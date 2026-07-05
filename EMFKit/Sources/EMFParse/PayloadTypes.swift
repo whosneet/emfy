@@ -223,6 +223,36 @@ public enum StockObject: Sendable, Equatable {
     }
 }
 
+/// Region combination mode ([MS-EMF] §2.1.29, RegionMode enumeration).
+/// Carried by EMR_SELECTCLIPPATH and EMR_EXTSELECTCLIPRGN to say how the new
+/// region combines with the current clipping region. Out-of-range values
+/// decode to `.unknown` rather than failing (log-and-skip).
+public enum RegionMode: Sendable, Equatable {
+    /// RGN_AND (0x01): intersection with the current clipping region.
+    case and
+    /// RGN_OR (0x02): union with the current clipping region.
+    case or
+    /// RGN_XOR (0x03): symmetric difference with the current clipping region.
+    case xor
+    /// RGN_DIFF (0x04): current region minus the new region.
+    case diff
+    /// RGN_COPY (0x05): replace with the new region (or, for
+    /// EMR_EXTSELECTCLIPRGN with no region data, reset to the default region).
+    case copy
+    case unknown(UInt32)
+
+    public init(_ raw: UInt32) {
+        switch raw {
+        case 0x01: self = .and
+        case 0x02: self = .or
+        case 0x03: self = .xor
+        case 0x04: self = .diff
+        case 0x05: self = .copy
+        default: self = .unknown(raw)
+        }
+    }
+}
+
 /// An object-table reference as carried by EMR_SELECTOBJECT / EMR_DELETEOBJECT.
 ///
 /// Per [MS-EMF] §2.1.31 (p. 46): "The index of a stock object can be

@@ -148,7 +148,7 @@ extension EMFFile {
     /// array is ever built, so `parse(_:)` cost is unchanged even for
     /// 276k-record files.
     ///
-    /// Verdicts, never errors: types outside the phase-2 decode set —
+    /// Verdicts, never errors: types outside the current decode set —
     /// including EMR_HEADER (already decoded as `header`) and EMR_EOF —
     /// return `.unimplemented(type:)`; a payload that fails validation
     /// against its own `nSize` returns `.malformed(type:reason:)`. The
@@ -195,6 +195,14 @@ extension EMFFile {
         case 45: return decodeArc(slice: slice)
         case 54: return decodePointL(type: type, slice: slice) { .lineTo(point: $0) }
         case 58: return decodeU32(type: type, slice: slice) { .setMiterLimit(miterLimit: $0) }
+        case 59: return .beginPath
+        case 60: return .endPath
+        case 61: return .closeFigure
+        case 62: return decodePathBounds(type: type, slice: slice) { .fillPath(bounds: $0) }
+        case 63: return decodePathBounds(type: type, slice: slice) { .strokeAndFillPath(bounds: $0) }
+        case 64: return decodePathBounds(type: type, slice: slice) { .strokePath(bounds: $0) }
+        case 67: return decodeU32(type: type, slice: slice) { .selectClipPath(RegionMode($0)) }
+        case 75: return decodeExtSelectClipRgn(slice: slice)
         case 85: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polyBezier16)
         case 86: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polygon16)
         case 87: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polyline16)
@@ -259,6 +267,21 @@ extension EMFFile {
             return .malformed(type: type, reason: .tooSmall(minimumSize: 24, actualSize: slice.size))
         }
         return make(rect)
+    }
+
+    /// The path closers EMR_FILLPATH §2.3.5.9, EMR_STROKEANDFILLPATH
+    /// §2.3.5.38, EMR_STROKEPATH §2.3.5.39: a single Bounds RectL at offset 8,
+    /// 24 bytes total. Spec-literal — real emitters always write Bounds, so a
+    /// shorter record is `.malformed` (never a lenient zero-bounds fallback).
+    private static func decodePathBounds(
+        type: UInt32,
+        slice: RecordSlice,
+        make: (RectL) -> EMFRecordPayload
+    ) -> EMFRecordPayload {
+        guard let bounds = slice.rectL(8) else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 24, actualSize: slice.size))
+        }
+        return make(bounds)
     }
 
     /// EMR_SETWORLDTRANSFORM §2.3.12.2: XForm at offset 8, 32 bytes total.
@@ -375,6 +398,76 @@ extension EMFFile {
             brushHatch: brushHatch,
             styleEntries: styleEntries
         ))
+    }
+
+    // MARK: - Clipping-region decoder
+
+    /// EMR_EXTSELECTCLIPRGN §2.3.2.2: RgnDataSize u32 at 8, RegionMode u32 at
+    /// 12, RgnData at 16. RgnData is a RegionData object (§2.2.24): a 32-byte
+    /// RegionDataHeader (§2.2.25 — Size==0x20, Type==RDH_RECTANGLES==0x01,
+    /// CountRects, RgnSize, Bounds RectL) followed by CountRects × RectL.
+    ///
+    /// Per §2.3.2.2, when RegionMode is RGN_COPY the region data MAY be omitted
+    /// (RgnDataSize 0, no bytes) meaning "reset to the default clipping
+    /// region" — a valid payload, not malformed. All counts are validated in
+    /// Int arithmetic against BOTH RgnDataSize and the record's own nSize
+    /// before any allocation (primer §8).
+    private static func decodeExtSelectClipRgn(slice: RecordSlice) -> EMFRecordPayload {
+        let type: UInt32 = 75
+        guard let rawRgnDataSize = slice.u32(8), let rawMode = slice.u32(12) else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 16, actualSize: slice.size))
+        }
+        let mode = RegionMode(rawMode)
+        let rgnDataSize = Int(rawRgnDataSize)
+
+        // RGN_COPY with no region data: reset to the default clipping region.
+        if mode == .copy, rgnDataSize == 0 {
+            return .extSelectClipRgn(ExtSelectClipRgnPayload(mode: mode, bounds: nil, rects: []))
+        }
+
+        // The declared region data must fit within the record's own bytes
+        // after the two fixed u32s at offset 8..16.
+        let available = slice.size - 16
+        guard rgnDataSize <= available else {
+            return .malformed(type: type, reason: .countTooLarge(declared: rgnDataSize, maxFitting: max(available, 0)))
+        }
+
+        // The 32-byte RegionDataHeader must be present and readable.
+        guard rgnDataSize >= 32,
+              let headerSize = slice.u32(16),
+              let headerType = slice.u32(20),
+              let rawCountRects = slice.u32(24),
+              // RgnSize (offset 28) is advisory here — not trusted for bounds.
+              let bounds = slice.rectL(32)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 48, actualSize: slice.size))
+        }
+
+        // Header constants are mandatory ([MS-EMF] §2.2.25).
+        guard headerSize == 0x20, headerType == 0x01 else {
+            return .malformed(type: type, reason: .badRegionHeader(size: headerSize, type: headerType))
+        }
+
+        // CountRects × 16 must fit in the rects region, bounded independently
+        // by RgnDataSize (region-internal budget) and nSize (record budget).
+        let declared = Int(rawCountRects)
+        let maxByRgnData = (rgnDataSize - 32) / 16
+        let maxBySize = (slice.size - 48) / 16
+        let maxFitting = min(maxByRgnData, maxBySize)
+        guard declared <= maxFitting else {
+            return .malformed(type: type, reason: .countTooLarge(declared: declared, maxFitting: maxFitting))
+        }
+
+        var rects: [RectL] = []
+        rects.reserveCapacity(declared)
+        for index in 0 ..< declared {
+            guard let rect = slice.rectL(48 + index * 16) else {
+                return .malformed(type: type, reason: .tooSmall(minimumSize: 48, actualSize: slice.size))
+            }
+            rects.append(rect)
+        }
+
+        return .extSelectClipRgn(ExtSelectClipRgnPayload(mode: mode, bounds: bounds, rects: rects))
     }
 
     // MARK: - Geometry array decoders

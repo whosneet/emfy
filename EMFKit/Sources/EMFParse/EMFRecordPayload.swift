@@ -14,6 +14,10 @@ public enum EMFPayloadIssue: Sendable, Equatable {
     /// An XForm contained NaN or infinity ([MS-EMF] §2.2.28 FLOAT fields;
     /// hostile floats are rejected at the decode boundary).
     case nonFiniteTransform
+    /// A RegionDataHeader ([MS-EMF] §2.2.25) whose `Size` or `Type` field is
+    /// not the required constant (Size MUST be 0x20, Type MUST be
+    /// RDH_RECTANGLES = 0x01). Carries the offending values as read.
+    case badRegionHeader(size: UInt32, type: UInt32)
 }
 
 /// Common payload of the single-polygon 32-bit geometry records
@@ -201,8 +205,36 @@ public struct CreateBrushPayload: Sendable, Equatable {
     }
 }
 
-/// A decoded record payload — one case per phase-2 record type, plus
-/// `.unimplemented` for everything not yet decoded and `.malformed` for
+/// Payload of EMR_EXTSELECTCLIPRGN ([MS-EMF] §2.3.2.2): the combination
+/// mode and the region's rectangles, decoded from the RegionData object
+/// ([MS-EMF] §2.2.24) that follows the RgnDataSize/RegionMode fields.
+///
+/// Two valid shapes:
+/// - Normal: `mode` combines with the current clip and `rects` holds the
+///   region's `CountRects` rectangles (validated to fit both `RgnDataSize`
+///   and the record's own `nSize` before allocation); `bounds` is the
+///   RegionDataHeader's bounding rectangle.
+/// - Reset: `mode == .copy` with `RgnDataSize == 0` and no region data. Per
+///   §2.3.2.2, this resets the clip to the default region; it decodes to an
+///   empty `rects` array and a `nil` `bounds` — a VALID payload, not malformed.
+public struct ExtSelectClipRgnPayload: Sendable, Equatable {
+    /// How the region combines with the current clipping region.
+    public var mode: RegionMode
+    /// The RegionDataHeader bounds ([MS-EMF] §2.2.25); `nil` for the RGN_COPY
+    /// reset form, which carries no region data.
+    public var bounds: RectL?
+    /// The region's rectangles ([MS-WMF] §2.2.2.19); empty for the reset form.
+    public var rects: [RectL]
+
+    public init(mode: RegionMode, bounds: RectL?, rects: [RectL]) {
+        self.mode = mode
+        self.bounds = bounds
+        self.rects = rects
+    }
+}
+
+/// A decoded record payload — one case per decoded record type (phases 2–3),
+/// plus `.unimplemented` for everything not yet decoded and `.malformed` for
 /// payloads that fail their own validation.
 ///
 /// Section references are [MS-EMF] v20240423. Every decoder validates its
@@ -260,6 +292,29 @@ public enum EMFRecordPayload: Sendable, Equatable {
     /// EMR_DELETEOBJECT (40), §2.3.8.3.
     case deleteObject(ObjectHandle)
 
+    // MARK: Paths and clipping ([MS-EMF] §2.3.5, §2.3.2)
+
+    /// EMR_BEGINPATH (59), §2.3.5.4 (listing) — opens a path bracket. No
+    /// parameters (8-byte record).
+    case beginPath
+    /// EMR_ENDPATH (60) — closes the path bracket. No parameters.
+    case endPath
+    /// EMR_CLOSEFIGURE (61) — closes the open figure in the path bracket. No
+    /// parameters.
+    case closeFigure
+    /// EMR_FILLPATH (62), §2.3.5.9. Fills the current path; `bounds` is the
+    /// path's bounding rectangle in logical units.
+    case fillPath(bounds: RectL)
+    /// EMR_STROKEANDFILLPATH (63), §2.3.5.38.
+    case strokeAndFillPath(bounds: RectL)
+    /// EMR_STROKEPATH (64), §2.3.5.39.
+    case strokePath(bounds: RectL)
+    /// EMR_SELECTCLIPPATH (67), §2.3.2.5. Combines the current path bracket
+    /// with the current clipping region using this mode.
+    case selectClipPath(RegionMode)
+    /// EMR_EXTSELECTCLIPRGN (75), §2.3.2.2.
+    case extSelectClipRgn(ExtSelectClipRgnPayload)
+
     // MARK: 32-bit geometry ([MS-EMF] §2.3.5, §2.3.11.4)
 
     /// EMR_POLYBEZIER (2), §2.3.5.16.
@@ -304,7 +359,7 @@ public enum EMFRecordPayload: Sendable, Equatable {
 
     // MARK: Fallbacks
 
-    /// Any record type outside the phase-2 decode set (including EMR_HEADER,
+    /// Any record type outside the current decode set (including EMR_HEADER,
     /// which is decoded separately as `EMFFile.header`, and EMR_EOF).
     /// Log-and-skip: unknown is a verdict, not an error.
     case unimplemented(type: UInt32)

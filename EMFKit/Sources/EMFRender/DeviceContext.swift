@@ -161,6 +161,18 @@ struct DeviceContext {
             log.note(.clipDeferred)
             return true
 
+        // MARK: Path brackets and clipping (decoded phase 3; playback is Task B)
+        // Task A decodes these payloads; the renderer does not yet build path
+        // brackets or apply clipping. Until Task B, they are consumed here as
+        // deferred — rendering continues, geometry inside a bracket still draws
+        // immediately (its own drawing arm), matching the phase-2 behaviour of
+        // EMR_INTERSECTCLIPRECT above. No path is built and no clip is set.
+        case .beginPath, .endPath, .closeFigure,
+             .fillPath, .strokeAndFillPath, .strokePath,
+             .selectClipPath, .extSelectClipRgn:
+            log.note(.clipDeferred)
+            return true
+
         // MARK: Object records
         case .createPen(let payload):
             let pen = ObjectResolver.resolve(payload, log: &log)
