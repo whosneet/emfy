@@ -141,14 +141,16 @@ struct DeviceContextTests {
         #expect(log.isClean)
     }
 
-    @Test("font/palette/unknown stock selections log and change nothing")
+    @Test("palette/unknown stock selections log and change nothing (pen/brush)")
     func unsupportedStock() {
         var dc = Self.makeDC()
         var log = EMFRenderLog()
         let penBefore = dc.state.pen
         let brushBefore = dc.state.brush
 
-        _ = dc.apply(.selectObject(.stock(.systemFont)), log: &log)
+        // Stock FONTs (phase 4) resolve to the system font — tested separately;
+        // here palette/undefined stocks and a stock-named DELETEOBJECT are the
+        // ones that still change no pen/brush and log.
         _ = dc.apply(.selectObject(.stock(.defaultPalette)), log: &log)
         _ = dc.apply(.selectObject(.stock(.unknownStock(0x8000_0009))), log: &log)
         // DELETEOBJECT must never name a stock object ([MS-EMF] §2.3.8.3).
@@ -156,8 +158,8 @@ struct DeviceContextTests {
 
         #expect(dc.state.pen == penBefore)
         #expect(dc.state.brush == brushBefore)
+        #expect(dc.state.font == nil)     // no font stock selected here
         #expect(log.entries == [
-            .unsupportedStockObject(rawValue: 0x8000_000D),
             .unsupportedStockObject(rawValue: 0x8000_000F),
             .unsupportedStockObject(rawValue: 0x8000_0009),
             .unsupportedStockObject(rawValue: 0x8000_0007),

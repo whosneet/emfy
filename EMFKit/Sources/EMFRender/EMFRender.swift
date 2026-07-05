@@ -112,6 +112,18 @@ public enum EMFRenderer {
                 for _ in 0 ..< count { log.noteUnimplemented(type: type) }
             case .unsupportedROP2(let rawMode, let count):
                 for _ in 0 ..< count { log.noteUnsupportedROP2(rawMode: rawMode) }
+            case .fontSubstituted(let requested, let used, let count):
+                for _ in 0 ..< count { log.noteFontSubstituted(requested: requested, used: used) }
+            case .stockFontUsed(let rawValue, let count):
+                for _ in 0 ..< count { log.noteStockFontUsed(rawValue: rawValue) }
+            case .glyphIndexTextSkipped(let count):
+                for _ in 0 ..< count { log.noteGlyphIndexTextSkipped() }
+            case .unsupportedDIB(let reason, let count):
+                for _ in 0 ..< count { log.noteUnsupportedDIB(reason: reason) }
+            case .unsupportedRasterOp(let op, let count):
+                for _ in 0 ..< count { log.noteUnsupportedRasterOp(rasterOperation: op) }
+            case .xformSrcIgnored(let count):
+                for _ in 0 ..< count { log.noteXformSrcIgnored() }
             default:
                 log.note(entry)
             }
@@ -203,6 +215,26 @@ public enum EMFRenderer {
         case .strokeAndFillPath:
             drawPathCloser(fill: true, stroke: true, into: context, dc: &dc, base: base, log: &log)
             return
+
+        // Text and bitmap records draw directly regardless of path-bracket
+        // state — GDI does not record EXTTEXTOUTW or the blits into a path
+        // bracket, so an open bracket does not capture them.
+        case .extTextOutW(let text):
+            TextDrawer.draw(text, into: context, dc: &dc, base: base, log: &log)
+            return
+        case .stretchDIBits(let payload):
+            BitmapDrawer.drawStretchDIBits(payload, into: context, dc: dc, base: base, log: &log)
+            return
+        case .bitBlt(let payload):
+            BitmapDrawer.drawBitBlt(payload, stretch: false, into: context, dc: dc, base: base, log: &log)
+            return
+        case .stretchBlt(let payload):
+            BitmapDrawer.drawBitBlt(payload, stretch: true, into: context, dc: dc, base: base, log: &log)
+            return
+        case .setDIBitsToDevice(let payload):
+            BitmapDrawer.drawSetDIBitsToDevice(payload, into: context, dc: dc, base: base, log: &log)
+            return
+
         default:
             break
         }

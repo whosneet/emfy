@@ -1,3 +1,4 @@
+import EMFParse
 import Foundation
 
 /// The log-and-skip surface for a render pass (primer §8, §10.8).
@@ -94,6 +95,34 @@ public struct EMFRenderLog: Sendable, Equatable {
             renderedWidth: Int,
             renderedHeight: Int
         )
+        /// A requested font family did not resolve on this machine and a
+        /// substitute was used (LOGFONT → CTFont mapping, primer §6 phase 4).
+        /// Coalesced by `requested` family: one line per requested family that
+        /// was remapped, carrying a count. `used` is the substitute face.
+        case fontSubstituted(requested: String, used: String, count: Int)
+        /// A stock FONT (SYSTEM_FONT, DEFAULT_GUI_FONT, …) was selected and
+        /// resolved to the system font at an approximate size — the exact GDI
+        /// stock-font metrics are Windows-specific. Coalesced by `rawValue`.
+        case stockFontUsed(rawValue: UInt32, count: Int)
+        /// An EMR_EXTTEXTOUTW run set ETO_GLYPH_INDEX: the string holds Windows
+        /// glyph ids that do not map to the substituted macOS font, so the run
+        /// was skipped (primer §6 phase 4). Coalesced.
+        case glyphIndexTextSkipped(count: Int)
+        /// A DIB the renderer could not draw — a compression, bit-count, or
+        /// palette-usage the phase-4 raster path does not support — was skipped.
+        /// Coalesced. `reason` is the parse-side unsupported verdict, or `nil`
+        /// when the render path itself declined it (DIB_PAL_COLORS usage).
+        case unsupportedDIB(reason: DIBUnsupportedReason?, count: Int)
+        /// A raster operation other than SRCCOPY (and the sourceless
+        /// BLACKNESS/WHITENESS/PATCOPY fills) was requested. Source blits with an
+        /// unsupported source rop are drawn as a plain copy (best effort);
+        /// sourceless blits with an unsupported rop are skipped. Coalesced by
+        /// `rasterOperation`. ([MS-WMF] §2.1.1.31 TernaryRasterOperation.)
+        case unsupportedRasterOp(rasterOperation: UInt32, count: Int)
+        /// A blit carried a non-identity source-space transform (XformSrc),
+        /// which the renderer ignores — source-space transforms are vanishingly
+        /// rare ([MS-EMF] §2.2.28). Coalesced.
+        case xformSrcIgnored(count: Int)
     }
 
     /// Every logged event, in the order it was raised. The coalesced families
@@ -133,6 +162,74 @@ public struct EMFRenderLog: Sendable, Equatable {
             }
         }
         entries.append(.unsupportedROP2(rawMode: rawMode, count: 1))
+    }
+
+    /// Records one font substitution, coalescing by requested family so a file
+    /// with hundreds of runs in a missing family yields one line.
+    mutating func noteFontSubstituted(requested: String, used: String) {
+        for index in entries.indices {
+            if case .fontSubstituted(let r, let u, let c) = entries[index], r == requested {
+                entries[index] = .fontSubstituted(requested: requested, used: u, count: c + 1)
+                return
+            }
+        }
+        entries.append(.fontSubstituted(requested: requested, used: used, count: 1))
+    }
+
+    /// Records one stock-font selection, coalescing by `rawValue`.
+    mutating func noteStockFontUsed(rawValue: UInt32) {
+        for index in entries.indices {
+            if case .stockFontUsed(let v, let c) = entries[index], v == rawValue {
+                entries[index] = .stockFontUsed(rawValue: rawValue, count: c + 1)
+                return
+            }
+        }
+        entries.append(.stockFontUsed(rawValue: rawValue, count: 1))
+    }
+
+    /// Records one ETO_GLYPH_INDEX run skip, coalescing into a single count.
+    mutating func noteGlyphIndexTextSkipped() {
+        for index in entries.indices {
+            if case .glyphIndexTextSkipped(let c) = entries[index] {
+                entries[index] = .glyphIndexTextSkipped(count: c + 1)
+                return
+            }
+        }
+        entries.append(.glyphIndexTextSkipped(count: 1))
+    }
+
+    /// Records one unsupported-DIB skip, coalescing by `reason`.
+    mutating func noteUnsupportedDIB(reason: DIBUnsupportedReason?) {
+        for index in entries.indices {
+            if case .unsupportedDIB(let r, let c) = entries[index], r == reason {
+                entries[index] = .unsupportedDIB(reason: reason, count: c + 1)
+                return
+            }
+        }
+        entries.append(.unsupportedDIB(reason: reason, count: 1))
+    }
+
+    /// Records one unsupported raster operation, coalescing by value so a file
+    /// of thousands of the same rop yields one line.
+    mutating func noteUnsupportedRasterOp(rasterOperation: UInt32) {
+        for index in entries.indices {
+            if case .unsupportedRasterOp(let op, let c) = entries[index], op == rasterOperation {
+                entries[index] = .unsupportedRasterOp(rasterOperation: rasterOperation, count: c + 1)
+                return
+            }
+        }
+        entries.append(.unsupportedRasterOp(rasterOperation: rasterOperation, count: 1))
+    }
+
+    /// Records one ignored source-space transform, coalescing into a count.
+    mutating func noteXformSrcIgnored() {
+        for index in entries.indices {
+            if case .xformSrcIgnored(let c) = entries[index] {
+                entries[index] = .xformSrcIgnored(count: c + 1)
+                return
+            }
+        }
+        entries.append(.xformSrcIgnored(count: 1))
     }
 
     /// Records any non-coalesced event verbatim.

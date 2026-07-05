@@ -54,6 +54,29 @@ var isRecordingBaselines: Bool {
     ProcessInfo.processInfo.environment["EMFY_RECORD"] == "1"
 }
 
+/// A DeviceContext over a 100×100 MM_TEXT-ready header, for DC-state unit
+/// tests (fonts, colours, alignment) that do not need to render.
+func makeTextDC() -> DeviceContext {
+    DeviceContext(header: EMFHeader(
+        bounds: RectL(left: 0, top: 0, right: 99, bottom: 99),
+        frame: RectL(left: 0, top: 0, right: 2646, bottom: 2646),
+        recordSignature: 0x464D_4520,
+        version: 0x0001_0000,
+        bytes: 0,
+        records: 0,
+        handles: 1,
+        nDescription: 0,
+        offDescription: 0,
+        nPalEntries: 0,
+        device: SizeL(cx: 1000, cy: 1000),
+        millimeters: SizeL(cx: 250, cy: 250),
+        extension1: nil,
+        extension2: nil,
+        description: nil,
+        variant: .extension2
+    ))
+}
+
 /// Parses a corpus EMF file.
 func parseCorpusFile(_ name: String) throws -> EMFFile {
     let url = TestPaths.corpusFile(name)

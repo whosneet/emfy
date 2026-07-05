@@ -36,6 +36,18 @@ struct DeviceContext {
         var pen: ResolvedPen = .cosmetic(StockObjects.black)
         /// Selected brush — a resolved value, default WHITE_BRUSH.
         var brush: ResolvedBrush = .solid(StockObjects.white)
+        /// Selected font — a resolved value, `nil` until one is selected (the
+        /// text drawer then falls back to the system font). Not part of the
+        /// phase-2/3 set; added for phase-4 text playback.
+        var font: ResolvedFont?
+        /// Text foreground colour (EMR_SETTEXTCOLOR); GDI's default is black.
+        var textColor: ColorRef = StockObjects.black
+        /// Background colour (EMR_SETBKCOLOR); GDI's default is white. Painted
+        /// behind text under bkMode OPAQUE or ETO_OPAQUE.
+        var bkColor: ColorRef = StockObjects.white
+        /// Text alignment mask (EMR_SETTEXTALIGN); GDI's default is
+        /// (TA_LEFT, TA_TOP, TA_NOUPDATECP) == rawValue 0.
+        var textAlign = TextAlign(rawValue: 0)
         /// The last VALID page→device scale (default: MM_TEXT's 1:1). A state
         /// record that would produce a zero-extent mapping logs and leaves
         /// this untouched — "keep the previous valid mapping".
@@ -269,22 +281,30 @@ struct DeviceContext {
             applyDeleteObject(handle, log: &log)
             return true
 
-        // MARK: Text and bitmaps (decoded phase 4 Task A; playback is Task B)
-        // Task A decodes these payloads; the renderer does not yet draw text or
-        // bitmaps. Until Task B, they are consumed here behaviour-neutrally —
-        // logged as unimplemented-by-type (coalesced) and skipped, matching the
-        // phase-2/3 log-and-skip of any record the renderer cannot yet honour.
-        // No text is drawn, no image is blitted. Task B replaces this arm with
-        // real CoreText/CGImage playback. Type ids per [MS-EMF] §2.1.1.
-        case .setTextAlign: log.noteUnimplemented(type: 22); return true
-        case .setTextColor: log.noteUnimplemented(type: 24); return true
-        case .setBkColor: log.noteUnimplemented(type: 25); return true
-        case .extCreateFontIndirectW: log.noteUnimplemented(type: 82); return true
-        case .extTextOutW: log.noteUnimplemented(type: 84); return true
-        case .stretchDIBits: log.noteUnimplemented(type: 81); return true
-        case .bitBlt: log.noteUnimplemented(type: 76); return true
-        case .stretchBlt: log.noteUnimplemented(type: 77); return true
-        case .setDIBitsToDevice: log.noteUnimplemented(type: 80); return true
+        // MARK: Text state ([MS-EMF] §2.3.11.25/.26/.10, §2.3.7.8)
+        case .setTextAlign(let align):
+            state.textAlign = align
+            return true
+
+        case .setTextColor(let color):
+            state.textColor = color
+            return true
+
+        case .setBkColor(let color):
+            state.bkColor = color
+            return true
+
+        case .extCreateFontIndirectW(let payload):
+            // Resolve the LOGFONT to a base CTFont + attributes now; the text
+            // drawer sizes it to the device at draw time (the transform can
+            // change before the run — same reasoning as geometric pen widths).
+            let font = FontMapper.resolve(payload.logFont, log: &log)
+            store(.font(font), at: payload.ihFonts, log: &log)
+            return true
+
+        // MARK: Text / bitmap DRAWING records — the renderer's job (return false).
+        case .extTextOutW, .stretchDIBits, .bitBlt, .stretchBlt, .setDIBitsToDevice:
+            return false
 
         // MARK: Fallback verdicts
         case .unimplemented(let type):
@@ -570,6 +590,8 @@ struct DeviceContext {
                 state.pen = pen
             case .brush(let brush):
                 state.brush = brush
+            case .font(let font):
+                state.font = font
             case nil:
                 log.note(.invalidObjectIndex(index: index))
             }
@@ -579,6 +601,9 @@ struct DeviceContext {
                 state.pen = pen
             case .brush(let brush):
                 state.brush = brush
+            case .font(let font, let raw):
+                state.font = font
+                log.noteStockFontUsed(rawValue: raw)
             case .unsupported(let raw):
                 log.note(.unsupportedStockObject(rawValue: raw))
             }

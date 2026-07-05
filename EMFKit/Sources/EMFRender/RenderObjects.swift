@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import EMFParse
 import Foundation
 
@@ -62,10 +63,37 @@ enum ResolvedPen: Equatable, Sendable {
     }
 }
 
+/// A font resolved to a base CTFont plus the drawing attributes CoreText's
+/// font object does not itself carry (underline, strike-out, baseline
+/// rotation) and the SIGNED logical height (§2.2.13) the text drawer scales to
+/// a device point size at draw time — the transform in effect can change
+/// between SELECTOBJECT and EXTTEXTOUTW, exactly like a geometric pen's width.
+///
+/// `Equatable`/`Sendable` are synthesised over CTFont: `CTFont` is a
+/// toll-free-bridged CoreFoundation type that conforms to both. Two resolved
+/// fonts are equal when their base CTFont and attributes match.
+struct ResolvedFont: Equatable, @unchecked Sendable {
+    /// The substituted base font at a nominal size (`FontMapper.nominalSize`);
+    /// the drawer copies it to the device size at draw time.
+    var base: CTFont
+    /// Signed logical character/cell height (§2.2.13): < 0 em height, > 0 cell
+    /// height, 0 → default. Scaled to a device point size by the text drawer.
+    var logicalHeight: Int32
+    /// lfEscapement, tenths of a degree counterclockwise ([MS-EMF] §2.2.13):
+    /// rotates the text baseline.
+    var escapementTenths: Int32
+    /// lfUnderline: draw a single underline.
+    var underline: Bool
+    /// lfStrikeOut: draw a manual strike-through (CoreText has no
+    /// strikethrough attribute).
+    var strikeOut: Bool
+}
+
 /// One object-table slot.
-enum TableObject: Equatable, Sendable {
+enum TableObject: Equatable, @unchecked Sendable {
     case pen(ResolvedPen)
     case brush(ResolvedBrush)
+    case font(ResolvedFont)
 }
 
 // MARK: - PenStyle bit field ([MS-EMF] §2.1.25, values verified 2026-07-05)
@@ -235,8 +263,12 @@ enum ObjectResolver {
 enum StockResolution: Equatable {
     case brush(ResolvedBrush)
     case pen(ResolvedPen)
-    /// Font, palette, or undefined stock values — nothing a phase-2 DC can
-    /// select. `rawValue` is the on-disk 0x8000_00xx index.
+    /// A stock FONT (SYSTEM_FONT, DEFAULT_GUI_FONT, …): resolves to the system
+    /// font at a reasonable size. `rawValue` is the on-disk index (for the
+    /// coalesced stock-font log — the exact metrics are Windows-specific).
+    case font(ResolvedFont, rawValue: UInt32)
+    /// Palette or undefined stock values — nothing the DC can select.
+    /// `rawValue` is the on-disk 0x8000_00xx index.
     case unsupported(rawValue: UInt32)
 }
 
@@ -265,16 +297,34 @@ enum StockObjects {
         case .blackPen: return .pen(.cosmetic(black))
         case .nullPen: return .pen(.none)
         case .dcPen: return .pen(.cosmetic(black))
-        case .oemFixedFont: return .unsupported(rawValue: 0x8000_000A)
-        case .ansiFixedFont: return .unsupported(rawValue: 0x8000_000B)
-        case .ansiVarFont: return .unsupported(rawValue: 0x8000_000C)
-        case .systemFont: return .unsupported(rawValue: 0x8000_000D)
-        case .deviceDefaultFont: return .unsupported(rawValue: 0x8000_000E)
+        // Stock FONTs resolve to the system font at a reasonable size. The
+        // exact GDI stock-font metrics are Windows-specific, so this is an
+        // approximation the caller logs (coalesced) — never a blank canvas.
+        case .oemFixedFont: return stockFont(0x8000_000A)
+        case .ansiFixedFont: return stockFont(0x8000_000B)
+        case .ansiVarFont: return stockFont(0x8000_000C)
+        case .systemFont: return stockFont(0x8000_000D)
+        case .deviceDefaultFont: return stockFont(0x8000_000E)
+        case .systemFixedFont: return stockFont(0x8000_0010)
+        case .defaultGuiFont: return stockFont(0x8000_0011)
         case .defaultPalette: return .unsupported(rawValue: 0x8000_000F)
-        case .systemFixedFont: return .unsupported(rawValue: 0x8000_0010)
-        case .defaultGuiFont: return .unsupported(rawValue: 0x8000_0011)
         case .unknownStock(let raw): return .unsupported(rawValue: raw)
         }
+    }
+
+    /// A stock font resolved to the system font at a default cell height
+    /// (logical height 0 → the drawer's 12pt default, scaled by the transform).
+    private static func stockFont(_ rawValue: UInt32) -> StockResolution {
+        .font(
+            ResolvedFont(
+                base: FontMapper.systemBaseFont(),
+                logicalHeight: 0,
+                escapementTenths: 0,
+                underline: false,
+                strikeOut: false
+            ),
+            rawValue: rawValue
+        )
     }
 }
 
