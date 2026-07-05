@@ -3,6 +3,3 @@ corpus-local/
 xcuserdata/
 .DS_Store
 docs/MS-EMF.pdf
-
-# Stray Icon Composer artifact from phase 5 (out of scope; revisit for phase-6 app icon)
-/emfy.icon/

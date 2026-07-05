@@ -12,6 +12,7 @@
 		B01100000000000000000003 /* EMFDocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000003 /* EMFDocumentView.swift */; };
 		B01100000000000000000004 /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
 		B01100000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000005 /* Assets.xcassets */; };
+		B01100000000000000000006 /* emfy.icon in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* emfy.icon */; };
 		B01100000000000000000010 /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000010 /* PreviewProvider.swift */; };
 		B01100000000000000000011 /* PreviewSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000011 /* PreviewSizing.swift */; };
 		B01100000000000000000020 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000020 /* ThumbnailProvider.swift */; };
@@ -67,6 +68,7 @@
 		B00100000000000000000003 /* EMFDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocumentView.swift; sourceTree = "<group>"; };
 		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
 		B00100000000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B00100000000000000000008 /* emfy.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = emfy.icon; sourceTree = "<group>"; };
 		B00100000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B00100000000000000000007 /* Emfy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Emfy.entitlements; sourceTree = "<group>"; };
 		B00100000000000000000010 /* PreviewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
@@ -130,6 +132,7 @@
 				B00100000000000000000003 /* EMFDocumentView.swift */,
 				B00100000000000000000004 /* EMFExport.swift */,
 				B00100000000000000000005 /* Assets.xcassets */,
+				B00100000000000000000008 /* emfy.icon */,
 				B00100000000000000000006 /* Info.plist */,
 				B00100000000000000000007 /* Emfy.entitlements */,
 			);
@@ -293,6 +296,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B01100000000000000000005 /* Assets.xcassets in Resources */,
+				B01100000000000000000006 /* emfy.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -467,7 +471,7 @@
 		B05200000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = emfy;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Emfy/Emfy.entitlements;
 				CODE_SIGN_IDENTITY = "-";
@@ -493,7 +497,7 @@
 		B05200000000000000000002 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = emfy;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Emfy/Emfy.entitlements;
 				CODE_SIGN_IDENTITY = "-";
