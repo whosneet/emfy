@@ -208,6 +208,9 @@ else
     xcrun stapler staple "${STAGED_APP}" \
         || die "stapler staple failed for the app"
     info "app stapled"
+    info "re-zipping the stapled app for dist"
+    rm -f "${APP_ZIP}"
+    ditto -c -k --keepParent "${STAGED_APP}" "${APP_ZIP}"
 fi
 
 # --- 4. Build, sign, notarize, and staple the DMG ----------------------------
