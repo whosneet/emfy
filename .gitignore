@@ -4,5 +4,8 @@ xcuserdata/
 .DS_Store
 docs/MS-EMF.pdf
 
+# Release artifacts (scripts/release.sh output)
+dist/
+
 # Never commit App Store Connect / notarization keys
 *.p8
