@@ -15,10 +15,16 @@ enum EMFExport {
     /// points = frameUnits / 100 (→ mm) / 25.4 (→ inch) × 72 (→ points).
     static let pointsPerFrameUnit = 72.0 / 25.4 / 100.0
 
+    /// PDF's spec maximum page side is 200 inches = 14400 pt. A degenerate or
+    /// huge header frame can otherwise yield an out-of-range media box, which
+    /// makes `CGContext(consumer:mediaBox:)` fail and the export produce nothing.
+    static let maxPageSide = 14400.0
+
     /// The document's physical page size in PostScript points, from the header
     /// frame. Falls back to the device-pixel bounds (at 1 pt/px) when the frame
     /// is degenerate, and to a 1×1 box as a last resort so the PDF media box is
-    /// never empty.
+    /// never empty. The result is clamped into the safe PDF page range so the
+    /// media box is always usable.
     static func pageSizeInPoints(_ header: EMFHeader) -> CGSize {
         let frame = header.frame
         let widthUnits = Int64(frame.right) - Int64(frame.left) + 1
@@ -26,16 +32,26 @@ enum EMFExport {
         if widthUnits > 0, heightUnits > 0 {
             let w = Double(widthUnits) * pointsPerFrameUnit
             let h = Double(heightUnits) * pointsPerFrameUnit
-            if w >= 1, h >= 1 { return CGSize(width: w, height: h) }
+            if w >= 1, h >= 1 { return clampedToPageRange(width: w, height: h) }
         }
         // Frame unusable: fall back to device bounds at 1 pt per pixel.
         let bounds = header.bounds
         let bw = Int64(bounds.right) - Int64(bounds.left) + 1
         let bh = Int64(bounds.bottom) - Int64(bounds.top) + 1
         if bw > 0, bh > 0 {
-            return CGSize(width: Double(bw), height: Double(bh))
+            return clampedToPageRange(width: Double(bw), height: Double(bh))
         }
         return CGSize(width: 1, height: 1)
+    }
+
+    /// Clamps a candidate page size into `[1, maxPageSide]` on each axis,
+    /// scaling both axes by the same factor when a dimension overshoots so the
+    /// aspect ratio is preserved.
+    private static func clampedToPageRange(width: Double, height: Double) -> CGSize {
+        let w = max(width, 1)
+        let h = max(height, 1)
+        let overshoot = max(w / maxPageSide, h / maxPageSide, 1)
+        return CGSize(width: w / overshoot, height: h / overshoot)
     }
 
     /// Encodes a `CGImage` as PNG via ImageIO. Returns `nil` if no PNG
