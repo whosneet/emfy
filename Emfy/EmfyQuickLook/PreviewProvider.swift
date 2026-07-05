@@ -13,8 +13,12 @@ import QuickLookUI
 /// partial render; only a file EMFKit cannot even give a header for throws, and
 /// Quick Look then falls back to the generic icon.
 final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
-    /// Aspect-fit long-edge cap for the preview context, in points.
-    private static let maxLongEdge = 4096
+    /// Aspect-fit long-edge cap for the preview context, in points. Held at
+    /// 2048 so a near-square large-bounds file stays within a Quick Look
+    /// extension's tight memory budget: 2048² is 4 MB at 1x (16 MB at 2x on
+    /// Retina), versus ~64 MB at the old 4096, leaving room for the parse
+    /// array and any DIB decode before jetsam.
+    private static let maxLongEdge = 2048
 
     func providePreview(for request: QLFilePreviewRequest) async throws -> QLPreviewReply {
         let data = try Data(contentsOf: request.fileURL, options: .mappedIfSafe)
