@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -32,14 +32,14 @@
 			isa = PBXContainerItemProxy;
 			containerPortal = B00000000000000000000001 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = B00400000000000000000002 /* EmfyQuickLook */;
+			remoteGlobalIDString = B00400000000000000000002;
 			remoteInfo = EmfyQuickLook;
 		};
 		B09000000000000000000002 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = B00000000000000000000001 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = B00400000000000000000003 /* EmfyThumbnail */;
+			remoteGlobalIDString = B00400000000000000000003;
 			remoteInfo = EmfyThumbnail;
 		};
 /* End PBXContainerItemProxy section */
@@ -60,17 +60,14 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		B00200000000000000000001 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B00200000000000000000002 /* EmfyQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		B00200000000000000000003 /* EmfyThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00100000000000000000001 /* EmfyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyApp.swift; sourceTree = "<group>"; };
 		B00100000000000000000002 /* EMFDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocument.swift; sourceTree = "<group>"; };
 		B00100000000000000000003 /* EMFDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocumentView.swift; sourceTree = "<group>"; };
 		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
 		B00100000000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		B00100000000000000000008 /* emfy.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = emfy.icon; sourceTree = "<group>"; };
 		B00100000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B00100000000000000000007 /* Emfy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Emfy.entitlements; sourceTree = "<group>"; };
+		B00100000000000000000008 /* emfy.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = emfy.icon; sourceTree = "<group>"; };
 		B00100000000000000000010 /* PreviewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
 		B00100000000000000000011 /* PreviewSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewSizing.swift; sourceTree = "<group>"; };
 		B00100000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -79,6 +76,9 @@
 		B00100000000000000000021 /* ThumbnailSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailSizing.swift; sourceTree = "<group>"; };
 		B00100000000000000000022 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B00100000000000000000023 /* EmfyThumbnail.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmfyThumbnail.entitlements; sourceTree = "<group>"; };
+		B00200000000000000000001 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00200000000000000000002 /* EmfyQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00200000000000000000003 /* EmfyThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00500000000000000000001 /* EMFKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = EMFKit; path = ../EMFKit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -474,13 +474,16 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = emfy;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Emfy/Emfy.entitlements;
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6Y294JNMJ2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Emfy/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Emfy;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Avneet Singh. MIT licensed.";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -490,6 +493,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Debug;
@@ -500,13 +504,16 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = emfy;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Emfy/Emfy.entitlements;
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6Y294JNMJ2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Emfy/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Emfy;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Avneet Singh. MIT licensed.";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -516,6 +523,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Release;
@@ -615,15 +623,6 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		B05000000000000000000004 /* Build configuration list for PBXProject "Emfy" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				B05100000000000000000001 /* Debug */,
-				B05100000000000000000002 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		B05000000000000000000001 /* Build configuration list for PBXNativeTarget "Emfy" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -647,6 +646,15 @@
 			buildConfigurations = (
 				B05400000000000000000001 /* Debug */,
 				B05400000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B05000000000000000000004 /* Build configuration list for PBXProject "Emfy" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05100000000000000000001 /* Debug */,
+				B05100000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
