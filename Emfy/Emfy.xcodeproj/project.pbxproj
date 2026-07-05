@@ -1,0 +1,693 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B01100000000000000000001 /* EmfyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000001 /* EmfyApp.swift */; };
+		B01100000000000000000002 /* EMFDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000002 /* EMFDocument.swift */; };
+		B01100000000000000000003 /* EMFDocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000003 /* EMFDocumentView.swift */; };
+		B01100000000000000000004 /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
+		B01100000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000005 /* Assets.xcassets */; };
+		B01100000000000000000010 /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000010 /* PreviewProvider.swift */; };
+		B01100000000000000000011 /* PreviewSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000011 /* PreviewSizing.swift */; };
+		B01100000000000000000020 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000020 /* ThumbnailProvider.swift */; };
+		B01100000000000000000021 /* ThumbnailSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000021 /* ThumbnailSizing.swift */; };
+		B01100000000000000000030 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000001 /* EMFParse */; };
+		B01100000000000000000031 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000002 /* EMFRender */; };
+		B01100000000000000000032 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000003 /* EMFParse */; };
+		B01100000000000000000033 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000004 /* EMFRender */; };
+		B01100000000000000000034 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000005 /* EMFParse */; };
+		B01100000000000000000035 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000006 /* EMFRender */; };
+		B01100000000000000000040 /* EmfyQuickLook.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B00200000000000000000002 /* EmfyQuickLook.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B01100000000000000000041 /* EmfyThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B00200000000000000000003 /* EmfyThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B09000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B00400000000000000000002 /* EmfyQuickLook */;
+			remoteInfo = EmfyQuickLook;
+		};
+		B09000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B00400000000000000000003 /* EmfyThumbnail */;
+			remoteInfo = EmfyThumbnail;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B08000000000000000000001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B01100000000000000000040 /* EmfyQuickLook.appex in Embed Foundation Extensions */,
+				B01100000000000000000041 /* EmfyThumbnail.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		B00200000000000000000001 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00200000000000000000002 /* EmfyQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00200000000000000000003 /* EmfyThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00100000000000000000001 /* EmfyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyApp.swift; sourceTree = "<group>"; };
+		B00100000000000000000002 /* EMFDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocument.swift; sourceTree = "<group>"; };
+		B00100000000000000000003 /* EMFDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocumentView.swift; sourceTree = "<group>"; };
+		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
+		B00100000000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B00100000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B00100000000000000000007 /* Emfy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Emfy.entitlements; sourceTree = "<group>"; };
+		B00100000000000000000010 /* PreviewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
+		B00100000000000000000011 /* PreviewSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewSizing.swift; sourceTree = "<group>"; };
+		B00100000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B00100000000000000000013 /* EmfyQuickLook.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmfyQuickLook.entitlements; sourceTree = "<group>"; };
+		B00100000000000000000020 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
+		B00100000000000000000021 /* ThumbnailSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailSizing.swift; sourceTree = "<group>"; };
+		B00100000000000000000022 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B00100000000000000000023 /* EmfyThumbnail.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmfyThumbnail.entitlements; sourceTree = "<group>"; };
+		B00500000000000000000001 /* EMFKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = EMFKit; path = ../EMFKit; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B07000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000030 /* EMFParse in Frameworks */,
+				B01100000000000000000031 /* EMFRender in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B07000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000032 /* EMFParse in Frameworks */,
+				B01100000000000000000033 /* EMFRender in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B07000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000034 /* EMFParse in Frameworks */,
+				B01100000000000000000035 /* EMFRender in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B06000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				B06000000000000000000002 /* Emfy */,
+				B06000000000000000000003 /* EmfyQuickLook */,
+				B06000000000000000000004 /* EmfyThumbnail */,
+				B06000000000000000000006 /* Packages */,
+				B06000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B06000000000000000000002 /* Emfy */ = {
+			isa = PBXGroup;
+			children = (
+				B00100000000000000000001 /* EmfyApp.swift */,
+				B00100000000000000000002 /* EMFDocument.swift */,
+				B00100000000000000000003 /* EMFDocumentView.swift */,
+				B00100000000000000000004 /* EMFExport.swift */,
+				B00100000000000000000005 /* Assets.xcassets */,
+				B00100000000000000000006 /* Info.plist */,
+				B00100000000000000000007 /* Emfy.entitlements */,
+			);
+			path = Emfy;
+			sourceTree = "<group>";
+		};
+		B06000000000000000000003 /* EmfyQuickLook */ = {
+			isa = PBXGroup;
+			children = (
+				B00100000000000000000010 /* PreviewProvider.swift */,
+				B00100000000000000000011 /* PreviewSizing.swift */,
+				B00100000000000000000012 /* Info.plist */,
+				B00100000000000000000013 /* EmfyQuickLook.entitlements */,
+			);
+			path = EmfyQuickLook;
+			sourceTree = "<group>";
+		};
+		B06000000000000000000004 /* EmfyThumbnail */ = {
+			isa = PBXGroup;
+			children = (
+				B00100000000000000000020 /* ThumbnailProvider.swift */,
+				B00100000000000000000021 /* ThumbnailSizing.swift */,
+				B00100000000000000000022 /* Info.plist */,
+				B00100000000000000000023 /* EmfyThumbnail.entitlements */,
+			);
+			path = EmfyThumbnail;
+			sourceTree = "<group>";
+		};
+		B06000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B00200000000000000000001 /* Emfy.app */,
+				B00200000000000000000002 /* EmfyQuickLook.appex */,
+				B00200000000000000000003 /* EmfyThumbnail.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B06000000000000000000006 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				B00500000000000000000001 /* EMFKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B00400000000000000000001 /* Emfy */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B05000000000000000000001 /* Build configuration list for PBXNativeTarget "Emfy" */;
+			buildPhases = (
+				B06600000000000000000001 /* Sources */,
+				B07000000000000000000001 /* Frameworks */,
+				B06700000000000000000001 /* Resources */,
+				B08000000000000000000001 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B09100000000000000000001 /* PBXTargetDependency */,
+				B09100000000000000000002 /* PBXTargetDependency */,
+			);
+			name = Emfy;
+			packageProductDependencies = (
+				B03000000000000000000001 /* EMFParse */,
+				B03000000000000000000002 /* EMFRender */,
+			);
+			productName = Emfy;
+			productReference = B00200000000000000000001 /* Emfy.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B00400000000000000000002 /* EmfyQuickLook */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B05000000000000000000002 /* Build configuration list for PBXNativeTarget "EmfyQuickLook" */;
+			buildPhases = (
+				B06600000000000000000002 /* Sources */,
+				B07000000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = EmfyQuickLook;
+			packageProductDependencies = (
+				B03000000000000000000003 /* EMFParse */,
+				B03000000000000000000004 /* EMFRender */,
+			);
+			productName = EmfyQuickLook;
+			productReference = B00200000000000000000002 /* EmfyQuickLook.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		B00400000000000000000003 /* EmfyThumbnail */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B05000000000000000000003 /* Build configuration list for PBXNativeTarget "EmfyThumbnail" */;
+			buildPhases = (
+				B06600000000000000000003 /* Sources */,
+				B07000000000000000000003 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = EmfyThumbnail;
+			packageProductDependencies = (
+				B03000000000000000000005 /* EMFParse */,
+				B03000000000000000000006 /* EMFRender */,
+			);
+			productName = EmfyThumbnail;
+			productReference = B00200000000000000000003 /* EmfyThumbnail.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					B00400000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					B00400000000000000000002 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					B00400000000000000000003 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+				};
+			};
+			buildConfigurationList = B05000000000000000000004 /* Build configuration list for PBXProject "Emfy" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B06000000000000000000001;
+			packageReferences = (
+				B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */,
+			);
+			productRefGroup = B06000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B00400000000000000000001 /* Emfy */,
+				B00400000000000000000002 /* EmfyQuickLook */,
+				B00400000000000000000003 /* EmfyThumbnail */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B06700000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000005 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B06600000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000001 /* EmfyApp.swift in Sources */,
+				B01100000000000000000002 /* EMFDocument.swift in Sources */,
+				B01100000000000000000003 /* EMFDocumentView.swift in Sources */,
+				B01100000000000000000004 /* EMFExport.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B06600000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000010 /* PreviewProvider.swift in Sources */,
+				B01100000000000000000011 /* PreviewSizing.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B06600000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000020 /* ThumbnailProvider.swift in Sources */,
+				B01100000000000000000021 /* ThumbnailSizing.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B09100000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B00400000000000000000002 /* EmfyQuickLook */;
+			targetProxy = B09000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		B09100000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B00400000000000000000003 /* EmfyThumbnail */;
+			targetProxy = B09000000000000000000002 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		B05100000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		B05100000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		B05200000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Emfy/Emfy.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Emfy/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Avneet Singh. MIT licensed.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		B05200000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Emfy/Emfy.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Emfy/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Avneet Singh. MIT licensed.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		B05300000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = EmfyQuickLook/EmfyQuickLook.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyQuickLook/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy.quicklook;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		B05300000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = EmfyQuickLook/EmfyQuickLook.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyQuickLook/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy.quicklook;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		B05400000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = EmfyThumbnail/EmfyThumbnail.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyThumbnail/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy.thumbnail;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		B05400000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = EmfyThumbnail/EmfyThumbnail.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyThumbnail/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy.thumbnail;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B05000000000000000000004 /* Build configuration list for PBXProject "Emfy" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05100000000000000000001 /* Debug */,
+				B05100000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B05000000000000000000001 /* Build configuration list for PBXNativeTarget "Emfy" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05200000000000000000001 /* Debug */,
+				B05200000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B05000000000000000000002 /* Build configuration list for PBXNativeTarget "EmfyQuickLook" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05300000000000000000001 /* Debug */,
+				B05300000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B05000000000000000000003 /* Build configuration list for PBXNativeTarget "EmfyThumbnail" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05400000000000000000001 /* Debug */,
+				B05400000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../EMFKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B03000000000000000000001 /* EMFParse */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFParse;
+		};
+		B03000000000000000000002 /* EMFRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFRender;
+		};
+		B03000000000000000000003 /* EMFParse */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFParse;
+		};
+		B03000000000000000000004 /* EMFRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFRender;
+		};
+		B03000000000000000000005 /* EMFParse */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFParse;
+		};
+		B03000000000000000000006 /* EMFRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFRender;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B00000000000000000000001 /* Project object */;
+}
