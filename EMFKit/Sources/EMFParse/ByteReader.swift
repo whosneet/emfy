@@ -9,7 +9,7 @@ import Foundation
 /// (indices always start at 0) and expose only relative-offset reads. Every
 /// read is bounds-checked and returns `nil` on overrun rather than trapping —
 /// nothing here can force-unwrap or overflow.
-struct ByteReader {
+struct ByteReader: Equatable {
     /// Normalised backing storage. `bytes[0]` is always the first byte of the
     /// input regardless of the source `Data`'s `startIndex`.
     let bytes: [UInt8]
@@ -48,6 +48,14 @@ struct ByteReader {
         let b0 = UInt16(bytes[offset])
         let b1 = UInt16(bytes[offset + 1])
         return b0 | (b1 << 8)
+    }
+
+    /// Reads a little-endian `Int16` at the given zero-based offset, or `nil`
+    /// if out of range. The `UInt16` bit pattern is reinterpreted as signed
+    /// (PointS coordinates, [MS-WMF] §2.2.2.16).
+    func readInt16(at offset: Int) -> Int16? {
+        guard let u = readUInt16(at: offset) else { return nil }
+        return Int16(bitPattern: u)
     }
 
     /// Returns the raw bytes in `[offset, offset + length)` as `Data`, or `nil`

@@ -32,17 +32,24 @@ public struct EMFFile: Sendable, Equatable {
     /// Number of bytes the walk accounted for, from offset 0. Equals the file
     /// length for a clean, EOF-terminated file with no trailing bytes.
     public let bytesWalked: Int
+    /// The normalised byte buffer the walk ran over, retained so record
+    /// payloads can be decoded lazily via `payload(of:)` — `parse` itself
+    /// never decodes payloads (decode-on-demand keeps 276k-record files
+    /// as cheap to parse as before).
+    let reader: ByteReader
 
     init(
         header: EMFHeader,
         records: [EMFRawRecord],
         diagnostics: [EMFDiagnostic],
-        bytesWalked: Int
+        bytesWalked: Int,
+        reader: ByteReader
     ) {
         self.header = header
         self.records = records
         self.diagnostics = diagnostics
         self.bytesWalked = bytesWalked
+        self.reader = reader
     }
 
     // MARK: - Constants
@@ -156,7 +163,8 @@ public struct EMFFile: Sendable, Equatable {
             header: header,
             records: walk.records,
             diagnostics: diagnostics,
-            bytesWalked: walk.bytesWalked
+            bytesWalked: walk.bytesWalked,
+            reader: reader
         )
     }
 

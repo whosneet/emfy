@@ -25,6 +25,15 @@ struct FixtureBuilder {
         bytes.append(UInt8((value >> 8) & 0xFF))
     }
 
+    mutating func appendInt16(_ value: Int16) {
+        appendUInt16(UInt16(bitPattern: value))
+    }
+
+    /// Appends a little-endian FLOAT via its bit pattern ([MS-EMF] §2.2.28).
+    mutating func appendFloat(_ value: Float) {
+        appendUInt32(value.bitPattern)
+    }
+
     /// Appends raw bytes verbatim.
     mutating func appendBytes(_ raw: [UInt8]) {
         bytes.append(contentsOf: raw)
@@ -60,6 +69,22 @@ extension FixtureBuilder {
         if payload > 0 {
             b.appendZeros(payload)
         }
+        return b.bytes
+    }
+
+    /// Builds a record around explicit payload bytes: `Type`, `Size`
+    /// (8 + payload length unless overridden — override to write a lying
+    /// nSize), then the payload verbatim. Callers keep payloads 4-aligned
+    /// for walk-valid records.
+    static func record(
+        type: UInt32,
+        payload: [UInt8],
+        sizeOverride: UInt32? = nil
+    ) -> [UInt8] {
+        var b = FixtureBuilder()
+        b.appendUInt32(type)
+        b.appendUInt32(sizeOverride ?? UInt32(8 + payload.count))
+        b.appendBytes(payload)
         return b.bytes
     }
 
