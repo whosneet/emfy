@@ -1,0 +1,5 @@
+corpus-local/
+.build/
+xcuserdata/
+.DS_Store
+docs/MS-EMF.pdf
