@@ -2,7 +2,7 @@
 
 ![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
 ![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)
-![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)
+![Release](https://img.shields.io/github/v/release/whosneet/emfy)
 
 **Press space on an `.emf` file. See the picture.**
 
@@ -22,34 +22,40 @@ the picture.
 
 ## Status
 
-**Pre-alpha.** The clean-room parser and the core of the renderer are built
-and tested; the app and Quick Look extensions — the actual point — don't
-exist yet. What works today:
+**Version 1.0.0 — it works.** Press space on an `.emf` file in Finder and
+the preview appears; thumbnails render right in the file listing. Direct
+download: the notarized DMG on the
+[releases page](https://github.com/whosneet/emfy/releases). App Store
+listing: in progress.
 
-- Any `.emf` file parses safely: bounds-checked end to end, zero crashes
-  across a 246-file corpus that includes deliberately corrupted files.
+What's inside:
+
+- Safe parsing of any EMF file — bounds-checked end to end, fuzz-tested
+  (16,000 hostile mutants, sanitizer-clean), zero crashes across a 249-file
+  corpus that includes deliberately corrupted files.
 - `emfy-dump` prints the record inventory, header dimensions, and
   diagnostics for any EMF file.
-- Vector content renders — polygons, polylines, béziers, rectangles,
-  ellipses, path brackets (fill, stroke, or both), clipping, pens including
-  dashed styles, brushes, transforms — verified against LibreOffice renders
-  of the same files.
-- Text renders legibly: Windows font names map to macOS fonts (with a
-  substitution table), styled/rotated/accented runs, per-character
-  advances, alignment, underline and strikeout.
-- Embedded bitmaps render: 24/32-bit and palettised DIBs, stretched,
-  cropped, and mirrored — crisp, with correct colours.
-- A SwiftUI viewer app (open, zoom, pan, fit, export to PNG or vector PDF)
-  plus Quick Look preview and Finder thumbnail extensions, all sharing the
-  same renderer. The extensions build and register; verifying live spacebar
-  preview and Finder thumbnails needs a code-signed build (phase 6).
+- Vector content — polygons, polylines, béziers, rectangles, ellipses, path
+  brackets (fill, stroke, or both), clipping, pens including dashed styles,
+  brushes, transforms — verified against LibreOffice renders of the same
+  files.
+- Text: Windows font names map to macOS fonts (with a substitution table),
+  styled/rotated/accented runs, per-character advances, alignment,
+  underline and strikeout.
+- Embedded bitmaps: 24/32-bit and palettised DIBs, stretched, cropped, and
+  mirrored — crisp, with correct colours.
+- The viewer app: zoom, pan, fit, export to PNG or true-vector PDF, and an
+  honest partial-rendering notice on files whose drawing content is
+  EMF+-only (deferred to v2).
+- Quick Look preview + Finder thumbnail extensions sharing the same
+  renderer — notarized, sandboxed, no network access anywhere.
 
 - [x] **Phase 1 — parse.** EMF header, record walker, `emfy-dump` inventory CLI
 - [x] **Phase 2 — draw.** Pens, brushes, transforms, core geometry
 - [x] **Phase 3 — paths.** Path brackets and clipping
 - [x] **Phase 4 — text & images.** Font mapping, text runs, embedded bitmaps
-- [x] **Phase 5 — the point.** Viewer app, Quick Look preview, Finder thumbnails *(built; live Quick Look pending a signed build — see Status)*
-- [ ] **Phase 6 — ship.** Hardening, notarised DMG, Mac App Store
+- [x] **Phase 5 — the point.** Viewer app, Quick Look preview, Finder thumbnails
+- [x] **Phase 6 — ship.** Hardening, notarised DMG, Mac App Store *(DMG released; App Store submission in progress)*
 
 Each phase gates on real files rendering correctly before the next begins.
 
@@ -81,6 +87,14 @@ Emfy.app + Quick Look preview & thumbnail extensions: thin shells over EMFKit
   moment Finder shows them, so every size and count is bounds-checked before
   it is trusted, unknown records log-and-skip, decoders return typed
   failures, and the extensions run sandboxed with no network access anywhere.
+
+## Install
+
+Download `Emfy.dmg` from the
+[latest release](https://github.com/whosneet/emfy/releases/latest), open it,
+and drag Emfy to Applications. The app is notarized, so it opens without
+Gatekeeper warnings. Finder thumbnails and spacebar previews activate after
+the app has been launched once.
 
 ## Requirements & building
 
