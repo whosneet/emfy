@@ -56,7 +56,10 @@ rather than parser/renderer code. Cite the spec section
 - **Tests first.** A record decoder PR needs hand-built byte fixtures
   (including truncated and lying-size variants) before rendering work.
   Renderer changes must keep the committed snapshot baselines byte-identical
-  or justify a re-record in the PR description.
+  or justify a re-record in the PR description. (One legitimate re-record
+  cause outside your control: a macOS update that changes system font
+  rasterization can fail the text snapshots — say so in the PR and re-record
+  with `EMFY_RECORD=1`.)
 - **Surgical diffs.** One concern per PR; no drive-by refactors.
 
 ## Building and testing
