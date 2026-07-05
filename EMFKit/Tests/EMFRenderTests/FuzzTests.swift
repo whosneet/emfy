@@ -41,7 +41,9 @@ struct FuzzTests {
     /// unless `EMFY_FUZZ_SEED` overrides it.
     static let defaultSeed: UInt64 = 0x9E37_79B9_7F4A_7C15
     /// Default mutants per corpus file; `EMFY_FUZZ_ITERATIONS` overrides it.
-    static let defaultIterations = 200
+    /// Kept low so an everyday `swift test` stays fast; the phase-6 gate runs a
+    /// deep pass with `EMFY_FUZZ_ITERATIONS=2000` explicitly.
+    static let defaultIterations = 50
 
     static var seed: UInt64 {
         if let raw = ProcessInfo.processInfo.environment["EMFY_FUZZ_SEED"],
