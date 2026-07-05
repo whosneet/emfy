@@ -1,5 +1,6 @@
 corpus-local/
 .build/
+.swiftpm/
 xcuserdata/
 .DS_Store
 dist/
