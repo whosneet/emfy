@@ -27,6 +27,7 @@ hand-authored files have exact headers and no exporter quirks.
 | gate-p4-text | 4 | EXTCREATEFONTINDIRECTW ×3, EXTTEXTOUTW ×3, SETTEXTALIGN, SETTEXTCOLOR | three text runs: Arial 28 dark, Times New Roman italic 22 blue, Arial bold 18 dark red |
 | gate-p4-image | 4 | STRETCHDIBITS, POLYGON | 8×8 hand-rolled red/blue checkerboard PNG embedded at 240×240 (chunky pixels) + green square |
 
-All five also carry the standard LibreOffice state preamble (map mode,
-window/viewport, SAVEDC/RESTOREDC, SETROP2, one full-canvas
-EMR_INTERSECTCLIPRECT) — phase-2 renderable except where marked phase 3.
+All seven LibreOffice-converted files (everything except
+`handmade-strokes-paths`) also carry the standard LibreOffice state
+preamble: map mode, window/viewport, SAVEDC/RESTOREDC, SETROP2, and one
+full-canvas EMR_INTERSECTCLIPRECT.
