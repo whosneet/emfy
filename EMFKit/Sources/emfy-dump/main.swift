@@ -52,6 +52,8 @@ func describe(_ diagnostic: EMFDiagnostic) -> String {
         return "header Records field claims \(headerSays), walk found \(walked) (advisory field; the walk is authoritative)"
     case .byteCountMismatch(let headerSays, let walked):
         return "header Bytes field claims \(headerSays), walk covered \(walked) (advisory field; the walk is authoritative)"
+    case .recordCountCapped(let limit):
+        return "record-count cap of \(limit) reached; walk stopped, keeping every record parsed so far"
     }
 }
 

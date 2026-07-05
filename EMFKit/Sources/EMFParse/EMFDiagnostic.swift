@@ -29,4 +29,14 @@ public enum EMFDiagnostic: Sendable, Equatable {
     /// The header's advisory `Bytes` field disagreed with the number of bytes
     /// actually walked.
     case byteCountMismatch(headerSays: UInt32, walked: Int)
+    /// The walk hit its record-count cap and stopped, keeping every record
+    /// parsed so far. `limit` is the cap that was reached.
+    ///
+    /// Rationale (§8, the hostile surface): the walk materialises a fixed-size
+    /// `EMFRawRecord` per record, while the on-disk minimum record is 8 bytes,
+    /// so a crafted file of nothing but 8-byte records would inflate to an
+    /// unbounded record array and could jetsam a sandboxed Quick Look
+    /// extension mid-parse. The cap bounds that array well above any
+    /// real-world file (our largest real corpus file holds ~276k records).
+    case recordCountCapped(limit: Int)
 }

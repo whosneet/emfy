@@ -64,6 +64,14 @@ public struct EMFFile: Sendable, Equatable {
     static let baseHeaderSize = 88
     /// Every record opens with an 8-byte `Type`/`Size` header.
     static let recordHeaderSize = 8
+    /// Upper bound on the number of records the walk will materialise (§8).
+    /// Each walked record costs a fixed-size `EMFRawRecord`, so an all-8-byte
+    /// hostile file would otherwise inflate a 50 MB input into ~6.5M array
+    /// entries and could jetsam a sandboxed Quick Look extension mid-parse.
+    /// 1,000,000 caps the array at ~16 MB — over 3.5× our largest real corpus
+    /// file (~276k records) — and stops the walk on reaching it, keeping
+    /// everything parsed so far.
+    static let recordCountLimit = 1_000_000
 
     // MARK: - Entry point
 
@@ -368,6 +376,17 @@ public struct EMFFile: Sendable, Equatable {
         var sawEOF = false
 
         while offset < total {
+            // §8 memory guard: stop before the record array can grow without
+            // bound on a hostile all-tiny-records file. `records` already holds
+            // the header at index 0, so its count is the running total; when it
+            // reaches the cap, keep everything and stop (a `recordCountCapped`
+            // diagnostic here also suppresses the `missingEOF` note below, since
+            // the walk was cut short deliberately, not run off the end).
+            if records.count >= recordCountLimit {
+                diagnostics.append(.recordCountCapped(limit: recordCountLimit))
+                break
+            }
+
             let remaining = total - offset
 
             // Need a full 8-byte record header to read Type and Size.

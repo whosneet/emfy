@@ -186,6 +186,46 @@ struct EMFWalkerTests {
         #expect(file.diagnostics.contains(.byteCountMismatch(headerSays: 999, walked: 128)))
     }
 
+    /// §8 memory guard: a file of `cap + 1000` minimal 8-byte records is
+    /// walked only up to the 1,000,000-record cap, then stopped with everything
+    /// parsed so far kept. `records.count` lands exactly on the cap, the
+    /// `recordCountCapped` diagnostic is present, and — because the walk was cut
+    /// short deliberately rather than running off the end — no `missingEOF` is
+    /// raised alongside it (the two would be a misleading pair). The advisory
+    /// `Records`/`Bytes` mismatches are legitimate here (the header describes
+    /// the full untruncated file) and are allowed to coexist truthfully.
+    @Test("record-count cap: all-tiny-records file stops at the cap")
+    func recordCountCap() throws {
+        let cap = EMFFile.recordCountLimit
+        // cap + 1000 minimal SAVEDC (type 33, size 8) records, no EOF. Built as
+        // one flat block for speed — a 1M-record walk stays well under a second
+        // in debug.
+        let nonHeaderRecords = cap + 1000
+        let template: [UInt8] = [33, 0, 0, 0, 8, 0, 0, 0]   // SAVEDC, nSize 8
+
+        var bytes = FixtureBuilder.header(fixedSize: 108, recordsField: UInt32(cap + 1001))
+        bytes.reserveCapacity(bytes.count + nonHeaderRecords * 8)
+        for _ in 0 ..< nonHeaderRecords {
+            bytes.append(contentsOf: template)
+        }
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        let file = try EMFFile.parse(Data(bytes))
+        let elapsed = clock.now - start
+
+        // Walk stopped exactly at the cap, keeping everything parsed so far.
+        #expect(file.records.count == cap)
+        #expect(file.diagnostics.contains(.recordCountCapped(limit: cap)))
+        // The deliberate cap-stop must NOT also report a missing EOF.
+        #expect(!file.diagnostics.contains(.missingEOF))
+        // bytesWalked accounts for exactly the walked records (header + the
+        // cap-1 admitted 8-byte records).
+        #expect(file.bytesWalked == 108 + (cap - 1) * 8)
+        // Sanity on runtime; report rather than shrink the cap if it regresses.
+        #expect(elapsed < .seconds(5), "1M-record walk took \(elapsed)")
+    }
+
     @Test("record-name lookup: known, prefixed, and unknown values")
     func recordNameLookup() {
         #expect(EMFRecordType.name(for: 1) == "EMR_HEADER")
