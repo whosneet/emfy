@@ -13,12 +13,12 @@ struct SnapshotTests {
 
     /// Every gate file carries the same LibreOffice shell: two EMF+ comment
     /// records up front and one before EOF (type 70, unimplemented by design
-    /// — EMF+ is v2 scope), one full-canvas EMR_INTERSECTCLIPRECT (clipping
-    /// deferred to phase 3), and the EMR_EOF terminator (type 14). NOTHING
-    /// else may be skipped or approximated.
+    /// — EMF+ is v2 scope) and the EMR_EOF terminator (type 14). The
+    /// full-canvas EMR_INTERSECTCLIPRECT each file carries is now HONOURED
+    /// (phase 3) — it clips to the whole canvas, changes no pixels, and logs
+    /// nothing. NOTHING else may be skipped or approximated.
     private static let expectedGateLog: [EMFRenderLog.Entry] = [
         .unimplementedRecord(type: 70, count: 3),
-        .clipDeferred,
         .unimplementedRecord(type: 14, count: 1),
     ]
 

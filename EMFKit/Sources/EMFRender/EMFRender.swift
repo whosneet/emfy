@@ -103,11 +103,16 @@ public enum EMFRenderer {
             into: context,
             target: CGRect(x: 0, y: 0, width: width, height: height)
         )
-        // The clamp entry (if any) precedes playback entries.
+        // The clamp entry (if any) precedes playback entries. Re-feed the
+        // coalesced families through their coalescing helpers so a preceding
+        // clamp entry cannot split them into two counted lines.
         for entry in renderLog.entries {
-            if case .unimplementedRecord(let type, let count) = entry {
+            switch entry {
+            case .unimplementedRecord(let type, let count):
                 for _ in 0 ..< count { log.noteUnimplemented(type: type) }
-            } else {
+            case .unsupportedROP2(let rawMode, let count):
+                for _ in 0 ..< count { log.noteUnsupportedROP2(rawMode: rawMode) }
+            default:
                 log.note(entry)
             }
         }
@@ -185,6 +190,30 @@ public enum EMFRenderer {
         base: CGAffineTransform,
         log: inout EMFRenderLog
     ) {
+        // The FILL/STROKE closers consume the current path; dispatch them
+        // separately (they run whether or not a bracket is open — a closer with
+        // no current path logs and skips).
+        switch payload {
+        case .fillPath:
+            drawPathCloser(fill: true, stroke: false, into: context, dc: &dc, base: base, log: &log)
+            return
+        case .strokePath:
+            drawPathCloser(fill: false, stroke: true, into: context, dc: &dc, base: base, log: &log)
+            return
+        case .strokeAndFillPath:
+            drawPathCloser(fill: true, stroke: true, into: context, dc: &dc, base: base, log: &log)
+            return
+        default:
+            break
+        }
+
+        // Inside a path bracket, geometry records APPEND to the path (in device
+        // space, with the transform in effect now) instead of drawing.
+        if dc.isRecordingPath {
+            recordIntoPath(payload, dc: &dc)
+            return
+        }
+
         let full = dc.resolvedTransform.concatenating(base)
         let path = CGMutablePath()
 
@@ -281,6 +310,152 @@ public enum EMFRenderer {
             // Unreachable: DeviceContext.apply consumed every non-drawing
             // payload. Kept exhaustive-safe rather than trapping (§8).
             break
+        }
+    }
+
+    // MARK: - Path bracket recording
+
+    /// Appends one geometry record to the open path bracket, in DEVICE space,
+    /// using the transform in effect now (transform changes mid-bracket affect
+    /// only subsequent records — the GDI advanced-mode behaviour). The
+    /// figure-continuation records (lineTo / polylineTo / polyBezierTo) seed
+    /// from and advance the current position; the self-contained figures
+    /// (polygons, rectangle, ellipse, roundRect, arc, open polylines/beziers)
+    /// add their own subpath and do neither.
+    private static func recordIntoPath(_ payload: EMFRecordPayload, dc: inout DeviceContext) {
+        switch payload {
+        // Continue the current figure from the current position.
+        case .lineTo(let point):
+            dc.appendToPath(seedFromCurrentPosition: true) { path, t in
+                path.addLine(to: PathBuilder.cgPoint(point), transform: t)
+                return point
+            }
+
+        case .polylineTo(let poly):
+            appendPolyLineToPath(poly.points.map(PathBuilder.cgPoint),
+                                 last: poly.points.last.map { PointL(x: $0.x, y: $0.y) }, dc: &dc)
+
+        case .polylineTo16(let poly):
+            appendPolyLineToPath(poly.points.map(PathBuilder.cgPoint),
+                                 last: poly.points.last.map { PointL(x: Int32($0.x), y: Int32($0.y)) }, dc: &dc)
+
+        case .polyBezierTo(let poly):
+            appendPolyBezierToPath(poly.points.map(PathBuilder.cgPoint),
+                                   logicalPoints: poly.points.map { PointL(x: $0.x, y: $0.y) }, dc: &dc)
+
+        case .polyBezierTo16(let poly):
+            appendPolyBezierToPath(poly.points.map(PathBuilder.cgPoint),
+                                   logicalPoints: poly.points.map { PointL(x: Int32($0.x), y: Int32($0.y)) }, dc: &dc)
+
+        // Self-contained figures.
+        case .polygon(let poly):
+            dc.appendFigureToPath { path, t in PathBuilder.appendPolygon(poly.points.map(PathBuilder.cgPoint), to: path, transform: t) }
+        case .polygon16(let poly):
+            dc.appendFigureToPath { path, t in PathBuilder.appendPolygon(poly.points.map(PathBuilder.cgPoint), to: path, transform: t) }
+        case .polyPolygon16(let poly):
+            dc.appendFigureToPath { path, t in forEachSlice(of: poly) { slice in PathBuilder.appendPolygon(slice.map(PathBuilder.cgPoint), to: path, transform: t) } }
+        case .polyline(let poly):
+            dc.appendFigureToPath { path, t in PathBuilder.appendPolyline(poly.points.map(PathBuilder.cgPoint), to: path, transform: t) }
+        case .polyline16(let poly):
+            dc.appendFigureToPath { path, t in PathBuilder.appendPolyline(poly.points.map(PathBuilder.cgPoint), to: path, transform: t) }
+        case .polyPolyline16(let poly):
+            dc.appendFigureToPath { path, t in forEachSlice(of: poly) { slice in PathBuilder.appendPolyline(slice.map(PathBuilder.cgPoint), to: path, transform: t) } }
+        case .polyBezier(let poly):
+            dc.appendFigureToPath { path, t in PathBuilder.appendBezier(prefixOfBezier(poly.points.map(PathBuilder.cgPoint), continues: false), to: path, transform: t) }
+        case .polyBezier16(let poly):
+            dc.appendFigureToPath { path, t in PathBuilder.appendBezier(prefixOfBezier(poly.points.map(PathBuilder.cgPoint), continues: false), to: path, transform: t) }
+        case .rectangle(let box):
+            dc.appendFigureToPath { path, t in path.addRect(PathBuilder.cgRect(box), transform: t) }
+        case .ellipse(let box):
+            dc.appendFigureToPath { path, t in path.addEllipse(in: PathBuilder.cgRect(box), transform: t) }
+        case .roundRect(let payload):
+            dc.appendFigureToPath { path, t in PathBuilder.appendRoundRect(box: payload.box, corner: payload.corner, to: path, transform: t) }
+        case .arc(let arc):
+            dc.appendFigureToPath { path, t in PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: path, transform: t) }
+
+        default:
+            // Not a geometry record — nothing to record.
+            break
+        }
+    }
+
+    /// The well-formed prefix of a poly-bezier's points (start + triples, or
+    /// triples for the …To variants), used when recording into a path — the
+    /// malformed-suffix log is emitted only on the drawing path, not here.
+    private static func prefixOfBezier(_ points: [CGPoint], continues: Bool) -> [CGPoint] {
+        let shape = PathBuilder.bezierShape(pointCount: points.count, continuesFromCurrentPosition: continues)
+        return Array(points.prefix(shape.usableCount))
+    }
+
+    /// EMR_POLYLINETO into a bracket: continue the current figure through all
+    /// points, advancing the current position to the last.
+    private static func appendPolyLineToPath(_ points: [CGPoint], last: PointL?, dc: inout DeviceContext) {
+        guard !points.isEmpty, let last else { return }
+        dc.appendToPath(seedFromCurrentPosition: true) { path, t in
+            for point in points { path.addLine(to: point, transform: t) }
+            return last
+        }
+    }
+
+    /// EMR_POLYBEZIERTO into a bracket: continue the current figure through the
+    /// well-formed triple prefix, advancing the current position to its end.
+    private static func appendPolyBezierToPath(_ points: [CGPoint], logicalPoints: [PointL], dc: inout DeviceContext) {
+        let prefix = prefixOfBezier(points, continues: true)
+        guard !prefix.isEmpty else { return }
+        dc.appendToPath(seedFromCurrentPosition: true) { path, t in
+            PathBuilder.appendBezierTriples(prefix, to: path, transform: t)
+            return logicalPoints[prefix.count - 1]
+        }
+    }
+
+    // MARK: - Path closers
+
+    /// EMR_FILLPATH / EMR_STROKEPATH / EMR_STROKEANDFILLPATH: consume the DC's
+    /// current path (device space) and paint it under the current clip. Fill
+    /// uses the current brush + polyfill mode; stroke uses the current pen;
+    /// STROKEANDFILLPATH fills THEN strokes. The record's own Bounds field is
+    /// advisory and NOT used to clip. A closer with no current path logs and
+    /// skips.
+    private static func drawPathCloser(
+        fill: Bool,
+        stroke: Bool,
+        into context: CGContext,
+        dc: inout DeviceContext,
+        base: CGAffineTransform,
+        log: inout EMFRenderLog
+    ) {
+        // FILLPATH/STROKEANDFILLPATH implicitly close open figures; an ENDPATH
+        // has already moved the path to `currentPath`, but if a bracket is
+        // still open (no ENDPATH), fold it in so a BEGINPATH…FILLPATH without an
+        // explicit ENDPATH still paints (GDI closes the bracket implicitly).
+        if dc.isRecordingPath {
+            dc.foldOpenBracketIntoCurrentPath()
+        }
+        guard let devicePath = dc.consumeCurrentPath(), !devicePath.isEmpty else {
+            log.note(.noCurrentPath(record: fill && stroke ? 63 : (fill ? 62 : 64)))
+            return
+        }
+        // Transform the device-space path to target space (the same space the
+        // geometry drawing path uses) once, then paint under the clip.
+        let targetPath = CGMutablePath()
+        targetPath.addPath(devicePath, transform: base)
+
+        if fill, case .solid(let color) = dc.state.brush {
+            context.saveGState()
+            dc.state.clip.apply(to: context, deviceToTarget: base)
+            context.setFillColor(cgColor(color))
+            context.addPath(targetPath)
+            context.fillPath(using: dc.state.polyFillMode == .winding ? .winding : .evenOdd)
+            context.restoreGState()
+        }
+        if stroke, case .stroke(let pen) = dc.state.pen {
+            let full = dc.resolvedTransform.concatenating(base)
+            context.saveGState()
+            dc.state.clip.apply(to: context, deviceToTarget: base)
+            applyStrokeParameters(pen, on: context, full: full, base: base, miterLimit: dc.state.miterLimit)
+            context.addPath(targetPath)
+            context.strokePath()
+            context.restoreGState()
         }
     }
 
@@ -381,6 +556,9 @@ public enum EMFRenderer {
     /// Filled-shape semantics: fill with the current brush under the current
     /// polyfill rule (ALTERNATE → even-odd, WINDING → winding), THEN stroke
     /// the outline with the current pen. A NULL brush or pen skips its half.
+    /// The fill and the stroke each paint inside their own gstate save/restore
+    /// with the DC's clip applied, so CoreGraphics' monotonic gstate clip never
+    /// leaks between records or past a RestoreDC.
     private static func fillAndStroke(
         _ path: CGPath,
         context: CGContext,
@@ -389,13 +567,18 @@ public enum EMFRenderer {
         full: CGAffineTransform
     ) {
         if case .solid(let color) = dc.state.brush, !path.isEmpty {
+            context.saveGState()
+            dc.state.clip.apply(to: context, deviceToTarget: base)
             context.setFillColor(cgColor(color))
             context.addPath(path)
             context.fillPath(using: dc.state.polyFillMode == .winding ? .winding : .evenOdd)
+            context.restoreGState()
         }
         stroke(path, context: context, dc: dc, base: base, full: full)
     }
 
+    /// Strokes `path` with the current pen inside a gstate save/restore that
+    /// applies the DC's clip.
     private static func stroke(
         _ path: CGPath,
         context: CGContext,
@@ -404,6 +587,25 @@ public enum EMFRenderer {
         full: CGAffineTransform
     ) {
         guard case .stroke(let pen) = dc.state.pen, !path.isEmpty else { return }
+        context.saveGState()
+        dc.state.clip.apply(to: context, deviceToTarget: base)
+        applyStrokeParameters(pen, on: context, full: full, base: base, miterLimit: dc.state.miterLimit)
+        context.addPath(path)
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    /// Sets the stroke colour, width, cap, join, miter limit, and dash on
+    /// `context` from a resolved pen. Shared by `stroke` and the STROKEPATH
+    /// closer; the caller manages the gstate save/restore and clip and adds the
+    /// path.
+    private static func applyStrokeParameters(
+        _ pen: ResolvedStroke,
+        on context: CGContext,
+        full: CGAffineTransform,
+        base: CGAffineTransform,
+        miterLimit: UInt32
+    ) {
         let parameters = StrokeMapper.deviceStroke(
             for: pen,
             logicalToTarget: full,
@@ -414,10 +616,8 @@ public enum EMFRenderer {
         context.setLineCap(parameters.cap)
         context.setLineJoin(parameters.join)
         // GDI's floor for the miter limit is 1.
-        context.setMiterLimit(max(1, CGFloat(dc.state.miterLimit)))
+        context.setMiterLimit(max(1, CGFloat(miterLimit)))
         context.setLineDash(phase: 0, lengths: parameters.dash)
-        context.addPath(path)
-        context.strokePath()
     }
 }
 

@@ -85,6 +85,117 @@ struct RenderFixture {
         append(type: 20, payload: body.bytes)
     }
 
+    mutating func setBkMode(_ raw: UInt32) {
+        var body = LE(); body.u32(raw)
+        append(type: 18, payload: body.bytes)
+    }
+
+    /// EMR_SETWORLDTRANSFORM §2.3.12.2 — six FLOATs M11,M12,M21,M22,Dx,Dy.
+    mutating func setWorldTransform(
+        _ m11: Float, _ m12: Float, _ m21: Float, _ m22: Float, _ dx: Float, _ dy: Float
+    ) {
+        var body = LE()
+        for value in [m11, m12, m21, m22, dx, dy] {
+            body.u32(value.bitPattern)
+        }
+        append(type: 35, payload: body.bytes)
+    }
+
+    // MARK: - Clipping / path bracket records
+
+    mutating func saveDC() { append(type: 33, payload: []) }
+
+    mutating func restoreDC(_ savedDC: Int32) {
+        var body = LE(); body.i32(savedDC)
+        append(type: 34, payload: body.bytes)
+    }
+
+    /// EMR_INTERSECTCLIPRECT §2.3.2.3 — a Clip RectL in logical units.
+    mutating func intersectClipRect(_ l: Int32, _ t: Int32, _ r: Int32, _ b: Int32) {
+        var body = LE(); body.i32(l); body.i32(t); body.i32(r); body.i32(b)
+        append(type: 30, payload: body.bytes)
+    }
+
+    mutating func beginPath() { append(type: 59, payload: []) }
+    mutating func endPath() { append(type: 60, payload: []) }
+    mutating func closeFigure() { append(type: 61, payload: []) }
+
+    /// A RectL bounds body shared by the FILL/STROKE closers.
+    private static func rectBody(_ l: Int32, _ t: Int32, _ r: Int32, _ b: Int32) -> [UInt8] {
+        var body = LE(); body.i32(l); body.i32(t); body.i32(r); body.i32(b)
+        return body.bytes
+    }
+
+    /// EMR_FILLPATH §2.3.5.9 — Bounds (advisory).
+    mutating func fillPath(_ l: Int32 = 0, _ t: Int32 = 0, _ r: Int32 = 0, _ b: Int32 = 0) {
+        append(type: 62, payload: Self.rectBody(l, t, r, b))
+    }
+
+    /// EMR_STROKEANDFILLPATH §2.3.5.38 — Bounds (advisory).
+    mutating func strokeAndFillPath(_ l: Int32 = 0, _ t: Int32 = 0, _ r: Int32 = 0, _ b: Int32 = 0) {
+        append(type: 63, payload: Self.rectBody(l, t, r, b))
+    }
+
+    /// EMR_STROKEPATH §2.3.5.39 — Bounds (advisory).
+    mutating func strokePath(_ l: Int32 = 0, _ t: Int32 = 0, _ r: Int32 = 0, _ b: Int32 = 0) {
+        append(type: 64, payload: Self.rectBody(l, t, r, b))
+    }
+
+    /// EMR_SELECTCLIPPATH §2.3.2.5 — a RegionMode.
+    mutating func selectClipPath(_ regionMode: UInt32) {
+        var body = LE(); body.u32(regionMode)
+        append(type: 67, payload: body.bytes)
+    }
+
+    /// EMR_EXTSELECTCLIPRGN §2.3.2.2. Builds the RegionData object (§2.2.24)
+    /// from `rects` (logical units), or the RGN_COPY reset form when `rects`
+    /// is empty (RgnDataSize 0, no region data).
+    mutating func extSelectClipRgn(
+        mode: UInt32,
+        rects: [(l: Int32, t: Int32, r: Int32, b: Int32)]
+    ) {
+        var body = LE()
+        if rects.isEmpty {
+            body.u32(0)              // RgnDataSize
+            body.u32(mode)           // RegionMode (RGN_COPY reset expected)
+            append(type: 75, payload: body.bytes)
+            return
+        }
+        // RegionDataHeader (32 bytes) + CountRects × RectL (16 bytes each).
+        let rgnDataSize = UInt32(32 + rects.count * 16)
+        body.u32(rgnDataSize)        // RgnDataSize
+        body.u32(mode)               // RegionMode
+        // RegionDataHeader §2.2.25.
+        body.u32(0x20)               // Size (MUST be 0x20)
+        body.u32(0x01)               // Type (RDH_RECTANGLES)
+        body.u32(UInt32(rects.count))// CountRects
+        body.u32(UInt32(rects.count * 16)) // RgnSize (advisory)
+        // Bounds: the union of the rects.
+        let ls = rects.map(\.l), ts = rects.map(\.t), rs = rects.map(\.r), bs = rects.map(\.b)
+        body.i32(ls.min() ?? 0); body.i32(ts.min() ?? 0)
+        body.i32(rs.max() ?? 0); body.i32(bs.max() ?? 0)
+        for rect in rects {
+            body.i32(rect.l); body.i32(rect.t); body.i32(rect.r); body.i32(rect.b)
+        }
+        append(type: 75, payload: body.bytes)
+    }
+
+    // MARK: - More geometry
+
+    mutating func polyline16(_ points: [(Int16, Int16)]) {
+        append(type: 87, payload: Self.poly16Body(points))
+    }
+
+    /// EMR_RECTANGLE §2.3.5.34 — an inclusive-inclusive Box RectL.
+    mutating func rectangle(_ l: Int32, _ t: Int32, _ r: Int32, _ b: Int32) {
+        append(type: 43, payload: Self.rectBody(l, t, r, b))
+    }
+
+    /// EMR_ELLIPSE §2.3.5.5 — an inclusive-inclusive Box RectL.
+    mutating func ellipse(_ l: Int32, _ t: Int32, _ r: Int32, _ b: Int32) {
+        append(type: 42, payload: Self.rectBody(l, t, r, b))
+    }
+
     /// EMR_CREATEBRUSHINDIRECT §2.3.7.1 (LogBrushEx §2.2.12).
     mutating func createSolidBrush(index: UInt32, r: UInt8, g: UInt8, b: UInt8) {
         var body = LE()
@@ -93,6 +204,18 @@ struct RenderFixture {
         body.color(r, g, b)
         body.u32(0)             // BrushHatch
         append(type: 39, payload: body.bytes)
+    }
+
+    /// EMR_CREATEPEN §2.3.7.7 (LogPen §2.2.19): ihPen, PenStyle, Width PointL
+    /// (only x used), ColorRef. `width` 0 → cosmetic one-device-pixel pen;
+    /// `width` > 0 with PS_SOLID (style 0) → a geometric solid pen.
+    mutating func createPen(index: UInt32, style: UInt32, width: Int32, r: UInt8, g: UInt8, b: UInt8) {
+        var body = LE()
+        body.u32(index)
+        body.u32(style)
+        body.i32(width); body.i32(0)   // Width PointL (y ignored)
+        body.color(r, g, b)
+        append(type: 38, payload: body.bytes)
     }
 
     /// EMR_SELECTOBJECT §2.3.8.5 — pass a table index or a 0x8000_00xx

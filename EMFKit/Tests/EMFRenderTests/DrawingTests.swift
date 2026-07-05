@@ -132,7 +132,7 @@ struct DrawingTests {
         let file = try fixture.parsed()
         let (image, log) = try #require(EMFRenderer.makeImage(file))
         #expect(log.entries == [
-            .unsupportedROP2(rawMode: 0x06),
+            .unsupportedROP2(rawMode: 0x06, count: 1),
             .unimplementedRecord(type: 14, count: 1),
         ])
 

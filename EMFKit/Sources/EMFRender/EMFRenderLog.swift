@@ -5,25 +5,29 @@ import Foundation
 /// Rendering never fails — it always produces best-effort output. Anything the
 /// renderer could not fully honour lands here so a caller can tell exactly what
 /// was skipped or approximated: unimplemented record types, malformed payloads,
-/// unsupported ROP2 modes, deferred clipping, unknown brush/pen styles,
+/// unsupported ROP2 modes, region-combination modes CoreGraphics cannot
+/// express, path-bracket faults, unknown brush/pen styles and enum values,
 /// zero-extent mapping records, save/restore stack faults, and canvas clamps.
 public struct EMFRenderLog: Sendable, Equatable {
     /// One logged event. Kept coarse and value-comparable so tests can assert
     /// the exact set of things a file exercised (the gate-file coverage pin).
+    ///
+    /// Two families are COALESCED (one entry carrying a count, appended on
+    /// first occurrence and updated in place): `unimplementedRecord` and
+    /// `unsupportedROP2`. Coalescing keeps a file with tens of thousands of a
+    /// repeated skip (e.g. WS-B's 15.7k EMR_SETROP2) to a single log line.
     public enum Entry: Sendable, Equatable {
-        /// A record type outside the phase-2 render set was encountered and
-        /// skipped. Includes EMF+ content (EMR_COMMENT, type 70) and EMR_EOF
-        /// (type 14). `count` records of this `type` were skipped in total.
+        /// A record type outside the render set was encountered and skipped.
+        /// Includes EMF+ content (EMR_COMMENT, type 70) and EMR_EOF (type 14).
+        /// `count` records of this `type` were skipped in total (coalesced).
         case unimplementedRecord(type: UInt32, count: Int)
         /// A record's payload failed EMFParse's own validation
         /// (`.malformed`); it was skipped.
         case malformedRecord(type: UInt32)
-        /// EMR_INTERSECTCLIPRECT was decoded but clipping is deferred to
-        /// phase 3; rendering continued unclipped.
-        case clipDeferred
-        /// A ROP2 mode other than R2_COPYPEN was selected. The shape is still
-        /// drawn as if R2_COPYPEN (the agreed best-partial-output reading, D5).
-        case unsupportedROP2(rawMode: UInt32)
+        /// A ROP2 mode other than R2_COPYPEN was selected on `count` records.
+        /// Every affected shape is still drawn as if R2_COPYPEN (the agreed
+        /// best-partial-output reading, D5). Coalesced by `rawMode`.
+        case unsupportedROP2(rawMode: UInt32, count: Int)
         /// A brush style other than BS_SOLID / BS_NULL was requested; a solid
         /// fallback fill from the payload's ColorRef was used instead.
         case unsupportedBrushStyle(rawStyle: UInt32)
@@ -37,6 +41,27 @@ public struct EMFRenderLog: Sendable, Equatable {
         /// `render(_:into:target:)` built its device→target fit. The previous
         /// (or a unit) mapping was kept.
         case zeroExtentMapping
+        /// A clip-combination RegionMode that CoreGraphics cannot express —
+        /// RGN_OR, RGN_XOR, or RGN_DIFF on EMR_SELECTCLIPPATH or
+        /// EMR_EXTSELECTCLIPRGN (CG's clip is monotonic-intersection only). The
+        /// current clip was left unchanged. `record` is the record type id
+        /// (67 or 75); `rawMode` is the RegionMode value as read.
+        case unsupportedClipMode(record: UInt32, rawMode: UInt32)
+        /// A path closer or clip-from-path record (EMR_FILLPATH,
+        /// EMR_STROKEPATH, EMR_STROKEANDFILLPATH, EMR_SELECTCLIPPATH) ran with
+        /// no current path — no bracket had been closed, or a previous closer
+        /// already consumed it. The record was skipped. `record` is the type id.
+        case noCurrentPath(record: UInt32)
+        /// EMR_BEGINPATH opened a path bracket while one was already open
+        /// (forbidden by [MS-EMF] §2.3.10). The in-progress path was discarded
+        /// and a fresh bracket started (best-effort recovery).
+        case nestedBeginPath
+        /// A record carried a defined-enum field whose value is outside the
+        /// enumeration and was ignored, falling back to the current/default
+        /// behaviour: EMR_SETMAPMODE (fell back to MM_TEXT),
+        /// EMR_SETPOLYFILLMODE, or EMR_SETBKMODE (both kept the current value).
+        /// `record` is the record type id; `rawValue` is the value as read.
+        case unknownEnumValue(record: UInt32, rawValue: UInt32)
         /// A poly-bezier point count was not ≡ 1 (or 0 for the …To variants)
         /// mod 3; the well-formed prefix was rendered and the remainder
         /// dropped.
@@ -71,14 +96,14 @@ public struct EMFRenderLog: Sendable, Equatable {
         )
     }
 
-    /// Every logged event, in the order it was raised (unimplemented-record
-    /// entries are coalesced by type — one entry per type carrying a count).
+    /// Every logged event, in the order it was raised. The coalesced families
+    /// (unimplemented-record by type, unsupported-ROP2 by mode) appear once
+    /// each, carrying a count.
     public private(set) var entries: [Entry] = []
 
     public init() {}
 
-    /// Total number of events, counting each coalesced unimplemented-record
-    /// entry once.
+    /// Total number of events, counting each coalesced entry once.
     public var count: Int { entries.count }
 
     /// True when nothing was skipped or approximated.
@@ -96,6 +121,18 @@ public struct EMFRenderLog: Sendable, Equatable {
             }
         }
         entries.append(.unimplementedRecord(type: type, count: 1))
+    }
+
+    /// Records one unsupported ROP2 selection of `rawMode`, coalescing repeats
+    /// by mode so WS-B's 15.7k EMR_SETROP2 records yield one line, not 15,700.
+    mutating func noteUnsupportedROP2(rawMode: UInt32) {
+        for index in entries.indices {
+            if case .unsupportedROP2(let m, let c) = entries[index], m == rawMode {
+                entries[index] = .unsupportedROP2(rawMode: rawMode, count: c + 1)
+                return
+            }
+        }
+        entries.append(.unsupportedROP2(rawMode: rawMode, count: 1))
     }
 
     /// Records any non-coalesced event verbatim.

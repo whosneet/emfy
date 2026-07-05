@@ -40,6 +40,10 @@ struct DeviceContext {
         /// record that would produce a zero-extent mapping logs and leaves
         /// this untouched — "keep the previous valid mapping".
         var scale = CoordinatePipeline.Scale(sx: 1, sy: 1)
+        /// The current clipping region in DEVICE space. Part of the saved
+        /// state: SaveDC snapshots it and RestoreDC brings it back, matching
+        /// GDI's Regions state element ([MS-EMF] §3.1.1.2.1, saved by SaveDC).
+        var clip = ClipRegion.none
     }
 
     /// R2_COPYPEN ([MS-WMF] §2.1.1.2 BinaryRasterOperation).
@@ -56,6 +60,27 @@ struct DeviceContext {
     private(set) var saveStack: [State] = []
     /// Header metrics feed the fixed metric map modes' scale.
     let header: EMFHeader
+
+    /// Path-bracket construction state ([MS-EMF] §2.3.10). This is DC-level,
+    /// NOT part of the saveable `State`: a bracket is a transient
+    /// record-recording mode bounded by EMR_BEGINPATH … EMR_ENDPATH, orthogonal
+    /// to the SaveDC/RestoreDC state stack.
+    ///
+    /// While `pathAccumulator` is non-nil a bracket is open and geometry
+    /// records APPEND to it (in DEVICE space) instead of drawing. EMR_ENDPATH
+    /// moves the accumulator into `currentPath`; the closing records
+    /// (FILL/STROKE/STROKEANDFILLPATH, SELECTCLIPPATH) consume and clear it.
+    private(set) var pathAccumulator: CGMutablePath?
+    /// The last subpath's start point in DEVICE space, for EMR_CLOSEFIGURE.
+    /// `nil` when no subpath is open.
+    private var pathSubpathStart: CGPoint?
+    /// The closed, selected path from EMR_ENDPATH, in DEVICE space; consumed
+    /// (set back to nil) by the next fill/stroke/clip-from-path record.
+    private(set) var currentPath: CGPath?
+
+    /// True while an EMR_BEGINPATH bracket is open (geometry is recorded, not
+    /// drawn).
+    var isRecordingPath: Bool { pathAccumulator != nil }
 
     init(header: EMFHeader) {
         self.header = header
@@ -80,6 +105,11 @@ struct DeviceContext {
         switch payload {
         // MARK: State records
         case .setMapMode(let mode):
+            // An unknown value falls back to MM_TEXT in the pipeline; surface
+            // that (previously silent — phase-2 backlog).
+            if case .unknown(let raw) = mode {
+                log.note(.unknownEnumValue(record: 17, rawValue: raw))
+            }
             state.mapMode = mode
             recomputeScale(log: &log)
             return true
@@ -110,21 +140,31 @@ struct DeviceContext {
 
         case .setBkMode(let mode):
             // Stored only: background mode affects dashed-gap/text-background
-            // painting, which arrives with EMR_SETBKCOLOR in phase 4.
+            // painting, which arrives with EMR_SETBKCOLOR in phase 4. An
+            // unknown value keeps the current mode and logs (phase-2 backlog).
+            if case .unknown(let raw) = mode {
+                log.note(.unknownEnumValue(record: 18, rawValue: raw))
+                return true
+            }
             state.bkMode = mode
             return true
 
         case .setPolyFillMode(let mode):
-            // Unknown values keep the current mode (hostile-input fallback;
-            // both defined values are handled).
-            if case .unknown = mode { return true }
+            // Unknown values keep the current mode and log (previously silent
+            // — phase-2 backlog); both defined values are handled.
+            if case .unknown(let raw) = mode {
+                log.note(.unknownEnumValue(record: 19, rawValue: raw))
+                return true
+            }
             state.polyFillMode = mode
             return true
 
         case .setROP2(let rawMode):
             state.rop2Raw = rawMode
             if rawMode != Self.rop2CopyPen {
-                log.note(.unsupportedROP2(rawMode: rawMode))
+                // Coalesced by mode so a file with tens of thousands of
+                // SETROP2s yields one log line (phase-2 backlog).
+                log.noteUnsupportedROP2(rawMode: rawMode)
             }
             return true
 
@@ -154,24 +194,56 @@ struct DeviceContext {
 
         case .moveToEx(let point):
             state.currentPosition = point
+            // Inside a bracket, EMR_MOVETOEX starts a new subpath at the point
+            // (GDI advanced-mode); outside, it only moves the position.
+            if isRecordingPath {
+                startSubpath(at: point)
+            }
             return true
 
-        case .intersectClipRect:
-            // Decoded but deferred to phase 3; rendering continues unclipped.
-            log.note(.clipDeferred)
+        case .intersectClipRect(let clip):
+            // [MS-EMF] §2.3.2.3: Clip is a RectL in LOGICAL units. Transform to
+            // device with the transform in effect and intersect the current
+            // clip. (The spec excludes the lower/right edges; that sub-pixel
+            // nicety is immaterial to a rasterising viewer and is not modelled.)
+            let deviceRect = PathBuilder.cgRect(clip).applying(resolvedTransform)
+            state.clip.intersect(.rects([deviceRect]))
             return true
 
-        // MARK: Path brackets and clipping (decoded phase 3; playback is Task B)
-        // Task A decodes these payloads; the renderer does not yet build path
-        // brackets or apply clipping. Until Task B, they are consumed here as
-        // deferred — rendering continues, geometry inside a bracket still draws
-        // immediately (its own drawing arm), matching the phase-2 behaviour of
-        // EMR_INTERSECTCLIPRECT above. No path is built and no clip is set.
-        case .beginPath, .endPath, .closeFigure,
-             .fillPath, .strokeAndFillPath, .strokePath,
-             .selectClipPath, .extSelectClipRgn:
-            log.note(.clipDeferred)
+        // MARK: Path brackets ([MS-EMF] §2.3.10) — construction state only.
+        // The FILL/STROKE closers and SELECTCLIPPATH need a CGContext, so the
+        // renderer drives them; they are NOT consumed here (return false). The
+        // three construction records below carry no drawing and are consumed.
+        case .beginPath:
+            beginPathBracket(log: &log)
             return true
+
+        case .endPath:
+            endPathBracket()
+            return true
+
+        case .closeFigure:
+            closeFigure()
+            return true
+
+        case .selectClipPath(let mode):
+            // EMR_SELECTCLIPPATH ([MS-EMF] §2.3.2.5): combine the current path
+            // (already DEVICE space) with the clip per RegionMode. Pure state —
+            // no CGContext needed.
+            applySelectClipPath(mode, log: &log)
+            return true
+
+        case .extSelectClipRgn(let payload):
+            // EMR_EXTSELECTCLIPRGN ([MS-EMF] §2.3.2.2): region rects are LOGICAL
+            // units; transform to device via the transform in effect. Pure
+            // state — no CGContext needed.
+            applyExtSelectClipRgn(payload, log: &log)
+            return true
+
+        // The FILL/STROKE closers reach the renderer — they paint and need the
+        // device→target transform plus the CGContext.
+        case .fillPath, .strokeAndFillPath, .strokePath:
+            return false
 
         // MARK: Object records
         case .createPen(let payload):
@@ -235,6 +307,171 @@ struct DeviceContext {
             state.scale = scale
         } else {
             log.note(.zeroExtentMapping)
+        }
+    }
+
+    // MARK: - Path bracket ([MS-EMF] §2.3.10)
+
+    /// EMR_BEGINPATH: opens a fresh bracket. Per §2.3.10 path-bracket
+    /// construction MUST NOT already be open; if it is, discard the in-progress
+    /// path and start fresh (best-effort recovery) with a log entry.
+    private mutating func beginPathBracket(log: inout EMFRenderLog) {
+        if isRecordingPath {
+            log.note(.nestedBeginPath)
+        }
+        pathAccumulator = CGMutablePath()
+        pathSubpathStart = nil
+    }
+
+    /// EMR_ENDPATH: closes construction and selects the accumulated path as the
+    /// current path. A stray ENDPATH with no open bracket leaves the existing
+    /// `currentPath` untouched (rather than clobbering it with nil).
+    private mutating func endPathBracket() {
+        guard let accumulator = pathAccumulator else { return }
+        currentPath = accumulator.copy()
+        pathAccumulator = nil
+        pathSubpathStart = nil
+    }
+
+    /// EMR_CLOSEFIGURE ([MS-EMF] §2.3.10): closes the open figure by drawing a
+    /// line back to its first point. A no-op outside a bracket or with no open
+    /// subpath.
+    private mutating func closeFigure() {
+        guard isRecordingPath else { return }
+        pathAccumulator?.closeSubpath()
+        // After CLOSEFIGURE a following line/curve starts a NEW figure, so the
+        // subpath start is cleared; the next append will re-seed it from the
+        // current position.
+        pathSubpathStart = nil
+    }
+
+    /// Starts a new subpath in the accumulator at `logicalPoint` (device space
+    /// via the current transform). Used by EMR_MOVETOEX inside a bracket.
+    private mutating func startSubpath(at logicalPoint: PointL) {
+        let device = PathBuilder.cgPoint(logicalPoint).applying(resolvedTransform)
+        pathAccumulator?.move(to: device)
+        pathSubpathStart = device
+    }
+
+    /// Ensures a subpath is open before appending a line/curve inside a
+    /// bracket, seeding it from the current position when a fresh figure is
+    /// starting (GDI implicitly begins the figure at the current point). Runs
+    /// `body` with the accumulator and the logical→device transform, then
+    /// records the resulting current position.
+    ///
+    /// `body` appends geometry in DEVICE space and returns the point the
+    /// current position should advance to (`nil` to leave it unchanged).
+    mutating func appendToPath(
+        seedFromCurrentPosition: Bool,
+        _ body: (CGMutablePath, CGAffineTransform) -> PointL?
+    ) {
+        guard let accumulator = pathAccumulator else { return }
+        if seedFromCurrentPosition, pathSubpathStart == nil {
+            let device = PathBuilder.cgPoint(state.currentPosition).applying(resolvedTransform)
+            accumulator.move(to: device)
+            pathSubpathStart = device
+        }
+        if let advanced = body(accumulator, resolvedTransform) {
+            state.currentPosition = advanced
+        }
+    }
+
+    /// Appends a self-contained figure (its own move/close, e.g. a polygon,
+    /// rectangle, or ellipse) to the accumulator in device space. These do NOT
+    /// seed from or advance the current position.
+    mutating func appendFigureToPath(_ body: (CGMutablePath, CGAffineTransform) -> Void) {
+        guard let accumulator = pathAccumulator else { return }
+        body(accumulator, resolvedTransform)
+        // A closed figure ends any implicit open subpath; the next line/curve
+        // re-seeds from the current position.
+        pathSubpathStart = nil
+    }
+
+    /// Consumes and returns the current path (device space) for a fill/stroke
+    /// closer, clearing it — [MS-EMF]/GDI: FillPath, StrokePath, and
+    /// StrokeAndFillPath discard the DC's current path after use. Returns nil
+    /// when there is no current path (a closer with nothing to draw).
+    mutating func consumeCurrentPath() -> CGPath? {
+        defer { currentPath = nil }
+        return currentPath
+    }
+
+    /// Folds a still-open bracket into `currentPath` when a fill/stroke closer
+    /// runs without an intervening EMR_ENDPATH. GDI's FillPath/StrokePath/
+    /// StrokeAndFillPath implicitly close the path bracket, so this mirrors
+    /// EMR_ENDPATH: snapshot the accumulator and end construction.
+    mutating func foldOpenBracketIntoCurrentPath() {
+        guard isRecordingPath else { return }
+        currentPath = pathAccumulator?.copy()
+        pathAccumulator = nil
+        pathSubpathStart = nil
+    }
+
+    // MARK: - Clipping ([MS-EMF] §2.3.2)
+
+    /// EMR_SELECTCLIPPATH ([MS-EMF] §2.3.2.5): combine the current path with the
+    /// clip. The path is CONSUMED (GDI selects the path bracket into the clip
+    /// and the path is no longer current). RGN_COPY replaces, RGN_AND
+    /// intersects; RGN_OR/XOR/DIFF are logged and leave the clip unchanged.
+    /// A missing current path is a logged skip.
+    private mutating func applySelectClipPath(_ mode: RegionMode, log: inout EMFRenderLog) {
+        guard let path = consumeCurrentPath() else {
+            log.note(.noCurrentPath(record: 67))
+            return
+        }
+        switch mode {
+        case .copy:
+            state.clip.replace(with: .path(path))
+        case .and:
+            state.clip.intersect(.path(path))
+        case .or, .xor, .diff:
+            log.note(.unsupportedClipMode(record: 67, rawMode: Self.regionModeRaw(mode)))
+        case .unknown(let raw):
+            log.note(.unsupportedClipMode(record: 67, rawMode: raw))
+        }
+    }
+
+    /// EMR_EXTSELECTCLIPRGN ([MS-EMF] §2.3.2.2). COORDINATE NOTE: the region
+    /// data is specified "in logical units" by [MS-EMF] §2.3.2.2 (contrary to
+    /// the common assumption that GDI region data is device-space) — so the
+    /// RectL array is transformed to device space with the transform in effect,
+    /// exactly like EMR_INTERSECTCLIPRECT. The reset form (RGN_COPY with no
+    /// region data) clears to the default clip (whole canvas). RGN_COPY
+    /// replaces, RGN_AND intersects; RGN_OR/XOR/DIFF are logged and unchanged.
+    private mutating func applyExtSelectClipRgn(
+        _ payload: ExtSelectClipRgnPayload,
+        log: inout EMFRenderLog
+    ) {
+        // Reset form: RGN_COPY with no rectangles → default (no) clip.
+        if payload.mode == .copy, payload.rects.isEmpty, payload.bounds == nil {
+            state.clip = .none
+            return
+        }
+
+        let transform = resolvedTransform
+        let deviceRects = payload.rects.map { PathBuilder.cgRect($0).applying(transform) }
+
+        switch payload.mode {
+        case .copy:
+            state.clip.replace(with: .rects(deviceRects))
+        case .and:
+            state.clip.intersect(.rects(deviceRects))
+        case .or, .xor, .diff:
+            log.note(.unsupportedClipMode(record: 75, rawMode: Self.regionModeRaw(payload.mode)))
+        case .unknown(let raw):
+            log.note(.unsupportedClipMode(record: 75, rawMode: raw))
+        }
+    }
+
+    /// The on-disk RegionMode value for a defined mode (log reporting only).
+    private static func regionModeRaw(_ mode: RegionMode) -> UInt32 {
+        switch mode {
+        case .and: 0x01
+        case .or: 0x02
+        case .xor: 0x03
+        case .diff: 0x04
+        case .copy: 0x05
+        case .unknown(let raw): raw
         }
     }
 

@@ -268,6 +268,10 @@ struct DeviceContextTests {
 
         _ = dc.apply(.setROP2(rawMode: 0x06), log: &log)    // R2_XORPEN
         #expect(dc.state.rop2Raw == 0x06)
-        #expect(log.entries == [.unsupportedROP2(rawMode: 0x06)])
+        #expect(log.entries == [.unsupportedROP2(rawMode: 0x06, count: 1)])
+
+        // A second occurrence of the same mode COALESCES into the count.
+        _ = dc.apply(.setROP2(rawMode: 0x06), log: &log)
+        #expect(log.entries == [.unsupportedROP2(rawMode: 0x06, count: 2)])
     }
 }

@@ -117,11 +117,28 @@ struct RasterizedImage {
         in rect: (x: Int, y: Int, width: Int, height: Int),
         threshold: UInt8 = 200
     ) -> Bool {
+        contains(in: rect) { $0.r < threshold }
+    }
+
+    /// True if any pixel in the (clamped) rectangle is dominantly blue (high
+    /// blue, low red and green) — a "blue ink landed here" probe robust to
+    /// antialiasing against a white background or red fill.
+    func containsBluePixel(
+        in rect: (x: Int, y: Int, width: Int, height: Int)
+    ) -> Bool {
+        contains(in: rect) { $0.b > 160 && $0.r < 120 && $0.g < 120 }
+    }
+
+    /// True if any pixel in the (clamped) rectangle satisfies `predicate`.
+    func contains(
+        in rect: (x: Int, y: Int, width: Int, height: Int),
+        where predicate: ((r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool
+    ) -> Bool {
         let x0 = max(0, rect.x), y0 = max(0, rect.y)
         let x1 = min(width, rect.x + rect.width), y1 = min(height, rect.y + rect.height)
         guard x0 < x1, y0 < y1 else { return false }
         for y in y0 ..< y1 {
-            for x in x0 ..< x1 where self[x, y].r < threshold {
+            for x in x0 ..< x1 where predicate(self[x, y]) {
                 return true
             }
         }
