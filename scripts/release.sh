@@ -93,6 +93,43 @@ info()  { printf '    %s\n' "$*"; }
 warn()  { printf '\033[33m    warning: %s\033[0m\n' "$*" >&2; }
 die()   { printf '\033[31m    error: %s\033[0m\n' "$*" >&2; exit 1; }
 
+# Submit an artifact to the notary service and REQUIRE an Accepted verdict.
+# `notarytool submit --wait` exits 0 even when the verdict is Invalid, so its
+# exit status cannot be trusted — the output must be parsed. This captures the
+# submission log (shown live via tee) and only returns success on a final
+# "status: Accepted"; otherwise it dies, printing the submission id and the
+# exact command to fetch the detailed failure log.
+#   $1 — path to the artifact (zip or dmg)
+#   $2 — human label for messages ("app", "DMG")
+notarize_and_verify() {
+    local artifact="$1" label="$2"
+    local out
+    out="$(mktemp "${WORK_DIR}/notary-${label}.XXXXXX")"
+
+    # Tee so the operator sees progress live; keep the text for parsing. The
+    # `|| true` stops set -e from aborting before we can inspect the verdict.
+    xcrun notarytool submit "${artifact}" \
+        --keychain-profile "${NOTARY_PROFILE}" \
+        --wait 2>&1 | tee "${out}" || true
+
+    # First "  id:" line is the submission id (value after the colon).
+    local submission_id
+    submission_id="$(awk -F': *' '/^ *id:/{print $2; exit}' "${out}")"
+
+    # Verdict: the final-block "  status:" line (anchored to exclude the
+    # "Current status:" polling lines); take the last such line.
+    local status
+    status="$(awk -F': *' '/^ *status:/{v=$2} END{print v}' "${out}")"
+
+    if [[ "${status}" != "Accepted" ]]; then
+        die "notarization of the ${label} was not Accepted (status: ${status:-unknown}).
+    submission id: ${submission_id:-unknown}
+    fetch the detailed log with:
+      xcrun notarytool log ${submission_id:-<submission-id>} --keychain-profile ${NOTARY_PROFILE}"
+    fi
+    info "notarization Accepted (submission id: ${submission_id:-unknown})"
+}
+
 if [[ "${SKIP_NOTARIZE}" -eq 1 ]]; then
     printf '\033[1mEmfy release — DRY RUN (--skip-notarize): notarization and stapling are skipped\033[0m\n'
 else
@@ -166,10 +203,7 @@ if [[ "${SKIP_NOTARIZE}" -eq 1 ]]; then
     warn "skipping notarytool submit + stapler staple for the app (dry run)"
 else
     info "submitting to notary service (profile: ${NOTARY_PROFILE}); this waits for the result"
-    xcrun notarytool submit "${APP_ZIP}" \
-        --keychain-profile "${NOTARY_PROFILE}" \
-        --wait \
-        || die "notarytool submit failed for the app"
+    notarize_and_verify "${APP_ZIP}" "app"
     info "stapling notarization ticket to the app"
     xcrun stapler staple "${STAGED_APP}" \
         || die "stapler staple failed for the app"
@@ -210,10 +244,7 @@ if [[ "${SKIP_NOTARIZE}" -eq 1 ]]; then
     warn "skipping notarytool submit + stapler staple for the DMG (dry run)"
 else
     info "submitting DMG to notary service (profile: ${NOTARY_PROFILE})"
-    xcrun notarytool submit "${DMG_PATH}" \
-        --keychain-profile "${NOTARY_PROFILE}" \
-        --wait \
-        || die "notarytool submit failed for the DMG"
+    notarize_and_verify "${DMG_PATH}" "DMG"
     info "stapling notarization ticket to the DMG"
     xcrun stapler staple "${DMG_PATH}" \
         || die "stapler staple failed for the DMG"
