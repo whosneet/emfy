@@ -18,7 +18,13 @@ import Testing
 ///
 /// Disabled in record mode: these tests feed deliberately WRONG images into
 /// `verify`, which in record mode would overwrite real baselines.
-@Suite("Snapshot comparator failure paths", .enabled(if: !isRecordingBaselines))
+///
+/// `.serialized`: two failure-path tests share one artifact directory —
+/// `pixelMismatchFails` writes actual/expected/diff PNGs there and asserts
+/// they exist, while `sizeMismatchFails` removes that same directory on exit.
+/// Run concurrently (Swift Testing's default) the removal races the existence
+/// assertions, so these tests must run one at a time.
+@Suite("Snapshot comparator failure paths", .enabled(if: !isRecordingBaselines), .serialized)
 struct ComparatorTests {
 
     /// The self-test artifact directory (never a real snapshot's name).
