@@ -11,6 +11,10 @@
 		B01100000000000000000002 /* EMFDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000002 /* EMFDocument.swift */; };
 		B01100000000000000000003 /* EMFDocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000003 /* EMFDocumentView.swift */; };
 		B01100000000000000000004 /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
+		B01100000000000000000050 /* Changelog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000050 /* Changelog.swift */; };
+		B01100000000000000000051 /* WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000051 /* WhatsNewView.swift */; };
+		B01100000000000000000052 /* ChangelogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000052 /* ChangelogView.swift */; };
+		B01100000000000000000053 /* EmfyCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000053 /* EmfyCommands.swift */; };
 		B01100000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000005 /* Assets.xcassets */; };
 		B01100000000000000000006 /* emfy.icon in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* emfy.icon */; };
 		B01100000000000000000010 /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000010 /* PreviewProvider.swift */; };
@@ -64,6 +68,10 @@
 		B00100000000000000000002 /* EMFDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocument.swift; sourceTree = "<group>"; };
 		B00100000000000000000003 /* EMFDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocumentView.swift; sourceTree = "<group>"; };
 		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
+		B00100000000000000000050 /* Changelog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Changelog.swift; sourceTree = "<group>"; };
+		B00100000000000000000051 /* WhatsNewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsNewView.swift; sourceTree = "<group>"; };
+		B00100000000000000000052 /* ChangelogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangelogView.swift; sourceTree = "<group>"; };
+		B00100000000000000000053 /* EmfyCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyCommands.swift; sourceTree = "<group>"; };
 		B00100000000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B00100000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B00100000000000000000007 /* Emfy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Emfy.entitlements; sourceTree = "<group>"; };
@@ -131,6 +139,10 @@
 				B00100000000000000000002 /* EMFDocument.swift */,
 				B00100000000000000000003 /* EMFDocumentView.swift */,
 				B00100000000000000000004 /* EMFExport.swift */,
+				B00100000000000000000050 /* Changelog.swift */,
+				B00100000000000000000051 /* WhatsNewView.swift */,
+				B00100000000000000000052 /* ChangelogView.swift */,
+				B00100000000000000000053 /* EmfyCommands.swift */,
 				B00100000000000000000005 /* Assets.xcassets */,
 				B00100000000000000000008 /* emfy.icon */,
 				B00100000000000000000006 /* Info.plist */,
@@ -311,6 +323,10 @@
 				B01100000000000000000002 /* EMFDocument.swift in Sources */,
 				B01100000000000000000003 /* EMFDocumentView.swift in Sources */,
 				B01100000000000000000004 /* EMFExport.swift in Sources */,
+				B01100000000000000000050 /* Changelog.swift in Sources */,
+				B01100000000000000000051 /* WhatsNewView.swift in Sources */,
+				B01100000000000000000052 /* ChangelogView.swift in Sources */,
+				B01100000000000000000053 /* EmfyCommands.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

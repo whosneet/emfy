@@ -14,6 +14,20 @@ struct EmfyApp: App {
         .commands {
             // Replace the New Document command — this app cannot create files.
             CommandGroup(replacing: .newItem) {}
+            // Help menu: documentation, What's New, Changelog, and feedback.
+            EmfyCommands()
         }
+
+        // Single-instance auxiliary windows the Help menu raises by id.
+        Window("What's New in Emfy", id: "whats-new") {
+            WhatsNewView()
+        }
+        .defaultSize(width: 440, height: 560)
+        .windowResizability(.contentSize)
+
+        Window("Emfy Changelog", id: "changelog") {
+            ChangelogView()
+        }
+        .defaultSize(width: 460, height: 600)
     }
 }
