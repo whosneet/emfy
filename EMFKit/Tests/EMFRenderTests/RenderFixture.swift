@@ -203,6 +203,39 @@ struct RenderFixture {
         append(type: 42, payload: Self.rectBody(l, t, r, b))
     }
 
+    /// EMR_ROUNDRECT §2.3.5.35 — Box RectL at 8, corner SizeL at 24.
+    mutating func roundRect(_ l: Int32, _ t: Int32, _ r: Int32, _ b: Int32, cornerW: Int32, cornerH: Int32) {
+        var body = LE()
+        body.i32(l); body.i32(t); body.i32(r); body.i32(b)
+        body.i32(cornerW); body.i32(cornerH)
+        append(type: 44, payload: body.bytes)
+    }
+
+    /// EMR_ARC §2.3.5.2 — Box RectL at 8, Start PointL at 24, End PointL at 32.
+    mutating func arc(box: (l: Int32, t: Int32, r: Int32, b: Int32), start: (x: Int32, y: Int32), end: (x: Int32, y: Int32)) {
+        var body = LE()
+        body.i32(box.l); body.i32(box.t); body.i32(box.r); body.i32(box.b)
+        body.i32(start.x); body.i32(start.y)
+        body.i32(end.x); body.i32(end.y)
+        append(type: 45, payload: body.bytes)
+    }
+
+    /// EMR_POLYPOLYGON16 §2.3.5.29 — Bounds at 8, NumberOfPolys at 24, total
+    /// Count at 28, the per-polygon u32 counts at 32, then all PointS values.
+    mutating func polyPolygon16(_ polygons: [[(Int16, Int16)]]) {
+        let all = polygons.flatMap { $0 }
+        let xs = all.map { Int32($0.0) }
+        let ys = all.map { Int32($0.1) }
+        var body = LE()
+        body.i32(xs.min() ?? 0); body.i32(ys.min() ?? 0)
+        body.i32(xs.max() ?? 0); body.i32(ys.max() ?? 0)
+        body.u32(UInt32(polygons.count))           // NumberOfPolys
+        body.u32(UInt32(all.count))                // total Count
+        for polygon in polygons { body.u32(UInt32(polygon.count)) }
+        for (x, y) in all { body.i16(x); body.i16(y) }
+        append(type: 91, payload: body.bytes)
+    }
+
     /// EMR_CREATEBRUSHINDIRECT §2.3.7.1 (LogBrushEx §2.2.12).
     mutating func createSolidBrush(index: UInt32, r: UInt8, g: UInt8, b: UInt8) {
         var body = LE()
@@ -223,6 +256,33 @@ struct RenderFixture {
         body.i32(width); body.i32(0)   // Width PointL (y ignored)
         body.color(r, g, b)
         append(type: 38, payload: body.bytes)
+    }
+
+    /// EMR_EXTCREATEPEN §2.3.7.9 (LogPenEx §2.2.20): ihPen, four DIB
+    /// bookkeeping u32s (0 for a non-pattern pen), PenStyle, Width, BrushStyle,
+    /// ColorRef, BrushHatch, NumStyleEntries, then the u32 style array. For a
+    /// PS_GEOMETRIC | PS_USERSTYLE pen the `styleEntries` are the dash/gap
+    /// lengths in logical units; PS_ENDCAP_FLAT gives butt caps so gaps are not
+    /// bridged by round cap bleed.
+    mutating func extCreatePen(
+        index: UInt32,
+        style: UInt32,
+        width: UInt32,
+        r: UInt8, g: UInt8, b: UInt8,
+        brushStyle: UInt32 = 0,          // BS_SOLID
+        styleEntries: [UInt32] = []
+    ) {
+        var body = LE()
+        body.u32(index)
+        body.u32(0); body.u32(0); body.u32(0); body.u32(0)   // offBmi/cbBmi/offBits/cbBits
+        body.u32(style)
+        body.u32(width)
+        body.u32(brushStyle)
+        body.color(r, g, b)
+        body.u32(0)                      // BrushHatch
+        body.u32(UInt32(styleEntries.count))
+        for entry in styleEntries { body.u32(entry) }
+        append(type: 95, payload: body.bytes)
     }
 
     /// EMR_SELECTOBJECT §2.3.8.5 — pass a table index or a 0x8000_00xx
@@ -260,6 +320,33 @@ struct RenderFixture {
 
     mutating func polygon16(_ points: [(Int16, Int16)]) {
         append(type: 86, payload: Self.poly16Body(points))
+    }
+
+    /// The common 32-bit poly body: Bounds, Count, PointL array (§2.3.5.24 etc).
+    private static func poly32Body(_ points: [(Int32, Int32)]) -> [UInt8] {
+        var body = LE()
+        let xs = points.map(\.0)
+        let ys = points.map(\.1)
+        body.i32(xs.min() ?? 0); body.i32(ys.min() ?? 0)
+        body.i32(xs.max() ?? 0); body.i32(ys.max() ?? 0)
+        body.u32(UInt32(points.count))
+        for (x, y) in points { body.i32(x); body.i32(y) }
+        return body.bytes
+    }
+
+    /// EMR_POLYLINE §2.3.5.24 (32-bit PointL points).
+    mutating func polyline(_ points: [(Int32, Int32)]) {
+        append(type: 4, payload: Self.poly32Body(points))
+    }
+
+    /// EMR_POLYLINETO §2.3.5.26 (32-bit); strokes from the current position.
+    mutating func polylineTo(_ points: [(Int32, Int32)]) {
+        append(type: 6, payload: Self.poly32Body(points))
+    }
+
+    /// EMR_POLYBEZIER §2.3.5.16 (32-bit); start point + cubic control triples.
+    mutating func polyBezier(_ points: [(Int32, Int32)]) {
+        append(type: 2, payload: Self.poly32Body(points))
     }
 
     mutating func polyBezier16(_ points: [(Int16, Int16)]) {
@@ -479,6 +566,79 @@ struct RenderFixture {
         body.u32(0)                                  // iStartScan@68
         body.u32(0)                                  // cScans@72
         append(type: 80, payload: body.bytes)
+    }
+
+    /// EMR_SETDIBITSTODEVICE §2.3.1.5 WITH a source DIB. The 76-byte fixed part,
+    /// then bmi, then bits. Draws the scanline window 1:1 at dest (no stretch).
+    mutating func setDIBitsToDevice(
+        bounds: (l: Int32, t: Int32, r: Int32, b: Int32),
+        dest: (x: Int32, y: Int32),
+        src: (x: Int32, y: Int32) = (0, 0),
+        srcSize: (cx: Int32, cy: Int32),
+        startScan: UInt32 = 0,
+        scanCount: UInt32,
+        usageSrc: UInt32 = 0,
+        bmi: [UInt8],
+        bits: [UInt8]
+    ) {
+        let offBmi = 76
+        let cbBmi = bmi.count
+        let offBits = offBmi + cbBmi
+        let cbBits = bits.count
+
+        var body = LE()                              // record offset 8
+        body.i32(bounds.l); body.i32(bounds.t); body.i32(bounds.r); body.i32(bounds.b) // Bounds@8
+        body.i32(dest.x); body.i32(dest.y)           // xDest,yDest@24
+        body.i32(src.x); body.i32(src.y)             // xSrc,ySrc@32
+        body.i32(srcSize.cx); body.i32(srcSize.cy)   // cxSrc,cySrc@40
+        body.u32(UInt32(offBmi))                     // offBmiSrc@48
+        body.u32(UInt32(cbBmi))                      // cbBmiSrc@52
+        body.u32(UInt32(offBits))                    // offBitsSrc@56
+        body.u32(UInt32(cbBits))                     // cbBitsSrc@60
+        body.u32(usageSrc)                           // UsageSrc@64
+        body.u32(startScan)                          // iStartScan@68
+        body.u32(scanCount)                          // cScans@72
+        body.raw(bmi)
+        body.raw(bits)
+        append(type: 80, payload: body.bytes)
+    }
+
+    /// EMR_STRETCHBLT §2.3.1.6 WITH a source DIB. The 108-byte fixed part
+    /// (BITBLT's 100 + cxSrc/cySrc), then bmi, then bits. The image stretches
+    /// from the source size to the destination size under SRCCOPY.
+    mutating func stretchBlt(
+        bounds: (l: Int32, t: Int32, r: Int32, b: Int32),
+        dest: (x: Int32, y: Int32),
+        destSize: (cx: Int32, cy: Int32),
+        src: (x: Int32, y: Int32) = (0, 0),
+        srcSize: (cx: Int32, cy: Int32),
+        rasterOperation: UInt32 = 0x00CC_0020,   // SRCCOPY
+        usageSrc: UInt32 = 0,
+        bmi: [UInt8],
+        bits: [UInt8]
+    ) {
+        let offBmi = 108
+        let cbBmi = bmi.count
+        let offBits = offBmi + cbBmi
+        let cbBits = bits.count
+
+        var body = LE()                              // record offset 8
+        body.i32(bounds.l); body.i32(bounds.t); body.i32(bounds.r); body.i32(bounds.b) // Bounds@8
+        body.i32(dest.x); body.i32(dest.y)           // xDest,yDest@24
+        body.i32(destSize.cx); body.i32(destSize.cy) // cxDest,cyDest@32
+        body.u32(rasterOperation)                    // rop@40
+        body.i32(src.x); body.i32(src.y)             // xSrc,ySrc@44
+        body.f32(1); body.f32(0); body.f32(0); body.f32(1); body.f32(0); body.f32(0) // XformSrc@52
+        body.color(0, 0, 0)                          // BkColorSrc@76
+        body.u32(usageSrc)                           // UsageSrc@80
+        body.u32(UInt32(offBmi))                     // offBmiSrc@84
+        body.u32(UInt32(cbBmi))                      // cbBmiSrc@88
+        body.u32(UInt32(offBits))                    // offBitsSrc@92
+        body.u32(UInt32(cbBits))                     // cbBitsSrc@96
+        body.i32(srcSize.cx); body.i32(srcSize.cy)   // cxSrc,cySrc@100 (STRETCHBLT only)
+        body.raw(bmi)
+        body.raw(bits)
+        append(type: 77, payload: body.bytes)
     }
 
     /// EMR_BITBLT §2.3.1.2 — sourceless rop-only form (cbBmiSrc == 0).

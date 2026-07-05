@@ -106,6 +106,95 @@ struct PayloadBitmapTests {
         return FixtureBuilder.record(type: 81, payload: payload.bytes)
     }
 
+    /// Builds an EMR_SETDIBITSTODEVICE record WITH a source DIB. The 76-byte
+    /// fixed part is followed by `bmi` then `bits`, at record-relative offsets
+    /// 76 and 76+cbBmi. off/cb fields can be overridden to build malformed
+    /// fixtures.
+    private static func setDIBitsToDeviceRecord(
+        bounds: RectL = RectL(left: 0, top: 0, right: 8, bottom: 8),
+        dest: PointL = PointL(x: 0, y: 0),
+        src: PointL = PointL(x: 0, y: 0),
+        srcSize: SizeL = SizeL(cx: 8, cy: 8),
+        usageSrc: UInt32 = 0,
+        startScan: UInt32 = 0,
+        scanCount: UInt32 = 8,
+        bmi: [UInt8],
+        bits: [UInt8],
+        offBmiOverride: UInt32? = nil,
+        offBitsOverride: UInt32? = nil
+    ) -> [UInt8] {
+        let offBmi = 76
+        let cbBmi = bmi.count
+        let offBits = offBmi + cbBmi
+        let cbBits = bits.count
+
+        var payload = FixtureBuilder()  // record offset 8
+        payload.appendBytes(FixtureBuilder.rectBytes(bounds))   // Bounds@8
+        payload.appendInt32(dest.x)                 // xDest@24
+        payload.appendInt32(dest.y)                 // yDest@28
+        payload.appendInt32(src.x)                  // xSrc@32
+        payload.appendInt32(src.y)                  // ySrc@36
+        payload.appendInt32(srcSize.cx)             // cxSrc@40
+        payload.appendInt32(srcSize.cy)             // cySrc@44
+        payload.appendUInt32(offBmiOverride ?? UInt32(offBmi))   // offBmiSrc@48
+        payload.appendUInt32(UInt32(cbBmi))         // cbBmiSrc@52
+        payload.appendUInt32(offBitsOverride ?? UInt32(offBits)) // offBitsSrc@56
+        payload.appendUInt32(UInt32(cbBits))        // cbBitsSrc@60
+        payload.appendUInt32(usageSrc)              // UsageSrc@64
+        payload.appendUInt32(startScan)             // iStartScan@68
+        payload.appendUInt32(scanCount)             // cScans@72
+        // payload length now 68 (record offsets 8..76). BMI at 76, bits after.
+        payload.appendBytes(bmi)
+        payload.appendBytes(bits)
+        return FixtureBuilder.record(type: 80, payload: payload.bytes)
+    }
+
+    /// Builds an EMR_STRETCHBLT record WITH a source DIB. The 108-byte fixed
+    /// part (BITBLT's 100 + cxSrc/cySrc) is followed by `bmi` then `bits`, at
+    /// record-relative offsets 108 and 108+cbBmi.
+    private static func stretchBltRecord(
+        bounds: RectL = RectL(left: 0, top: 0, right: 8, bottom: 8),
+        dest: PointL = PointL(x: 0, y: 0),
+        destSize: SizeL = SizeL(cx: 8, cy: 8),
+        src: PointL = PointL(x: 0, y: 0),
+        srcSize: SizeL = SizeL(cx: 4, cy: 4),
+        rasterOperation: UInt32 = 0x00CC0020,   // SRCCOPY
+        usageSrc: UInt32 = 0,
+        bmi: [UInt8],
+        bits: [UInt8]
+    ) -> [UInt8] {
+        let offBmi = 108
+        let cbBmi = bmi.count
+        let offBits = offBmi + cbBmi
+        let cbBits = bits.count
+
+        var payload = FixtureBuilder()  // record offset 8
+        payload.appendBytes(FixtureBuilder.rectBytes(bounds))   // Bounds@8
+        payload.appendInt32(dest.x)                 // xDest@24
+        payload.appendInt32(dest.y)                 // yDest@28
+        payload.appendInt32(destSize.cx)            // cxDest@32
+        payload.appendInt32(destSize.cy)            // cyDest@36
+        payload.appendUInt32(rasterOperation)       // BitBltRasterOperation@40
+        payload.appendInt32(src.x)                  // xSrc@44
+        payload.appendInt32(src.y)                  // ySrc@48
+        // XformSrc@52 (24 bytes) — identity.
+        payload.appendFloat(1); payload.appendFloat(0)
+        payload.appendFloat(0); payload.appendFloat(1)
+        payload.appendFloat(0); payload.appendFloat(0)
+        payload.appendBytes([0, 0, 0, 0])           // BkColorSrc@76
+        payload.appendUInt32(usageSrc)              // UsageSrc@80
+        payload.appendUInt32(UInt32(offBmi))        // offBmiSrc@84
+        payload.appendUInt32(UInt32(cbBmi))         // cbBmiSrc@88
+        payload.appendUInt32(UInt32(offBits))       // offBitsSrc@92
+        payload.appendUInt32(UInt32(cbBits))        // cbBitsSrc@96
+        payload.appendInt32(srcSize.cx)             // cxSrc@100 (STRETCHBLT only)
+        payload.appendInt32(srcSize.cy)             // cySrc@104
+        // payload length now 100 (record offsets 8..108). BMI at 108, bits after.
+        payload.appendBytes(bmi)
+        payload.appendBytes(bits)
+        return FixtureBuilder.record(type: 77, payload: payload.bytes)
+    }
+
     /// Builds a sourceless EMR_SETDIBITSTODEVICE (76-byte fixed part, no
     /// bitmap): offBmiSrc/cbBmiSrc/offBitsSrc/cbBitsSrc all 0. No raster op.
     private static func setDIBitsToDeviceSourceless(
@@ -438,5 +527,113 @@ struct PayloadBitmapTests {
         payload.appendUInt32(0); payload.appendUInt32(0) // offBits/cbBits
         let record = FixtureBuilder.record(type: 76, payload: payload.bytes)
         #expect(try decodeSingle(record) == .malformed(type: 76, reason: .nonFiniteTransform))
+    }
+
+    // MARK: - SETDIBITSTODEVICE with a real source DIB
+
+    @Test("SETDIBITSTODEVICE with source DIB: fields + non-nil dib")
+    func setDIBitsToDeviceSourced() throws {
+        // A 2×2 24-bit BI_RGB DIB (stride 8, 16 bytes) carried by the record.
+        let bmi = Self.bitmapInfoHeader(width: 2, height: 2, bitCount: 24)
+        let bits = [UInt8](repeating: 0x33, count: 16)
+        let payload = try decodeSingle(Self.setDIBitsToDeviceRecord(
+            dest: PointL(x: 3, y: 4),
+            src: PointL(x: 1, y: 0),
+            srcSize: SizeL(cx: 2, cy: 2),
+            startScan: 1,
+            scanCount: 2,
+            bmi: bmi, bits: bits
+        ))
+        guard case .setDIBitsToDevice(let p) = payload else {
+            Issue.record("expected .setDIBitsToDevice, got \(payload)")
+            return
+        }
+        #expect(p.dest == PointL(x: 3, y: 4))
+        #expect(p.src == PointL(x: 1, y: 0))
+        #expect(p.srcSize == SizeL(cx: 2, cy: 2))
+        #expect(p.startScan == 1)
+        #expect(p.scanCount == 2)
+        let d = try #require(p.dib, "sourced SETDIBITSTODEVICE must decode a DIB")
+        #expect(d.width == 2)
+        #expect(d.height == 2)
+        #expect(d.bitCount == 24)
+        guard case .pixels(let bytes, let stride, _) = d.content else {
+            Issue.record("expected .pixels, got \(d.content)")
+            return
+        }
+        #expect(stride == 8)
+        #expect(Array(bytes) == bits)
+    }
+
+    // MARK: - STRETCHBLT with a real source DIB (stretch / srcSize branch)
+
+    @Test("STRETCHBLT with source DIB: srcSize set, non-nil dib, stretch branch")
+    func stretchBltSourced() throws {
+        // Source DIB is 4×4 24-bit (stride 12, 48 bytes); dest is 8×8, so the
+        // blit stretches — exercising decodeBitBlt's stretch:true srcSize read
+        // at offsets 100/104 that BITBLT lacks.
+        let bmi = Self.bitmapInfoHeader(width: 4, height: 4, bitCount: 24)
+        let bits = [UInt8](repeating: 0x7A, count: 12 * 4)
+        let payload = try decodeSingle(Self.stretchBltRecord(
+            dest: PointL(x: 2, y: 2),
+            destSize: SizeL(cx: 8, cy: 8),
+            src: PointL(x: 0, y: 0),
+            srcSize: SizeL(cx: 4, cy: 4),
+            bmi: bmi, bits: bits
+        ))
+        guard case .stretchBlt(let blt) = payload else {
+            Issue.record("expected .stretchBlt, got \(payload)")
+            return
+        }
+        #expect(blt.hasSource == true)
+        #expect(blt.srcSize == SizeL(cx: 4, cy: 4))   // STRETCHBLT carries it (BITBLT nil)
+        #expect(blt.dest == PointL(x: 2, y: 2))
+        #expect(blt.destSize == SizeL(cx: 8, cy: 8))
+        #expect(blt.rasterOperation == 0x00CC0020)
+        let d = try #require(blt.dib, "sourced STRETCHBLT must decode a DIB")
+        #expect(d.width == 4)
+        #expect(d.height == 4)
+        #expect(d.bitCount == 24)
+    }
+
+    // MARK: - Bad / unsupported DIB header size and out-of-bounds offsets
+
+    @Test("DIB with BITMAPCOREHEADER size (biSize 12, not 40) → badBitmapHeader")
+    func dibBadHeaderSize() throws {
+        // cbBmiSrc is a valid 40 bytes (so the header prefix is present and the
+        // record is walk-valid), but the header's own biSize field says 12
+        // (BITMAPCOREHEADER) — below the 40-byte BITMAPINFOHEADER minimum. The
+        // decoder must reject with badBitmapHeader, not misparse a V-something.
+        var bmi = Self.bitmapInfoHeader(width: 2, height: 2, bitCount: 24)
+        bmi[0] = 12; bmi[1] = 0; bmi[2] = 0; bmi[3] = 0   // biSize = 12
+        let payload = try decodeSingle(Self.stretchDIBitsRecord(
+            destSize: SizeL(cx: 2, cy: 2), srcSize: SizeL(cx: 2, cy: 2),
+            bmi: bmi, bits: [UInt8](repeating: 0, count: 16)
+        ))
+        #expect(payload == .malformed(type: 81, reason: .badBitmapHeader(headerSize: 12)))
+    }
+
+    @Test("DIB offBitsSrc pointing outside the record → rangeOutOfBounds")
+    func dibOffBitsOutOfBounds() throws {
+        // offBitsSrc lies far past nSize: the bits range fails its bounds check
+        // against the record's own size before any pixel byte is read (§8).
+        let bmi = Self.bitmapInfoHeader(width: 2, height: 2, bitCount: 24)
+        let bits = [UInt8](repeating: 0, count: 16)
+        let payload = try decodeSingle(Self.stretchDIBitsRecord(
+            destSize: SizeL(cx: 2, cy: 2), srcSize: SizeL(cx: 2, cy: 2),
+            bmi: bmi, bits: bits,
+            offBitsOverride: 100_000
+        ))
+        guard case .malformed(let type, let reason) = payload else {
+            Issue.record("expected .malformed, got \(payload)")
+            return
+        }
+        #expect(type == 81)
+        guard case .rangeOutOfBounds(let offset, let length, _) = reason else {
+            Issue.record("expected .rangeOutOfBounds, got \(reason)")
+            return
+        }
+        #expect(offset == 100_000)
+        #expect(length == 16)          // cbBitsSrc (real bits length) carried as the length
     }
 }

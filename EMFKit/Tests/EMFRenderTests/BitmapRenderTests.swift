@@ -281,6 +281,61 @@ struct BitmapRenderTests {
         #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
     }
 
+    // MARK: - Sourced STRETCHBLT and SETDIBITSTODEVICE (source DIB → pixels)
+
+    @Test("STRETCHBLT with a source DIB stretches the image onto the dest")
+    func stretchBltSourcedLandsImage() throws {
+        // A solid-red 2×2 24-bit DIB stretched to a 20×20 dest at device (10,10).
+        // A uniform colour is row-order agnostic, so the whole block reads red.
+        let redRow = Self.row24([(b: 0, g: 0, r: 255), (b: 0, g: 0, r: 255)])
+        let bits = redRow + redRow
+        var fixture = RenderFixture()
+        fixture.bounds = (0, 0, 99, 99)
+        fixture.stretchBlt(
+            bounds: (0, 0, 2, 2),
+            dest: (x: 10, y: 10),
+            destSize: (cx: 20, cy: 20),
+            srcSize: (cx: 2, cy: 2),
+            bmi: RenderFixture.bitmapInfoHeader(width: 2, height: 2, bitCount: 24),
+            bits: bits
+        )
+        let file = try fixture.parsed()
+        let (image, log) = try #require(EMFRenderer.makeImage(file))
+        let pixels = try #require(RasterizedImage(image))
+        // Centre of the stretched block (device 10..30) must be red.
+        let p = pixels[20, 20]
+        #expect(p.r > 200 && p.g < 60 && p.b < 60, "STRETCHBLT source DIB did not land red, got \(p)")
+        // SRCCOPY of a source DIB logs nothing beyond the trailing EOF.
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+    }
+
+    @Test("SETDIBITSTODEVICE with a source DIB draws the scanlines 1:1 at dest")
+    func setDIBitsToDeviceSourcedLandsImage() throws {
+        // A solid-red 4×4 24-bit DIB; the full scanline window (cScans 4) draws
+        // 1:1 as a 4×4 red block at device (5,5).
+        let redRow = Self.row24([(b: 0, g: 0, r: 255), (b: 0, g: 0, r: 255),
+                                 (b: 0, g: 0, r: 255), (b: 0, g: 0, r: 255)])
+        let bits = redRow + redRow + redRow + redRow
+        var fixture = RenderFixture()
+        fixture.bounds = (0, 0, 99, 99)
+        fixture.setDIBitsToDevice(
+            bounds: (0, 0, 4, 4),
+            dest: (x: 5, y: 5),
+            srcSize: (cx: 4, cy: 4),
+            startScan: 0,
+            scanCount: 4,
+            bmi: RenderFixture.bitmapInfoHeader(width: 4, height: 4, bitCount: 24),
+            bits: bits
+        )
+        let file = try fixture.parsed()
+        let (image, log) = try #require(EMFRenderer.makeImage(file))
+        let pixels = try #require(RasterizedImage(image))
+        // Inside the 4×4 block (device 5..9) must be red.
+        let p = pixels[6, 6]
+        #expect(p.r > 200 && p.g < 60 && p.b < 60, "SETDIBITSTODEVICE source DIB did not land red, got \(p)")
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+    }
+
     @Test("sourceless unsupported rop is skipped with a coalesced log")
     func sourcelessUnsupportedRop() throws {
         var fixture = RenderFixture()

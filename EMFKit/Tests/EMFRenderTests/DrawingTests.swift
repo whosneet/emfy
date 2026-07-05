@@ -141,6 +141,141 @@ struct DrawingTests {
         #expect(pixels[50, 50] == (0, 0, 0, 255))
     }
 
+    // MARK: - Dash application (pixel-level, guards setLineDash)
+
+    /// A geometric PS_USERSTYLE pen strokes a long horizontal line under a 2×
+    /// world transform; the wide user pattern leaves a probeable ink run and a
+    /// probeable gap. This asserts the RENDERER APPLIES the dash (calls
+    /// setLineDash) — a dash→solid regression turns the gap pixel red and fails
+    /// here. PenMappingTests only checks the mapped dash ARRAY; the snapshot's
+    /// 1% tolerance could absorb a solid-line regression. This closes that gap.
+    @Test("a dashed geometric pen leaves background in its gaps and ink on its dashes")
+    func dashedPenLeavesGaps() throws {
+        var fixture = RenderFixture()
+        // PS_GEOMETRIC | PS_USERSTYLE | PS_ENDCAP_FLAT: butt caps so a dash end
+        // does not bleed round-cap ink into the following gap.
+        let style: UInt32 = 0x0001_0000 | 0x07 | 0x200
+        // Logical dash pattern [30, 30]; the 2× transform scales it to target
+        // units [60, 60], and width 4 → 8 target units.
+        fixture.extCreatePen(index: 1, style: style, width: 4, r: 255, g: 0, b: 0, styleEntries: [30, 30])
+        fixture.selectObject(1)
+        fixture.setWorldTransform(2, 0, 0, 2, 0, 0)   // logical → device 2×
+        // Logical (1,25)→(49,25) → device (2,50)→(98,50), length 96 target.
+        // Dash phase 0: ink along path length [0,60) → device x [2,62); gap
+        // [60,96] → device x [62,98].
+        fixture.moveToEx(1, 25)
+        fixture.lineTo(49, 25)
+
+        let (image, log) = try Self.render(fixture)
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+
+        // INK: device x≈30 is well inside the first dash [2,62); the pen is red.
+        let ink = image[30, 50]
+        #expect(ink.r > 200 && ink.g < 60 && ink.b < 60, "on a dash: expected red ink, got \(ink)")
+        // GAP: device x≈80 is well inside the gap [62,98); background stays white.
+        let gap = image[80, 50]
+        #expect(gap.r > 220 && gap.g > 220 && gap.b > 220, "in a dash gap: expected white background, got \(gap)")
+    }
+
+    private static func render(_ fixture: RenderFixture) throws -> (RasterizedImage, EMFRenderLog) {
+        let file = try fixture.parsed()
+        let rendered = try #require(EMFRenderer.makeImage(file), "makeImage returned nil")
+        return (try #require(RasterizedImage(rendered.0)), rendered.1)
+    }
+
+    // MARK: - Implemented-record render probes (ROUNDRECT / ARC / POLYPOLYGON16)
+
+    @Test("ROUNDRECT fills its interior and rounds its corners away")
+    func roundRectRenders() throws {
+        var fixture = RenderFixture()
+        fixture.createSolidBrush(index: 1, r: 0, g: 0, b: 0)
+        fixture.selectObject(1)
+        fixture.selectObject(0x8000_0008)     // NULL_PEN
+        // Box (10,10)-(90,90) with a large 40×40 corner ellipse: the extreme
+        // corner pixel is cut away, the centre is filled.
+        fixture.roundRect(10, 10, 90, 90, cornerW: 40, cornerH: 40)
+
+        let (image, log) = try Self.render(fixture)
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+        #expect(Self.isBlack(image[50, 50]), "interior filled")
+        #expect(Self.isWhite(image[12, 12]), "rounded corner cut away")
+        #expect(Self.isWhite(image[5, 50]), "outside the box")
+    }
+
+    @Test("ARC strokes an outline without filling its interior")
+    func arcRenders() throws {
+        var fixture = RenderFixture()
+        // Default DC pen is BLACK_PEN (cosmetic). Coincident start/end radials
+        // draw the FULL ellipse inscribed in (20,20)-(80,80).
+        fixture.arc(box: (20, 20, 80, 80), start: (80, 50), end: (80, 50))
+
+        let (image, log) = try Self.render(fixture)
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+        // Ink lands on the ellipse outline (its left edge near device (20,50)).
+        #expect(image.containsDarkPixel(in: (x: 17, y: 45, width: 8, height: 10)),
+                "expected arc outline ink near the ellipse's left edge")
+        // ARC is stroke-only: the centre stays background.
+        #expect(Self.isWhite(image[50, 50]), "arc must not fill its interior")
+    }
+
+    @Test("POLYPOLYGON16 fills each sub-polygon, leaving the gap between them")
+    func polyPolygon16Renders() throws {
+        var fixture = RenderFixture()
+        fixture.createSolidBrush(index: 1, r: 0, g: 0, b: 0)
+        fixture.selectObject(1)
+        fixture.selectObject(0x8000_0008)     // NULL_PEN
+        // Two disjoint squares: left 10..30, right 70..90 (both y 40..60).
+        fixture.polyPolygon16([
+            [(10, 40), (30, 40), (30, 60), (10, 60)],
+            [(70, 40), (90, 40), (90, 60), (70, 60)],
+        ])
+
+        let (image, log) = try Self.render(fixture)
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+        #expect(Self.isBlack(image[20, 50]), "first sub-polygon filled")
+        #expect(Self.isBlack(image[80, 50]), "second sub-polygon filled")
+        #expect(Self.isWhite(image[50, 50]), "the gap between the two polygons stays background")
+    }
+
+    private static func isBlack(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool {
+        p.r < 40 && p.g < 40 && p.b < 40
+    }
+    private static func isWhite(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool {
+        p.r > 220 && p.g > 220 && p.b > 220
+    }
+
+    // MARK: - 32-bit poly render variants (POLYLINE 4 / POLYLINETO 6 / POLYBEZIER 2)
+
+    @Test("32-bit POLYLINE strokes its segments")
+    func polyline32Renders() throws {
+        var fixture = RenderFixture()   // default BLACK_PEN
+        fixture.polyline([(10, 20), (90, 20)])   // horizontal segment at y=20
+        let (image, log) = try Self.render(fixture)
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+        #expect(image.containsDarkPixel(in: (x: 45, y: 17, width: 10, height: 6)), "POLYLINE ink missing")
+    }
+
+    @Test("32-bit POLYLINETO strokes from the current position")
+    func polylineTo32Renders() throws {
+        var fixture = RenderFixture()
+        fixture.moveToEx(10, 80)
+        fixture.polylineTo([(90, 80)])           // continues to a horizontal at y=80
+        let (image, log) = try Self.render(fixture)
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+        #expect(image.containsDarkPixel(in: (x: 45, y: 77, width: 10, height: 6)), "POLYLINETO ink missing")
+    }
+
+    @Test("32-bit POLYBEZIER strokes the cubic through its midpoint")
+    func polyBezier32Renders() throws {
+        var fixture = RenderFixture()
+        // start + one triple: the cubic (10,50)→(90,50) with both controls at
+        // y=10 passes through (50,20) at t=0.5 (mirrors bezierPrefixRenders).
+        fixture.polyBezier([(10, 50), (30, 10), (70, 10), (90, 50)])
+        let (image, log) = try Self.render(fixture)
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+        #expect(image.containsDarkPixel(in: (x: 46, y: 16, width: 9, height: 9)), "POLYBEZIER ink missing")
+    }
+
     // MARK: - Hostile canvas
 
     @Test("hostile header bounds clamp the makeImage canvas per side and log")
