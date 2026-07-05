@@ -188,8 +188,10 @@ struct PayloadTextTests {
         var b = FixtureBuilder()
         b.appendUInt32(1)
         b.appendZeros(40)      // far short of a 92-byte LogFont
+        // Record = 8 + 4 (ihFonts) + 40 = 52 bytes; the 92-byte LogFont at
+        // record offset 12 needs the record to reach 104.
         let payload = try decodeSingle(FixtureBuilder.record(type: 82, payload: b.bytes))
-        #expect(payload.malformedReason != nil)
+        #expect(payload == .malformed(type: 82, reason: .tooSmall(minimumSize: 104, actualSize: 52)))
     }
 
     // MARK: - EXTTEXTOUTW
@@ -339,8 +341,10 @@ struct PayloadTextTests {
             string: str,
             offStringOverride: 100_000
         )
+        // "Hi" → 2 chars → 4 string bytes; record is 80 bytes. The overlarge
+        // offString fails the string byte-range check against nSize (§8).
         let payload = try decodeSingle(record)
-        #expect(payload.malformedReason != nil)
+        #expect(payload == .malformed(type: 84, reason: .rangeOutOfBounds(offset: 100_000, length: 4, recordSize: 80)))
     }
 
     @Test("EXTTEXTOUTW Chars lying vs nSize → malformed")
@@ -352,8 +356,10 @@ struct PayloadTextTests {
             string: str,
             charsOverride: 100_000
         )
+        // Chars lies (100_000 → 200_000 string bytes) while offString stays at
+        // the real 76; the string range overruns the 80-byte record (§8).
         let payload = try decodeSingle(record)
-        #expect(payload.malformedReason != nil)
+        #expect(payload == .malformed(type: 84, reason: .rangeOutOfBounds(offset: 76, length: 200_000, recordSize: 80)))
     }
 
     @Test("EXTTEXTOUTW offDx pointing outside record → malformed")
@@ -365,8 +371,11 @@ struct PayloadTextTests {
             dx: [1, 2],
             offDxOverride: 100_000             // far past nSize
         )
+        // The string decodes; then offDx (100_000) fails the Dx byte-range
+        // check — 2 chars, no ETO_PDY → 2 advances → 8 bytes — against the
+        // 88-byte record (§8).
         let payload = try decodeSingle(record)
-        #expect(payload.malformedReason != nil)
+        #expect(payload == .malformed(type: 84, reason: .rangeOutOfBounds(offset: 100_000, length: 8, recordSize: 88)))
     }
 
     @Test("EXTTEXTOUTW non-finite exScale → malformed")

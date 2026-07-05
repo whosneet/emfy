@@ -12,14 +12,13 @@ private func emfPlusRecord(
     type: UInt16,
     flags: UInt16 = 0,
     data: [UInt8] = [],
-    dataSizeOverride: UInt32? = nil,
     sizeOverride: UInt32? = nil
 ) -> [UInt8] {
     var b = FixtureBuilder()
     b.appendUInt16(type)
     b.appendUInt16(flags)
     b.appendUInt32(sizeOverride ?? UInt32(12 + data.count))
-    b.appendUInt32(dataSizeOverride ?? UInt32(data.count))
+    b.appendUInt32(UInt32(data.count))
     b.appendBytes(data)
     return b.bytes
 }
