@@ -80,6 +80,56 @@ struct PayloadBitmapTests {
         return nil
     }
 
+    /// Builds a sourceless EMR_STRETCHDIBITS (80-byte fixed part, no bitmap):
+    /// offBmiSrc/cbBmiSrc/offBitsSrc/cbBitsSrc all 0 — the valid rop-only form.
+    private static func stretchDIBitsSourceless(
+        dest: PointL = PointL(x: 0, y: 0),
+        destSize: SizeL = SizeL(cx: 8, cy: 8),
+        rasterOperation: UInt32 = 0x0000_0042   // BLACKNESS
+    ) -> [UInt8] {
+        var payload = FixtureBuilder()  // record offset 8
+        payload.appendBytes(FixtureBuilder.rectBytes(RectL(left: 0, top: 0, right: 8, bottom: 8))) // Bounds@8
+        payload.appendInt32(dest.x)                 // xDest@24
+        payload.appendInt32(dest.y)                 // yDest@28
+        payload.appendInt32(0)                      // xSrc@32
+        payload.appendInt32(0)                      // ySrc@36
+        payload.appendInt32(0)                      // cxSrc@40
+        payload.appendInt32(0)                      // cySrc@44
+        payload.appendUInt32(0)                     // offBmiSrc@48 == 0
+        payload.appendUInt32(0)                     // cbBmiSrc@52 == 0 → sourceless
+        payload.appendUInt32(0)                     // offBitsSrc@56
+        payload.appendUInt32(0)                     // cbBitsSrc@60
+        payload.appendUInt32(0)                     // UsageSrc@64
+        payload.appendUInt32(rasterOperation)       // BitBltRasterOperation@68
+        payload.appendInt32(destSize.cx)            // cxDest@72
+        payload.appendInt32(destSize.cy)            // cyDest@76
+        return FixtureBuilder.record(type: 81, payload: payload.bytes)
+    }
+
+    /// Builds a sourceless EMR_SETDIBITSTODEVICE (76-byte fixed part, no
+    /// bitmap): offBmiSrc/cbBmiSrc/offBitsSrc/cbBitsSrc all 0. No raster op.
+    private static func setDIBitsToDeviceSourceless(
+        dest: PointL = PointL(x: 0, y: 0),
+        srcSize: SizeL = SizeL(cx: 8, cy: 8)
+    ) -> [UInt8] {
+        var payload = FixtureBuilder()  // record offset 8
+        payload.appendBytes(FixtureBuilder.rectBytes(RectL(left: 0, top: 0, right: 8, bottom: 8))) // Bounds@8
+        payload.appendInt32(dest.x)                 // xDest@24
+        payload.appendInt32(dest.y)                 // yDest@28
+        payload.appendInt32(0)                      // xSrc@32
+        payload.appendInt32(0)                      // ySrc@36
+        payload.appendInt32(srcSize.cx)             // cxSrc@40
+        payload.appendInt32(srcSize.cy)             // cySrc@44
+        payload.appendUInt32(0)                     // offBmiSrc@48 == 0
+        payload.appendUInt32(0)                     // cbBmiSrc@52 == 0 → sourceless
+        payload.appendUInt32(0)                     // offBitsSrc@56
+        payload.appendUInt32(0)                     // cbBitsSrc@60
+        payload.appendUInt32(0)                     // UsageSrc@64
+        payload.appendUInt32(0)                     // iStartScan@68
+        payload.appendUInt32(0)                     // cScans@72
+        return FixtureBuilder.record(type: 80, payload: payload.bytes)
+    }
+
     // MARK: - 24-bit golden
 
     @Test("STRETCHDIBITS 24-bit 2×2 golden: stride padding asserted")
@@ -291,6 +341,43 @@ struct PayloadBitmapTests {
         }
         #expect(type == 81)
         #expect(reason == .badBitmapDimensions(width: 1_000_000, height: 1))
+    }
+
+    // MARK: - Sourceless (cbBmiSrc == 0) — valid, dib nil (not malformed)
+
+    @Test("STRETCHDIBITS sourceless (cbBmiSrc == 0) → dib nil, not malformed")
+    func stretchDIBitsSourcelessDecodes() throws {
+        // A rop-only STRETCHDIBITS with all four off/cb DIB fields 0. Before the
+        // fix this decoded DIB unconditionally and became .malformed(.tooSmall);
+        // it must now decode to a .stretchDIBits payload whose dib is nil.
+        let payload = try decodeSingle(Self.stretchDIBitsSourceless(
+            dest: PointL(x: 1, y: 2),
+            destSize: SizeL(cx: 10, cy: 10),
+            rasterOperation: 0x0000_0042   // BLACKNESS
+        ))
+        guard case .stretchDIBits(let p) = payload else {
+            Issue.record("expected .stretchDIBits, got \(payload)")
+            return
+        }
+        #expect(p.dib == nil)
+        #expect(p.rasterOperation == 0x0000_0042)
+        #expect(p.dest == PointL(x: 1, y: 2))
+        #expect(p.destSize == SizeL(cx: 10, cy: 10))
+    }
+
+    @Test("SETDIBITSTODEVICE sourceless (cbBmiSrc == 0) → dib nil, not malformed")
+    func setDIBitsToDeviceSourcelessDecodes() throws {
+        let payload = try decodeSingle(Self.setDIBitsToDeviceSourceless(
+            dest: PointL(x: 3, y: 4),
+            srcSize: SizeL(cx: 8, cy: 8)
+        ))
+        guard case .setDIBitsToDevice(let p) = payload else {
+            Issue.record("expected .setDIBitsToDevice, got \(payload)")
+            return
+        }
+        #expect(p.dib == nil)
+        #expect(p.dest == PointL(x: 3, y: 4))
+        #expect(p.srcSize == SizeL(cx: 8, cy: 8))
     }
 
     // MARK: - BITBLT sourceless

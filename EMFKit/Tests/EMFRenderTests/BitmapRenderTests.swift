@@ -251,6 +251,36 @@ struct BitmapRenderTests {
         #expect(p.g > 150 && p.r < 60 && p.b < 60, "PATCOPY should fill with the green brush, got \(p)")
     }
 
+    @Test("sourceless STRETCHDIBITS (cbBmiSrc == 0) BLACKNESS fills the dest black")
+    func stretchDIBitsSourcelessBlackness() throws {
+        // A rop-only STRETCHDIBITS with no DIB now reuses BITBLT's sourceless
+        // fill: BLACKNESS paints the dest black. Mirrors `blackness()`.
+        var fixture = RenderFixture()
+        fixture.bounds = (0, 0, 99, 99)
+        fixture.stretchDIBitsSourceless(dest: (x: 10, y: 10), destSize: (cx: 30, cy: 30), rasterOperation: 0x0000_0042)
+        let file = try fixture.parsed()
+        let (image, log) = try #require(EMFRenderer.makeImage(file))
+        let pixels = try #require(RasterizedImage(image))
+        #expect(pixels[25, 25] == (0, 0, 0, 255))
+        // A recognised sourceless fill logs nothing beyond the trailing EOF.
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+    }
+
+    @Test("sourceless SETDIBITSTODEVICE (cbBmiSrc == 0) draws nothing, no crash")
+    func setDIBitsToDeviceSourcelessSkipped() throws {
+        // SETDIBITSTODEVICE has no raster op, so a nil-DIB record has nothing to
+        // draw: the renderer skips it gracefully and the canvas stays white.
+        var fixture = RenderFixture()
+        fixture.bounds = (0, 0, 99, 99)
+        fixture.setDIBitsToDeviceSourceless(dest: (x: 10, y: 10), srcSize: (cx: 30, cy: 30))
+        let file = try fixture.parsed()
+        let (image, log) = try #require(EMFRenderer.makeImage(file))
+        let pixels = try #require(RasterizedImage(image))
+        #expect(!pixels.containsDarkPixel(in: (x: 5, y: 5, width: 40, height: 40)))
+        // Nothing to log beyond the trailing EOF.
+        #expect(log.entries == [.unimplementedRecord(type: 14, count: 1)])
+    }
+
     @Test("sourceless unsupported rop is skipped with a coalesced log")
     func sourcelessUnsupportedRop() throws {
         var fixture = RenderFixture()

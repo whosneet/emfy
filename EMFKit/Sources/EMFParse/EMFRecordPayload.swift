@@ -336,8 +336,9 @@ public struct StretchDIBitsPayload: Sendable, Equatable {
     public var usageSrc: UInt32
     /// Ternary raster operation ([MS-WMF] §2.1.1.31); SRCCOPY is 0x00CC0020.
     public var rasterOperation: UInt32
-    /// The source bitmap; `nil` only when the record declared none
-    /// (cbBmiSrc == 0), which STRETCHDIBITS does not normally do.
+    /// The source bitmap; `nil` exactly when the record declared none
+    /// (cbBmiSrc == 0) — the valid rop-only (sourceless) form. Rare for
+    /// STRETCHDIBITS but legal (§2.3.1.7), so a nil `dib` is never malformed.
     public var dib: DIB?
 
     public init(
@@ -377,7 +378,9 @@ public struct SetDIBitsToDevicePayload: Sendable, Equatable {
     public var startScan: UInt32
     /// Number of scan lines.
     public var scanCount: UInt32
-    /// The source bitmap; `nil` only when the record declared none.
+    /// The source bitmap; `nil` exactly when the record declared none
+    /// (cbBmiSrc == 0). SETDIBITSTODEVICE has no raster op, so a nil `dib`
+    /// leaves nothing to draw; it is a valid payload, never malformed.
     public var dib: DIB?
 
     public init(

@@ -795,25 +795,32 @@ extension EMFFile {
             return .malformed(type: type, reason: .tooSmall(minimumSize: 80, actualSize: slice.size))
         }
 
-        let dibResult = decodeDIB(
-            slice: slice, type: type,
-            offBmi: offBmi, cbBmi: cbBmi, offBits: offBits, cbBits: cbBits
-        )
-        switch dibResult {
-        case .failure(let reason):
-            return .malformed(type: type, reason: reason)
-        case .success(let dib):
-            return .stretchDIBits(StretchDIBitsPayload(
-                bounds: bounds,
-                dest: PointL(x: xDest, y: yDest),
-                destSize: SizeL(cx: cxDest, cy: cyDest),
-                src: PointL(x: xSrc, y: ySrc),
-                srcSize: SizeL(cx: cxSrc, cy: cySrc),
-                usageSrc: usageSrc,
-                rasterOperation: rop,
-                dib: dib
-            ))
+        // Sourceless (rop-only) form: cbBmiSrc == 0, DIB omitted — VALID, not
+        // malformed (§2.3.1.7; mirrors EMR_BITBLT). The rop alone paints the
+        // destination; the payload's `dib` is nil.
+        var dib: DIB? = nil
+        if cbBmi != 0 {
+            switch decodeDIB(
+                slice: slice, type: type,
+                offBmi: offBmi, cbBmi: cbBmi, offBits: offBits, cbBits: cbBits
+            ) {
+            case .failure(let reason):
+                return .malformed(type: type, reason: reason)
+            case .success(let decoded):
+                dib = decoded
+            }
         }
+
+        return .stretchDIBits(StretchDIBitsPayload(
+            bounds: bounds,
+            dest: PointL(x: xDest, y: yDest),
+            destSize: SizeL(cx: cxDest, cy: cyDest),
+            src: PointL(x: xSrc, y: ySrc),
+            srcSize: SizeL(cx: cxSrc, cy: cySrc),
+            usageSrc: usageSrc,
+            rasterOperation: rop,
+            dib: dib
+        ))
     }
 
     /// EMR_SETDIBITSTODEVICE §2.3.1.5. Fixed part 76 bytes: Bounds at 8,
@@ -834,25 +841,33 @@ extension EMFFile {
             return .malformed(type: type, reason: .tooSmall(minimumSize: 76, actualSize: slice.size))
         }
 
-        let dibResult = decodeDIB(
-            slice: slice, type: type,
-            offBmi: offBmi, cbBmi: cbBmi, offBits: offBits, cbBits: cbBits
-        )
-        switch dibResult {
-        case .failure(let reason):
-            return .malformed(type: type, reason: reason)
-        case .success(let dib):
-            return .setDIBitsToDevice(SetDIBitsToDevicePayload(
-                bounds: bounds,
-                dest: PointL(x: xDest, y: yDest),
-                src: PointL(x: xSrc, y: ySrc),
-                srcSize: SizeL(cx: cxSrc, cy: cySrc),
-                usageSrc: usageSrc,
-                startScan: startScan,
-                scanCount: scanCount,
-                dib: dib
-            ))
+        // Sourceless form: cbBmiSrc == 0, DIB omitted — VALID, not malformed
+        // (mirrors EMR_BITBLT). SETDIBITSTODEVICE carries no raster op, so a
+        // nil-DIB record has nothing to draw; the payload's `dib` is nil and
+        // the renderer skips it.
+        var dib: DIB? = nil
+        if cbBmi != 0 {
+            switch decodeDIB(
+                slice: slice, type: type,
+                offBmi: offBmi, cbBmi: cbBmi, offBits: offBits, cbBits: cbBits
+            ) {
+            case .failure(let reason):
+                return .malformed(type: type, reason: reason)
+            case .success(let decoded):
+                dib = decoded
+            }
         }
+
+        return .setDIBitsToDevice(SetDIBitsToDevicePayload(
+            bounds: bounds,
+            dest: PointL(x: xDest, y: yDest),
+            src: PointL(x: xSrc, y: ySrc),
+            srcSize: SizeL(cx: cxSrc, cy: cySrc),
+            usageSrc: usageSrc,
+            startScan: startScan,
+            scanCount: scanCount,
+            dib: dib
+        ))
     }
 
     /// EMR_BITBLT §2.3.1.2 (100-byte fixed part) and EMR_STRETCHBLT §2.3.1.6

@@ -438,6 +438,49 @@ struct RenderFixture {
         append(type: 81, payload: body.bytes)
     }
 
+    /// EMR_STRETCHDIBITS §2.3.1.7 — sourceless rop-only form (cbBmiSrc == 0),
+    /// the 80-byte fixed part with no bitmap.
+    mutating func stretchDIBitsSourceless(
+        dest: (x: Int32, y: Int32),
+        destSize: (cx: Int32, cy: Int32),
+        rasterOperation: UInt32
+    ) {
+        var body = LE()                              // record offset 8
+        body.i32(0); body.i32(0); body.i32(0); body.i32(0)  // Bounds@8
+        body.i32(dest.x); body.i32(dest.y)           // xDest,yDest@24
+        body.i32(0); body.i32(0)                     // xSrc,ySrc@32
+        body.i32(0); body.i32(0)                     // cxSrc,cySrc@40
+        body.u32(0)                                  // offBmiSrc@48
+        body.u32(0)                                  // cbBmiSrc@52 == 0 → sourceless
+        body.u32(0)                                  // offBitsSrc@56
+        body.u32(0)                                  // cbBitsSrc@60
+        body.u32(0)                                  // UsageSrc@64
+        body.u32(rasterOperation)                    // rop@68
+        body.i32(destSize.cx); body.i32(destSize.cy) // cxDest,cyDest@72
+        append(type: 81, payload: body.bytes)
+    }
+
+    /// EMR_SETDIBITSTODEVICE §2.3.1.5 — sourceless form (cbBmiSrc == 0), the
+    /// 76-byte fixed part with no bitmap and no raster op.
+    mutating func setDIBitsToDeviceSourceless(
+        dest: (x: Int32, y: Int32),
+        srcSize: (cx: Int32, cy: Int32)
+    ) {
+        var body = LE()                              // record offset 8
+        body.i32(0); body.i32(0); body.i32(0); body.i32(0)  // Bounds@8
+        body.i32(dest.x); body.i32(dest.y)           // xDest,yDest@24
+        body.i32(0); body.i32(0)                     // xSrc,ySrc@32
+        body.i32(srcSize.cx); body.i32(srcSize.cy)   // cxSrc,cySrc@40
+        body.u32(0)                                  // offBmiSrc@48
+        body.u32(0)                                  // cbBmiSrc@52 == 0 → sourceless
+        body.u32(0)                                  // offBitsSrc@56
+        body.u32(0)                                  // cbBitsSrc@60
+        body.u32(0)                                  // UsageSrc@64
+        body.u32(0)                                  // iStartScan@68
+        body.u32(0)                                  // cScans@72
+        append(type: 80, payload: body.bytes)
+    }
+
     /// EMR_BITBLT §2.3.1.2 — sourceless rop-only form (cbBmiSrc == 0).
     mutating func bitBltSourceless(
         dest: (x: Int32, y: Int32),

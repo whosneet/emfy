@@ -2,8 +2,9 @@ import CoreGraphics
 import EMFParse
 import Foundation
 
-/// Bitmap playback: EMR_STRETCHDIBITS, EMR_BITBLT / EMR_STRETCHBLT (source and
-/// sourceless), and EMR_SETDIBITSTODEVICE. Draws under the DC clip with
+/// Bitmap playback: EMR_STRETCHDIBITS (source and sourceless rop-only),
+/// EMR_BITBLT / EMR_STRETCHBLT (source and sourceless), and
+/// EMR_SETDIBITSTODEVICE. Draws under the DC clip with
 /// `interpolationQuality = .none` — GDI-faithful chunky pixels (the gate file
 /// is an 8×8 checker blown up 30×; crispness is the point).
 ///
@@ -32,12 +33,22 @@ enum BitmapDrawer {
         base: CGAffineTransform,
         log: inout EMFRenderLog
     ) {
+        // Sourceless (rop-only) form: cbBmiSrc == 0 → no DIB, the rop alone
+        // paints the dest (§2.3.1.7; rare for STRETCHDIBITS but legal). Shares
+        // BITBLT's sourceless fill semantics.
+        guard let dib = payload.dib else {
+            fillSourcelessRop(
+                rasterOperation: payload.rasterOperation,
+                dest: payload.dest, destSize: payload.destSize,
+                into: context, dc: dc, base: base, log: &log
+            )
+            return
+        }
         // DIB_PAL_COLORS (usageSrc == 1) indexes a DC palette we do not track.
         guard payload.usageSrc != 1 else {
             log.noteUnsupportedDIB(reason: .paletteUsage(payload.usageSrc))
             return
         }
-        guard let dib = payload.dib else { return }
         guard let image = decode(dib, log: &log) else { return }
 
         // A rop other than SRCCOPY still draws as a copy (best effort, D5), with
@@ -70,7 +81,11 @@ enum BitmapDrawer {
     ) {
         // Sourceless (rop-only) form: no DIB, the rop alone paints the dest.
         guard payload.hasSource, let dib = payload.dib else {
-            drawSourcelessRop(payload, into: context, dc: dc, base: base, log: &log)
+            fillSourcelessRop(
+                rasterOperation: payload.rasterOperation,
+                dest: payload.dest, destSize: payload.destSize,
+                into: context, dc: dc, base: base, log: &log
+            )
             return
         }
 
@@ -106,18 +121,22 @@ enum BitmapDrawer {
         )
     }
 
-    /// Sourceless blits: BLACKNESS fills black, WHITENESS fills white, PATCOPY
+    /// Sourceless blits (BITBLT/STRETCHBLT rop-only, and STRETCHDIBITS with
+    /// cbBmiSrc == 0): BLACKNESS fills black, WHITENESS fills white, PATCOPY
     /// fills with the current brush; any other sourceless rop is skipped with a
-    /// coalesced log.
-    private static func drawSourcelessRop(
-        _ payload: BitBltPayload,
+    /// coalesced log. Takes only the fields the fill needs so both bitmap
+    /// families share one implementation.
+    private static func fillSourcelessRop(
+        rasterOperation: UInt32,
+        dest: PointL,
+        destSize: SizeL,
         into context: CGContext,
         dc: DeviceContext,
         base: CGAffineTransform,
         log: inout EMFRenderLog
     ) {
         let color: CGColor?
-        switch payload.rasterOperation {
+        switch rasterOperation {
         case blackness:
             color = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
         case whiteness:
@@ -129,12 +148,12 @@ enum BitmapDrawer {
                 color = nil   // NULL brush: PATCOPY paints nothing.
             }
         default:
-            log.noteUnsupportedRasterOp(rasterOperation: payload.rasterOperation)
+            log.noteUnsupportedRasterOp(rasterOperation: rasterOperation)
             return
         }
         guard let fill = color else { return }
 
-        let rect = destRect(origin: payload.dest, size: payload.destSize)
+        let rect = destRect(origin: dest, size: destSize)
         let full = dc.resolvedTransform.concatenating(base)
         context.saveGState()
         defer { context.restoreGState() }
