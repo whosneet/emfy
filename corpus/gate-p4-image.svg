@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">
+  <image x="40" y="30" width="240" height="240" image-rendering="pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAH0lEQVR4nGO4IycHRHI2J4AImc2AUwJTCMLGLUEHOwDZ3UdBxRY1SAAAAABJRU5ErkJggg=="/>
+  <polygon points="320,40 380,40 380,100 320,100" fill="#33aa55"/>
+</svg>

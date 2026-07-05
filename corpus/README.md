@@ -24,6 +24,8 @@ hand-authored files have exact headers and no exporter quirks.
 | gate-p3-shapes | 3 | paths: FILLPATH, LINETO, POLYBEZIERTO | rects/ellipse/line exported via path brackets |
 | gate-p3-curves | 3 | paths: FILLPATH, POLYBEZIERTO | cubic béziers + rounded rect via path brackets |
 | handmade-strokes-paths | 3 | CREATEPEN, POLYLINE16, LINETO, POLYBEZIER16, path bracket → STROKEANDFILLPATH | hand-authored bytes (no .svg); solid + dashed pen STROKING, which LibreOffice exports tessellate away; stock BLACK_PEN; exact header counts |
+| gate-p4-text | 4 | EXTCREATEFONTINDIRECTW ×3, EXTTEXTOUTW ×3, SETTEXTALIGN, SETTEXTCOLOR | three text runs: Arial 28 dark, Times New Roman italic 22 blue, Arial bold 18 dark red |
+| gate-p4-image | 4 | STRETCHDIBITS, POLYGON | 8×8 hand-rolled red/blue checkerboard PNG embedded at 240×240 (chunky pixels) + green square |
 
 All five also carry the standard LibreOffice state preamble (map mode,
 window/viewport, SAVEDC/RESTOREDC, SETROP2, one full-canvas
