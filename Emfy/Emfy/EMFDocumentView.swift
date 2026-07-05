@@ -58,13 +58,22 @@ struct EMFDocumentView: View {
             }
             .onAppear {
                 viewportSize = geometry.size
-                if !didInitialFit {
+                // Only spend the one-shot fit once we have a real viewport;
+                // at .zero (window-restore timing) fitZoom returns 1, which
+                // would leave the document stuck at 100%.
+                if !didInitialFit, geometry.size.width > 0, geometry.size.height > 0 {
                     didInitialFit = true
                     zoom = fitZoom(in: geometry.size)
                 }
             }
             .onChange(of: geometry.size) { _, newSize in
                 viewportSize = newSize
+                // If onAppear ran at .zero, complete the one-shot fit as soon
+                // as a real size arrives — still exactly once.
+                if !didInitialFit, newSize.width > 0, newSize.height > 0 {
+                    didInitialFit = true
+                    zoom = fitZoom(in: newSize)
+                }
             }
         }
         .toolbar { toolbarContent }
