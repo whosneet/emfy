@@ -22,6 +22,9 @@ struct EMFDocumentView: View {
     @State private var exportingPDF = false
     @State private var pngDocument = PNGExportDocument(data: Data())
     @State private var pdfDocument = PDFExportDocument(data: Data())
+    /// Set from a `.fileExporter` failure so the error surfaces in an alert
+    /// instead of the export silently doing nothing.
+    @State private var exportError: String?
 
     /// Zoom bounds and step. GDI pictures can be tiny or huge; keep a generous
     /// but finite range so the scaled frame never overflows layout.
@@ -82,13 +85,33 @@ struct EMFDocumentView: View {
             document: pngDocument,
             contentType: .png,
             defaultFilename: "Untitled"
-        ) { _ in }
+        ) { result in
+            if case .failure(let error) = result {
+                exportError = error.localizedDescription
+            }
+        }
         .fileExporter(
             isPresented: $exportingPDF,
             document: pdfDocument,
             contentType: .pdf,
             defaultFilename: "Untitled"
-        ) { _ in }
+        ) { result in
+            if case .failure(let error) = result {
+                exportError = error.localizedDescription
+            }
+        }
+        .alert(
+            "Export Failed",
+            isPresented: Binding(
+                get: { exportError != nil },
+                set: { if !$0 { exportError = nil } }
+            ),
+            presenting: exportError
+        ) { _ in
+            Button("OK", role: .cancel) { exportError = nil }
+        } message: { message in
+            Text(message)
+        }
     }
 
     // MARK: - Picture
