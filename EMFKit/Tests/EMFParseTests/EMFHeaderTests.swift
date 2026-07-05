@@ -173,6 +173,38 @@ struct EMFHeaderTests {
         #expect(file.diagnostics.isEmpty)
     }
 
+    /// Security guard (§8): a hostile header claims a description starting at
+    /// offset 12 — inside the mandatory 88-byte fixed header, where no
+    /// description can legally begin ([MS-EMF] §2.2.9). The file must parse
+    /// cleanly, but the "description" must be treated as absent rather than
+    /// decoding rclBounds (bytes 8..) as a bogus UTF-16 string. The sub-88
+    /// effective size is harmless for variant selection (anything < 100 is
+    /// `.base`). Before the fix, `description` came back non-nil.
+    @Test("hostile offDescription < 88 → description nil, base variant, clean parse")
+    func descriptionBelowMinimumHeaderRejected() throws {
+        var fixture = FixtureBuilder()
+        fixture.appendBytes(
+            FixtureBuilder.header(
+                fixedSize: 108,
+                recordSize: 108,
+                bounds: (0x0041_0041, 0x0042_0042, 0x0043_0043, 0x0044_0044), // decodable UTF-16 if mis-read
+                bytesField: 128,
+                recordsField: 2,
+                nDescription: 4,          // 4 code units → 8 bytes at offDescription
+                offDescription: 12        // inside the 88-byte fixed header — illegal
+            )
+        )
+        fixture.appendBytes(FixtureBuilder.eof())
+
+        let file = try EMFFile.parse(fixture.data)
+
+        #expect(file.header.description == nil)     // NOT rclBounds mis-decoded
+        #expect(file.header.variant == .base)       // effective size 12 → base
+        #expect(file.header.nDescription == 4)       // fields still surfaced raw
+        #expect(file.header.offDescription == 12)
+        #expect(file.diagnostics.isEmpty)            // parses cleanly
+    }
+
     @Test("HeaderSize algorithm unit cases")
     func headerSizeAlgorithm() {
         // No optional fields: size stays at recordSize.

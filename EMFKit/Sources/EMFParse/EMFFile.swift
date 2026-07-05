@@ -233,8 +233,12 @@ public struct EMFFile: Sendable, Equatable {
             offPixelFormat: offPixelFormat
         )
 
-        // Variant selection from the FINAL capped fixed-part size. The < 88
-        // case is impossible here — parse() already rejected it.
+        // Variant selection from the FINAL capped fixed-part size. This size
+        // CAN fall below 88 — parse() rejected only a sub-88 recordSize, and
+        // the description cap in headerSize() can drop the effective size below
+        // it (a hostile offDescription of 12 yields 12). That is harmless for
+        // variant selection: anything below 100 is `.base`, and decodeDescription
+        // independently rejects a description starting inside the 88-byte header.
         let variant: EMFHeaderVariant
         if effectiveSize >= 108 {
             variant = .extension2
@@ -321,16 +325,25 @@ public struct EMFFile: Sendable, Equatable {
     }
 
     /// Decodes the UTF-16LE description string, but only when `nDescription`
-    /// is non-zero and the byte range `[offDescription, offDescription + 2n)`
-    /// lies fully inside the header record. Returns `nil` otherwise — including
-    /// when the declared length would overflow or the bytes are unreadable.
+    /// is non-zero, `offDescription` is at or past the 88-byte minimum fixed
+    /// header, and the byte range `[offDescription, offDescription + 2n)` lies
+    /// fully inside the header record. Returns `nil` otherwise — including when
+    /// the declared length would overflow or the bytes are unreadable.
+    ///
+    /// The `< 88` floor is a security guard (§8): a description can never
+    /// legally begin inside the mandatory 88-byte header ([MS-EMF] §2.2.9), so
+    /// a hostile `offDescription` of, say, 12 is treated as "no description"
+    /// rather than decoding fixed header fields (rclBounds, the signature, …)
+    /// as a bogus UTF-16 string that would surface in emfy-dump and the app.
     private static func decodeDescription(
         reader: ByteReader,
         nDescription: UInt32,
         offDescription: UInt32,
         headerRecordSize: UInt32
     ) -> String? {
-        guard nDescription != 0, offDescription != 0 else { return nil }
+        guard nDescription != 0,
+              offDescription >= UInt32(baseHeaderSize)
+        else { return nil }
 
         // Byte length = 2 * character count. Guard the multiply against
         // overflow before computing the end offset.
