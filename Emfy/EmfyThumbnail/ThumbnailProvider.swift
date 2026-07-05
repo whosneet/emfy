@@ -30,7 +30,8 @@ final class ThumbnailProvider: QLThumbnailProvider {
         // Quick Look scales it by `request.scale` for the backing bitmap.
         let size = ThumbnailSizing.contextSize(
             for: file.header,
-            maximumSize: request.maximumSize
+            maximumSize: request.maximumSize,
+            minimumSize: request.minimumSize
         )
         let target = CGRect(origin: .zero, size: size)
 

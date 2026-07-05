@@ -11,7 +11,17 @@ enum ThumbnailSizing {
     /// scaled to fit inside `maximumSize`, never upscaled past the native pixel
     /// size, and never smaller than 1×1. A degenerate maximum falls back to a
     /// 1×1 box.
-    static func contextSize(for header: EMFHeader, maximumSize: CGSize) -> CGSize {
+    ///
+    /// `minimumSize` is the request's floor: `QLThumbnailReply` rejects a
+    /// context smaller than it, so each axis is raised to at least the
+    /// corresponding minimum when that component is positive. When
+    /// `minimumSize` is `.zero` (the common Finder case) the result is
+    /// byte-identical to fitting alone.
+    static func contextSize(
+        for header: EMFHeader,
+        maximumSize: CGSize,
+        minimumSize: CGSize
+    ) -> CGSize {
         let maxWidth = maximumSize.width
         let maxHeight = maximumSize.height
         guard maxWidth >= 1, maxHeight >= 1 else {
@@ -29,8 +39,21 @@ enum ThumbnailSizing {
         let h = Double(height)
         // Fit inside the box; never magnify beyond native size.
         let fit = min(maxWidth / w, maxHeight / h, 1)
-        let outWidth = max((w * fit).rounded(), 1)
-        let outHeight = max((h * fit).rounded(), 1)
+        var outWidth = max((w * fit).rounded(), 1)
+        var outHeight = max((h * fit).rounded(), 1)
+
+        // Raise each axis to the requested minimum (the accept threshold),
+        // still clamped to the maximum. If minimum exceeds maximum on an axis,
+        // prefer satisfying the minimum — that is what QLThumbnailReply checks.
+        if minimumSize.width > 0 {
+            let minWidth = minimumSize.width.rounded(.up)
+            outWidth = max(min(outWidth, maxWidth), minWidth)
+        }
+        if minimumSize.height > 0 {
+            let minHeight = minimumSize.height.rounded(.up)
+            outHeight = max(min(outHeight, maxHeight), minHeight)
+        }
+
         return CGSize(width: outWidth, height: outHeight)
     }
 }
