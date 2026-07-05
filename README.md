@@ -1,17 +1,33 @@
-# Emfy
+<div align="center">
 
-![Platform: macOS 14+](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
-![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)
-![Release](https://img.shields.io/github/v/release/whosneet/emfy)
+<img src="assets/emfy-icon.png" width="128" alt="Emfy app icon">
 
-**Press space on an `.emf` file. See the picture.**
+<h1>Emfy</h1>
 
-Emfy is a free, open-source viewer for EMF (Enhanced Metafile) files on
-macOS — the vector format Windows tools quietly export: diagrams out of
+<p><strong>Press space on an <code>.emf</code> file. See the picture.</strong></p>
+
+<p>A free, open-source viewer for EMF (Enhanced Metafile) files on macOS —<br>
+Quick Look previews, Finder thumbnails, and a small viewer app.</p>
+
+<p>
+<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" alt="Platform: macOS 14+"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-green" alt="Licence: MIT"></a>
+<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/github/v/release/whosneet/emfy" alt="Latest release"></a>
+<a href="https://github.com/whosneet/emfy/releases"><img src="https://img.shields.io/github/downloads/whosneet/emfy/total" alt="Downloads"></a>
+</p>
+
+<p>
+<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/Download-Emfy.dmg-0d96f6?style=for-the-badge&logo=apple&logoColor=white" alt="Download Emfy.dmg"></a>
+</p>
+
+</div>
+
+---
+
+EMF is the vector format Windows tools quietly export: diagrams out of
 PowerPoint and Visio, charts out of Excel, drawings out of engineering
-tools. Emfy gives macOS the two things no free tool offered for it:
-**Quick Look spacebar previews and Finder thumbnails**, plus a small viewer
-app with PNG and vector-PDF export.
+tools. macOS opens none of it. Emfy fixes that where you actually work —
+the spacebar and the Finder window.
 
 ## Install
 
@@ -23,17 +39,20 @@ without Gatekeeper warnings. Requires macOS 14.0 (Sonoma) or later.
 
 ## What it does
 
-- Renders the EMF (GDI) record set that covers real-world files: vector
-  shapes, path brackets, clipping, dashed and styled pens, brushes,
-  transforms, text (Windows font names mapped to macOS fonts — rotated and
-  accented runs included), and embedded bitmaps.
-- Viewer app: zoom, pan, fit-to-window, export to PNG or true-vector PDF.
-- Built for hostile input. Quick Look parses files the moment Finder shows
-  them, so every size and count is bounds-checked before it is trusted,
-  unknown records are logged and skipped (a partial render always beats an
-  error), the parser is fuzz-tested, and the app and extensions run
-  sandboxed with no network access anywhere.
-- Clean-room implementation from the public [MS-EMF]/[MS-WMF]
+- **Quick Look, first-class.** Spacebar previews and Finder thumbnails for
+  `.emf` files — the two things no free macOS tool offered.
+- **Real-world record coverage.** Vector shapes, path brackets, clipping,
+  dashed and styled pens, brushes, transforms, text (Windows font names
+  mapped to macOS fonts — rotated and accented runs included), and
+  embedded bitmaps.
+- **A viewer, not just a peek.** Zoom, pan, fit-to-window; export to PNG
+  or true-vector PDF.
+- **Built for hostile input.** Quick Look parses files the moment Finder
+  shows them, so every size and count is bounds-checked before it is
+  trusted, unknown records are logged and skipped (a partial render always
+  beats an error), the parser is fuzz-tested, and the app and extensions
+  run sandboxed with no network access anywhere.
+- **Clean-room implementation** from the public [MS-EMF]/[MS-WMF]
   specifications — no code from, or derived from, any existing EMF
   implementation.
 
