@@ -22,11 +22,20 @@ the picture.
 
 ## Status
 
-**Pre-alpha. Nothing renders yet.** The parser comes first, record by
-record, built against the public [MS-EMF] specification.
+**Pre-alpha.** The clean-room parser and the core of the renderer are built
+and tested; the app and Quick Look extensions — the actual point — don't
+exist yet. What works today:
 
-- [ ] **Phase 1 — parse.** EMF header, record walker, `emfy-dump` inventory CLI
-- [ ] **Phase 2 — draw.** Pens, brushes, transforms, core geometry
+- Any `.emf` file parses safely: bounds-checked end to end, zero crashes
+  across a 246-file corpus that includes deliberately corrupted files.
+- `emfy-dump` prints the record inventory, header dimensions, and
+  diagnostics for any EMF file.
+- Core vector content renders — polygons, polylines, béziers, rectangles,
+  ellipses, pens, brushes, transforms — verified against LibreOffice
+  renders of the same files.
+
+- [x] **Phase 1 — parse.** EMF header, record walker, `emfy-dump` inventory CLI
+- [x] **Phase 2 — draw.** Pens, brushes, transforms, core geometry
 - [ ] **Phase 3 — paths.** Path brackets and clipping
 - [ ] **Phase 4 — text & images.** Font mapping, text runs, embedded bitmaps
 - [ ] **Phase 5 — the point.** Viewer app, Quick Look preview, Finder thumbnails
@@ -63,10 +72,17 @@ Emfy.app + Quick Look preview & thumbnail extensions: thin shells over EMFKit
   it is trusted, unknown records log-and-skip, decoders return typed
   failures, and the extensions run sandboxed with no network access anywhere.
 
-## Requirements
+## Requirements & building
 
-macOS 14.0 (Sonoma) or later. Building from source needs Xcode once the
-package lands in phase 1 — watch the roadmap above.
+Runs on macOS 14.0 (Sonoma) or later; building needs Xcode 26 or newer
+(Swift 6.2 toolchain).
+
+```sh
+cd EMFKit
+swift test                                   # parser fixtures + renderer snapshots
+swift build -c release
+.build/release/emfy-dump path/to/file.emf    # record inventory + diagnostics
+```
 
 ## Contributing
 
