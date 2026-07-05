@@ -3,3 +3,6 @@ corpus-local/
 xcuserdata/
 .DS_Store
 docs/MS-EMF.pdf
+
+# Never commit App Store Connect / notarization keys
+*.p8
