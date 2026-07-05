@@ -29,6 +29,16 @@ enum FontMapper {
     /// "font mapper default"), in logical units before the transform scale.
     static let defaultHeight: CGFloat = 12
 
+    /// The ceiling on a resolved device point size. A glyph cannot usefully
+    /// exceed the canvas (capped at `EMFRenderer.canvasDimensionCap`, 16384 per
+    /// side), so anything larger only feeds CoreText/CTLine an enormous size to
+    /// flatten glyph outlines at before CG clips — a slow, large-allocation path
+    /// from a single hostile EMR_EXTCREATEFONTINDIRECTW with, say,
+    /// `lfHeight = -2_000_000_000` (§8: never hang). Half the canvas cap is
+    /// still far larger than any glyph a real file draws (normal sizes are a few
+    /// hundred points at most), so legitimate text is untouched.
+    static let maxDevicePointSize: CGFloat = 8192
+
     /// The default substitution when a requested family neither resolves
     /// directly nor has a table entry.
     static let defaultFamily = "Helvetica Neue"
@@ -159,6 +169,10 @@ enum FontMapper {
         let sized = logicalPoints * scale
         // A degenerate (zero/negative) result would make CoreText unhappy;
         // floor at 1 device point so text never vanishes to nothing.
-        return sized.isFinite && sized >= 1 ? sized : max(defaultHeight, 1)
+        guard sized.isFinite && sized >= 1 else { return max(defaultHeight, 1) }
+        // Ceiling: a glyph larger than the canvas is never useful and feeds
+        // CoreText an enormous outline-flattening size (the anti-hang for a
+        // hostile lfHeight). Normal sizes are far below the cap, so untouched.
+        return min(sized, maxDevicePointSize)
     }
 }

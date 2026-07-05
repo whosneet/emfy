@@ -126,6 +126,20 @@ struct FontMappingTests {
         #expect(FontMapper.devicePointSize(logicalHeight: -30, logicalToTarget: doubled) == 60)
     }
 
+    @Test("an absurd lfHeight is clamped to the ceiling; normal sizes untouched (§8, R3)")
+    func hostileHeightClamped() {
+        let identity = CGAffineTransform.identity
+        // A single hostile EMR_EXTCREATEFONTINDIRECTW: enormous em (negative)
+        // and cell (positive) heights both clamp to the ceiling — never handed
+        // to CoreText as a ~2e9-point outline-flattening request.
+        #expect(FontMapper.devicePointSize(logicalHeight: -2_000_000_000, logicalToTarget: identity)
+            == FontMapper.maxDevicePointSize)
+        #expect(FontMapper.devicePointSize(logicalHeight: 2_000_000_000, logicalToTarget: identity)
+            == FontMapper.maxDevicePointSize)
+        // A normal height is well below the ceiling and passes through unchanged.
+        #expect(FontMapper.devicePointSize(logicalHeight: -28, logicalToTarget: identity) == 28)
+    }
+
     // MARK: - Text orientation (the y-flip trap)
 
     /// Renders a single left/baseline "L" at a known reference and returns the
