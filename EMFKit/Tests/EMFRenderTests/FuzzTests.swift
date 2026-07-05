@@ -81,6 +81,25 @@ struct FuzzTests {
         var prng = SplitMix64(seed: Self.seed)
         var tally = Tally()
 
+        // Crash-site marker: a trap anywhere in parse/render unwinds through
+        // this defer, printing the exact file + iteration so the crash is
+        // replayable (re-run with EMFY_FUZZ_SEED set to `seed` and step to
+        // `iteration`). On a clean finish `completed` is set true first, so the
+        // marker stays silent — no per-iteration stderr cost on the happy path.
+        var currentFile = "<none>"
+        var currentIteration = -1
+        var completed = false
+        defer {
+            if !completed {
+                fputs(
+                    "[fuzz] CRASH SITE — seed=\(Self.seed) file=\(currentFile) "
+                        + "iteration=\(currentIteration) (re-run with "
+                        + "EMFY_FUZZ_SEED=\(Self.seed) to reproduce)\n",
+                    stderr
+                )
+            }
+        }
+
         for name in Self.corpusFiles {
             let url = TestPaths.corpusFile(name)
             let original = try #require(
@@ -88,12 +107,15 @@ struct FuzzTests {
                 "corpus file not readable at \(url.path) — see TestPaths fragility note"
             )
 
-            for _ in 0 ..< Self.iterations {
+            currentFile = name
+            for iteration in 0 ..< Self.iterations {
+                currentIteration = iteration
                 tally.mutants += 1
                 let mutated = Self.mutate(original, using: &prng)
                 Self.exercise(Data(mutated), into: context, target: target, tally: &tally)
             }
         }
+        completed = true
 
         // Auditable one-liner so a gate run can see coverage at a glance.
         print("""
@@ -108,6 +130,12 @@ struct FuzzTests {
         // this vacuously green.
         #expect(tally.mutants == Self.corpusFiles.count * Self.iterations)
         #expect(tally.rendered <= tally.mutants)
+        // Floors: `rendered <= mutants` is tautological and would stay green even
+        // if a regression made the parser reject EVERY mutant (empty surface).
+        // Most mutations leave a parseable file, so many mutants must reach the
+        // renderer, and at least some must parse with a clean diagnostics list.
+        #expect(tally.rendered > 0, "no mutant reached the renderer — the parse/render surface went silently empty")
+        #expect(tally.parsedClean > 0, "no mutant parsed clean — the parser rejects everything")
     }
 
     // MARK: - Surface exercise
@@ -183,15 +211,20 @@ struct FuzzTests {
     ///  - single byte flip;
     ///  - 4-byte stomp at a random 4-aligned offset (adversarial values);
     ///  - truncation at a random offset;
-    ///  - a stomp aimed at offset 0..108 (header territory).
-    /// Truncation short-circuits (nothing after it to mutate).
+    ///  - a stomp aimed at offset 0..108 (header territory);
+    ///  - appending garbage bytes to the end (trailing-bytes / over-long file);
+    ///  - duplicating a random 4-aligned window (record duplication).
+    /// Truncation short-circuits (nothing after it to mutate). Every operator
+    /// draws from the same SplitMix64 stream, so the mutant stream stays
+    /// reproducible for a given seed; growth operators keep the file bounded
+    /// (append ≤ 64 bytes, duplicate ≤ 256 bytes per application).
     static func mutate(_ bytes: [UInt8], using prng: inout SplitMix64) -> [UInt8] {
         var out = bytes
         let mutationCount = Int(prng.next() % 8) + 1   // 1..8
 
         for _ in 0 ..< mutationCount {
             guard !out.isEmpty else { break }
-            let op = prng.next() % 4
+            let op = prng.next() % 6
             switch op {
             case 0:
                 // Single byte flip.
@@ -211,13 +244,36 @@ struct FuzzTests {
                 out.removeLast(out.count - cut)
                 return out
 
-            default:
+            case 3:
                 // Stomp in header territory (offset 0..108), 4-aligned.
                 let ceiling = min(108, out.count - 4)
                 guard ceiling >= 0 else { continue }
                 let maxWord = ceiling / 4
                 let offset = Int(prng.next() % UInt64(maxWord + 1)) * 4
                 writeUInt32LE(stompValue(using: &prng), at: offset, in: &out)
+
+            case 4:
+                // Append 1..64 garbage bytes past the declared end of the file —
+                // exercises trailing-bytes / over-long-file handling (the walker
+                // must stop at the last record, not run off into the padding).
+                let extra = Int(prng.next() % 64) + 1
+                for _ in 0 ..< extra {
+                    out.append(UInt8(truncatingIfNeeded: prng.next()))
+                }
+
+            default:
+                // Duplicate a random 4-aligned window (record duplication): copy
+                // a 4-aligned run of up to 256 bytes and splice it back in at a
+                // 4-aligned offset, mimicking a repeated/echoed record.
+                guard out.count >= 4 else { continue }
+                let maxWord = (out.count - 4) / 4
+                let start = Int(prng.next() % UInt64(maxWord + 1)) * 4
+                let maxLenWords = min((out.count - start) / 4, 64)   // ≤ 256 bytes
+                guard maxLenWords >= 1 else { continue }
+                let length = (Int(prng.next() % UInt64(maxLenWords)) + 1) * 4
+                let window = Array(out[start ..< start + length])
+                let insertAt = Int(prng.next() % UInt64(maxWord + 1)) * 4
+                out.insert(contentsOf: window, at: insertAt)
             }
         }
         return out
