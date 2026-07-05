@@ -30,13 +30,14 @@ exist yet. What works today:
   across a 246-file corpus that includes deliberately corrupted files.
 - `emfy-dump` prints the record inventory, header dimensions, and
   diagnostics for any EMF file.
-- Core vector content renders — polygons, polylines, béziers, rectangles,
-  ellipses, pens, brushes, transforms — verified against LibreOffice
-  renders of the same files.
+- Vector content renders — polygons, polylines, béziers, rectangles,
+  ellipses, path brackets (fill, stroke, or both), clipping, pens including
+  dashed styles, brushes, transforms — verified against LibreOffice renders
+  of the same files.
 
 - [x] **Phase 1 — parse.** EMF header, record walker, `emfy-dump` inventory CLI
 - [x] **Phase 2 — draw.** Pens, brushes, transforms, core geometry
-- [ ] **Phase 3 — paths.** Path brackets and clipping
+- [x] **Phase 3 — paths.** Path brackets and clipping
 - [ ] **Phase 4 — text & images.** Font mapping, text runs, embedded bitmaps
 - [ ] **Phase 5 — the point.** Viewer app, Quick Look preview, Finder thumbnails
 - [ ] **Phase 6 — ship.** Hardening, notarised DMG, Mac App Store
