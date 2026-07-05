@@ -39,12 +39,16 @@ exist yet. What works today:
   advances, alignment, underline and strikeout.
 - Embedded bitmaps render: 24/32-bit and palettised DIBs, stretched,
   cropped, and mirrored — crisp, with correct colours.
+- A SwiftUI viewer app (open, zoom, pan, fit, export to PNG or vector PDF)
+  plus Quick Look preview and Finder thumbnail extensions, all sharing the
+  same renderer. The extensions build and register; verifying live spacebar
+  preview and Finder thumbnails needs a code-signed build (phase 6).
 
 - [x] **Phase 1 — parse.** EMF header, record walker, `emfy-dump` inventory CLI
 - [x] **Phase 2 — draw.** Pens, brushes, transforms, core geometry
 - [x] **Phase 3 — paths.** Path brackets and clipping
 - [x] **Phase 4 — text & images.** Font mapping, text runs, embedded bitmaps
-- [ ] **Phase 5 — the point.** Viewer app, Quick Look preview, Finder thumbnails
+- [x] **Phase 5 — the point.** Viewer app, Quick Look preview, Finder thumbnails *(built; live Quick Look pending a signed build — see Status)*
 - [ ] **Phase 6 — ship.** Hardening, notarised DMG, Mac App Store
 
 Each phase gates on real files rendering correctly before the next begins.
@@ -83,12 +87,24 @@ Emfy.app + Quick Look preview & thumbnail extensions: thin shells over EMFKit
 Runs on macOS 14.0 (Sonoma) or later; building needs Xcode 26 or newer
 (Swift 6.2 toolchain).
 
+The EMFKit package (parser + renderer + CLI):
+
 ```sh
 cd EMFKit
 swift test                                   # parser fixtures + renderer snapshots
 swift build -c release
 .build/release/emfy-dump path/to/file.emf    # record inventory + diagnostics
 ```
+
+The app and Quick Look extensions:
+
+```sh
+xcodebuild -project Emfy/Emfy.xcodeproj -scheme Emfy -configuration Debug build
+```
+
+The build is ad-hoc signed for local development; a Developer ID signed,
+notarised build (phase 6) is what enables the system to load the Quick Look
+extensions.
 
 ## Contributing
 
