@@ -34,11 +34,16 @@ exist yet. What works today:
   ellipses, path brackets (fill, stroke, or both), clipping, pens including
   dashed styles, brushes, transforms — verified against LibreOffice renders
   of the same files.
+- Text renders legibly: Windows font names map to macOS fonts (with a
+  substitution table), styled/rotated/accented runs, per-character
+  advances, alignment, underline and strikeout.
+- Embedded bitmaps render: 24/32-bit and palettised DIBs, stretched,
+  cropped, and mirrored — crisp, with correct colours.
 
 - [x] **Phase 1 — parse.** EMF header, record walker, `emfy-dump` inventory CLI
 - [x] **Phase 2 — draw.** Pens, brushes, transforms, core geometry
 - [x] **Phase 3 — paths.** Path brackets and clipping
-- [ ] **Phase 4 — text & images.** Font mapping, text runs, embedded bitmaps
+- [x] **Phase 4 — text & images.** Font mapping, text runs, embedded bitmaps
 - [ ] **Phase 5 — the point.** Viewer app, Quick Look preview, Finder thumbnails
 - [ ] **Phase 6 — ship.** Hardening, notarised DMG, Mac App Store
 
