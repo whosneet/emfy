@@ -33,6 +33,19 @@ struct ClipRegion: Equatable {
     /// The primitives to intersect, in order. Empty means no clip.
     private(set) var primitives: [Primitive] = []
 
+    /// The hard cap on stored primitives. `apply(to:)` replays the whole list on
+    /// every draw, so an uncapped list makes drawing O(primitives × draws) — a
+    /// hostile `[EMR_INTERSECTCLIPRECT, EMR_RECTANGLE] × N` stream would hang
+    /// (§8: never hang). The common INTERSECTCLIPRECT chain now folds to a
+    /// single rect (see `intersect`), so real files sit at 1–2 primitives; this
+    /// only ever fires on abuse. Past the cap further intersections are dropped
+    /// silently: the clip stays looser than the (pathological) true region would
+    /// be — at worst a few extra pixels draw — which is valid best-effort partial
+    /// output (§8: render more, never crash). There is no clean render-log
+    /// channel here — `intersect` is on the COW-copied DC state and carries no
+    /// log — so the drop is silent by design.
+    static let maxPrimitives = 256
+
     /// The default (no) clip — the whole canvas. A computed property (not a
     /// stored static): `CGPath` is not `Sendable`, so `ClipRegion` cannot be,
     /// and a stored static would trip Swift 6's global-mutable-state check.
@@ -42,7 +55,23 @@ struct ClipRegion: Equatable {
 
     /// Intersects the current region with `primitive` (INTERSECTCLIPRECT and
     /// RGN_AND).
+    ///
+    /// Consecutive SINGLE-rect intersections fold in place: clipping to r1 then
+    /// r2 is exactly clipping to r1 ∩ r2 for axis-aligned rects, so an
+    /// INTERSECTCLIPRECT chain collapses to one primitive instead of growing the
+    /// replayed list (the anti-hang). `CGRect.intersection` returns `.null` for
+    /// disjoint rects, which clips to nothing — the correct empty-clip result.
+    /// Multi-rect primitives (a region's union) and `.path` primitives do NOT
+    /// fold (they don't reduce to a single rect), and the fold only applies when
+    /// the LAST primitive is itself a single rect, so unrelated primitives are
+    /// never merged across.
     mutating func intersect(_ primitive: Primitive) {
+        if case .rects(let new) = primitive, new.count == 1,
+           case .rects(let last)? = primitives.last, last.count == 1 {
+            primitives[primitives.count - 1] = .rects([last[0].intersection(new[0])])
+            return
+        }
+        guard primitives.count < Self.maxPrimitives else { return }
         primitives.append(primitive)
     }
 

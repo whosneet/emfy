@@ -270,6 +270,46 @@ struct ClipTests {
         #expect(dc.state.clip == narrowed, "RestoreDC brought the saved clip back")
         #expect(log.isClean)
     }
+
+    // MARK: - Bounded clip growth (anti-hang, R2)
+
+    @Test("a long INTERSECTCLIPRECT chain folds to one rect equal to the intersection")
+    func intersectClipRectChainFoldsAndStaysBounded() throws {
+        var dc = DeviceContext(header: RenderFixtureHeader.make())
+        var log = EMFRenderLog()
+        // A hostile-length chain of single-rect intersections. Each fold is
+        // O(1); the list must never grow beyond one primitive.
+        for _ in 0 ..< 10_000 {
+            _ = dc.apply(.intersectClipRect(clip: RectL(left: 0, top: 0, right: 60, bottom: 100)), log: &log)
+            _ = dc.apply(.intersectClipRect(clip: RectL(left: 40, top: 0, right: 100, bottom: 100)), log: &log)
+        }
+        #expect(dc.state.clip.primitives.count == 1,
+                "consecutive single-rect intersections fold in place")
+        // The folded clip equals the geometric intersection 40..60 × 0..100.
+        guard case .rects(let rects) = dc.state.clip.primitives.first, rects.count == 1 else {
+            Issue.record("expected a single folded rect")
+            return
+        }
+        #expect(rects[0] == CGRect(x: 40, y: 0, width: 20, height: 100))
+        #expect(log.isClean)
+    }
+
+    @Test("the folded clip chain still shapes ink to the intersection")
+    func foldedClipChainClipsCorrectly() throws {
+        var fixture = RenderFixture()
+        Self.fillFullCanvas(&fixture)
+        // Many overlapping intersections that reduce to the 40..60 column.
+        fixture.intersectClipRect(0, 0, 60, 100)
+        fixture.intersectClipRect(40, 0, 100, 100)
+        fixture.intersectClipRect(0, 0, 60, 100)
+        fixture.intersectClipRect(40, 0, 100, 100)
+        Self.fullRect(&fixture)
+        let (image, log) = try Self.render(fixture)
+        #expect(log.entries == Self.eofOnly)
+        #expect(Self.isBlack(image[50, 50]), "inside the folded 40..60 clip: painted")
+        #expect(Self.isWhite(image[20, 50]), "left of clip: out")
+        #expect(Self.isWhite(image[80, 50]), "right of clip: out")
+    }
 }
 
 /// A minimal header for constructing a bare `DeviceContext` in unit tests.
