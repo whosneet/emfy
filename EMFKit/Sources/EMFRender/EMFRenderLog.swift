@@ -86,9 +86,12 @@ public struct EMFRenderLog: Sendable, Equatable {
         /// A ModifyWorldTransform mode outside MWT_IDENTITY/LEFTMULTIPLY/
         /// RIGHTMULTIPLY/SET was seen; the transform was left unchanged.
         case unsupportedWorldTransformMode(rawMode: UInt32)
-        /// The header bounds (times scale) implied a `makeImage` canvas larger
-        /// than the 16384×16384 cap, or a non-positive one; the canvas was
-        /// clamped to the rendered size.
+        /// The header bounds (times scale) implied a `makeImage` canvas outside
+        /// the caps: larger than the 16384-per-side cap, larger than the
+        /// 32-Mpx total-area cap (aspect ratio then preserved), or non-positive.
+        /// The canvas was clamped to the rendered size. `requestedWidth`/
+        /// `requestedHeight` are the unclamped request; `renderedWidth`/
+        /// `renderedHeight` are the final canvas.
         case canvasClamped(
             requestedWidth: Int,
             requestedHeight: Int,

@@ -143,7 +143,7 @@ struct DrawingTests {
 
     // MARK: - Hostile canvas
 
-    @Test("hostile header bounds clamp the makeImage canvas and log")
+    @Test("hostile header bounds clamp the makeImage canvas per side and log")
     func canvasClamp() throws {
         var fixture = RenderFixture()
         fixture.bounds = (left: 0, top: 0, right: 999_999_999, bottom: 499)
@@ -151,13 +151,63 @@ struct DrawingTests {
         let file = try fixture.parsed()
         let (image, log) = try #require(EMFRenderer.makeImage(file))
 
+        // Width clamps to the per-side cap; the resulting 16384×500 = 8.19 Mpx
+        // is under the 32-Mpx area cap, so the height is untouched.
         #expect(image.width == 16_384)
         #expect(image.height == 500)
+        #expect(image.width * image.height <= EMFRenderer.canvasAreaCap)
         #expect(log.entries.first == .canvasClamped(
             requestedWidth: 1_000_000_000,
             requestedHeight: 500,
             renderedWidth: 16_384,
             renderedHeight: 500
+        ))
+    }
+
+    @Test("a within-per-side-cap but huge-area canvas clamps by area, aspect kept")
+    func canvasAreaClamp() throws {
+        var fixture = RenderFixture()
+        // 16000×16000 = 256 Mpx: each side is under the 16384 per-side cap, so
+        // ONLY the area cap bites. Aspect ratio (1:1) must be preserved.
+        fixture.bounds = (left: 0, top: 0, right: 15_999, bottom: 15_999)
+
+        let file = try fixture.parsed()
+        let (image, log) = try #require(EMFRenderer.makeImage(file))
+
+        // sqrt(32_000_000 / 256_000_000) = 0.353553…; 16000 × that, floored,
+        // is 5656 on each side (5656² = 31_990_336 ≤ 32 Mpx).
+        #expect(image.width == 5_656)
+        #expect(image.height == 5_656)
+        #expect(image.width * image.height <= EMFRenderer.canvasAreaCap)
+        // Square in, square out: the aspect ratio survived the area scale.
+        #expect(image.width == image.height)
+        #expect(log.entries.first == .canvasClamped(
+            requestedWidth: 16_000,
+            requestedHeight: 16_000,
+            renderedWidth: 5_656,
+            renderedHeight: 5_656
+        ))
+    }
+
+    @Test("a non-square huge-area canvas clamps by area while preserving aspect")
+    func canvasAreaClampNonSquare() throws {
+        var fixture = RenderFixture()
+        // 16000×8000 = 128 Mpx, 2:1. Both sides under the per-side cap; only
+        // the area cap applies. The 2:1 ratio must survive (within rounding).
+        fixture.bounds = (left: 0, top: 0, right: 15_999, bottom: 7_999)
+
+        let file = try fixture.parsed()
+        let (image, log) = try #require(EMFRenderer.makeImage(file))
+
+        #expect(image.width * image.height <= EMFRenderer.canvasAreaCap)
+        // sqrt(32_000_000 / 128_000_000) = 0.5; 16000×0.5=8000, 8000×0.5=4000.
+        #expect(image.width == 8_000)
+        #expect(image.height == 4_000)
+        #expect(log.entries.first == .canvasClamped(
+            requestedWidth: 16_000,
+            requestedHeight: 8_000,
+            renderedWidth: 8_000,
+            renderedHeight: 4_000
         ))
     }
 

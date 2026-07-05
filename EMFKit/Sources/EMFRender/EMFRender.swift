@@ -15,6 +15,14 @@ public enum EMFRenderer {
     /// bounds; anything larger is clamped with a `canvasClamped` log entry.
     public static let canvasDimensionCap = 16_384
 
+    /// `makeImage` canvas cap on TOTAL area, in pixels. The per-side cap alone
+    /// still permits a ~16384×16384 ≈ 268 Mpx (≈1 GiB RGBA) allocation from a
+    /// hostile header; this bounds the whole canvas to 32 Mpx (≈128 MiB RGBA).
+    /// When the per-side-clamped canvas still exceeds this, both sides scale
+    /// down together (aspect ratio preserved) and a `canvasClamped` entry
+    /// records it (primer §8).
+    public static let canvasAreaCap = 32_000_000
+
     // MARK: - Public API
 
     /// Plays `file`'s records into `context`, mapping the file's device space
@@ -50,7 +58,8 @@ public enum EMFRenderer {
     /// bounds (width = right−left+1, height = bottom−top+1, times `scale`),
     /// on a white background.
     ///
-    /// The canvas is capped at 16384×16384 — hostile headers declaring absurd
+    /// The canvas is capped at 16384 per side AND at 32 Mpx total area (the
+    /// latter preserving aspect ratio) — hostile headers declaring absurd
     /// bounds are clamped with a log entry. Returns `nil` only if the bitmap
     /// context itself cannot be created (allocation failure); rendering
     /// itself never fails.
@@ -72,8 +81,12 @@ public enum EMFRenderer {
 
         let requestedWidth = Double(deviceWidth) * safeScale
         let requestedHeight = Double(deviceHeight) * safeScale
-        let width = clampDimension(requestedWidth)
-        let height = clampDimension(requestedHeight)
+        // Per-side clamp first, then the total-area clamp on the result: a
+        // header near the per-side cap on both axes (≈268 Mpx) is brought under
+        // the area cap with its aspect ratio preserved.
+        let sideWidth = clampDimension(requestedWidth)
+        let sideHeight = clampDimension(requestedHeight)
+        let (width, height) = clampArea(width: sideWidth, height: sideHeight)
         if Double(width) != requestedWidth || Double(height) != requestedHeight {
             log.note(.canvasClamped(
                 requestedWidth: saturatingInt(requestedWidth),
@@ -142,6 +155,20 @@ public enum EMFRenderer {
         if rounded < 1 { return 1 }
         if rounded > Double(canvasDimensionCap) { return canvasDimensionCap }
         return Int(rounded)
+    }
+
+    /// Scales an already per-side-clamped canvas down to `canvasAreaCap` total
+    /// pixels, preserving aspect ratio, floored to 1×1. Inputs are each in
+    /// [1, canvasDimensionCap], so `width * height` fits Int with no overflow
+    /// risk. A no-op when the canvas is already within the area budget.
+    private static func clampArea(width: Int, height: Int) -> (width: Int, height: Int) {
+        let area = width * height
+        guard area > canvasAreaCap else { return (width, height) }
+        // scale = sqrt(cap / area) applied to each side keeps the ratio.
+        let scale = (Double(canvasAreaCap) / Double(area)).squareRoot()
+        let scaledWidth = max(1, Int((Double(width) * scale).rounded(.down)))
+        let scaledHeight = max(1, Int((Double(height) * scale).rounded(.down)))
+        return (scaledWidth, scaledHeight)
     }
 
     /// A Double → Int conversion that saturates instead of trapping — needed
