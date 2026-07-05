@@ -269,6 +269,23 @@ struct DeviceContext {
             applyDeleteObject(handle, log: &log)
             return true
 
+        // MARK: Text and bitmaps (decoded phase 4 Task A; playback is Task B)
+        // Task A decodes these payloads; the renderer does not yet draw text or
+        // bitmaps. Until Task B, they are consumed here behaviour-neutrally —
+        // logged as unimplemented-by-type (coalesced) and skipped, matching the
+        // phase-2/3 log-and-skip of any record the renderer cannot yet honour.
+        // No text is drawn, no image is blitted. Task B replaces this arm with
+        // real CoreText/CGImage playback. Type ids per [MS-EMF] §2.1.1.
+        case .setTextAlign: log.noteUnimplemented(type: 22); return true
+        case .setTextColor: log.noteUnimplemented(type: 24); return true
+        case .setBkColor: log.noteUnimplemented(type: 25); return true
+        case .extCreateFontIndirectW: log.noteUnimplemented(type: 82); return true
+        case .extTextOutW: log.noteUnimplemented(type: 84); return true
+        case .stretchDIBits: log.noteUnimplemented(type: 81); return true
+        case .bitBlt: log.noteUnimplemented(type: 76); return true
+        case .stretchBlt: log.noteUnimplemented(type: 77); return true
+        case .setDIBitsToDevice: log.noteUnimplemented(type: 80); return true
+
         // MARK: Fallback verdicts
         case .unimplemented(let type):
             log.noteUnimplemented(type: type)

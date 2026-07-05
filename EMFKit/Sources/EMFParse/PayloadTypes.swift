@@ -253,6 +253,285 @@ public enum RegionMode: Sendable, Equatable {
     }
 }
 
+/// Text alignment flags carried by EMR_SETTEXTALIGN ([MS-EMF] §2.3.11.25,
+/// TextAlignmentMode from [MS-WMF] §2.1.2.3). The raw mask is a combination
+/// of horizontal, vertical, and current-position flags; the accessors decode
+/// the ones the renderer needs.
+///
+/// The horizontal and vertical alignment values are NOT single bits — they
+/// are small multi-bit codes masked out of the field:
+///   horizontal (mask 0x0006): TA_LEFT=0, TA_RIGHT=2, TA_CENTER=6
+///   vertical   (mask 0x0018): TA_TOP=0, TA_BOTTOM=8, TA_BASELINE=24 (0x18)
+///   TA_UPDATECP=1 (TA_NOUPDATECP=0) is a standalone bit.
+/// Values verified against [MS-WMF] §2.1.2.3 (not present in the local
+/// [MS-EMF] PDF, which references it) as supplied in the task.
+public struct TextAlign: Sendable, Equatable {
+    /// Horizontal alignment of the reference point relative to the text.
+    public enum Horizontal: Sendable, Equatable {
+        /// TA_LEFT (0): reference point is at the left of the bounding rect.
+        case left
+        /// TA_RIGHT (2): reference point is at the right.
+        case right
+        /// TA_CENTER (6): reference point is horizontally centered.
+        case center
+    }
+
+    /// Vertical alignment of the reference point relative to the text.
+    public enum Vertical: Sendable, Equatable {
+        /// TA_TOP (0): reference point is at the top of the bounding rect.
+        case top
+        /// TA_BOTTOM (8): reference point is at the bottom.
+        case bottom
+        /// TA_BASELINE (24): reference point is on the text baseline.
+        case baseline
+    }
+
+    /// The mask as read from the record ([MS-WMF] §2.1.2.3).
+    public var rawValue: UInt32
+
+    public init(rawValue: UInt32) {
+        self.rawValue = rawValue
+    }
+
+    /// TA_UPDATECP (0x0001): the current position is updated by text output.
+    public var updatesCurrentPosition: Bool { rawValue & 0x0001 != 0 }
+
+    /// Horizontal component (mask 0x0006). TA_CENTER (0x0006) is checked
+    /// before TA_RIGHT (0x0002) because it shares the TA_RIGHT bit.
+    public var horizontal: Horizontal {
+        switch rawValue & 0x0006 {
+        case 0x0006: return .center
+        case 0x0002: return .right
+        default: return .left
+        }
+    }
+
+    /// Vertical component (mask 0x0018). TA_BASELINE (0x0018) is checked
+    /// before TA_BOTTOM (0x0008) because it shares the TA_BOTTOM bit.
+    public var vertical: Vertical {
+        switch rawValue & 0x0018 {
+        case 0x0018: return .baseline
+        case 0x0008: return .bottom
+        default: return .top
+        }
+    }
+}
+
+/// ExtTextOut option flags ([MS-EMF] §2.1.11, ExtTextOutOptions enumeration).
+/// Carried raw so the renderer sees every flag; accessors expose the ones that
+/// change decode or layout. Bit values verified against §2.1.11.
+public struct ExtTextOutOptions: Sendable, Equatable {
+    /// The full Options field as read.
+    public var rawValue: UInt32
+
+    public init(rawValue: UInt32) {
+        self.rawValue = rawValue
+    }
+
+    /// ETO_OPAQUE (0x0002): fill the rectangle with the background color.
+    public var opaque: Bool { rawValue & 0x0002 != 0 }
+    /// ETO_CLIPPED (0x0004): clip text to the rectangle.
+    public var clipped: Bool { rawValue & 0x0004 != 0 }
+    /// ETO_GLYPH_INDEX (0x0010): the string holds glyph indices, not
+    /// character codes.
+    public var glyphIndex: Bool { rawValue & 0x0010 != 0 }
+    /// ETO_RTLREADING (0x0080): lay characters out right-to-left.
+    public var rtlReading: Bool { rawValue & 0x0080 != 0 }
+    /// ETO_PDY (0x2000): the Dx array carries two values (dx, dy) per
+    /// character rather than one.
+    public var pdy: Bool { rawValue & 0x2000 != 0 }
+}
+
+/// A LogFont object ([MS-EMF] §2.2.13): the basic attributes of a logical
+/// font. Fixed size 92 bytes (0x5C) — 28-byte field block + 64-byte FaceName.
+/// This same 92-byte prefix begins the LogFontEx / LogFontExDv / LogFontPanose
+/// variants, so it decodes from any of them.
+///
+/// `height` is carried SIGNED per §2.2.13: a negative value is the character
+/// (em) height, a positive value is the cell height, and zero means "font
+/// mapper default". The renderer's LOGFONT→CTFont mapping (Task B) relies on
+/// this sign.
+public struct LogFont: Sendable, Equatable {
+    /// Character-cell height, logical units, SIGNED (§2.2.13): < 0 character
+    /// height, > 0 cell height, 0 default.
+    public var height: Int32
+    /// Average character width, logical units; 0 means "derive from height".
+    public var width: Int32
+    /// Escapement angle, tenths of a degree.
+    public var escapement: Int32
+    /// Character orientation angle, tenths of a degree.
+    public var orientation: Int32
+    /// Weight, 0–1000 (400 = normal, 700 = bold); 0 = default.
+    public var weight: Int32
+    /// 0x01 if italic.
+    public var italic: UInt8
+    /// 0x01 if underlined.
+    public var underline: UInt8
+    /// 0x01 if struck out.
+    public var strikeOut: UInt8
+    /// CharacterSet enumeration value ([MS-WMF] §2.1.1.5).
+    public var charSet: UInt8
+    /// OutPrecision enumeration value ([MS-WMF] §2.1.1.21).
+    public var outPrecision: UInt8
+    /// ClipPrecision flags ([MS-WMF] §2.1.2.1).
+    public var clipPrecision: UInt8
+    /// FontQuality enumeration value ([MS-WMF] §2.1.1.10).
+    public var quality: UInt8
+    /// PitchAndFamily ([MS-WMF] §2.2.2.14).
+    public var pitchAndFamily: UInt8
+    /// Typeface name, decoded from up to 32 UTF-16LE code units, NUL-truncated
+    /// (§2.2.13: a name shorter than 32 units MUST be NUL-terminated; a name
+    /// using all 32 units carries no terminator — both decode here).
+    public var faceName: String
+
+    public init(
+        height: Int32,
+        width: Int32,
+        escapement: Int32,
+        orientation: Int32,
+        weight: Int32,
+        italic: UInt8,
+        underline: UInt8,
+        strikeOut: UInt8,
+        charSet: UInt8,
+        outPrecision: UInt8,
+        clipPrecision: UInt8,
+        quality: UInt8,
+        pitchAndFamily: UInt8,
+        faceName: String
+    ) {
+        self.height = height
+        self.width = width
+        self.escapement = escapement
+        self.orientation = orientation
+        self.weight = weight
+        self.italic = italic
+        self.underline = underline
+        self.strikeOut = strikeOut
+        self.charSet = charSet
+        self.outPrecision = outPrecision
+        self.clipPrecision = clipPrecision
+        self.quality = quality
+        self.pitchAndFamily = pitchAndFamily
+        self.faceName = faceName
+    }
+}
+
+/// A single color-table entry in a DIB ([MS-WMF] §2.2.2.20, RGBQuad).
+///
+/// CRITICAL byte order: on disk the quad is Blue, Green, Red, Reserved — the
+/// REVERSE of a ColorRef (Red, Green, Blue, Reserved). Kept a distinct type so
+/// the two can never be confused when building pixel colors (Task B).
+public struct RGBQuad: Sendable, Equatable {
+    public var blue: UInt8
+    public var green: UInt8
+    public var red: UInt8
+    /// MUST be 0 and ignored per the spec; carried for fidelity.
+    public var reserved: UInt8
+
+    public init(blue: UInt8, green: UInt8, red: UInt8, reserved: UInt8 = 0) {
+        self.blue = blue
+        self.green = green
+        self.red = red
+        self.reserved = reserved
+    }
+}
+
+/// DIB compression ([MS-WMF] §2.1.1.3, Compression enumeration). Only the
+/// values this phase acts on are named; everything else is `.other(raw)` and
+/// yields a `.unsupported` DIB (a valid, precisely-logged payload).
+public enum BitmapCompression: Sendable, Equatable {
+    /// BI_RGB (0x0000): uncompressed.
+    case rgb
+    /// BI_RLE8 (0x0001): 8-bit run-length encoded.
+    case rle8
+    /// BI_RLE4 (0x0002): 4-bit run-length encoded.
+    case rle4
+    /// BI_BITFIELDS (0x0003): uncompressed with explicit channel masks.
+    case bitfields
+    /// BI_JPEG (0x0004): a JPEG image.
+    case jpeg
+    /// BI_PNG (0x0005): a PNG image.
+    case png
+    case other(UInt32)
+
+    public init(_ raw: UInt32) {
+        switch raw {
+        case 0x0000: self = .rgb
+        case 0x0001: self = .rle8
+        case 0x0002: self = .rle4
+        case 0x0003: self = .bitfields
+        case 0x0004: self = .jpeg
+        case 0x0005: self = .png
+        default: self = .other(raw)
+        }
+    }
+}
+
+/// Why a DIB decoded to `.unsupported` rather than `.pixels`. This is a VALID
+/// payload verdict the renderer logs precisely — it is NOT `.malformed`
+/// (which means the DIB's own size/count fields were internally inconsistent
+/// or hostile).
+public enum DIBUnsupportedReason: Sendable, Equatable {
+    /// A compression other than BI_RGB (RLE, BITFIELDS, JPEG, PNG, …).
+    case compression(BitmapCompression)
+    /// A BitCount this phase does not decode (1, 4, 16; or 8/24/32 in a
+    /// combination not supported). Carries the value as read.
+    case bitCount(UInt16)
+    /// DIB_PAL_COLORS / DIB_PAL_INDICES usage: the color table indexes a
+    /// palette in the playback DC, which this phase does not track.
+    case paletteUsage(UInt32)
+}
+
+/// A decoded device-independent bitmap: its header dimensions plus either the
+/// pixel bytes (BI_RGB 24/32-bit or 8-bit palettised) or a typed reason it is
+/// unsupported. The pixel bytes and palette are validated against the DIB's
+/// own size fields AND the enclosing record before this value exists
+/// (primer §8).
+///
+/// Header fields decoded from BitmapInfoHeader ([MS-WMF] §2.2.2.3; the
+/// structure is not in the local [MS-EMF] PDF — layout per the task's
+/// [MS-WMF]-verified description). `height` is SIGNED: a negative value means
+/// a top-down DIB (rows stored top-to-bottom); positive is bottom-up.
+public struct DIB: Sendable, Equatable {
+    /// The DIB's pixel payload, or why it is not decoded.
+    public enum Content: Sendable, Equatable {
+        /// Uncompressed pixels plus, for palettised bitmaps, the color table.
+        /// `stride` is the padded row length in bytes.
+        case pixels(bytes: Data, stride: Int, palette: [RGBQuad])
+        /// The DIB is well-formed but this phase does not decode it.
+        case unsupported(DIBUnsupportedReason)
+    }
+
+    /// Bitmap width in pixels (BitmapInfoHeader.Width).
+    public var width: Int32
+    /// Bitmap height in pixels, SIGNED: < 0 = top-down (BitmapInfoHeader.Height).
+    public var height: Int32
+    /// Bits per pixel (BitmapInfoHeader.BitCount).
+    public var bitCount: UInt16
+    /// Compression scheme (BitmapInfoHeader.Compression).
+    public var compression: BitmapCompression
+    /// Pixels, or the unsupported reason.
+    public var content: Content
+
+    public init(
+        width: Int32,
+        height: Int32,
+        bitCount: UInt16,
+        compression: BitmapCompression,
+        content: Content
+    ) {
+        self.width = width
+        self.height = height
+        self.bitCount = bitCount
+        self.compression = compression
+        self.content = content
+    }
+
+    /// True when the DIB stores rows top-to-bottom (negative header height).
+    public var isTopDown: Bool { height < 0 }
+}
+
 /// An object-table reference as carried by EMR_SELECTOBJECT / EMR_DELETEOBJECT.
 ///
 /// Per [MS-EMF] §2.1.31 (p. 46): "The index of a stock object can be

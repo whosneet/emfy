@@ -35,6 +35,47 @@ struct RecordSlice {
         return reader.readInt16(at: base + offset)
     }
 
+    func u16(_ offset: Int) -> UInt16? {
+        guard offset >= 0, offset <= size - 2 else { return nil }
+        return reader.readUInt16(at: base + offset)
+    }
+
+    func u8(_ offset: Int) -> UInt8? {
+        guard offset >= 0, offset <= size - 1,
+              let byte = reader.data(at: base + offset, length: 1)
+        else { return nil }
+        return byte[byte.startIndex]
+    }
+
+    /// The raw bytes in `[offset, offset + length)`, bounds-checked against
+    /// the record's own extent. `length` must be >= 0.
+    func bytes(at offset: Int, length: Int) -> Data? {
+        guard length >= 0, offset >= 0, length <= size - offset else { return nil }
+        return reader.data(at: base + offset, length: length)
+    }
+
+    /// Decodes `codeUnits` UTF-16LE code units at `offset` into a `String`.
+    /// Bounds-checked against the record. Lone surrogates decode losslessly
+    /// (`String(decoding:as:)` substitutes U+FFFD; it never fails), so a
+    /// hostile string never fails the payload. Reads up to the first NUL when
+    /// `stopAtNUL` is set (LogFont FaceName semantics, [MS-EMF] §2.2.13);
+    /// otherwise decodes exactly `codeUnits` (EmrText string, §2.2.5).
+    func utf16String(at offset: Int, codeUnits: Int, stopAtNUL: Bool) -> String? {
+        guard codeUnits >= 0, offset >= 0, codeUnits <= (size - offset) / 2 else {
+            return nil
+        }
+        var units: [UInt16] = []
+        units.reserveCapacity(codeUnits)
+        for index in 0 ..< codeUnits {
+            guard let unit = reader.readUInt16(at: base + offset + index * 2) else {
+                return nil
+            }
+            if stopAtNUL, unit == 0 { break }
+            units.append(unit)
+        }
+        return String(decoding: units, as: UTF16.self)
+    }
+
     /// Little-endian FLOAT via bit pattern ([MS-EMF] §2.2.28). May be
     /// non-finite; callers must check.
     func f32(_ offset: Int) -> Float? {
@@ -176,6 +217,9 @@ extension EMFFile {
         case 11: return decodeSizeL(type: type, slice: slice) { .setViewportExtEx(extent: $0) }
         case 12: return decodePointL(type: type, slice: slice) { .setViewportOrgEx(origin: $0) }
         case 17: return decodeU32(type: type, slice: slice) { .setMapMode(MapMode($0)) }
+        case 22: return decodeU32(type: type, slice: slice) { .setTextAlign(TextAlign(rawValue: $0)) }
+        case 24: return decodeColor(type: type, slice: slice) { .setTextColor($0) }
+        case 25: return decodeColor(type: type, slice: slice) { .setBkColor($0) }
         case 18: return decodeU32(type: type, slice: slice) { .setBkMode(BackgroundMode($0)) }
         case 19: return decodeU32(type: type, slice: slice) { .setPolyFillMode(PolygonFillMode($0)) }
         case 20: return decodeU32(type: type, slice: slice) { .setROP2(rawMode: $0) }
@@ -203,6 +247,12 @@ extension EMFFile {
         case 64: return decodePathBounds(type: type, slice: slice) { .strokePath(bounds: $0) }
         case 67: return decodeU32(type: type, slice: slice) { .selectClipPath(RegionMode($0)) }
         case 75: return decodeExtSelectClipRgn(slice: slice)
+        case 76: return decodeBitBlt(slice: slice, stretch: false)
+        case 77: return decodeBitBlt(slice: slice, stretch: true)
+        case 80: return decodeSetDIBitsToDevice(slice: slice)
+        case 81: return decodeStretchDIBits(slice: slice)
+        case 82: return decodeExtCreateFontIndirectW(slice: slice)
+        case 84: return decodeExtTextOutW(slice: slice)
         case 85: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polyBezier16)
         case 86: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polygon16)
         case 87: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polyline16)
@@ -229,6 +279,19 @@ extension EMFFile {
             return .malformed(type: type, reason: .tooSmall(minimumSize: 12, actualSize: slice.size))
         }
         return make(value)
+    }
+
+    /// Single ColorRef field at offset 8 (EMR_SETTEXTCOLOR §2.3.11.26,
+    /// EMR_SETBKCOLOR §2.3.11.10).
+    private static func decodeColor(
+        type: UInt32,
+        slice: RecordSlice,
+        make: (ColorRef) -> EMFRecordPayload
+    ) -> EMFRecordPayload {
+        guard let color = slice.colorRef(8) else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 12, actualSize: slice.size))
+        }
+        return make(color)
     }
 
     /// Single PointL field at offset 8 (EMR_MOVETOEX §2.3.11.4,
@@ -561,5 +624,456 @@ extension EMFFile {
         }
 
         return make(PolyPoly16Payload(bounds: bounds, pointCounts: pointCounts, points: points))
+    }
+
+    // MARK: - Text decoders
+
+    /// EMR_EXTCREATEFONTINDIRECTW §2.3.7.8: ihFonts u32 at 8, then the `elw`
+    /// font object at 12. `elw` is a LogFont (92), LogFontEx (348), LogFontExDv
+    /// (>348), or LogFontPanose (320) — every variant begins with the same
+    /// 92-byte LogFont (§2.2.14/.15/.16), so the prefix decodes uniformly.
+    /// The full record is therefore at least 12 + 92 = 104 bytes; a shorter one
+    /// is `.malformed`. `hasExtendedData` is true when `elw` exceeded 92 bytes.
+    private static func decodeExtCreateFontIndirectW(slice: RecordSlice) -> EMFRecordPayload {
+        let type: UInt32 = 82
+        guard let ihFonts = slice.u32(8), let logFont = decodeLogFont(slice: slice, at: 12) else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 104, actualSize: slice.size))
+        }
+        // elw size = record size - 12; > 92 means LogFontEx/ExDv/Panose extras.
+        let hasExtendedData = (slice.size - 12) > 92
+        return .extCreateFontIndirectW(ExtCreateFontPayload(
+            ihFonts: ihFonts,
+            logFont: logFont,
+            hasExtendedData: hasExtendedData
+        ))
+    }
+
+    /// The 92-byte LogFont prefix ([MS-EMF] §2.2.13) at record offset `at`:
+    /// five i32s (Height..Weight) at +0..+16, eight u8s (Italic..PitchAndFamily)
+    /// at +20..+27, then a 64-byte (32 UTF-16LE code units) NUL-terminable
+    /// FaceName at +28. Returns nil (→ caller reports `.malformed`) on a short
+    /// read. Height is carried signed (§2.2.13 sign convention).
+    private static func decodeLogFont(slice: RecordSlice, at offset: Int) -> LogFont? {
+        guard let height = slice.i32(offset),
+              let width = slice.i32(offset + 4),
+              let escapement = slice.i32(offset + 8),
+              let orientation = slice.i32(offset + 12),
+              let weight = slice.i32(offset + 16),
+              let italic = slice.u8(offset + 20),
+              let underline = slice.u8(offset + 21),
+              let strikeOut = slice.u8(offset + 22),
+              let charSet = slice.u8(offset + 23),
+              let outPrecision = slice.u8(offset + 24),
+              let clipPrecision = slice.u8(offset + 25),
+              let quality = slice.u8(offset + 26),
+              let pitchAndFamily = slice.u8(offset + 27),
+              // FaceName: 32 UTF-16LE code units, NUL-terminated (§2.2.13).
+              let faceName = slice.utf16String(at: offset + 28, codeUnits: 32, stopAtNUL: true)
+        else { return nil }
+        return LogFont(
+            height: height,
+            width: width,
+            escapement: escapement,
+            orientation: orientation,
+            weight: weight,
+            italic: italic,
+            underline: underline,
+            strikeOut: strikeOut,
+            charSet: charSet,
+            outPrecision: outPrecision,
+            clipPrecision: clipPrecision,
+            quality: quality,
+            pitchAndFamily: pitchAndFamily,
+            faceName: faceName
+        )
+    }
+
+    /// EMR_EXTTEXTOUTW §2.3.5.8: Bounds RectL at 8 (ignored on receipt),
+    /// iGraphicsMode u32 at 24, exScale f32 at 28, eyScale f32 at 32, then the
+    /// EmrText object (§2.2.5) at 36. Fixed part through the EmrText fixed
+    /// fields is 76 bytes (offDx sits at 72).
+    ///
+    /// EmrText fixed fields, at RECORD offsets: Reference PointL at 36, Chars
+    /// u32 at 44, offString u32 at 48, Options u32 at 52, Rectangle RectL at 56,
+    /// offDx u32 at 72. offString and offDx are RECORD-start-relative (§2.2.5:
+    /// "from the start of the record in which this object is contained").
+    private static func decodeExtTextOutW(slice: RecordSlice) -> EMFRecordPayload {
+        let type: UInt32 = 84
+        guard let bounds = slice.rectL(8),
+              let graphicsMode = slice.u32(24),
+              let exScale = slice.f32(28),
+              let eyScale = slice.f32(32),
+              let reference = slice.pointL(36),
+              let rawChars = slice.u32(44),
+              let rawOffString = slice.u32(48),
+              let rawOptions = slice.u32(52),
+              let rectangle = slice.rectL(56),
+              let rawOffDx = slice.u32(72)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 76, actualSize: slice.size))
+        }
+        _ = bounds // Bounds MUST be ignored on receipt (§2.3.5.8); not carried.
+
+        // Hostile floats never propagate (primer §8): reject non-finite scales.
+        guard exScale.isFinite, eyScale.isFinite else {
+            return .malformed(type: type, reason: .nonFiniteTransform)
+        }
+
+        let options = ExtTextOutOptions(rawValue: rawOptions)
+        let chars = Int(rawChars)
+        let offString = Int(rawOffString)
+
+        // String: `chars` UTF-16LE code units at the record-relative offString.
+        // Validate the byte range against nSize before decoding (§8).
+        let stringByteLength = chars * 2
+        guard offString >= 0, chars >= 0, stringByteLength <= slice.size - offString else {
+            return .malformed(type: type, reason: .rangeOutOfBounds(
+                offset: offString, length: stringByteLength, recordSize: slice.size
+            ))
+        }
+        guard let string = slice.utf16String(at: offString, codeUnits: chars, stopAtNUL: false) else {
+            return .malformed(type: type, reason: .rangeOutOfBounds(
+                offset: offString, length: stringByteLength, recordSize: slice.size
+            ))
+        }
+
+        // Dx: present only when offDx != 0. Length is `chars`, or `2 × chars`
+        // when ETO_PDY is set (§2.2.5 OutputDx). Validate the range against
+        // nSize before allocating.
+        var dx: [UInt32]? = nil
+        if rawOffDx != 0 {
+            let offDx = Int(rawOffDx)
+            let dxCount = options.pdy ? chars * 2 : chars
+            let dxByteLength = dxCount * 4
+            guard offDx >= 0, dxByteLength <= slice.size - offDx else {
+                return .malformed(type: type, reason: .rangeOutOfBounds(
+                    offset: offDx, length: dxByteLength, recordSize: slice.size
+                ))
+            }
+            guard let values = slice.u32Array(at: offDx, count: dxCount) else {
+                return .malformed(type: type, reason: .rangeOutOfBounds(
+                    offset: offDx, length: dxByteLength, recordSize: slice.size
+                ))
+            }
+            dx = values
+        }
+
+        return .extTextOutW(ExtTextPayload(
+            graphicsMode: graphicsMode,
+            exScale: exScale,
+            eyScale: eyScale,
+            reference: reference,
+            rectangle: rectangle,
+            string: string,
+            options: options,
+            dx: dx
+        ))
+    }
+
+    // MARK: - Bitmap decoders
+
+    /// Per-side and total-area caps for a decoded DIB (primer §8): a hostile
+    /// header must never make the renderer allocate an enormous surface.
+    private static let dibMaxDimension = 30_000
+    private static let dibMaxArea = 100_000_000
+
+    /// EMR_STRETCHDIBITS §2.3.1.7. Fixed part 80 bytes: Bounds RectL at 8,
+    /// xDest/yDest at 24/28, xSrc/ySrc at 32/36, cxSrc/cySrc at 40/44,
+    /// offBmiSrc/cbBmiSrc/offBitsSrc/cbBitsSrc at 48/52/56/60, UsageSrc at 64,
+    /// BitBltRasterOperation at 68, cxDest/cyDest at 72/76.
+    private static func decodeStretchDIBits(slice: RecordSlice) -> EMFRecordPayload {
+        let type: UInt32 = 81
+        guard let bounds = slice.rectL(8),
+              let xDest = slice.i32(24), let yDest = slice.i32(28),
+              let xSrc = slice.i32(32), let ySrc = slice.i32(36),
+              let cxSrc = slice.i32(40), let cySrc = slice.i32(44),
+              let offBmi = slice.u32(48), let cbBmi = slice.u32(52),
+              let offBits = slice.u32(56), let cbBits = slice.u32(60),
+              let usageSrc = slice.u32(64), let rop = slice.u32(68),
+              let cxDest = slice.i32(72), let cyDest = slice.i32(76)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 80, actualSize: slice.size))
+        }
+
+        let dibResult = decodeDIB(
+            slice: slice, type: type,
+            offBmi: offBmi, cbBmi: cbBmi, offBits: offBits, cbBits: cbBits
+        )
+        switch dibResult {
+        case .failure(let reason):
+            return .malformed(type: type, reason: reason)
+        case .success(let dib):
+            return .stretchDIBits(StretchDIBitsPayload(
+                bounds: bounds,
+                dest: PointL(x: xDest, y: yDest),
+                destSize: SizeL(cx: cxDest, cy: cyDest),
+                src: PointL(x: xSrc, y: ySrc),
+                srcSize: SizeL(cx: cxSrc, cy: cySrc),
+                usageSrc: usageSrc,
+                rasterOperation: rop,
+                dib: dib
+            ))
+        }
+    }
+
+    /// EMR_SETDIBITSTODEVICE §2.3.1.5. Fixed part 76 bytes: Bounds at 8,
+    /// xDest/yDest at 24/28, xSrc/ySrc at 32/36, cxSrc/cySrc at 40/44,
+    /// offBmiSrc/cbBmiSrc/offBitsSrc/cbBitsSrc at 48/52/56/60, UsageSrc at 64,
+    /// iStartScan at 68, cScans at 72. No raster op, no source transform.
+    private static func decodeSetDIBitsToDevice(slice: RecordSlice) -> EMFRecordPayload {
+        let type: UInt32 = 80
+        guard let bounds = slice.rectL(8),
+              let xDest = slice.i32(24), let yDest = slice.i32(28),
+              let xSrc = slice.i32(32), let ySrc = slice.i32(36),
+              let cxSrc = slice.i32(40), let cySrc = slice.i32(44),
+              let offBmi = slice.u32(48), let cbBmi = slice.u32(52),
+              let offBits = slice.u32(56), let cbBits = slice.u32(60),
+              let usageSrc = slice.u32(64),
+              let startScan = slice.u32(68), let scanCount = slice.u32(72)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 76, actualSize: slice.size))
+        }
+
+        let dibResult = decodeDIB(
+            slice: slice, type: type,
+            offBmi: offBmi, cbBmi: cbBmi, offBits: offBits, cbBits: cbBits
+        )
+        switch dibResult {
+        case .failure(let reason):
+            return .malformed(type: type, reason: reason)
+        case .success(let dib):
+            return .setDIBitsToDevice(SetDIBitsToDevicePayload(
+                bounds: bounds,
+                dest: PointL(x: xDest, y: yDest),
+                src: PointL(x: xSrc, y: ySrc),
+                srcSize: SizeL(cx: cxSrc, cy: cySrc),
+                usageSrc: usageSrc,
+                startScan: startScan,
+                scanCount: scanCount,
+                dib: dib
+            ))
+        }
+    }
+
+    /// EMR_BITBLT §2.3.1.2 (100-byte fixed part) and EMR_STRETCHBLT §2.3.1.6
+    /// (108-byte fixed part = BITBLT + cxSrc/cySrc). Shared layout: Bounds at 8,
+    /// xDest/yDest at 24/28, cxDest/cyDest at 32/36, BitBltRasterOperation at
+    /// 40, xSrc/ySrc at 44/48, XformSrc (24 bytes) at 52, BkColorSrc at 76,
+    /// UsageSrc at 80, offBmiSrc/cbBmiSrc/offBitsSrc/cbBitsSrc at 84/88/92/96.
+    /// STRETCHBLT adds cxSrc at 100 and cySrc at 104.
+    ///
+    /// A sourceless (rop-only) blit is VALID: cbBmiSrc == 0 means the DIB is
+    /// omitted (§2.3.1.2), yielding `dib == nil` — not malformed.
+    private static func decodeBitBlt(slice: RecordSlice, stretch: Bool) -> EMFRecordPayload {
+        let type: UInt32 = stretch ? 77 : 76
+        let minimumSize = stretch ? 108 : 100
+        guard let bounds = slice.rectL(8),
+              let xDest = slice.i32(24), let yDest = slice.i32(28),
+              let cxDest = slice.i32(32), let cyDest = slice.i32(36),
+              let rop = slice.u32(40),
+              let xSrc = slice.i32(44), let ySrc = slice.i32(48),
+              let xform = slice.xform(52),
+              let bkColor = slice.colorRef(76),
+              let usageSrc = slice.u32(80),
+              let offBmi = slice.u32(84), let cbBmi = slice.u32(88),
+              let offBits = slice.u32(92), let cbBits = slice.u32(96)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: minimumSize, actualSize: slice.size))
+        }
+
+        var srcSize: SizeL? = nil
+        if stretch {
+            guard let cxSrc = slice.i32(100), let cySrc = slice.i32(104) else {
+                return .malformed(type: type, reason: .tooSmall(minimumSize: 108, actualSize: slice.size))
+            }
+            srcSize = SizeL(cx: cxSrc, cy: cySrc)
+        }
+
+        // Hostile floats never propagate (primer §8).
+        guard xform.isFinite else {
+            return .malformed(type: type, reason: .nonFiniteTransform)
+        }
+
+        // Sourceless (rop-only) form: cbBmiSrc == 0, DIB omitted — VALID.
+        var dib: DIB? = nil
+        if cbBmi != 0 {
+            switch decodeDIB(
+                slice: slice, type: type,
+                offBmi: offBmi, cbBmi: cbBmi, offBits: offBits, cbBits: cbBits
+            ) {
+            case .failure(let reason):
+                return .malformed(type: type, reason: reason)
+            case .success(let decoded):
+                dib = decoded
+            }
+        }
+
+        let payload = BitBltPayload(
+            bounds: bounds,
+            dest: PointL(x: xDest, y: yDest),
+            destSize: SizeL(cx: cxDest, cy: cyDest),
+            rasterOperation: rop,
+            src: PointL(x: xSrc, y: ySrc),
+            xformSrc: xform,
+            bkColorSrc: bkColor,
+            usageSrc: usageSrc,
+            srcSize: srcSize,
+            dib: dib
+        )
+        return stretch ? .stretchBlt(payload) : .bitBlt(payload)
+    }
+
+    // MARK: - Shared DIB core
+
+    /// Outcome of `decodeDIB`: a decoded DIB (whose `content` may itself be
+    /// `.unsupported`, a valid verdict) or a `.malformed` reason. A dedicated
+    /// enum rather than `Result` — `EMFPayloadIssue` is a plain value type, not
+    /// an `Error`.
+    private enum DIBDecodeResult {
+        case success(DIB)
+        case failure(EMFPayloadIssue)
+    }
+
+    /// Decodes one source DIB from the record-relative BMI and bits ranges
+    /// carried by every bitmap record. Returns `.failure(reason)` for a hostile
+    /// or internally-inconsistent DIB (`.malformed`) and `.success(dib)` for a
+    /// valid one — where the DIB's own `content` is `.pixels` when this phase
+    /// decodes it (BI_RGB 24/32-bit, or 8-bit palettised) or `.unsupported`
+    /// otherwise (RLE, BITFIELDS, 1/4/16-bit, palette usage).
+    ///
+    /// Every offset and length is validated against the record's `nSize` in
+    /// Int arithmetic BEFORE any pixel bytes are exposed (primer §8, the
+    /// hostile surface). BitmapInfoHeader layout per [MS-WMF] §2.2.2.3
+    /// (not in the local [MS-EMF] PDF); RGBQuad order per [MS-WMF] §2.2.2.20.
+    private static func decodeDIB(
+        slice: RecordSlice,
+        type: UInt32,
+        offBmi: UInt32,
+        cbBmi: UInt32,
+        offBits: UInt32,
+        cbBits: UInt32
+    ) -> DIBDecodeResult {
+        let bmiOffset = Int(offBmi)
+        let bmiSize = Int(cbBmi)
+        let bitsOffset = Int(offBits)
+        let bitsSize = Int(cbBits)
+
+        // The BMI and bits ranges must each fit inside the record (§8). Bits
+        // may legitimately be empty (bitsSize 0), but the offset still has to
+        // be in range.
+        guard bmiOffset >= 0, bmiSize >= 0, bmiSize <= slice.size - bmiOffset else {
+            return .failure(.rangeOutOfBounds(offset: bmiOffset, length: bmiSize, recordSize: slice.size))
+        }
+        guard bitsOffset >= 0, bitsSize >= 0, bitsSize <= slice.size - bitsOffset else {
+            return .failure(.rangeOutOfBounds(offset: bitsOffset, length: bitsSize, recordSize: slice.size))
+        }
+
+        // BitmapInfoHeader is at least 40 bytes; its fixed prefix must fit both
+        // cbBmiSrc and the record. Larger headers are legal — read the 40-byte
+        // prefix and ignore the rest (still bounded by cbBmiSrc).
+        guard bmiSize >= 40, let rawHeaderSize = slice.u32(bmiOffset) else {
+            return .failure(.tooSmall(minimumSize: bmiOffset + 40, actualSize: slice.size))
+        }
+        guard rawHeaderSize >= 40 else {
+            return .failure(.badBitmapHeader(headerSize: rawHeaderSize))
+        }
+
+        guard let width = slice.i32(bmiOffset + 4),
+              let height = slice.i32(bmiOffset + 8),
+              // Planes u16 at +12 (MUST be 1; not acted on), BitCount u16 at +14.
+              let bitCount = slice.u16(bmiOffset + 14),
+              let rawCompression = slice.u32(bmiOffset + 16),
+              // ColorUsed u32 at +32 (palette length; 0 means "all for BitCount").
+              let colorUsed = slice.u32(bmiOffset + 32)
+        else {
+            return .failure(.tooSmall(minimumSize: bmiOffset + 40, actualSize: slice.size))
+        }
+        let compression = BitmapCompression(rawCompression)
+
+        // Only BI_RGB is decoded to pixels; anything else is a VALID
+        // `.unsupported` DIB the renderer logs (distinct from `.malformed`).
+        guard compression == .rgb else {
+            return .success(DIB(
+                width: width, height: height, bitCount: bitCount,
+                compression: compression,
+                content: .unsupported(.compression(compression))
+            ))
+        }
+        // 24/32-bit truecolor and 8-bit palettised are decoded; others are
+        // `.unsupported` (1/4/16-bit).
+        guard bitCount == 24 || bitCount == 32 || bitCount == 8 else {
+            return .success(DIB(
+                width: width, height: height, bitCount: bitCount,
+                compression: compression,
+                content: .unsupported(.bitCount(bitCount))
+            ))
+        }
+
+        // §8 HOSTILE SURFACE — the stride/size math. Dimensions are validated
+        // BEFORE the stride multiply so nothing overflows and nothing enormous
+        // is allocated. All arithmetic is Int (64-bit here); width/height came
+        // from i32 so |value| fits comfortably.
+        let w = Int(width)
+        let absHeight = height == Int32.min ? Int(Int32.max) + 1 : abs(Int(height))
+        guard w > 0, absHeight > 0,
+              w <= dibMaxDimension, absHeight <= dibMaxDimension,
+              w <= dibMaxArea / absHeight
+        else {
+            return .failure(.badBitmapDimensions(width: w, height: absHeight))
+        }
+
+        // stride = ((Width × BitCount + 31) / 32) × 4, required = stride × |Height|.
+        // w ≤ 30_000 and bitCount ≤ 32 keep the product far below Int overflow.
+        let stride = ((w * Int(bitCount) + 31) / 32) * 4
+        let required = stride * absHeight
+        guard required <= bitsSize else {
+            return .failure(.badBitmapDimensions(width: w, height: absHeight))
+        }
+        guard let pixelBytes = slice.bytes(at: bitsOffset, length: required) else {
+            return .failure(.rangeOutOfBounds(offset: bitsOffset, length: required, recordSize: slice.size))
+        }
+
+        // Palette (8-bit only): 4-byte RGBQuads (B,G,R,X) directly after the
+        // header prefix, inside cbBmiSrc. ColorUsed names the intended entry
+        // count (0 = "up to 256"), but the number PHYSICALLY present is bounded
+        // by what fits in cbBmiSrc after the header — real emitters (libUEMF,
+        // libemf2svg test-039) write a short 100-entry table with ColorUsed 0,
+        // relying on the reader to size the table from cbBmiSrc, exactly as GDI
+        // does. So the count is clamped to the available bytes rather than
+        // rejected. Pixel indices that then fall outside the table are the
+        // renderer's concern (Task B), not a parse failure.
+        var palette: [RGBQuad] = []
+        if bitCount == 8 {
+            let headerSize = Int(rawHeaderSize)
+            let paletteOffset = bmiOffset + headerSize
+            // Bytes available for the color table within cbBmiSrc (never past
+            // the header record, never negative).
+            let availableBytes = headerSize <= bmiSize ? bmiSize - headerSize : 0
+            let availableQuads = availableBytes / 4
+            let requested = colorUsed == 0 ? 256 : Int(colorUsed)
+            let paletteCount = min(requested, availableQuads)
+            palette.reserveCapacity(paletteCount)
+            for index in 0 ..< paletteCount {
+                guard let b = slice.u8(paletteOffset + index * 4),
+                      let g = slice.u8(paletteOffset + index * 4 + 1),
+                      let r = slice.u8(paletteOffset + index * 4 + 2),
+                      let x = slice.u8(paletteOffset + index * 4 + 3)
+                else {
+                    // Bounded by availableQuads above, so this is unreachable in
+                    // practice; kept as a defensive typed failure rather than a
+                    // force-unwrap (§8).
+                    return .failure(.rangeOutOfBounds(
+                        offset: paletteOffset, length: paletteCount * 4, recordSize: slice.size
+                    ))
+                }
+                palette.append(RGBQuad(blue: b, green: g, red: r, reserved: x))
+            }
+        }
+
+        return .success(DIB(
+            width: width, height: height, bitCount: bitCount,
+            compression: compression,
+            content: .pixels(bytes: pixelBytes, stride: stride, palette: palette)
+        ))
     }
 }

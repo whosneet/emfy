@@ -1,4 +1,5 @@
 import Foundation
+@testable import EMFParse
 
 /// A tiny little-endian byte-buffer builder for hand-constructing EMF fixtures
 /// in tests. Append helpers write in EMF's native little-endian order so the
@@ -149,6 +150,16 @@ extension FixtureBuilder {
             b.appendUInt32(micrometers.0)              // 100 MicrometersX
             b.appendUInt32(micrometers.1)              // 104 MicrometersY
         }
+        return b.bytes
+    }
+
+    /// A RectL's 16 bytes in file order: left, top, right, bottom (each i32).
+    static func rectBytes(_ rect: RectL) -> [UInt8] {
+        var b = FixtureBuilder()
+        b.appendInt32(rect.left)
+        b.appendInt32(rect.top)
+        b.appendInt32(rect.right)
+        b.appendInt32(rect.bottom)
         return b.bytes
     }
 

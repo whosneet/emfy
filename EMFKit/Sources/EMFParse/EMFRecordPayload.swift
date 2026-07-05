@@ -18,6 +18,17 @@ public enum EMFPayloadIssue: Sendable, Equatable {
     /// not the required constant (Size MUST be 0x20, Type MUST be
     /// RDH_RECTANGLES = 0x01). Carries the offending values as read.
     case badRegionHeader(size: UInt32, type: UInt32)
+    /// An EmrText or DIB byte range (offString / offDx / offBmiSrc / offBitsSrc
+    /// and its length) did not fit inside the record's own `nSize`. Carries the
+    /// offending offset and length as read.
+    case rangeOutOfBounds(offset: Int, length: Int, recordSize: Int)
+    /// A DIB's declared pixel dimensions were non-positive, exceeded the
+    /// per-side or total-area caps, or the required pixel bytes were larger
+    /// than the bytes actually present. Carries width and height as read.
+    case badBitmapDimensions(width: Int, height: Int)
+    /// A BitmapInfoHeader whose HeaderSize field is below the 40-byte minimum
+    /// ([MS-WMF] §2.2.2.3). Carries the value as read.
+    case badBitmapHeader(headerSize: UInt32)
 }
 
 /// Common payload of the single-polygon 32-bit geometry records
@@ -233,6 +244,223 @@ public struct ExtSelectClipRgnPayload: Sendable, Equatable {
     }
 }
 
+/// Payload of EMR_EXTCREATEFONTINDIRECTW ([MS-EMF] §2.3.7.8): the object-table
+/// index and the LogFont prefix of the record's `elw` font object.
+///
+/// The `elw` field is a LogFont (92 bytes), LogFontEx (348), LogFontExDv
+/// (>348), or LogFontPanose (320) — the spec picks the type from `elw`'s size
+/// (§2.3.7.8). All of them begin with the same 92-byte LogFont, so that prefix
+/// is always decoded; `hasExtendedData` records whether more than a plain
+/// LogFont followed (fullName/style/script + design vector), which phase 4
+/// does not need and carries opaque.
+public struct ExtCreateFontPayload: Sendable, Equatable {
+    /// Object-table index this font is assigned to.
+    public var ihFonts: UInt32
+    /// The 92-byte LogFont prefix, common to every `elw` variant.
+    public var logFont: LogFont
+    /// True when `elw` was larger than a plain 92-byte LogFont — i.e. a
+    /// LogFontEx / LogFontExDv / LogFontPanose whose extra fields are not
+    /// decoded in phase 4.
+    public var hasExtendedData: Bool
+
+    public init(ihFonts: UInt32, logFont: LogFont, hasExtendedData: Bool) {
+        self.ihFonts = ihFonts
+        self.logFont = logFont
+        self.hasExtendedData = hasExtendedData
+    }
+}
+
+/// Payload of EMR_EXTTEXTOUTW ([MS-EMF] §2.3.5.8) with its EmrText object
+/// (§2.2.5): where and how to draw a UTF-16LE string with the current font.
+///
+/// `string` is decoded from `Chars` UTF-16 code units at the record-relative
+/// `offString`; lone surrogates decode losslessly (never fail the payload).
+/// `dx` is present only when the record's `offDx` was non-zero — `Chars`
+/// advances, or `2 × Chars` when ETO_PDY is set. All offsets and lengths were
+/// validated against the record's `nSize` before this value existed.
+public struct ExtTextPayload: Sendable, Equatable {
+    /// The GraphicsMode value ([MS-EMF] §2.1.16); GM_COMPATIBLE (1) makes the
+    /// scale factors meaningful.
+    public var graphicsMode: UInt32
+    /// X page→.01mm scale factor (finite; used only in GM_COMPATIBLE).
+    public var exScale: Float
+    /// Y page→.01mm scale factor (finite; used only in GM_COMPATIBLE).
+    public var eyScale: Float
+    /// EmrText.Reference — the text reference point, logical units.
+    public var reference: PointL
+    /// EmrText.Rectangle — clipping/opaquing rectangle, logical units.
+    public var rectangle: RectL
+    /// The decoded output string.
+    public var string: String
+    /// ExtTextOut option flags ([MS-EMF] §2.1.11).
+    public var options: ExtTextOutOptions
+    /// The intercharacter spacing array, logical units; `nil` when the record
+    /// carried none (offDx == 0). When ETO_PDY is set it holds two values per
+    /// character (dx, dy in that order).
+    public var dx: [UInt32]?
+
+    public init(
+        graphicsMode: UInt32,
+        exScale: Float,
+        eyScale: Float,
+        reference: PointL,
+        rectangle: RectL,
+        string: String,
+        options: ExtTextOutOptions,
+        dx: [UInt32]?
+    ) {
+        self.graphicsMode = graphicsMode
+        self.exScale = exScale
+        self.eyScale = eyScale
+        self.reference = reference
+        self.rectangle = rectangle
+        self.string = string
+        self.options = options
+        self.dx = dx
+    }
+}
+
+/// Payload of EMR_STRETCHDIBITS ([MS-EMF] §2.3.1.7): a stretched block
+/// transfer of a source DIB into a destination rectangle under a raster op.
+public struct StretchDIBitsPayload: Sendable, Equatable {
+    public var bounds: RectL
+    /// Destination upper-left, logical units.
+    public var dest: PointL
+    /// Destination size, logical units.
+    public var destSize: SizeL
+    /// Source upper-left, source pixels.
+    public var src: PointL
+    /// Source size, source pixels.
+    public var srcSize: SizeL
+    /// DIBColors usage ([MS-EMF] §2.1.9) for the color table.
+    public var usageSrc: UInt32
+    /// Ternary raster operation ([MS-WMF] §2.1.1.31); SRCCOPY is 0x00CC0020.
+    public var rasterOperation: UInt32
+    /// The source bitmap; `nil` only when the record declared none
+    /// (cbBmiSrc == 0), which STRETCHDIBITS does not normally do.
+    public var dib: DIB?
+
+    public init(
+        bounds: RectL,
+        dest: PointL,
+        destSize: SizeL,
+        src: PointL,
+        srcSize: SizeL,
+        usageSrc: UInt32,
+        rasterOperation: UInt32,
+        dib: DIB?
+    ) {
+        self.bounds = bounds
+        self.dest = dest
+        self.destSize = destSize
+        self.src = src
+        self.srcSize = srcSize
+        self.usageSrc = usageSrc
+        self.rasterOperation = rasterOperation
+        self.dib = dib
+    }
+}
+
+/// Payload of EMR_SETDIBITSTODEVICE ([MS-EMF] §2.3.1.5): an unconditional
+/// (no raster op) transfer of scanlines from a source DIB to the device.
+public struct SetDIBitsToDevicePayload: Sendable, Equatable {
+    public var bounds: RectL
+    /// Destination upper-left, logical units.
+    public var dest: PointL
+    /// Source upper-left, source pixels.
+    public var src: PointL
+    /// Source size, source pixels.
+    public var srcSize: SizeL
+    /// DIBColors usage ([MS-EMF] §2.1.9).
+    public var usageSrc: UInt32
+    /// First scan line in the array.
+    public var startScan: UInt32
+    /// Number of scan lines.
+    public var scanCount: UInt32
+    /// The source bitmap; `nil` only when the record declared none.
+    public var dib: DIB?
+
+    public init(
+        bounds: RectL,
+        dest: PointL,
+        src: PointL,
+        srcSize: SizeL,
+        usageSrc: UInt32,
+        startScan: UInt32,
+        scanCount: UInt32,
+        dib: DIB?
+    ) {
+        self.bounds = bounds
+        self.dest = dest
+        self.src = src
+        self.srcSize = srcSize
+        self.usageSrc = usageSrc
+        self.startScan = startScan
+        self.scanCount = scanCount
+        self.dib = dib
+    }
+}
+
+/// Payload of EMR_BITBLT ([MS-EMF] §2.3.1.2) and EMR_STRETCHBLT
+/// (§2.3.1.6): a (possibly stretched) block transfer under a raster op, with
+/// a source-bitmap transform and background color.
+///
+/// Both records share this payload; STRETCHBLT additionally carries a source
+/// size (`srcSize`), which is `nil` for BITBLT (whose source and destination
+/// share the destination size). Per the spec, if the raster op needs no
+/// source the DIB is omitted (`dib == nil`, `hasSource == false`) — a VALID
+/// rop-only variant, not malformed.
+public struct BitBltPayload: Sendable, Equatable {
+    public var bounds: RectL
+    /// Destination upper-left, logical units.
+    public var dest: PointL
+    /// Destination size, logical units.
+    public var destSize: SizeL
+    /// Ternary raster operation ([MS-WMF] §2.1.1.31).
+    public var rasterOperation: UInt32
+    /// Source upper-left, logical units.
+    public var src: PointL
+    /// World→page transform for the source bitmap ([MS-EMF] §2.2.28); finite.
+    public var xformSrc: XForm
+    /// Source-bitmap background color.
+    public var bkColorSrc: ColorRef
+    /// DIBColors usage ([MS-EMF] §2.1.9).
+    public var usageSrc: UInt32
+    /// Source size, logical units — STRETCHBLT only; `nil` for BITBLT.
+    public var srcSize: SizeL?
+    /// The source bitmap; `nil` when the record declared none (cbBmiSrc == 0),
+    /// which is the valid rop-only (sourceless) form.
+    public var dib: DIB?
+
+    /// True when the record carried a source DIB (cbBmiSrc != 0). Distinguishes
+    /// a sourceless rop-only blit from a source-carrying one.
+    public var hasSource: Bool { dib != nil }
+
+    public init(
+        bounds: RectL,
+        dest: PointL,
+        destSize: SizeL,
+        rasterOperation: UInt32,
+        src: PointL,
+        xformSrc: XForm,
+        bkColorSrc: ColorRef,
+        usageSrc: UInt32,
+        srcSize: SizeL?,
+        dib: DIB?
+    ) {
+        self.bounds = bounds
+        self.dest = dest
+        self.destSize = destSize
+        self.rasterOperation = rasterOperation
+        self.src = src
+        self.xformSrc = xformSrc
+        self.bkColorSrc = bkColorSrc
+        self.usageSrc = usageSrc
+        self.srcSize = srcSize
+        self.dib = dib
+    }
+}
+
 /// A decoded record payload — one case per decoded record type (phases 2–3),
 /// plus `.unimplemented` for everything not yet decoded and `.malformed` for
 /// payloads that fail their own validation.
@@ -356,6 +584,30 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case polyPolyline16(PolyPoly16Payload)
     /// EMR_POLYPOLYGON16 (91), §2.3.5.29.
     case polyPolygon16(PolyPoly16Payload)
+
+    // MARK: Text ([MS-EMF] §2.3.11, §2.3.5.8, §2.3.7.8)
+
+    /// EMR_SETTEXTALIGN (22), §2.3.11.25. Text alignment mask.
+    case setTextAlign(TextAlign)
+    /// EMR_SETTEXTCOLOR (24), §2.3.11.26. Text foreground color.
+    case setTextColor(ColorRef)
+    /// EMR_SETBKCOLOR (25), §2.3.11.10. Background color for text/hatch.
+    case setBkColor(ColorRef)
+    /// EMR_EXTCREATEFONTINDIRECTW (82), §2.3.7.8.
+    case extCreateFontIndirectW(ExtCreateFontPayload)
+    /// EMR_EXTTEXTOUTW (84), §2.3.5.8.
+    case extTextOutW(ExtTextPayload)
+
+    // MARK: Bitmaps ([MS-EMF] §2.3.1)
+
+    /// EMR_STRETCHDIBITS (81), §2.3.1.7.
+    case stretchDIBits(StretchDIBitsPayload)
+    /// EMR_BITBLT (76), §2.3.1.2.
+    case bitBlt(BitBltPayload)
+    /// EMR_STRETCHBLT (77), §2.3.1.6. Shares BitBltPayload; `srcSize` is set.
+    case stretchBlt(BitBltPayload)
+    /// EMR_SETDIBITSTODEVICE (80), §2.3.1.5.
+    case setDIBitsToDevice(SetDIBitsToDevicePayload)
 
     // MARK: Fallbacks
 
