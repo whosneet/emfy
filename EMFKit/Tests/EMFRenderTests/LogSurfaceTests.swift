@@ -78,4 +78,53 @@ struct LogSurfaceTests {
         _ = dc.apply(.setBkMode(.transparent), log: &log)
         #expect(log.isClean)
     }
+
+    // MARK: - Bounded growth (anti-hang, R1)
+
+    @Test("distinct keys then repeats of an existing key give correct counts")
+    func distinctThenRepeatCounts() {
+        var log = EMFRenderLog()
+        // N distinct rop values, first-occurrence order preserved.
+        let n = 100
+        for value in 0 ..< n { log.noteUnsupportedRasterOp(rasterOperation: UInt32(value)) }
+        #expect(log.entries.count == n)
+        // M more of an already-present key (0) bump only that entry's count.
+        let m = 50
+        for _ in 0 ..< m { log.noteUnsupportedRasterOp(rasterOperation: 0) }
+        #expect(log.entries.count == n, "repeats never add entries")
+        #expect(log.entries.first == .unsupportedRasterOp(rasterOperation: 0, count: 1 + m))
+        #expect(log.entries.last == .unsupportedRasterOp(rasterOperation: UInt32(n - 1), count: 1))
+    }
+
+    @Test("a flood of distinct coalescing keys is capped and does not hang")
+    func distinctKeysAreCappedFast() {
+        let clock = ContinuousClock()
+        var log = EMFRenderLog()
+        let elapsed = clock.measure {
+            // Far more distinct keys than the cap; with the O(1) index map this
+            // is linear, not quadratic. Pre-map this was ~2e8 comparisons.
+            for value in 0 ..< 20_000 { log.noteUnsupportedRasterOp(rasterOperation: UInt32(value)) }
+        }
+        #expect(log.entries.count == EMFRenderLog.maxDistinctEntries,
+                "distinct entries are hard-capped")
+        // Counts on already-present keys must still increment past the cap.
+        log.noteUnsupportedRasterOp(rasterOperation: 0)
+        #expect(log.entries.first == .unsupportedRasterOp(rasterOperation: 0, count: 2))
+        // Wall-clock sanity: linear work over 20k inserts is milliseconds.
+        #expect(elapsed < .seconds(1), "must not hang: \(elapsed)")
+    }
+
+    @Test("distinct unsupported-DIB reasons stay separate; repeats coalesce")
+    func dibReasonsCoalesceByReason() {
+        var log = EMFRenderLog()
+        log.noteUnsupportedDIB(reason: .bitCount(1))
+        log.noteUnsupportedDIB(reason: .bitCount(4))
+        log.noteUnsupportedDIB(reason: nil)          // render-declined
+        log.noteUnsupportedDIB(reason: .bitCount(1)) // repeat of the first
+        #expect(log.entries == [
+            .unsupportedDIB(reason: .bitCount(1), count: 2),
+            .unsupportedDIB(reason: .bitCount(4), count: 1),
+            .unsupportedDIB(reason: nil, count: 1),
+        ])
+    }
 }
