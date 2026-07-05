@@ -217,15 +217,23 @@ struct EMFDocumentView: View {
     // MARK: - Export actions
 
     private func exportPNG() {
-        guard let image = document.image,
-              let data = EMFExport.pngData(from: image)
-        else { return }
+        guard let image = document.image else {
+            exportError = "This document has no rendered image to export as PNG."
+            return
+        }
+        guard let data = EMFExport.pngData(from: image) else {
+            exportError = "Emfy could not encode a PNG for this document."
+            return
+        }
         pngDocument = PNGExportDocument(data: data)
         exportingPNG = true
     }
 
     private func exportPDF() {
-        guard let data = EMFExport.pdfData(from: document.file) else { return }
+        guard let data = EMFExport.pdfData(from: document.file) else {
+            exportError = "Emfy could not generate a PDF for this document."
+            return
+        }
         pdfDocument = PDFExportDocument(data: data)
         exportingPDF = true
     }
