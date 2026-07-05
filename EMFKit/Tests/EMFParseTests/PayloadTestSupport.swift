@@ -44,6 +44,31 @@ func payloadCaseMatches(type: UInt32, payload: EMFRecordPayload) -> Bool {
     }
 }
 
+/// Reads a committed corpus file into `Data`, `#require`-ing it exists.
+///
+/// FRAGILITY NOTE (mirrors `CorpusPathTests`' `CorpusPaths`): the location is
+/// resolved from this source file's compile-time path
+/// (`<repo>/EMFKit/Tests/EMFParseTests/`), so it breaks if this file moves or
+/// the tree is built without its sibling `corpus/`. SPM has no supported way
+/// to reference files outside the package.
+func requireCorpus(
+    _ name: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) throws -> Data {
+    let url = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()    // EMFParseTests
+        .deletingLastPathComponent()    // Tests
+        .deletingLastPathComponent()    // EMFKit
+        .deletingLastPathComponent()    // repo root
+        .appendingPathComponent("corpus")
+        .appendingPathComponent(name)
+    return try #require(
+        try? Data(contentsOf: url),
+        "corpus file not readable at \(url.path) — see requireCorpus fragility note",
+        sourceLocation: sourceLocation
+    )
+}
+
 extension EMFRecordPayload {
     /// The shared 32-bit poly payload, whichever geometry case carries it.
     var poly32: PolyPointsPayload? {
