@@ -11,7 +11,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "EMFParse"),
-        .target(name: "EMFRender"),
+        .target(
+            name: "EMFRender",
+            dependencies: ["EMFParse"]
+        ),
         .executableTarget(
             name: "emfy-dump",
             dependencies: ["EMFParse"]
@@ -19,6 +22,11 @@ let package = Package(
         .testTarget(
             name: "EMFParseTests",
             dependencies: ["EMFParse"]
+        ),
+        .testTarget(
+            name: "EMFRenderTests",
+            dependencies: ["EMFRender", "EMFParse"],
+            resources: [.copy("__Baselines__")]
         ),
     ]
 )
