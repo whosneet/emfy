@@ -88,10 +88,19 @@ extension EMFFile {
     /// DataSize (u32) at +8, then the data. This walk only reads Type and Size.
     ///
     /// §8: `Size` is bounds-checked against the stream extent before advancing.
-    /// `Size` < 12, not 4-aligned, or running past `end` stops this comment's
-    /// scan (the verdict keeps whatever was seen). A `Size` of 0 fails the
-    /// `>= 12` check and stops — the loop can never fail to advance, so it can
+    /// `Size` < 12 or not 4-aligned stops this comment's scan (the verdict keeps
+    /// whatever was seen). A `Size` of 0 fails the `>= 12` check and stops — the
+    /// loop only ever advances by a fully-validated `recordSize`, so it can
     /// never hang.
+    ///
+    /// The drawing-record type is consulted the moment a 12-byte header is
+    /// readable and structurally sound (`Size >= 12`, 4-aligned), BEFORE the
+    /// body-fits-in-`end` check: EMF+ streams are routinely fragmented across
+    /// consecutive EMR_COMMENT_EMFPLUS records, so a drawing record's declared
+    /// body legitimately overruns this one comment's extent. A drawing type is
+    /// decisive regardless of where its body ends. For a NON-drawing type an
+    /// overrun still stops the scan — its header carries no verdict, and the
+    /// loop must not advance past `end` into bytes this comment does not own.
     private func scanEMFPlusStream(slice: RecordSlice, start: Int, end: Int) -> Bool {
         var offset = start
         // A full 12-byte EMF+ record header must fit before we trust it.
@@ -103,17 +112,23 @@ extension EMFFile {
             }
 
             let recordSize = Int(size)
+            // Structural validity of the header itself gates the type read.
             guard recordSize >= Self.emfPlusRecordHeaderSize,
-                  recordSize % 4 == 0,
-                  offset + recordSize <= end
+                  recordSize % 4 == 0
             else {
                 break
             }
 
+            // A drawing record settles the verdict even when its body overruns
+            // this comment (fragmented stream): the type alone is decisive.
             if Self.isEMFPlusDrawingRecord(type) {
                 return true
             }
 
+            // Non-drawing record: it must fit fully before we advance past it.
+            guard offset + recordSize <= end else {
+                break
+            }
             offset += recordSize
         }
         return false

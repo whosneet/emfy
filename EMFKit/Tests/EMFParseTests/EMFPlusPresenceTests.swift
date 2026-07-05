@@ -182,6 +182,44 @@ struct EMFPlusPresenceTests {
         #expect(file.emfPlusPresence() == .shellOnly)
     }
 
+    // MARK: - Fragmented drawing record (header valid, body overruns comment)
+
+    @Test("drawing header whose Size overruns the comment → drawingContent")
+    func drawingHeaderOverrunsComment() throws {
+        // A single DrawImage (0x401A) record whose 12-byte header is valid
+        // (readable type, Size >= 12, 4-aligned) but whose declared Size runs
+        // far past this comment's extent — the shape of a real EMF+ stream
+        // fragmented across consecutive EMR_COMMENT_EMFPLUS records. The type is
+        // decisive even though the body does not fit: this MUST report drawing
+        // content (it reports .shellOnly before the fix, because the old extent
+        // check ran before the type was ever consulted).
+        let drawing = emfPlusRecord(
+            type: 0x401A,                                 // DrawImage — a drawing record
+            data: [UInt8](repeating: 0, count: 8),
+            sizeOverride: 4096                            // body overruns the comment
+        )
+        let stream = emfPlusRecord(type: emfPlusHeader, flags: 0x0001, data: [UInt8](repeating: 0, count: 16))
+            + drawing
+        let file = try parseFile(records: [emfPlusComment(stream: stream)])
+        #expect(file.emfPlusPresence() == .drawingContent)
+    }
+
+    @Test("NON-drawing header overrunning the comment the same way → shellOnly")
+    func nonDrawingHeaderOverrunsComment() throws {
+        // The same overrun shape but a NON-drawing type (SetAntiAliasMode): its
+        // header carries no verdict, so the overrun stops the scan and the
+        // verdict stays shellOnly — the fix must not flip non-drawing overruns.
+        let nonDrawing = emfPlusRecord(
+            type: emfPlusSetAntiAliasMode,                // 0x4021 — non-drawing
+            data: [UInt8](repeating: 0, count: 8),
+            sizeOverride: 4096
+        )
+        let stream = emfPlusRecord(type: emfPlusHeader, flags: 0x0001, data: [UInt8](repeating: 0, count: 16))
+            + nonDrawing
+        let file = try parseFile(records: [emfPlusComment(stream: stream)])
+        #expect(file.emfPlusPresence() == .shellOnly)
+    }
+
     @Test("Size not 4-aligned → safe stop")
     func sizeNotAligned() throws {
         let misaligned = emfPlusRecord(
