@@ -2,10 +2,13 @@ corpus-local/
 .build/
 xcuserdata/
 .DS_Store
-docs/MS-EMF.pdf
-
-# Release artifacts (scripts/release.sh output)
 dist/
+
+# Private to this machine — internal process docs, never published
+emfy-session-primer.md
+docs/
+CLAUDE.md
+.claude/
 
 # Never commit App Store Connect / notarization keys
 *.p8
