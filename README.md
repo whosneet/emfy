@@ -84,6 +84,28 @@ xcodebuild -project Emfy/Emfy.xcodeproj -scheme Emfy -configuration Debug build
 `scripts/release.sh` is the notarized-release pipeline — point it at your
 own signing identity if you ship a fork.
 
+## Changelog
+
+### 1.1 — July 2026
+
+- Reliable PNG and PDF export, with a clear message if an export can't be
+  completed instead of failing silently.
+- A single Dock icon no matter how many files you open.
+- EMF+ documents show the partial-rendering notice correctly again.
+- More robust handling of large and malformed files — no hangs or runaway
+  memory on hostile input.
+- More memory-efficient Quick Look previews and Finder thumbnails.
+- New Help menu: Developer Documentation, What's New, Changelog, and
+  Contact the Developer.
+
+### 1.0.0 — July 2026
+
+- First public release.
+- Quick Look spacebar previews and Finder thumbnails for `.emf` files.
+- Vector shapes, paths, clipping, styled pens and brushes, transforms,
+  text, and embedded bitmaps.
+- Viewer with zoom, pan, fit-to-window, and export to PNG or true-vector PDF.
+
 ## Contributing
 
 The most valuable contribution is a real `.emf` file that renders wrongly.
