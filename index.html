@@ -128,6 +128,15 @@ img { max-width: 100%; height: auto; display: block; }
 .btn-primary:hover { filter: brightness(1.06); }
 .btn-ghost { border: 1px solid var(--hairline); color: var(--ink); }
 .btn-ghost:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.btn-soon {
+  border: 1px dashed var(--hairline); color: var(--muted);
+  cursor: default; display: inline-flex; align-items: center; gap: 8px;
+}
+.btn-soon .soon-tag {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--link); border-radius: 999px; padding: 2px 8px;
+}
 
 /* ---- lede ---- */
 .lede {
@@ -280,6 +289,9 @@ footer {
   </div>
   <div class="ctas">
     <a class="btn btn-primary" href="https://github.com/whosneet/emfy/releases/latest">Download Emfy.dmg</a>
+    <!-- App Store: when the link is live, replace this span with
+         <a class="btn btn-ghost" href="APP_STORE_URL">Mac App Store</a> -->
+    <span class="btn btn-soon" aria-disabled="true" title="Coming soon">Mac App Store <span class="soon-tag">Soon</span></span>
     <a class="btn btn-ghost" href="https://github.com/whosneet/emfy">View on GitHub</a>
   </div>
 </header>
