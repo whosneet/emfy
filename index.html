@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emfy — EMF viewer for macOS</title>
+<meta name="description" content="A free, open-source viewer for EMF (Enhanced Metafile) files on macOS — Quick Look previews, Finder thumbnails, and a small viewer app.">
+<link rel="icon" href="assets/emfy-icon.png">
+<link rel="apple-touch-icon" href="assets/emfy-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Emfy — EMF viewer for macOS">
+<meta property="og:description" content="Press space on an .emf file. See the picture. Quick Look previews, Finder thumbnails, and a small viewer app — free and open source.">
+<meta property="og:url" content="https://whosneet.github.io/emfy/">
+<meta property="og:image" content="https://whosneet.github.io/emfy/assets/screenshots/viewer-dark-flowchart.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0b0d" media="(prefers-color-scheme: dark)">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --bg-alt: #f5f5f7;
+  --card: #ffffff;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --hairline: rgba(0, 0, 0, 0.12);
+  --accent: #0d96f6;
+  --link: #0066cc;
+  --mount-strip: #fafafa;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 32px rgba(0,0,0,.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b0d;
+    --bg-alt: #151518;
+    --card: #1c1c1f;
+    --ink: #f5f5f7;
+    --muted: #a1a1a6;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --link: #409cff;
+    --mount-strip: #202024;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.5);
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+code, pre, .mono {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+code {
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  border-radius: 5px;
+  padding: 0.12em 0.38em;
+}
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { max-width: 100%; height: auto; display: block; }
+
+.wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+.prose { max-width: 720px; }
+
+/* ---- nav ---- */
+.nav {
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--hairline);
+}
+.nav-inner {
+  display: flex; align-items: center; gap: 20px;
+  height: 52px;
+}
+.nav-brand {
+  display: flex; align-items: center; gap: 9px;
+  font-weight: 600; color: var(--ink); font-size: 15px;
+}
+.nav-brand img { width: 22px; height: 22px; border-radius: 5px; }
+.nav-links {
+  display: flex; gap: 18px; margin-left: auto;
+  font-size: 13.5px;
+}
+.nav-links a { color: var(--muted); }
+.nav-links a:hover { color: var(--ink); text-decoration: none; }
+.nav-cta {
+  font-size: 13.5px; font-weight: 600; color: #fff !important;
+  background: var(--accent); border-radius: 999px; padding: 5px 14px;
+}
+.nav-cta:hover { text-decoration: none; filter: brightness(1.06); }
+
+/* ---- hero ---- */
+.hero { text-align: center; padding: 84px 0 56px; }
+.hero-icon { width: 112px; height: 112px; margin: 0 auto 22px; }
+.hero h1 {
+  font-size: clamp(2.6rem, 6vw, 3.4rem);
+  letter-spacing: -0.022em; font-weight: 700; line-height: 1.05;
+}
+.hero .tagline {
+  margin-top: 14px; font-size: clamp(1.15rem, 2.6vw, 1.35rem);
+  font-weight: 600; letter-spacing: -0.01em;
+}
+.hero .sub {
+  margin: 12px auto 0; max-width: 560px;
+  color: var(--muted); font-size: 1.02rem;
+}
+.chips { display: flex; gap: 8px; justify-content: center; margin-top: 22px; flex-wrap: wrap; }
+.chip {
+  font-size: 12.5px; color: var(--muted);
+  border: 1px solid var(--hairline); border-radius: 999px; padding: 3px 12px;
+}
+.ctas { display: flex; gap: 12px; justify-content: center; margin-top: 26px; flex-wrap: wrap; }
+.btn {
+  display: inline-block; border-radius: 999px; padding: 10px 22px;
+  font-size: 15px; font-weight: 600;
+}
+.btn:hover { text-decoration: none; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { filter: brightness(1.06); }
+.btn-ghost { border: 1px solid var(--hairline); color: var(--ink); }
+.btn-ghost:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+
+/* ---- lede ---- */
+.lede {
+  max-width: 640px; margin: 0 auto; text-align: center;
+  color: var(--ink); font-size: 1.06rem; padding-bottom: 48px;
+}
+
+/* ---- screenshot mounts ---- */
+.mount {
+  border: 1px solid var(--hairline); border-radius: 14px;
+  overflow: hidden; background: var(--card); box-shadow: var(--shadow);
+}
+.mount-strip {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 14px; font-size: 11.5px; color: var(--muted);
+  background: var(--mount-strip); border-bottom: 1px solid var(--hairline);
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+.mount img { width: 100%; }
+.mount-grid .mount img { aspect-ratio: 16 / 10; object-fit: contain; }
+.showpiece { padding-bottom: 84px; }
+figure figcaption {
+  margin-top: 12px; text-align: center;
+  color: var(--muted); font-size: 0.88rem; font-style: italic;
+}
+
+/* ---- sections ---- */
+section { padding: 72px 0; scroll-margin-top: 64px; }
+.band-alt { background: var(--bg-alt); }
+.band-alt .mount, .band-alt .card { background: var(--card); }
+h2 {
+  font-size: 1.8rem; letter-spacing: -0.017em; font-weight: 700;
+  margin-bottom: 26px;
+}
+
+/* ---- feature cards ---- */
+.card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.card {
+  border: 1px solid var(--hairline); border-radius: 14px;
+  padding: 20px 22px; background: var(--card); font-size: 0.98rem;
+}
+.card.wide { grid-column: 1 / -1; }
+.card strong { display: block; margin-bottom: 6px; font-size: 1.02rem; }
+.callout {
+  margin-top: 16px; border-left: 3px solid var(--accent);
+  background: var(--card); border-radius: 0 14px 14px 0;
+  border-top: 1px solid var(--hairline); border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  padding: 18px 22px; font-size: 0.98rem;
+}
+
+/* ---- screenshots grid ---- */
+.mount-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 24px; }
+.mount-grid figure { margin: 0; }
+
+/* ---- code / terminal blocks ---- */
+.term {
+  background: #0d1117; border-radius: 12px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.09); margin: 18px 0;
+}
+.term-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 9px 14px; background: rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.term-bar .dot { width: 10px; height: 10px; border-radius: 50%; }
+.dot-r { background: #ff5f57; } .dot-y { background: #febc2e; } .dot-g { background: #28c840; }
+.term-bar .title {
+  margin-left: 8px; font-size: 11.5px; color: #8b949e;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+.term pre {
+  padding: 16px 18px; overflow-x: auto;
+  font-size: 13px; line-height: 1.75; color: #e6edf3;
+}
+.term .cmt { color: #8b949e; }
+section p + .term-label, .term + p { margin-top: 18px; }
+
+/* ---- changelog ---- */
+.releases { display: grid; gap: 16px; }
+.release {
+  border: 1px solid var(--hairline); border-radius: 14px;
+  background: var(--card); padding: 22px 24px;
+}
+.release .ver {
+  display: inline-block; font-weight: 600; font-size: 13px;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--link); border-radius: 6px; padding: 2px 10px; margin-bottom: 12px;
+}
+.release ul { margin-left: 20px; font-size: 0.97rem; }
+.release li { margin: 5px 0; }
+
+/* ---- prose lists / refs ---- */
+.prose p { margin: 14px 0; }
+.refs { list-style: none; margin-top: 14px; }
+.refs li { margin: 8px 0; padding-left: 18px; position: relative; }
+.refs li::before {
+  content: ""; position: absolute; left: 0; top: 0.62em;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+}
+
+/* ---- footer ---- */
+footer {
+  border-top: 1px solid var(--hairline);
+  padding: 28px 0 40px; font-size: 14px; color: var(--muted);
+}
+.footer-inner { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.footer-links { display: flex; gap: 20px; }
+.footer-links a { color: var(--muted); }
+.footer-links a:hover { color: var(--ink); }
+
+@media (max-width: 760px) {
+  .nav-links a:not(.nav-cta) { display: none; }
+  .card-grid, .mount-grid { grid-template-columns: 1fr; }
+  section { padding: 56px 0; }
+  .hero { padding-top: 64px; }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="nav-brand" href="#" aria-label="Emfy home">
+      <img src="assets/emfy-icon.png" alt="" width="22" height="22">
+      Emfy
+    </a>
+    <div class="nav-links">
+      <a href="#install">Install</a>
+      <a href="#what-it-does">What it does</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#building-from-source">Source</a>
+      <a href="#changelog">Changelog</a>
+      <a class="nav-cta" href="https://github.com/whosneet/emfy/releases/latest">Download</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero wrap">
+  <img class="hero-icon" src="assets/emfy-icon.png" alt="Emfy app icon" width="112" height="112">
+  <h1>Emfy</h1>
+  <p class="tagline">Press space on an <code>.emf</code> file. See the picture.</p>
+  <p class="sub">A free, open-source viewer for EMF (Enhanced Metafile) files on macOS —
+  Quick Look previews, Finder thumbnails, and a small viewer app.</p>
+  <div class="chips">
+    <span class="chip">macOS 14+</span>
+    <span class="chip">MIT licence</span>
+    <span class="chip">v1.1</span>
+  </div>
+  <div class="ctas">
+    <a class="btn btn-primary" href="https://github.com/whosneet/emfy/releases/latest">Download Emfy.dmg</a>
+    <a class="btn btn-ghost" href="https://github.com/whosneet/emfy">View on GitHub</a>
+  </div>
+</header>
+
+<p class="lede wrap">EMF is the vector format Windows tools quietly export: diagrams out of
+PowerPoint and Visio, charts out of Excel, drawings out of engineering tools.
+macOS opens none of it. Emfy fixes that where you actually work — the spacebar
+and the Finder window.</p>
+
+<div class="wrap showpiece">
+  <div class="mount">
+    <div class="mount-strip"><span>Support Call Flow.emf</span><span>viewer</span></div>
+    <img src="assets/screenshots/viewer-dark-flowchart.png"
+         alt="Emfy rendering a complex dark-mode flowchart exported as an EMF file"
+         width="2560" height="1600" fetchpriority="high">
+  </div>
+</div>
+
+<section id="install" class="band-alt">
+  <div class="wrap prose">
+    <h2>Install</h2>
+    <p>Download <code>Emfy.dmg</code> from the
+    <a href="https://github.com/whosneet/emfy/releases/latest">latest release</a>, open
+    it, and drag Emfy to Applications. Launch it once — Finder thumbnails and
+    spacebar previews activate from then on. The app is notarized, so it opens
+    without Gatekeeper warnings. Requires macOS 14.0 (Sonoma) or later.</p>
+  </div>
+</section>
+
+<section id="what-it-does">
+  <div class="wrap">
+    <h2>What it does</h2>
+    <div class="card-grid">
+      <div class="card"><strong>Quick Look, first-class.</strong>
+        Spacebar previews and Finder thumbnails for <code>.emf</code> files — the two
+        things no free macOS tool offered.</div>
+      <div class="card"><strong>Real-world record coverage.</strong>
+        Vector shapes, path brackets, clipping, dashed and styled pens, brushes,
+        transforms, text (Windows font names mapped to macOS fonts — rotated and
+        accented runs included), and embedded bitmaps.</div>
+      <div class="card"><strong>A viewer, not just a peek.</strong>
+        Zoom, pan, fit-to-window; export to PNG or true-vector PDF.</div>
+      <div class="card"><strong>Clean-room implementation</strong>
+        from the public [MS-EMF]/[MS-WMF] specifications — no code from, or derived
+        from, any existing EMF implementation.</div>
+      <div class="card wide"><strong>Built for hostile input.</strong>
+        Quick Look parses files the moment Finder shows them, so every size and count
+        is bounds-checked before it is trusted, unknown records are logged and skipped
+        (a partial render always beats an error), the parser is fuzz-tested, and the
+        app and extensions run sandboxed with no network access anywhere.</div>
+    </div>
+    <div class="callout"><strong>Scope, honestly:</strong> modern exporters often write
+      dual-format files (GDI and EMF+ side by side) — these render fully from their GDI
+      half. Files whose drawing content exists <em>only</em> as EMF+ render partially and
+      say so in the viewer; EMF+ decoding is on the v2 list.</div>
+  </div>
+</section>
+
+<section id="screenshots" class="band-alt">
+  <div class="wrap">
+    <h2>Screenshots</h2>
+    <div class="mount-grid">
+      <figure>
+        <div class="mount">
+          <div class="mount-strip"><span>Q3 Product Roadmap.emf</span><span>quick look</span></div>
+          <img src="assets/screenshots/quick-look.png"
+               alt="Quick Look preview of an EMF file in Finder"
+               width="2560" height="1600" loading="lazy">
+        </div>
+        <figcaption>Spacebar preview, straight from Finder</figcaption>
+      </figure>
+      <figure>
+        <div class="mount">
+          <div class="mount-strip"><span>Emfy Screenshots</span><span>finder</span></div>
+          <img src="assets/screenshots/finder-thumbnails.png"
+               alt="Finder window showing real thumbnails for EMF files"
+               width="1869" height="1600" loading="lazy">
+        </div>
+        <figcaption>Real thumbnails for <code>.emf</code> files</figcaption>
+      </figure>
+      <figure>
+        <div class="mount">
+          <div class="mount-strip"><span>Cover Letter.emf</span><span>viewer</span></div>
+          <img src="assets/screenshots/viewer-text.png"
+               alt="Emfy rendering EMF text with Windows fonts mapped to macOS"
+               width="2560" height="1600" loading="lazy">
+        </div>
+        <figcaption>Windows fonts mapped to macOS — weight, slant, and colour intact</figcaption>
+      </figure>
+      <figure>
+        <div class="mount">
+          <div class="mount-strip"><span>Kitchen Process Map.emf</span><span>viewer · 125%</span></div>
+          <img src="assets/screenshots/viewer-process-map.png"
+               alt="Emfy rendering a process map with embedded bitmap content, zoomed to 125%"
+               width="2560" height="1600" loading="lazy">
+        </div>
+        <figcaption>Embedded bitmaps, zoomed and panned in the viewer</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="building-from-source">
+  <div class="wrap prose">
+    <h2>Building from source</h2>
+    <p>Xcode 26 or newer (Swift 6.2 toolchain).</p>
+    <p>The EMFKit package — parser, renderer, and the <code>emfy-dump</code> debugging CLI:</p>
+    <div class="term">
+      <div class="term-bar"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span><span class="title">EMFKit — zsh</span></div>
+      <pre>cd EMFKit
+swift test                                   <span class="cmt"># fixtures, snapshots, fuzz</span>
+swift build -c release
+.build/release/emfy-dump path/to/file.emf    <span class="cmt"># record inventory + diagnostics</span></pre>
+    </div>
+    <p>The app and both Quick Look extensions:</p>
+    <div class="term">
+      <div class="term-bar"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span><span class="title">Emfy — zsh</span></div>
+      <pre>xcodebuild -project Emfy/Emfy.xcodeproj -scheme Emfy -configuration Debug build</pre>
+    </div>
+    <p><code>corpus/</code> holds the self-generated test files the suite depends on.
+    <code>scripts/release.sh</code> is the notarized-release pipeline — point it at your
+    own signing identity if you ship a fork.</p>
+  </div>
+</section>
+
+<section id="changelog" class="band-alt">
+  <div class="wrap prose">
+    <h2>Changelog</h2>
+    <div class="releases">
+      <div class="release">
+        <span class="ver">1.1</span>
+        <ul>
+          <li>Reliable PNG and PDF export, with a clear message if an export can't be completed instead of failing silently.</li>
+          <li>A single Dock icon no matter how many files you open.</li>
+          <li>EMF+ documents show the partial-rendering notice correctly again.</li>
+          <li>More robust handling of large and malformed files — no hangs or runaway memory on hostile input.</li>
+          <li>More memory-efficient Quick Look previews and Finder thumbnails.</li>
+          <li>New Help menu: Developer Documentation, What's New, Changelog, and Contact the Developer.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <span class="ver">1.0</span>
+        <ul>
+          <li>First public release.</li>
+          <li>Quick Look spacebar previews and Finder thumbnails for .emf files.</li>
+          <li>Vector shapes, paths, clipping, styled pens and brushes, transforms, text, and embedded bitmaps.</li>
+          <li>Viewer with zoom, pan, fit-to-window, and export to PNG or true-vector PDF.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="contributing">
+  <div class="wrap prose">
+    <h2>Contributing</h2>
+    <p>The most valuable contribution is a real <code>.emf</code> file that renders wrongly.
+    See <a href="https://github.com/whosneet/emfy/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
+    for the file-licensing ground rules, the clean-room policy, and code expectations.</p>
+  </div>
+</section>
+
+<section id="licence" class="band-alt">
+  <div class="wrap prose">
+    <h2>Licence &amp; references</h2>
+    <p>MIT © 2026 Avneet Singh</p>
+    <ul class="refs">
+      <li><a href="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/">[MS-EMF] Enhanced Metafile Format</a></li>
+      <li><a href="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wmf/">[MS-WMF] shared structures</a></li>
+      <li><a href="https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emfplus/">[MS-EMFPLUS] (v2 scope)</a></li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap footer-inner">
+    <span>MIT © 2026 Avneet Singh</span>
+    <div class="footer-links">
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="support.html">Support</a>
+      <a href="https://github.com/whosneet/emfy">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
