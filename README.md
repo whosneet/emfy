@@ -28,6 +28,8 @@ PowerPoint and Visio, charts out of Excel, drawings out of engineering
 tools. macOS opens none of it. Emfy fixes that where you actually work —
 the spacebar and the Finder window.
 
+<img src="assets/screenshots/viewer-dark-flowchart.png" alt="Emfy rendering a complex dark-mode flowchart exported as an EMF file" width="100%">
+
 ## Install
 
 Download `Emfy.dmg` from the
@@ -59,6 +61,15 @@ without Gatekeeper warnings. Requires macOS 14.0 (Sonoma) or later.
 and EMF+ side by side) — these render fully from their GDI half. Files
 whose drawing content exists *only* as EMF+ render partially and say so in
 the viewer; EMF+ decoding is on the v2 list.
+
+## Screenshots
+
+| | |
+|:--:|:--:|
+| <img src="assets/screenshots/quick-look.png" alt="Quick Look preview of an EMF file in Finder"> | <img src="assets/screenshots/finder-thumbnails.png" alt="Finder window showing real thumbnails for EMF files"> |
+| *Spacebar preview, straight from Finder* | *Real thumbnails for `.emf` files* |
+| <img src="assets/screenshots/viewer-text.png" alt="Emfy rendering EMF text with Windows fonts mapped to macOS"> | <img src="assets/screenshots/viewer-process-map.png" alt="Emfy rendering a process map with embedded bitmap content, zoomed to 125%"> |
+| *Windows fonts mapped to macOS — weight, slant, and colour intact* | *Embedded bitmaps, zoomed and panned in the viewer* |
 
 ## Building from source
 
