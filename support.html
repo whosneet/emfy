@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emfy — Support</title>
+<meta name="description" content="Get help with Emfy, the free open-source EMF viewer for macOS: contact, bug reports, and common questions.">
+<link rel="icon" href="assets/emfy-icon.png">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0b0d" media="(prefers-color-scheme: dark)">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --hairline: rgba(0, 0, 0, 0.12);
+  --link: #0066cc;
+  --surface: #f5f5f7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b0d;
+    --ink: #f5f5f7;
+    --muted: #a1a1a6;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --link: #409cff;
+    --surface: #1c1c1f;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 17px; line-height: 1.65;
+  background: var(--bg); color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  border-radius: 5px; padding: 0.12em 0.38em;
+}
+.wrap { max-width: 640px; margin: 0 auto; padding: 0 24px; }
+header.top {
+  border-bottom: 1px solid var(--hairline);
+  padding: 14px 0;
+}
+.top-inner { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.top-inner img { width: 22px; height: 22px; border-radius: 5px; display: block; }
+.top-inner a { color: var(--ink); display: flex; align-items: center; gap: 9px; }
+.top-inner a:hover { text-decoration: none; color: var(--link); }
+main { padding: 56px 0 72px; }
+h1 { font-size: 2rem; letter-spacing: -0.02em; margin-bottom: 6px; }
+.sub { color: var(--muted); margin-bottom: 34px; }
+h2 { font-size: 1.18rem; letter-spacing: -0.01em; margin: 34px 0 10px; }
+p { margin: 12px 0; }
+.contact-card {
+  background: var(--surface); border-radius: 12px;
+  padding: 18px 22px; margin: 8px 0;
+}
+.contact-card strong { display: block; margin-bottom: 4px; }
+footer {
+  border-top: 1px solid var(--hairline);
+  padding: 24px 0 40px; font-size: 14px; color: var(--muted);
+}
+.footer-inner { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.footer-links { display: flex; gap: 20px; }
+.footer-links a { color: var(--muted); }
+.footer-links a:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-inner">
+    <a href="./"><img src="assets/emfy-icon.png" alt="" width="22" height="22"> Emfy</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1>Support</h1>
+  <p class="sub">Get help with Emfy, the free open-source EMF viewer for macOS.</p>
+
+  <div class="contact-card">
+    <strong>Email</strong>
+    <a href="mailto:hello@neetsingh.com?subject=Emfy%20-%20Feedback%2FSupport">hello@neetsingh.com</a>
+    — questions, feedback, and problem reports all welcome. This is the same
+    address as the app's Help&nbsp;→&nbsp;Contact the Developer menu item.
+  </div>
+  <div class="contact-card">
+    <strong>Bug reports</strong>
+    <a href="https://github.com/whosneet/emfy/issues">GitHub Issues</a>
+    — the most valuable report is a real <code>.emf</code> file that renders wrongly;
+    attach it if you're able to share it.
+  </div>
+
+  <h2>Which macOS versions does Emfy support?</h2>
+  <p>macOS 14.0 (Sonoma) or later.</p>
+
+  <h2>Previews or thumbnails aren't showing</h2>
+  <p>Launch the Emfy app once — macOS registers the Quick Look extensions from
+  then on. If Finder still shows generic icons afterwards, log out and back in,
+  and check that Emfy's extensions are enabled in System Settings (search for
+  “Extensions”, then look under Quick Look).</p>
+
+  <h2>A file renders wrongly or partially</h2>
+  <p>Some files store their drawing content only in the newer EMF+ format; Emfy
+  renders what it can and says so in the viewer — EMF+ decoding is on the v2
+  list. For anything else that looks wrong, email the file or open an issue and
+  it becomes a test case for the next release.</p>
+
+  <h2>Where do I get the latest version?</h2>
+  <p>The <a href="https://github.com/whosneet/emfy/releases/latest">latest release on
+  GitHub</a> always has the newest notarized <code>Emfy.dmg</code>.</p>
+</main>
+
+<footer>
+  <div class="wrap footer-inner">
+    <span>MIT © 2026 Avneet Singh</span>
+    <div class="footer-links">
+      <a href="./">Emfy</a>
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="https://github.com/whosneet/emfy">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

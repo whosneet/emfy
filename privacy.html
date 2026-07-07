@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emfy — Privacy Policy</title>
+<meta name="description" content="Emfy's privacy policy: the app collects no data, has no analytics, and cannot make network connections.">
+<link rel="icon" href="assets/emfy-icon.png">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0b0d" media="(prefers-color-scheme: dark)">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --hairline: rgba(0, 0, 0, 0.12);
+  --link: #0066cc;
+  --surface: #f5f5f7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b0d;
+    --ink: #f5f5f7;
+    --muted: #a1a1a6;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --link: #409cff;
+    --surface: #1c1c1f;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 17px; line-height: 1.65;
+  background: var(--bg); color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  border-radius: 5px; padding: 0.12em 0.38em;
+}
+.wrap { max-width: 640px; margin: 0 auto; padding: 0 24px; }
+header.top {
+  border-bottom: 1px solid var(--hairline);
+  padding: 14px 0;
+}
+.top-inner { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+.top-inner img { width: 22px; height: 22px; border-radius: 5px; display: block; }
+.top-inner a { color: var(--ink); display: flex; align-items: center; gap: 9px; }
+.top-inner a:hover { text-decoration: none; color: var(--link); }
+main { padding: 56px 0 72px; }
+h1 { font-size: 2rem; letter-spacing: -0.02em; margin-bottom: 6px; }
+.date { color: var(--muted); font-size: 0.92rem; margin-bottom: 34px; }
+h2 { font-size: 1.18rem; letter-spacing: -0.01em; margin: 34px 0 10px; }
+p { margin: 12px 0; }
+.summary {
+  background: var(--surface); border-radius: 12px;
+  padding: 18px 22px; margin-bottom: 8px; font-weight: 500;
+}
+footer {
+  border-top: 1px solid var(--hairline);
+  padding: 24px 0 40px; font-size: 14px; color: var(--muted);
+}
+.footer-inner { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.footer-links { display: flex; gap: 20px; }
+.footer-links a { color: var(--muted); }
+.footer-links a:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-inner">
+    <a href="./"><img src="assets/emfy-icon.png" alt="" width="22" height="22"> Emfy</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1>Privacy Policy</h1>
+  <p class="date">Effective 8 July 2026</p>
+
+  <p class="summary">Emfy does not collect, store, or transmit any personal data.
+  It has no analytics, no accounts, and no ability to make network connections.</p>
+
+  <h2>What Emfy collects</h2>
+  <p>Nothing. Emfy contains no analytics, telemetry, crash reporting, advertising
+  identifiers, or usage tracking of any kind, and it never asks you to create an
+  account.</p>
+
+  <h2>Your files</h2>
+  <p>EMF files you open, preview, or export are processed entirely on your Mac.
+  They are never uploaded, transmitted, or shared. The app and its Quick Look
+  extensions run sandboxed and are built <em>without</em> a network entitlement —
+  the operating system prevents them from making network connections at all.</p>
+
+  <h2>Quick Look previews and thumbnails</h2>
+  <p>When Finder shows a preview or thumbnail of an <code>.emf</code> file, macOS invokes
+  Emfy's sandboxed extensions on your Mac. The rendering happens locally and the
+  file's contents never leave your device.</p>
+
+  <h2>Third-party services</h2>
+  <p>Emfy uses no third-party services, SDKs, or dependencies. There is nothing
+  in the app that could share data with anyone.</p>
+
+  <h2>App Store distribution</h2>
+  <p>If you install Emfy from the Mac App Store, Apple may collect standard
+  download and diagnostics information according to your device settings and
+  <a href="https://www.apple.com/legal/privacy/">Apple's privacy policy</a>. That
+  collection is controlled by Apple, not by Emfy.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If this policy ever changes, the updated version will be posted at this
+  address with a new effective date.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy: <a href="mailto:hello@neetsingh.com?subject=Emfy%20%E2%80%94%20Privacy">hello@neetsingh.com</a></p>
+</main>
+
+<footer>
+  <div class="wrap footer-inner">
+    <span>MIT © 2026 Avneet Singh</span>
+    <div class="footer-links">
+      <a href="./">Emfy</a>
+      <a href="support.html">Support</a>
+      <a href="https://github.com/whosneet/emfy">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
