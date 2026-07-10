@@ -69,6 +69,11 @@ jobs:
           [[ "$preview_class" == *.PreviewProvider ]]
           [[ "$thumbnail_class" == *.ThumbnailProvider ]]
 
-          nm -gU "$app/Contents/MacOS/Emfy" | grep -F "EmfyApp"
-          nm -gU "$preview/Contents/MacOS/EmfyQuickLook" | grep -F "PreviewProvider"
-          nm -gU "$thumbnail/Contents/MacOS/EmfyThumbnail" | grep -F "ThumbnailProvider"
+          test -n "$(nm -gU "$app/Contents/MacOS/Emfy")"
+          test -n "$(nm -gU "$preview/Contents/MacOS/EmfyQuickLook")"
+          test -n "$(nm -gU "$thumbnail/Contents/MacOS/EmfyThumbnail")"
+
+          strings "$app/Contents/MacOS/Emfy" | grep -F "EmfyApp"
+          strings "$app/Contents/MacOS/Emfy" | grep -F "DocumentDiagnosticsView"
+          strings "$preview/Contents/MacOS/EmfyQuickLook" | grep -F "PreviewProvider"
+          strings "$thumbnail/Contents/MacOS/EmfyThumbnail" | grep -F "ThumbnailProvider"
