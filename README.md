@@ -12,7 +12,7 @@ Quick Look previews, Finder thumbnails, and a small viewer app.</p>
 <p>
 <a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" alt="Platform: macOS 14+"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-green" alt="Licence: MIT"></a>
-<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/release-v1.1-blue" alt="Latest release: v1.1"></a>
+<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/release-v1.2-blue" alt="Latest release: v1.2"></a>
 </p>
 
 <p>
