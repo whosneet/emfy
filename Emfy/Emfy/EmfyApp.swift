@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Emfy — a viewer-only document app for EMF (Enhanced Metafile) files.
@@ -12,8 +13,15 @@ struct EmfyApp: App {
             EMFDocumentView(document: configuration.document)
         }
         .commands {
-            // Replace the New Document command — this app cannot create files.
-            CommandGroup(replacing: .newItem) {}
+            // Replace New Document — this viewer cannot create EMF files — but
+            // retain the standard File > Open… command this replacement would
+            // otherwise remove on some macOS versions.
+            CommandGroup(replacing: .newItem) {
+                Button("Open…") {
+                    NSDocumentController.shared.openDocument(nil)
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
             // Help menu: documentation, What's New, Changelog, and feedback.
             EmfyCommands()
         }
