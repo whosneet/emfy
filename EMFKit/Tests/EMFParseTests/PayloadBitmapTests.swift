@@ -432,6 +432,24 @@ struct PayloadBitmapTests {
         #expect(reason == .badBitmapDimensions(width: 1_000_000, height: 1))
     }
 
+    @Test("STRETCHDIBITS over the 4 MP decode budget is refused before reading pixel bytes")
+    func stretchOverDecodeBudget() throws {
+        // This is below the former 100 MP cap but exceeds the strict 4 MP
+        // output budget. The intentionally tiny bits range proves the decoder
+        // rejects dimensions before it tries to materialise source pixels.
+        let bmi = Self.bitmapInfoHeader(width: 4_096, height: 1_025, bitCount: 32)
+        let (file, record) = try parseWithSingleRecord(Self.stretchDIBitsRecord(
+            bmi: bmi, bits: [0, 0, 0, 0]
+        ))
+        #expect(file.diagnostics.isEmpty)          // walk remains best-effort
+
+        let payload = file.payload(of: record)
+        #expect(payload == .malformed(
+            type: 81,
+            reason: .badBitmapDimensions(width: 4_096, height: 1_025)
+        ))
+    }
+
     // MARK: - Sourceless (cbBmiSrc == 0) — valid, dib nil (not malformed)
 
     @Test("STRETCHDIBITS sourceless (cbBmiSrc == 0) → dib nil, not malformed")

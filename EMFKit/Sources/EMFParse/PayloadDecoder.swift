@@ -774,8 +774,17 @@ extension EMFFile {
 
     /// Per-side and total-area caps for a decoded DIB (primer §8): a hostile
     /// header must never make the renderer allocate an enormous surface.
+    ///
+    /// The area budget is deliberately lower than the renderer's canvas cap.
+    /// The bitmap decoder currently makes a source-byte copy plus an RGBA8
+    /// output surface, so accepting a 100 MP DIB could temporarily amplify one
+    /// record into hundreds of megabytes in the app or either Quick Look
+    /// extension. Four million output pixels limits that expansion to a 16 MB
+    /// RGBA surface; the matching source-byte budget keeps 32-bit BI_RGB input
+    /// to 16 MB before those copies are made.
     private static let dibMaxDimension = 30_000
-    private static let dibMaxArea = 100_000_000
+    private static let dibMaxArea = 4_000_000
+    private static let dibMaxDecodedPixelBytes = 16_000_000
 
     /// EMR_STRETCHDIBITS §2.3.1.7. Fixed part 80 bytes: Bounds RectL at 8,
     /// xDest/yDest at 24/28, xSrc/ySrc at 32/36, cxSrc/cySrc at 40/44,
@@ -1041,7 +1050,7 @@ extension EMFFile {
         // w ≤ 30_000 and bitCount ≤ 32 keep the product far below Int overflow.
         let stride = ((w * Int(bitCount) + 31) / 32) * 4
         let required = stride * absHeight
-        guard required <= bitsSize else {
+        guard required <= dibMaxDecodedPixelBytes, required <= bitsSize else {
             return .failure(.badBitmapDimensions(width: w, height: absHeight))
         }
         guard let pixelBytes = slice.bytes(at: bitsOffset, length: required) else {
