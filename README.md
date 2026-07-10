@@ -96,6 +96,14 @@ own signing identity if you ship a fork.
 
 ## Changelog
 
+### 1.2
+
+```
+- Oversized embedded bitmaps are safely skipped before they can consume excessive memory, keeping the viewer and Quick Look resilient to hostile files.
+- New Render Details shows parsing diagnostics and rendering notes, including a clear no-diagnostics state.
+- File ▸ Open… is always available with Command-O, while Emfy continues to avoid creating blank documents.
+```
+
 ### 1.1
 
 ```

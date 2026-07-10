@@ -16,6 +16,16 @@ struct ChangelogEntry: Identifiable {
 enum Changelog {
     static let entries: [ChangelogEntry] = [
         ChangelogEntry(
+            version: "1.2",
+            build: "1",
+            date: "July 2026",
+            changes: [
+                "Oversized embedded bitmaps are now skipped before they can use excessive memory, keeping the viewer and Quick Look more resilient to hostile files.",
+                "New Render Details panel shows parser diagnostics and rendering notes, including a clear no-diagnostics state.",
+                "File > Open… is always available with Command-O, while Emfy continues to avoid creating blank documents.",
+            ]
+        ),
+        ChangelogEntry(
             version: "1.1",
             build: "2",
             date: "July 2026",
