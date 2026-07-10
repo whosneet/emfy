@@ -10,6 +10,9 @@ emfy-session-primer.md
 docs/
 CLAUDE.md
 .claude/
+AGENTS.md
+.Codex/
+.codex/
 
 # Never commit App Store Connect / notarization keys
 *.p8
