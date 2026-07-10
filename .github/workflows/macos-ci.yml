@@ -1,0 +1,74 @@
+name: macOS CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    name: Test EMFKit and verify app bundles
+    runs-on: macos-15
+    env:
+      # macos-15 ships Xcode 26 alongside its older default toolchain. Emfy is
+      # written in Swift 6.2, so select it explicitly rather than depending on
+      # the runner's mutable default Xcode selection.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show selected Xcode
+        run: xcodebuild -version
+
+      - name: Test EMFKit from a clean build directory
+        working-directory: EMFKit
+        run: |
+          rm -rf .build
+          swift test
+
+      - name: Build unsigned Debug app and extensions
+        run: |
+          xcodebuild \
+            -project Emfy/Emfy.xcodeproj \
+            -scheme Emfy \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/EmfyDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Verify app and Quick Look binary content
+        run: |
+          set -euo pipefail
+
+          products="$RUNNER_TEMP/EmfyDerivedData/Build/Products/Debug"
+          app="$products/Emfy.app"
+          preview="$app/Contents/PlugIns/EmfyQuickLook.appex"
+          thumbnail="$app/Contents/PlugIns/EmfyThumbnail.appex"
+
+          test -d "$app"
+          test -x "$app/Contents/MacOS/Emfy"
+          test -d "$preview"
+          test -x "$preview/Contents/MacOS/EmfyQuickLook"
+          test -d "$thumbnail"
+          test -x "$thumbnail/Contents/MacOS/EmfyThumbnail"
+
+          for bundle in "$app" "$preview" "$thumbnail"; do
+            plist="$bundle/Contents/Info.plist"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "1.2"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = "1"
+          done
+
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSPrincipalClass' "$app/Contents/Info.plist")" = "NSApplication"
+          preview_class="$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$preview/Contents/Info.plist")"
+          thumbnail_class="$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$thumbnail/Contents/Info.plist")"
+          [[ "$preview_class" == *.PreviewProvider ]]
+          [[ "$thumbnail_class" == *.ThumbnailProvider ]]
+
+          nm -gU "$app/Contents/MacOS/Emfy" | grep -F "EmfyApp"
+          nm -gU "$preview/Contents/MacOS/EmfyQuickLook" | grep -F "PreviewProvider"
+          nm -gU "$thumbnail/Contents/MacOS/EmfyThumbnail" | grep -F "ThumbnailProvider"
