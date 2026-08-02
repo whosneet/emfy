@@ -10,12 +10,14 @@ permissions:
 jobs:
   test-and-build:
     name: Test EMFKit and verify app bundles
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      # macos-15 ships Xcode 26 alongside its older default toolchain. Emfy is
-      # written in Swift 6.2, so select it explicitly rather than depending on
-      # the runner's mutable default Xcode selection.
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      # Pin the toolchain explicitly rather than trusting the image default:
+      # Xcode 26.3's asset-catalog compiler crashes compiling the app's Icon
+      # Composer icon (CI runs 29089294171, 30737411554), while 26.6 — the
+      # version the shipped 1.3 release was built with locally — compiles it
+      # cleanly.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
     steps:
       - uses: actions/checkout@v4
