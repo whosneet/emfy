@@ -56,7 +56,10 @@ struct EMFDocumentView: View {
                         height: max(naturalSize.height * zoom, geometry.size.height)
                     )
             }
-            .background(Color(white: 0.9))
+            // App Store dark-mode fix: the canvas around the page follows the
+            // system appearance, while the page itself stays white (the
+            // renderer fills the EMF bitmap with white paper).
+            .background(Color(nsColor: .underPageBackgroundColor))
             .overlay(alignment: .top) {
                 if document.plusPresence == .drawingContent {
                     plusNotice
