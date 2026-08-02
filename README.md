@@ -96,6 +96,12 @@ own signing identity if you ship a fork.
 
 ## Changelog
 
+### 1.3
+
+```
+- The viewer canvas now follows the system appearance, so the window and toolbar stay readable in Dark Mode.
+```
+
 ### 1.2
 
 ```
