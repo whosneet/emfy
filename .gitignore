@@ -13,6 +13,9 @@ CLAUDE.md
 AGENTS.md
 .Codex/
 .codex/
+PRODUCT.md
+DESIGN.md
+.impeccable/
 
 # Never commit App Store Connect / notarization keys
 *.p8
