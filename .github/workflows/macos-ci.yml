@@ -59,10 +59,16 @@ jobs:
           test -d "$thumbnail"
           test -x "$thumbnail/Contents/MacOS/EmfyThumbnail"
 
+          # Versions are read from the project so releases don't break CI.
+          marketing="$(sed -nE 's/^[[:space:]]*MARKETING_VERSION = (.+);$/\1/p' Emfy/Emfy.xcodeproj/project.pbxproj | sort -u)"
+          build_number="$(sed -nE 's/^[[:space:]]*CURRENT_PROJECT_VERSION = (.+);$/\1/p' Emfy/Emfy.xcodeproj/project.pbxproj | sort -u)"
+          test "$(printf '%s\n' "$marketing" | wc -l | tr -d ' ')" = "1"
+          test "$(printf '%s\n' "$build_number" | wc -l | tr -d ' ')" = "1"
+
           for bundle in "$app" "$preview" "$thumbnail"; do
             plist="$bundle/Contents/Info.plist"
-            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "1.2"
-            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = "1"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$marketing"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = "$build_number"
           done
 
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSPrincipalClass' "$app/Contents/Info.plist")" = "NSApplication"
