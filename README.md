@@ -17,6 +17,8 @@ Quick Look previews, Finder thumbnails, and a small viewer app.</p>
 
 <p>
 <a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/Download-Emfy.dmg-0d96f6?style=for-the-badge&logo=apple&logoColor=white" alt="Download Emfy.dmg"></a>
+&nbsp;
+<a href="https://apps.apple.com/app/emfy/id6787715125?mt=12"><img src="assets/badges/app-store-badge-black.svg" height="28" alt="Download Emfy on the Mac App Store"></a>
 </p>
 
 </div>
@@ -37,6 +39,10 @@ Download `Emfy.dmg` from the
 it, and drag Emfy to Applications. Launch it once — Finder thumbnails and
 spacebar previews activate from then on. The app is notarized, so it opens
 without Gatekeeper warnings. Requires macOS 14.0 (Sonoma) or later.
+
+Prefer the store? The same app is on the
+[Mac App Store](https://apps.apple.com/app/emfy/id6787715125?mt=12), where
+updates install automatically.
 
 ## What it does
 

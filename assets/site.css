@@ -195,14 +195,9 @@ code {
   display: flex; align-items: center; border-left: 2px solid var(--rule-heavy);
 }
 .btn-dl:hover .act { background: var(--blue-deep); }
-.appstore-soon { display: inline-flex; align-items: center; gap: 10px; }
-.appstore-soon img { height: 40px; width: auto; filter: grayscale(1); opacity: 0.55; }
-.soon {
-  font-family: var(--cond); font-weight: 700; font-size: 12px;
-  text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--ink-soft); border: 1px solid var(--rule);
-  padding: 2px 8px; background: var(--paper-shade);
-}
+.appstore { display: inline-flex; align-items: center; }
+.appstore img { height: 40px; width: auto; }
+.appstore:hover img { opacity: 0.85; }
 .gh-link { font-size: 15px; }
 
 .ratings { display: flex; gap: 0; margin: 34px 0 0; flex-wrap: wrap; border: 1px solid var(--rule-heavy); width: fit-content; }
