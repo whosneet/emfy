@@ -152,15 +152,10 @@ private func setClipRectIntersect(_ rect: (Float, Float, Float, Float)) -> [UInt
 
 private func getDC() -> [UInt8] { plusRecord(0x4004, 0) }
 
-/// A minimal (empty) EmfPlusDrawString (§2.3.4.14) — enough to walk; the
-/// playback logs it unsupported without reading the body.
-private func drawString() -> [UInt8] {
-    plusRecord(0x401C, 0x8000, le { writer in
-        writer.u32(argb(255, 0, 0, 0))   // BrushId (direct colour)
-        writer.u32(0)                    // FormatID
-        writer.u32(0)                    // Length
-        for _ in 0 ..< 4 { writer.f32(0) }   // LayoutRect
-    })
+/// An EmfPlusSerializableObject (§2.3.5.2, 0x4038) — a record type outside the
+/// P4 playback set, so the playback logs it unsupported and renders the rest.
+private func serializableObject() -> [UInt8] {
+    plusRecord(0x4038, 0, le { $0.u32(0) })
 }
 
 private extension RenderFixture {
@@ -373,17 +368,17 @@ struct EMFPlusPlaybackTests {
 
     // MARK: - 8. Unsupported record still lets the rest render
 
-    @Test("an unsupported DrawString is logged and the rest still renders")
-    func unsupportedDrawStringLogged() throws {
+    @Test("an unsupported EMF+ record is logged and the rest still renders")
+    func unsupportedRecordLogged() throws {
         let file = try plusFile([
             fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)),
-            drawString(),
+            serializableObject(),
         ])
         let (image, log) = try renderPlus(file)
 
         #expect(Self.isRed(image[20, 20]), "the fill before the unsupported record still drew")
         #expect(
-            log.entries.contains(.emfPlusUnsupportedRecord(type: 0x401C, count: 1)),
+            log.entries.contains(.emfPlusUnsupportedRecord(type: 0x4038, count: 1)),
             "expected an unsupported-record note, got \(log.entries)"
         )
     }

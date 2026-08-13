@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import EMFParse
 import Foundation
 
@@ -341,13 +342,223 @@ struct EMFPlusPlayback {
         case 0x401B:   // DrawImagePoints
             drawImagePoints(record, objectID: objectID, cBit: cBit, relative: relative, log: &log)
 
-        // Text and driver strings — phase-4-B scope: logged skip.
-        case 0x401C, 0x4036:
-            log.noteEMFPlusUnsupported(type: record.type)
+        case 0x401C:   // DrawString
+            drawString(record, sBit: sBit, fontID: objectID, log: &log)
+
+        case 0x4036:   // DrawDriverString
+            drawDriverString(record, sBit: sBit, fontID: objectID, log: &log)
 
         default:
             log.noteEMFPlusUnsupported(type: record.type)
         }
+    }
+
+    // MARK: - Text (§2.3.4.14 / §2.3.4.6)
+
+    /// EmfPlusDrawString ([MS-EMFPLUS] §2.3.4.14): a UTF-16 string drawn with the
+    /// ObjectID font, painted in the S-flag colour or the BrushId brush, laid out
+    /// within the LayoutRect by the optional StringFormat's alignment. Only string
+    /// ALIGNMENT is honoured; trimming/wrap/tabs/hotkey/ranges and RTL/vertical
+    /// direction are simplified to a single left-to-right line with one note.
+    private func drawString(_ record: EMFPlusRecord, sBit: Bool, fontID: Int, log: inout EMFRenderLog) {
+        guard let decoded = EMFPlusText.decodeString(record.data),
+              !decoded.string.isEmpty,
+              let font = table.font(fontID),
+              let color = textFillColor(sBit: sBit, brushID: decoded.brushId, log: &log) else { return }
+
+        // Optional StringFormat: alignment is honoured; other formatting is not.
+        let format = table.stringFormat(Int(decoded.formatId & 0xFF))
+        if let format, Self.formatSimplified(format) {
+            log.noteEMFPlusApproximated(.stringFormatSimplified)
+        }
+        let horizontal = format?.stringAlignment ?? 0   // StringAlignmentNear
+        let vertical = format?.lineAlign ?? 0
+
+        let sized = sizedFont(font, log: &log)
+        guard let line = makeCTLine(decoded.string, font: sized, color: color) else { return }
+        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+
+        // LayoutRect (world) → device. An axis-aligned world transform (the common
+        // case) maps exactly; a rotated/sheared transform yields its bounding box
+        // (best-effort — glyphs stay upright, the same approximation family as the
+        // GDI text path's average-scale sizing).
+        let rectDevice = decoded.layoutRect.applying(worldToDevice)
+        let origin = EMFPlusText.drawStringOrigin(
+            rectDevice: rectDevice, lineWidth: lineWidth, ascent: ascent, descent: descent,
+            horizontal: horizontal, vertical: vertical)
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        state.clip.apply(to: context, deviceToTarget: base)
+        context.setShouldAntialias(state.antialias)
+        // Enter device space (base carries the canvas fit + single y-flip), move to
+        // the baseline origin, then flip y so glyphs render UPRIGHT through base's
+        // y-down→y-up flip — the same discipline as the GDI TextDrawer.
+        context.concatenate(base)
+        context.translateBy(x: origin.x, y: origin.y)
+        context.scaleBy(x: 1, y: -1)
+        context.textPosition = .zero
+        CTLineDraw(line, context)
+    }
+
+    /// EmfPlusDrawDriverString ([MS-EMFPLUS] §2.3.4.6): per-glyph positioned text.
+    /// With CmapLookup the values are characters drawn through the mapped font;
+    /// without it they are raw font glyph indices drawn via CTFontDrawGlyphs. Each
+    /// GlyphPos is a baseline origin in world space. Vertical and realized-advance
+    /// options are simplified to a horizontal, advance-computed run.
+    private func drawDriverString(_ record: EMFPlusRecord, sBit: Bool, fontID: Int, log: inout EMFRenderLog) {
+        guard let decoded = EMFPlusText.decodeDriverString(record.data),
+              !decoded.values.isEmpty,
+              let font = table.font(fontID),
+              let color = textFillColor(sBit: sBit, brushID: decoded.brushId, log: &log) else { return }
+        if decoded.vertical || decoded.realizedAdvance {
+            log.noteEMFPlusApproximated(.stringFormatSimplified)
+        }
+
+        let sized = sizedFont(font, log: &log)
+        let glyphs = mapDriverGlyphs(decoded.values, cmapLookup: decoded.cmapLookup, font: sized)
+
+        // Positions: world → device (optional per-glyph matrix first). Under
+        // RealizedAdvance only the first origin is present; the rest advance by the
+        // font's own device-space horizontal advances.
+        let toDevice = (decoded.matrix ?? .identity).concatenating(worldToDevice)
+        let devicePositions: [CGPoint]
+        if decoded.realizedAdvance {
+            devicePositions = realizedAdvancePositions(glyphs: glyphs, font: sized, firstWorld: decoded.positions.first, toDevice: toDevice)
+        } else {
+            devicePositions = decoded.positions.map { $0.applying(toDevice) }
+        }
+        guard !glyphs.isEmpty, devicePositions.count == glyphs.count else { return }
+        // In the flipped device frame (after scaleBy(1,-1)) a device point (px, py)
+        // sits at local (px, -py); the flip makes the glyph outlines upright.
+        let localPositions = devicePositions.map { CGPoint(x: $0.x, y: -$0.y) }
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        state.clip.apply(to: context, deviceToTarget: base)
+        context.setShouldAntialias(state.antialias)
+        context.setFillColor(color)
+        context.concatenate(base)
+        context.scaleBy(x: 1, y: -1)
+        glyphs.withUnsafeBufferPointer { glyphBuffer in
+            localPositions.withUnsafeBufferPointer { positionBuffer in
+                guard let glyphBase = glyphBuffer.baseAddress,
+                      let positionBase = positionBuffer.baseAddress else { return }
+                CTFontDrawGlyphs(sized, glyphBase, positionBase, glyphs.count, context)
+            }
+        }
+    }
+
+    /// Maps DrawDriverString values to glyphs: CmapLookup treats them as Unicode
+    /// characters (one glyph per UTF-16 unit, .notdef for a lone surrogate half);
+    /// otherwise they are already font glyph indices.
+    private func mapDriverGlyphs(_ values: [UInt16], cmapLookup: Bool, font: CTFont) -> [CGGlyph] {
+        guard cmapLookup else { return values.map { CGGlyph($0) } }
+        var glyphs = [CGGlyph](repeating: 0, count: values.count)
+        values.withUnsafeBufferPointer { charBuffer in
+            glyphs.withUnsafeMutableBufferPointer { glyphBuffer in
+                guard let charBase = charBuffer.baseAddress,
+                      let glyphBase = glyphBuffer.baseAddress else { return }
+                CTFontGetGlyphsForCharacters(font, charBase, glyphBase, values.count)
+            }
+        }
+        return glyphs
+    }
+
+    /// The device-space baseline origins for a RealizedAdvance run: the first
+    /// origin (world → device), then each subsequent glyph advanced by the font's
+    /// own horizontal advance ([MS-EMFPLUS] §2.3.4.6 remarks).
+    private func realizedAdvancePositions(
+        glyphs: [CGGlyph], font: CTFont, firstWorld: CGPoint?, toDevice: CGAffineTransform
+    ) -> [CGPoint] {
+        guard let firstWorld else { return [] }
+        let start = firstWorld.applying(toDevice)
+        var advances = [CGSize](repeating: .zero, count: glyphs.count)
+        _ = glyphs.withUnsafeBufferPointer { glyphBuffer -> Double in
+            advances.withUnsafeMutableBufferPointer { advanceBuffer -> Double in
+                guard let glyphBase = glyphBuffer.baseAddress,
+                      let advanceBase = advanceBuffer.baseAddress else { return 0 }
+                return CTFontGetAdvancesForGlyphs(font, .horizontal, glyphBase, advanceBase, glyphs.count)
+            }
+        }
+        var result: [CGPoint] = []
+        result.reserveCapacity(glyphs.count)
+        var penX = start.x
+        for advance in advances {
+            result.append(CGPoint(x: penX, y: start.y))
+            penX += advance.width
+        }
+        return result
+    }
+
+    /// The DC font resolved through the shared `FontMapper` substitution machinery
+    /// (family + bold/italic traits) and sized to DEVICE units. EmSize is
+    /// interpreted per its SizeUnit ([MS-EMFPLUS] §2.1.1.32): World/Display units
+    /// scale by the world→device average scale (the same basis as pen widths and
+    /// GDI text); Pixel is already device pixels. Guarded like
+    /// FontMapper.devicePointSize — floored at 1 and capped so a hostile EmSize
+    /// cannot feed CoreText an enormous outline-flatten size (§8).
+    private func sizedFont(_ font: EMFPlusFont, log: inout EMFRenderLog) -> CTFont {
+        let scale: CGFloat = font.sizeUnit == 0x02 ? 1 : StrokeMapper.averageScale(worldToDevice)
+        var size = CGFloat(font.emSize) * scale
+        if !size.isFinite || size < 1 { size = FontMapper.defaultHeight }
+        size = min(size, FontMapper.maxDevicePointSize)
+        let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, log: &log)
+        return CTFontCreateCopyWithAttributes(base, size, nil, nil)
+    }
+
+    /// A CTLine carrying the font and foreground colour, or nil if the attributed
+    /// string cannot be built (hostile content never traps the render path, §8).
+    private func makeCTLine(_ string: String, font: CTFont, color: CGColor) -> CTLine? {
+        let attributes: [CFString: Any] = [
+            kCTFontAttributeName: font,
+            kCTForegroundColorAttributeName: color,
+        ]
+        guard let attributed = CFAttributedStringCreate(nil, string as CFString, attributes as CFDictionary) else { return nil }
+        return CTLineCreateWithAttributedString(attributed)
+    }
+
+    /// The foreground colour for a text run: a direct ARGB colour (S flag set) or
+    /// the object-table brush's colour. A non-solid brush contributes a
+    /// representative solid with its existing approximation note (a linear gradient
+    /// uses its start colour, which needs no separate note); an unbound brush
+    /// (S clear) returns nil so the run is skipped — best-effort partial output.
+    private func textFillColor(sBit: Bool, brushID: UInt32, log: inout EMFRenderLog) -> CGColor? {
+        if sBit { return EMFPlusGeometry.cgColor(argb(brushID)) }
+        guard let brush = table.brush(Int(brushID & 0xFF)) else { return nil }
+        switch brush.data {
+        case .solid(let color):
+            return EMFPlusGeometry.cgColor(color)
+        case .linearGradient(let gradient):
+            return EMFPlusGeometry.cgColor(gradient.startColor)
+        case .hatch(_, let foreColor, _):
+            log.noteEMFPlusApproximated(.hatchBrush)
+            return EMFPlusGeometry.cgColor(foreColor)
+        case .pathGradient(let gradient):
+            log.noteEMFPlusApproximated(.pathGradientBrush)
+            return EMFPlusGeometry.cgColor(gradient.centerColor)
+        case .texture:
+            log.noteEMFPlusApproximated(.textureBrush)
+            return EMFPlusGeometry.cgColor(EMFPlusARGB(blue: 0, green: 0, red: 0, alpha: 255))
+        }
+    }
+
+    /// True when a StringFormat carries a non-default feature the single-line,
+    /// left-to-right playback ignores: a right-to-left or vertical direction flag
+    /// ([MS-EMFPLUS] §2.1.2.8), an ellipsis trimming mode (§2.1.1.30, which would
+    /// insert "…"), defined tab stops or character ranges, or hotkey-prefix
+    /// processing (§2.1.1.14). Plain alignment/None-trimming formats return false
+    /// (nothing was simplified), so the common case logs nothing.
+    private static func formatSimplified(_ format: EMFPlusStringFormat) -> Bool {
+        let flags = format.stringFormatFlags
+        let rtl = flags & 0x0001 != 0
+        let vertical = flags & 0x0002 != 0
+        let ellipsisTrimming = format.trimming >= 3
+        return rtl || vertical || ellipsisTrimming
+            || !format.tabStops.isEmpty
+            || !format.characterRanges.isEmpty
+            || format.hotkeyPrefix != 0
     }
 
     // MARK: - Images (§2.3.4.8 / §2.3.4.9)
@@ -790,4 +1001,6 @@ private struct ObjectTable {
     func region(_ id: Int) -> EMFPlusRegion? { if case .region(let value)? = value(id) { return value }; return nil }
     func image(_ id: Int) -> EMFPlusImage? { if case .image(let value)? = value(id) { return value }; return nil }
     func imageAttributes(_ id: Int) -> EMFPlusImageAttributes? { if case .imageAttributes(let value)? = value(id) { return value }; return nil }
+    func font(_ id: Int) -> EMFPlusFont? { if case .font(let value)? = value(id) { return value }; return nil }
+    func stringFormat(_ id: Int) -> EMFPlusStringFormat? { if case .stringFormat(let value)? = value(id) { return value }; return nil }
 }
