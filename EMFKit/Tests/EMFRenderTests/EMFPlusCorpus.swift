@@ -40,6 +40,7 @@ enum EMFPlusCorpus {
 
     static let shapesData = Data(shapesBytes)
     static let dualData = Data(dualBytes)
+    static let imageData = Data(imageBytes)
 
     /// **handmade-emfplus-shapes.emf** — EMF+-only, Dual flag CLEAR.
     ///
@@ -131,6 +132,28 @@ enum EMFPlusCorpus {
         body.append(rectangle(60, 150, 150, 210))                              // @D — must NOT render
 
         return assemble(body: body, handles: 8)
+    }
+
+    /// **handmade-emfplus-image.emf** — EMF+-only, Dual flag CLEAR.
+    ///
+    /// EMF+ record order (all in one EMR_COMMENT_EMFPLUS): Header →
+    /// Object(image #1, an 8×8 32bpp-ARGB pixel bitmap with four solid quadrants
+    /// red/green/blue/white) → DrawImage(#1) scaling the whole image into a
+    /// 120×120 dest rect → DrawImagePoints(#1) mapping the SAME image into a
+    /// sheared parallelogram → EndOfFile. Proves bitmap decode, DrawImage
+    /// scaling, and DrawImagePoints shear from one reused image object.
+    static var imageBytes: [UInt8] {
+        var stream: [UInt8] = []
+        stream += plusHeader(dual: false)
+        // Object #1: the 8×8 four-quadrant bitmap.
+        stream += plusObject(id: 1, type: 5, payload: bitmapImagePayload())
+        // DrawImage: scale the whole 8×8 image into a 120×120 dest at (40,30).
+        stream += drawImage(imageId: 1, src: (0, 0, 8, 8), dest: (40, 30, 120, 120))
+        // DrawImagePoints: map the same image into a sheared parallelogram.
+        stream += drawImagePoints(imageId: 1, src: (0, 0, 8, 8),
+                                  points: [(220, 40), (320, 60), (240, 150)])
+        stream += plusEndOfFile()
+        return assemble(body: [emfPlusComment(stream)], handles: 8)
     }
 
     // MARK: - Colours (ARGB DWORD 0xAARRGGBB, [MS-EMFPLUS] §2.2.2.1)
@@ -355,12 +378,79 @@ enum EMFPlusCorpus {
         })
     }
 
-    /// EmfPlusDrawLines (§2.3.4.9) with the C flag (i16 EmfPlusPoint) and no L
+    /// EmfPlusDrawLines (§2.3.4.10) with the C flag (i16 EmfPlusPoint) and no L
     /// (open): Flags low byte = pen ObjectId; Data = Count, then i16 point pairs.
     private static func drawLinesI16(penId: UInt8, points: [(Int16, Int16)]) -> [UInt8] {
         plusRecord(0x400D, UInt16(penId) | 0x4000, le { w in
             w.u32(UInt32(points.count))
             for point in points { w.i16(point.0); w.i16(point.1) }
+        })
+    }
+
+    // MARK: - EMF+ images ([MS-EMFPLUS] §2.2.2.2, §2.3.4.8, §2.3.4.9)
+
+    /// EmfPlusImage bitmap object (§2.2.1.4 / §2.2.2.2): Version, Type
+    /// (ImageDataTypeBitmap 1), then the EmfPlusBitmap — Width, Height, Stride,
+    /// PixelFormat (32bpp ARGB, 0x0026200A), Type (BitmapDataTypePixel 0), and
+    /// the PixelData. The 8×8 image has four solid quadrants (top-down): red
+    /// (top-left), green (top-right), blue (bottom-left), white (bottom-right).
+    private static func bitmapImagePayload() -> [UInt8] {
+        le { w in
+            w.u32(plusVersion)     // Version
+            w.u32(1)               // Type = ImageDataTypeBitmap
+            w.i32(8)               // Width
+            w.i32(8)               // Height
+            w.i32(32)              // Stride (8 px × 4 bytes)
+            w.u32(0x0026_200A)     // PixelFormat = 32bpp ARGB
+            w.u32(0)               // Type = BitmapDataTypePixel
+            // PixelData, top-down; each pixel is B, G, R, A (a little-endian
+            // 0xAARRGGBB DWORD, [MS-EMFPLUS] §2.1.1.24 32bppARGB).
+            for row in 0 ..< 8 {
+                for col in 0 ..< 8 {
+                    let (r, g, b): (UInt8, UInt8, UInt8)
+                    switch (row < 4, col < 4) {
+                    case (true, true):   (r, g, b) = (255, 0, 0)        // red
+                    case (true, false):  (r, g, b) = (0, 255, 0)        // green
+                    case (false, true):  (r, g, b) = (0, 0, 255)        // blue
+                    case (false, false): (r, g, b) = (255, 255, 255)    // white
+                    }
+                    w.raw([b, g, r, 255])
+                }
+            }
+        }
+    }
+
+    /// EmfPlusDrawImage (§2.3.4.8), C flag clear (RectData is an EmfPlusRectF):
+    /// Flags low byte = image ObjectID; Data = ImageAttributesID (0), SrcUnit
+    /// (UnitTypePixel 2), SrcRect (EmfPlusRectF), dest RectData (EmfPlusRectF).
+    private static func drawImage(
+        imageId: UInt8,
+        src: (Float, Float, Float, Float),
+        dest: (Float, Float, Float, Float)
+    ) -> [UInt8] {
+        plusRecord(0x401A, UInt16(imageId), le { w in
+            w.u32(0)               // ImageAttributesID
+            w.i32(2)               // SrcUnit = UnitTypePixel
+            w.f32(src.0); w.f32(src.1); w.f32(src.2); w.f32(src.3)
+            w.f32(dest.0); w.f32(dest.1); w.f32(dest.2); w.f32(dest.3)
+        })
+    }
+
+    /// EmfPlusDrawImagePoints (§2.3.4.9), C and P clear (absolute EmfPlusPointF):
+    /// Flags low byte = image ObjectID; Data = ImageAttributesID (0), SrcUnit
+    /// (UnitTypePixel 2), SrcRect (EmfPlusRectF), Count (3), then the upper-left,
+    /// upper-right, and lower-left corners of the destination parallelogram.
+    private static func drawImagePoints(
+        imageId: UInt8,
+        src: (Float, Float, Float, Float),
+        points: [(Float, Float)]
+    ) -> [UInt8] {
+        plusRecord(0x401B, UInt16(imageId), le { w in
+            w.u32(0)               // ImageAttributesID
+            w.i32(2)               // SrcUnit = UnitTypePixel
+            w.f32(src.0); w.f32(src.1); w.f32(src.2); w.f32(src.3)
+            w.u32(UInt32(points.count))
+            for point in points { w.f32(point.0); w.f32(point.1) }
         })
     }
 

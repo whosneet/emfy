@@ -25,6 +25,7 @@ struct SnapshotEMFPlusTests {
 
     private static let shapesName = "handmade-emfplus-shapes"
     private static let dualName = "handmade-emfplus-dual"
+    private static let imageName = "handmade-emfplus-image"
 
     // MARK: - Pixel predicates (device coords == bitmap coords)
 
@@ -33,6 +34,9 @@ struct SnapshotEMFPlusTests {
     }
     private static func isGreen(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool {
         p.g > 130 && p.r < 90 && p.b < 90
+    }
+    private static func isBlue(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool {
+        p.b > 200 && p.r < 70 && p.g < 70
     }
     private static func isMagenta(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool {
         p.r > 200 && p.b > 200 && p.g < 90
@@ -50,10 +54,11 @@ struct SnapshotEMFPlusTests {
     /// can never drift from its documented origin. Under `EMFY_RECORD=1` this
     /// instead (re-)writes both files into the source `corpus/` and fails
     /// deliberately, so a recording run can never pass as green.
-    @Test("EMF+ corpus provenance: both committed files equal the generator byte-for-byte")
+    @Test("EMF+ corpus provenance: all committed files equal the generator byte-for-byte")
     func provenance() throws {
         try verifyProvenance(Self.shapesName, data: EMFPlusCorpus.shapesData)
         try verifyProvenance(Self.dualName, data: EMFPlusCorpus.dualData)
+        try verifyProvenance(Self.imageName, data: EMFPlusCorpus.imageData)
     }
 
     private func verifyProvenance(_ name: String, data: Data) throws {
@@ -89,6 +94,28 @@ struct SnapshotEMFPlusTests {
         let hasDrawing = plus.records.contains(where: \.isDrawing)
         #expect(hasDrawing, "no EMF+ drawing records found")
         #expect(plus.header?.isDual == true, "EmfPlusHeader Dual flag should be set")
+    }
+
+    @Test("image parses as EMF+-only with an image object and DrawImage/DrawImagePoints")
+    func imageParse() throws {
+        let file = try parseCorpusFile("\(Self.imageName).emf")
+        let plus = file.emfPlusStream()
+        #expect(plus.header?.isDual == false, "EmfPlusHeader Dual flag should be clear")
+        // The object table holds one decoded 8×8 32bpp-ARGB pixel bitmap.
+        let images = plus.objectDefinitions().definitions.compactMap { definition -> EMFPlusImage? in
+            if case .image(let image) = definition.decodedValue() { return image }
+            return nil
+        }
+        let image = try #require(images.first, "no EMF+ image object decoded")
+        guard case .bitmap(let header, let data) = image.content else {
+            Issue.record("image content is not a bitmap"); return
+        }
+        #expect(header.width == 8 && header.height == 8 && header.stride == 32)
+        #expect(header.pixelFormat == 0x0026_200A && header.bitmapDataType == 0)
+        #expect(data.count == 256, "expected 8×8×4 pixel bytes, got \(data.count)")
+        // Both image-drawing record types are present.
+        #expect(plus.records.contains { $0.type == 0x401A }, "no DrawImage record")
+        #expect(plus.records.contains { $0.type == 0x401B }, "no DrawImagePoints record")
     }
 
     // MARK: - Render coverage (ink probes)
@@ -133,6 +160,34 @@ struct SnapshotEMFPlusTests {
         #expect(Self.isWhite(pixels[105, 180]), "GDI-only rect D (outside any window) should be blank, got \(pixels[105, 180])")
     }
 
+    /// The image file renders its 8×8 four-quadrant bitmap twice — scaled into a
+    /// 120×120 dest rect (DrawImage) and mapped into a sheared parallelogram
+    /// (DrawImagePoints) — with a clean render log. Probes sit at each quadrant's
+    /// centre; the red/green/blue quadrants carry the strong signal (the white
+    /// quadrant is indistinguishable from the blank canvas, so the snapshot
+    /// verifies it), and blank probes bound each image spatially.
+    @Test("image render: DrawImage scaling and DrawImagePoints shear place every quadrant")
+    func imageRender() throws {
+        let (pixels, log) = try render(Self.imageName, width: 360, height: 240)
+        #expect(log.isClean, "unexpected render log for image: \(log.entries)")
+
+        // DrawImage: 8×8 → dest (40,30,120,120); quadrant split at (100, 90).
+        #expect(Self.isRed(pixels[70, 60]), "DrawImage red quadrant, got \(pixels[70, 60])")
+        #expect(Self.isGreen(pixels[130, 60]), "DrawImage green quadrant, got \(pixels[130, 60])")
+        #expect(Self.isBlue(pixels[70, 120]), "DrawImage blue quadrant, got \(pixels[70, 120])")
+        #expect(Self.isWhite(pixels[130, 120]), "DrawImage white quadrant, got \(pixels[130, 120])")
+        // The scaled image is spatially bounded (blank above-left of its origin).
+        #expect(Self.isWhite(pixels[20, 20]), "canvas above-left of the image not blank, got \(pixels[20, 20])")
+
+        // DrawImagePoints: parallelogram UL(220,40) UR(320,60) LL(240,150);
+        // quadrant centres computed from the affine src→parallelogram map.
+        #expect(Self.isRed(pixels[250, 72]), "DrawImagePoints red quadrant, got \(pixels[250, 72])")
+        #expect(Self.isGreen(pixels[300, 82]), "DrawImagePoints green quadrant, got \(pixels[300, 82])")
+        #expect(Self.isBlue(pixels[260, 127]), "DrawImagePoints blue quadrant, got \(pixels[260, 127])")
+        // Blank to the left of the sheared parallelogram.
+        #expect(Self.isWhite(pixels[210, 100]), "canvas left of the parallelogram not blank, got \(pixels[210, 100])")
+    }
+
     // MARK: - Snapshots
 
     @Test("shapes snapshot: EMF+-only geometry against the accepted baseline")
@@ -143,6 +198,11 @@ struct SnapshotEMFPlusTests {
     @Test("dual snapshot: EMF+ + windowed GDI against the accepted baseline")
     func dualSnapshot() throws {
         try snapshot(Self.dualName)
+    }
+
+    @Test("image snapshot: DrawImage + DrawImagePoints against the accepted baseline")
+    func imageSnapshot() throws {
+        try snapshot(Self.imageName)
     }
 
     // MARK: - Helpers
