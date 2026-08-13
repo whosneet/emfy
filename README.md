@@ -50,8 +50,9 @@ updates install automatically.
   `.emf` files — the two things no free macOS tool offered.
 - **Real-world record coverage.** Vector shapes, path brackets, clipping,
   dashed and styled pens, brushes, transforms, text (Windows font names
-  mapped to macOS fonts — rotated and accented runs included), and
-  embedded bitmaps.
+  mapped to macOS fonts — rotated and accented runs included), embedded
+  bitmaps, and EMF+ (GDI+) records — vector shapes, gradients, images, and
+  text.
 - **A viewer, not just a peek.** Zoom, pan, fit-to-window; export to PNG
   or true-vector PDF.
 - **Built for hostile input.** Quick Look parses files the moment Finder
@@ -63,10 +64,12 @@ updates install automatically.
   specifications — no code from, or derived from, any existing EMF
   implementation.
 
-**Scope, honestly:** modern exporters often write dual-format files (GDI
-and EMF+ side by side) — these render fully from their GDI half. Files
-whose drawing content exists *only* as EMF+ render partially and say so in
-the viewer; EMF+ decoding is on the v2 list.
+**Scope, honestly:** EMF+ (GDI+) decoding shipped in 2.0. Dual-format files
+(GDI and EMF+ side by side) now render from their higher-fidelity EMF+ half,
+and files whose drawing content exists *only* as EMF+ render fully. A few
+things are still approximated — exotic image pixel formats, nested-metafile
+images, and hatch and path-gradient fills — and Emfy itemizes every one in
+Render Details instead of rendering silently. WMF is on the v3 list.
 
 ## Screenshots
 
@@ -101,6 +104,15 @@ xcodebuild -project Emfy/Emfy.xcodeproj -scheme Emfy -configuration Debug build
 own signing identity if you ship a fork.
 
 ## Changelog
+
+### 2.0
+
+```
+- Full EMF+ (GDI+) rendering — vector shapes, gradients, images, and text now draw in the viewer, Quick Look previews, and Finder thumbnails.
+- Dual-format files play their higher-fidelity EMF+ content instead of the GDI fallback.
+- Files whose drawing content exists only as EMF+ now render fully, instead of showing a partial-rendering notice.
+- Render Details itemizes any EMF+ feature Emfy approximated or skipped.
+```
 
 ### 1.4
 
