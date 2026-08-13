@@ -27,8 +27,11 @@ hand-authored files have exact headers and no exporter quirks.
 | gate-p4-text | 4 | EXTCREATEFONTINDIRECTW ×3, EXTTEXTOUTW ×3, SETTEXTALIGN, SETTEXTCOLOR | three text runs: Arial 28 dark, Times New Roman italic 22 blue, Arial bold 18 dark red |
 | gate-p4-image | 4 | STRETCHDIBITS, POLYGON | 8×8 hand-rolled red/blue checkerboard PNG embedded at 240×240 (chunky pixels) + green square |
 | handmade-cjk-text | 4 | EXTCREATEFONTINDIRECTW ×4, EXTTEXTOUTW ×4, SETTEXTALIGN, SETTEXTCOLOR ×4 | hand-authored bytes (deterministic generator, byte-for-byte provenance-tested); four CJK runs — Simplified Chinese (SimSun / GB2312), Japanese (MS Mincho / SHIFTJIS), Korean (Batang / HANGUL), and a non-BMP surrogate-pair glyph U+2000B; non-Latin lfCharSet + UTF-16LE surrogate coverage; exact header counts |
+| handmade-emfplus-shapes | 3 | EMF+ (in EMR_COMMENT_EMFPLUS): Object path/brush/pen, FillPath, DrawPath, FillRects, FillEllipse, DrawLines | hand-authored bytes (deterministic generator, byte-for-byte provenance-tested); **EMF+-ONLY** (EmfPlusHeader Dual flag clear) — the path no LibreOffice-shell file reaches; object-table path/solid-brush/pen, solid + linear-gradient fills, world translate, intersect clip, open i16 polyline; exact header counts |
+| handmade-emfplus-dual | 3 | EMF+ FillRects (+ one GetDC-windowed GDI RECTANGLE) | hand-authored bytes (deterministic generator, byte-for-byte provenance-tested); **DUAL** (Dual flag set) with a divergent GDI fallback — proves the [MS-EMFPLUS] §1.3.1 arbitration: the EMF+ red rect and the GetDC-windowed GDI green rect render, while a window-closed GDI rect and a GDI-only rect outside any window (both of which a v1-style GDI player would draw) do NOT; exact header counts |
 
-All seven LibreOffice-converted files (everything except
-`handmade-strokes-paths` and `handmade-cjk-text`) also carry the standard LibreOffice state
-preamble: map mode, window/viewport, SAVEDC/RESTOREDC, SETROP2, and one
-full-canvas EMR_INTERSECTCLIPRECT.
+All seven LibreOffice-converted files (everything except the four hand-authored
+files — `handmade-strokes-paths`, `handmade-cjk-text`, `handmade-emfplus-shapes`,
+and `handmade-emfplus-dual`) also carry the standard LibreOffice state preamble:
+map mode, window/viewport, SAVEDC/RESTOREDC, SETROP2, and one full-canvas
+EMR_INTERSECTCLIPRECT.
