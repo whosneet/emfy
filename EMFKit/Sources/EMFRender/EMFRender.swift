@@ -44,14 +44,39 @@ public enum EMFRenderer {
         context.saveGState()
         defer { context.restoreGState() }
 
+        // EMF+ arbitration ([MS-EMFPLUS] §1.3.1): when the EMF+ stream carries
+        // at least one DRAWING record, the file plays in EMF+ mode regardless of
+        // the Dual flag — EMF+ records drive output and GDI records play only
+        // inside a GetDC window. A file with no EMF+ drawing records (a pure-GDI
+        // file, or an EMF+ shell) takes the unchanged GDI path below, so every
+        // existing output stays byte-identical.
+        let plus = file.emfPlusStream()
+        if plus.records.contains(where: \.isDrawing) {
+            EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, log: &log)
+            return log
+        }
+
         // records[0] is EMR_HEADER — already consumed as file.header, never
         // a playback record.
         for record in file.records.dropFirst() {
-            let payload = file.payload(of: record)
-            if dc.apply(payload, log: &log) { continue }
-            draw(payload, into: context, dc: &dc, base: base, log: &log)
+            playGDIRecord(file.payload(of: record), into: context, dc: &dc, base: base, log: &log)
         }
         return log
+    }
+
+    /// Plays one already-decoded GDI record into `context`: a state mutation
+    /// consumed by the DC, or a drawing record dispatched to `draw`. Shared by
+    /// the pure-GDI loop and the EMF+ GetDC-window path so both interpret GDI
+    /// records identically (§1.3.1).
+    static func playGDIRecord(
+        _ payload: EMFRecordPayload,
+        into context: CGContext,
+        dc: inout DeviceContext,
+        base: CGAffineTransform,
+        log: inout EMFRenderLog
+    ) {
+        if dc.apply(payload, log: &log) { return }
+        draw(payload, into: context, dc: &dc, base: base, log: &log)
     }
 
     /// Renders `file` into a fresh sRGB 8-bit bitmap sized from the header
@@ -139,6 +164,10 @@ public enum EMFRenderer {
                 for _ in 0 ..< count { log.noteXformSrcIgnored() }
             case .dibDownsampled(let count, let worstNative, let worstDecoded):
                 for _ in 0 ..< count { log.noteDIBDownsampled(nativePixels: worstNative, decodedPixels: worstDecoded) }
+            case .emfPlusUnsupportedRecord(let type, let count):
+                for _ in 0 ..< count { log.noteEMFPlusUnsupported(type: type) }
+            case .emfPlusApproximated(let feature, let count):
+                for _ in 0 ..< count { log.noteEMFPlusApproximated(feature) }
             default:
                 log.note(entry)
             }
