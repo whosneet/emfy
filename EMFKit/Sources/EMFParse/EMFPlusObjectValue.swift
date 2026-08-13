@@ -77,6 +77,16 @@ public enum EMFPlusObjectDecodeFailure: Error, Sendable, Equatable {
     case arrayCountExceedsBuffer(field: String, count: UInt32, remainingBytes: Int)
     /// A length-prefixed custom line cap declared more bytes than remain.
     case customCapSizeExceedsBuffer(field: String, size: UInt32, remainingBytes: Int)
+    /// An EmfPlusPath set the R (relative/RLE) flag ([MS-EMFPLUS] §2.2.1.6). No
+    /// real file uses it, so EmfPlusPointR/RLE is not decoded speculatively.
+    case relativePathEncodingUnsupported
+    /// An EmfPlusRegionNode carried a Type not in [MS-EMFPLUS] §2.1.1.26.
+    case unknownRegionNodeType(raw: UInt32)
+    /// A region node tree exceeded the recursion-depth cap (hostile-input guard,
+    /// primer §8) — decoding stops rather than risking a stack overflow.
+    case regionTreeTooDeep
+    /// A region node tree exceeded the total-node cap (hostile-input guard).
+    case regionTooManyNodes
 }
 
 /// The decoded value of an `EMFPlusObjectDefinition`. Only Brush and Pen are
@@ -85,8 +95,10 @@ public enum EMFPlusObjectDecodeFailure: Error, Sendable, Equatable {
 public enum EMFPlusObjectValue: Sendable, Equatable {
     case brush(EMFPlusBrush)
     case pen(EMFPlusPen)
-    /// A type not decoded in this increment (Path, Region, Image, Font,
-    /// StringFormat, ImageAttributes, standalone CustomLineCap, Invalid, unknown).
+    case path(EMFPlusPath)
+    case region(EMFPlusRegion)
+    /// A type not decoded yet (Image, Font, StringFormat, ImageAttributes,
+    /// standalone CustomLineCap, Invalid, unknown).
     case undecoded(type: EMFPlusObjectType, data: Data)
     /// A Brush or Pen whose structure could not be decoded (primer §8).
     case malformed(type: EMFPlusObjectType, reason: EMFPlusObjectDecodeFailure)
@@ -94,8 +106,9 @@ public enum EMFPlusObjectValue: Sendable, Equatable {
 
 extension EMFPlusObjectDefinition {
     /// Decodes this object's payload into a typed value. Brush ([MS-EMFPLUS]
-    /// §2.2.1.1) and Pen (§2.2.1.7) are decoded; every other type is returned as
-    /// `.undecoded`. A malformed Brush/Pen returns `.malformed` and never traps.
+    /// §2.2.1.1), Pen (§2.2.1.7), Path (§2.2.1.6), and Region (§2.2.1.8) are
+    /// decoded; every other type is returned as `.undecoded`. A malformed
+    /// object returns `.malformed` and never traps.
     public func decodedValue() -> EMFPlusObjectValue {
         switch objectType {
         case .brush:
@@ -108,6 +121,18 @@ extension EMFPlusObjectDefinition {
             var cursor = ByteCursor(data)
             switch decodePen(&cursor) {
             case .success(let pen): return .pen(pen)
+            case .failure(let reason): return .malformed(type: objectType, reason: reason)
+            }
+        case .path:
+            var cursor = ByteCursor(data)
+            switch decodePath(&cursor) {
+            case .success(let path): return .path(path)
+            case .failure(let reason): return .malformed(type: objectType, reason: reason)
+            }
+        case .region:
+            var cursor = ByteCursor(data)
+            switch decodeRegion(&cursor) {
+            case .success(let region): return .region(region)
             case .failure(let reason): return .malformed(type: objectType, reason: reason)
             }
         default:
