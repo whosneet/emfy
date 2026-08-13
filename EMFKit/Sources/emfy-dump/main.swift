@@ -90,6 +90,67 @@ func describe(_ diagnostic: EMFPlusDiagnostic) -> String {
     }
 }
 
+// EMF+ object-envelope diagnostics ([MS-EMFPLUS] §2.3.5.1 reassembly). Same
+// log-and-skip voice as the record-stream diagnostics above.
+func describe(_ diagnostic: EMFPlusObjectDiagnostic) -> String {
+    switch diagnostic {
+    case .objectIDOutOfRange(let objectID, let objectType):
+        return "EMF+ object ID \(objectID) (\(objectTypeName(objectType))) is outside the 0..63 range; kept"
+    case .continuationMismatch(let pendingID, let pendingType, let arrivingID, let arrivingType):
+        return "EMF+ continued object \(pendingID) (\(objectTypeName(pendingType))) interrupted by "
+            + "object \(arrivingID) (\(objectTypeName(arrivingType))); pending dropped, restarted"
+    case .continuationOverflow(let objectID, let totalObjectSize, let accumulatedBytes):
+        return "EMF+ continued object \(objectID): \(accumulatedBytes) accumulated bytes exceed "
+            + "TotalObjectSize \(totalObjectSize); clamped"
+    case .danglingContinuation(let objectID, let totalObjectSize, let accumulatedBytes):
+        return "EMF+ continued object \(objectID): only \(accumulatedBytes) of \(totalObjectSize) bytes "
+            + "before the stream ended; dropped"
+    case .chunkTooShort(let dataSize):
+        return "EMF+ object chunk with \(dataSize) data bytes cannot hold its TotalObjectSize prefix; dropped"
+    }
+}
+
+// Terse one-line reason for a failed typed object decode ([MS-EMFPLUS] §2.2.1).
+func describe(_ failure: EMFPlusObjectDecodeFailure) -> String {
+    switch failure {
+    case .truncated(let field):
+        return "truncated at \(field)"
+    case .unknownBrushType(let raw):
+        return String(format: "unknown brush type 0x%08X", raw)
+    case .arrayCountExceedsBuffer(let field, let count, _):
+        return "count \(count) exceeds buffer at \(field)"
+    case .customCapSizeExceedsBuffer(let field, let size, _):
+        return "custom-cap size \(size) exceeds buffer at \(field)"
+    case .relativePathEncodingUnsupported:
+        return "relative/RLE path encoding unsupported"
+    case .unknownRegionNodeType(let raw):
+        return String(format: "unknown region node type 0x%08X", raw)
+    case .regionTreeTooDeep:
+        return "region tree exceeds the depth cap"
+    case .regionTooManyNodes:
+        return "region tree exceeds the node cap"
+    case .unknownImageType(let raw):
+        return String(format: "unknown image type 0x%08X", raw)
+    }
+}
+
+// Short name for an EMF+ object type ([MS-EMFPLUS] §2.1.1.21).
+func objectTypeName(_ type: EMFPlusObjectType) -> String {
+    switch type {
+    case .invalid: return "invalid"
+    case .brush: return "brush"
+    case .pen: return "pen"
+    case .path: return "path"
+    case .region: return "region"
+    case .image: return "image"
+    case .font: return "font"
+    case .stringFormat: return "stringFormat"
+    case .imageAttributes: return "imageAttributes"
+    case .customLineCap: return "customLineCap"
+    case .unknown(let raw): return String(format: "unknown(0x%02X)", raw)
+    }
+}
+
 func describe(_ variant: EMFHeaderVariant) -> String {
     switch variant {
     case .base: return "base (88-byte fixed part)"
@@ -260,11 +321,56 @@ if !plus.records.isEmpty || !plus.diagnostics.isEmpty || plus.header != nil {
     }
     print("")
 
-    if plus.diagnostics.isEmpty {
+    // Object breakdown — printed only when at least one EmfPlusObject was
+    // reassembled, so a shell EMF+ file (no objects) prints nothing here and its
+    // output is unchanged.
+    let objects = plus.objectDefinitions()
+    if !objects.definitions.isEmpty {
+        print("  emf+ objects: \(objects.definitions.count) definitions")
+        var tallies: [(type: EMFPlusObjectType, count: Int, decoded: Int)] = []
+        var malformedLines: [String] = []
+        for definition in objects.definitions {
+            let value = definition.decodedValue()
+            let decoded: Bool
+            switch value {
+            case .undecoded, .malformed: decoded = false
+            default: decoded = true
+            }
+            if let index = tallies.firstIndex(where: { $0.type == definition.objectType }) {
+                tallies[index].count += 1
+                if decoded { tallies[index].decoded += 1 }
+            } else {
+                tallies.append((definition.objectType, 1, decoded ? 1 : 0))
+            }
+            if case .malformed(let type, let reason) = value {
+                malformedLines.append("    malformed: \(objectTypeName(type)) — \(describe(reason))")
+            }
+        }
+        tallies.sort { $0.type.rawValue < $1.type.rawValue }
+        let objRows = tallies.map {
+            (name: objectTypeName($0.type), count: String($0.count), decoded: String($0.decoded))
+        }
+        let onWidth = max("type".count, objRows.map { $0.name.count }.max() ?? 0)
+        let ocWidth = max("count".count, objRows.map { $0.count.count }.max() ?? 0)
+        let odWidth = max("decoded".count, objRows.map { $0.decoded.count }.max() ?? 0)
+        print("    \(rightPad("type", onWidth))  \(leftPad("count", ocWidth))  \(leftPad("decoded", odWidth))")
+        for row in objRows {
+            print("    \(rightPad(row.name, onWidth))  \(leftPad(row.count, ocWidth))  \(leftPad(row.decoded, odWidth))")
+        }
+        for line in malformedLines { print(line) }
+        print("")
+    }
+
+    // Diagnostics — stream-walk issues and object-envelope issues share the
+    // block; both empty prints the same single `none` line as before.
+    if plus.diagnostics.isEmpty && objects.diagnostics.isEmpty {
         print("emf+ diagnostics: none")
     } else {
         print("emf+ diagnostics:")
         for diagnostic in plus.diagnostics {
+            print("  - \(describe(diagnostic))")
+        }
+        for diagnostic in objects.diagnostics {
             print("  - \(describe(diagnostic))")
         }
     }
