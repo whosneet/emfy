@@ -30,10 +30,11 @@ hand-authored files have exact headers and no exporter quirks.
 | handmade-emfplus-shapes | 3 | EMF+ (in EMR_COMMENT_EMFPLUS): Object path/brush/pen, FillPath, DrawPath, FillRects, FillEllipse, DrawLines | hand-authored bytes (deterministic generator, byte-for-byte provenance-tested); **EMF+-ONLY** (EmfPlusHeader Dual flag clear) — the path no LibreOffice-shell file reaches; object-table path/solid-brush/pen, solid + linear-gradient fills, world translate, intersect clip, open i16 polyline; exact header counts |
 | handmade-emfplus-dual | 3 | EMF+ FillRects (+ one GetDC-windowed GDI RECTANGLE) | hand-authored bytes (deterministic generator, byte-for-byte provenance-tested); **DUAL** (Dual flag set) with a divergent GDI fallback — proves the [MS-EMFPLUS] §1.3.1 arbitration: the EMF+ red rect and the GetDC-windowed GDI green rect render, while a window-closed GDI rect and a GDI-only rect outside any window (both of which a v1-style GDI player would draw) do NOT; exact header counts |
 | handmade-emfplus-image | 3 | EMF+ (in EMR_COMMENT_EMFPLUS): Object image, DrawImage, DrawImagePoints | hand-authored bytes (deterministic generator, byte-for-byte provenance-tested); **EMF+-ONLY** (EmfPlusHeader Dual flag clear); an 8×8 32bpp-ARGB pixel bitmap (four solid quadrants — red/green/blue/white) drawn twice: DrawImage scales it into a 120×120 rect, DrawImagePoints maps the same image into a sheared parallelogram; exact header counts |
+| handmade-emfplus-text | 4 | EMF+ (in EMR_COMMENT_EMFPLUS): Object font/stringFormat/brush, DrawString ×3 | hand-authored bytes (deterministic generator, byte-for-byte provenance-tested); **EMF+-ONLY** (EmfPlusHeader Dual flag clear); three Arial-24 DrawString runs resolved through the shared LOGFONT→CTFont machinery — "Emfy+" object-brush blue centred (center/center StringFormat), "Direct" S-bit direct red near/near (no StringFormat → default), "Bold Italic" a bold-italic font object S-bit green near/near; exercises StringFormat alignment and FontStyle bold/italic trait mapping; baseline is **Arial-availability-dependent** (a machine lacking Arial substitutes and could trip the pixel snapshot — documented re-record case, as with `handmade-cjk-text`); exact header counts |
 
-All seven LibreOffice-converted files (everything except the five hand-authored
+All seven LibreOffice-converted files (everything except the six hand-authored
 files — `handmade-strokes-paths`, `handmade-cjk-text`, `handmade-emfplus-shapes`,
-`handmade-emfplus-dual`, and `handmade-emfplus-image`) also carry the standard
-LibreOffice state preamble:
+`handmade-emfplus-dual`, `handmade-emfplus-image`, and `handmade-emfplus-text`)
+also carry the standard LibreOffice state preamble:
 map mode, window/viewport, SAVEDC/RESTOREDC, SETROP2, and one full-canvas
 EMR_INTERSECTCLIPRECT.

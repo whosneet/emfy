@@ -26,6 +26,7 @@ struct SnapshotEMFPlusTests {
     private static let shapesName = "handmade-emfplus-shapes"
     private static let dualName = "handmade-emfplus-dual"
     private static let imageName = "handmade-emfplus-image"
+    private static let textName = "handmade-emfplus-text"
 
     // MARK: - Pixel predicates (device coords == bitmap coords)
 
@@ -59,6 +60,7 @@ struct SnapshotEMFPlusTests {
         try verifyProvenance(Self.shapesName, data: EMFPlusCorpus.shapesData)
         try verifyProvenance(Self.dualName, data: EMFPlusCorpus.dualData)
         try verifyProvenance(Self.imageName, data: EMFPlusCorpus.imageData)
+        try verifyProvenance(Self.textName, data: EMFPlusCorpus.textData)
     }
 
     private func verifyProvenance(_ name: String, data: Data) throws {
@@ -116,6 +118,23 @@ struct SnapshotEMFPlusTests {
         // Both image-drawing record types are present.
         #expect(plus.records.contains { $0.type == 0x401A }, "no DrawImage record")
         #expect(plus.records.contains { $0.type == 0x401B }, "no DrawImagePoints record")
+    }
+
+    @Test("text parses as EMF+-only with DrawString records and font/format objects")
+    func textParse() throws {
+        let file = try parseCorpusFile("\(Self.textName).emf")
+        let plus = file.emfPlusStream()
+        #expect(plus.header?.isDual == false, "EmfPlusHeader Dual flag should be clear")
+        #expect(plus.records.contains { $0.type == 0x401C }, "no DrawString record")
+        // Font and StringFormat objects both decode from the object table.
+        let values = plus.objectDefinitions().definitions.map { $0.decodedValue() }
+        let fonts = values.compactMap { value -> EMFPlusFont? in
+            if case .font(let font) = value { return font }; return nil
+        }
+        #expect(fonts.contains { $0.familyName == "Arial" && !$0.isBold }, "no regular Arial font decoded")
+        #expect(fonts.contains { $0.isBold && $0.isItalic }, "no bold-italic font decoded")
+        #expect(values.contains { if case .stringFormat = $0 { return true }; return false },
+                "no StringFormat object decoded")
     }
 
     // MARK: - Render coverage (ink probes)
@@ -188,6 +207,34 @@ struct SnapshotEMFPlusTests {
         #expect(Self.isWhite(pixels[210, 100]), "canvas left of the parallelogram not blank, got \(pixels[210, 100])")
     }
 
+    /// The text file renders three DrawString runs with a clean render log
+    /// (Arial resolves directly on macOS; only alignment is used, so nothing is
+    /// approximated): a blue object-brush "Emfy+" centred in its rect, a red
+    /// direct-colour "Direct" at the near/near corner of the next rect, and a
+    /// bold-italic green "Bold Italic" at the near/near corner of the last.
+    @Test("text render: centred brush run, near direct-colour run, bold-italic run")
+    func textRender() throws {
+        let (pixels, log) = try render(Self.textName, width: 360, height: 240)
+        #expect(log.isClean, "unexpected render log for text: \(log.entries)")
+
+        // String 1: blue, centred in rect (20,20,320,60) → ink around the centre.
+        #expect(pixels.contains(in: (x: 140, y: 38, width: 90, height: 26), where: Self.isBlue),
+                "centred blue text drew no ink")
+        // Centred text does not reach the left edge of its wide rect.
+        #expect(Self.isWhite(pixels[30, 48]), "centred text should leave the rect's left edge blank, got \(pixels[30, 48])")
+
+        // String 2: red, near/near in rect (20,100,320,50) → ink at the left.
+        #expect(pixels.contains(in: (x: 22, y: 104, width: 70, height: 24), where: Self.isRed),
+                "near-aligned red text drew no ink")
+
+        // String 3: bold-italic green, near/near in rect (20,170,320,50).
+        #expect(pixels.contains(in: (x: 22, y: 174, width: 100, height: 24), where: Self.isGreen),
+                "bold-italic green text drew no ink")
+
+        // Blank in the bottom-right corner, clear of every run.
+        #expect(Self.isWhite(pixels[345, 232]), "the corner should stay blank, got \(pixels[345, 232])")
+    }
+
     // MARK: - Snapshots
 
     @Test("shapes snapshot: EMF+-only geometry against the accepted baseline")
@@ -203,6 +250,11 @@ struct SnapshotEMFPlusTests {
     @Test("image snapshot: DrawImage + DrawImagePoints against the accepted baseline")
     func imageSnapshot() throws {
         try snapshot(Self.imageName)
+    }
+
+    @Test("text snapshot: DrawString runs against the accepted baseline")
+    func textSnapshot() throws {
+        try snapshot(Self.textName)
     }
 
     // MARK: - Helpers

@@ -41,6 +41,7 @@ enum EMFPlusCorpus {
     static let shapesData = Data(shapesBytes)
     static let dualData = Data(dualBytes)
     static let imageData = Data(imageBytes)
+    static let textData = Data(textBytes)
 
     /// **handmade-emfplus-shapes.emf** — EMF+-only, Dual flag CLEAR.
     ///
@@ -152,6 +153,42 @@ enum EMFPlusCorpus {
         // DrawImagePoints: map the same image into a sheared parallelogram.
         stream += drawImagePoints(imageId: 1, src: (0, 0, 8, 8),
                                   points: [(220, 40), (320, 60), (240, 150)])
+        stream += plusEndOfFile()
+        return assemble(body: [emfPlusComment(stream)], handles: 8)
+    }
+
+    /// **handmade-emfplus-text.emf** — EMF+-only, Dual flag CLEAR.
+    ///
+    /// EMF+ record order (all in one EMR_COMMENT_EMFPLUS): Header →
+    /// Object(font #1, Arial 24 regular) → Object(stringFormat #2, center/center)
+    /// → Object(brush #3, solid blue) → DrawString("Emfy+", brush #3, format #2)
+    /// centred in a wide LayoutRect → DrawString("Direct", S-bit red, no format →
+    /// near/near) in a lower rect → Object(font #5, Arial 24 BOLD-ITALIC) →
+    /// DrawString("Bold Italic", font #5, S-bit green, near/near) → EndOfFile.
+    /// Proves EmfPlusFont → CTFont through the shared substitution machinery,
+    /// StringFormat alignment, direct vs object-brush text fill, and bold-italic
+    /// trait mapping.
+    ///
+    /// FONT-AVAILABILITY NOTE (as SnapshotCJKTests documents): Arial resolves
+    /// directly on macOS, so the baseline is Arial glyphs; a machine lacking Arial
+    /// would substitute the default face (with a logged substitution) and could
+    /// trip the pixel snapshot — the documented re-record case.
+    static var textBytes: [UInt8] {
+        var stream: [UInt8] = []
+        stream += plusHeader(dual: false)
+        stream += plusObject(id: 1, type: 6, payload: fontPayload(emSize: 24, style: 0, family: "Arial"))
+        stream += plusObject(id: 2, type: 7, payload: stringFormatPayload(stringAlignment: 1, lineAlign: 1))
+        stream += plusObject(id: 3, type: 1, payload: solidBrushPayload(colorBlue))
+        // String 1: object-brush blue, centred in a wide rect (StringFormat #2).
+        stream += drawString(fontId: 1, sBit: false, brushId: 3, formatId: 2,
+                             rect: (20, 20, 320, 60), string: "Emfy+")
+        // String 2: S-bit direct red, near/near (no StringFormat → default).
+        stream += drawString(fontId: 1, sBit: true, brushId: colorRed, formatId: 0xFFFF_FFFF,
+                             rect: (20, 100, 320, 50), string: "Direct")
+        // String 3: a bold-italic font object, S-bit green, near/near.
+        stream += plusObject(id: 5, type: 6, payload: fontPayload(emSize: 24, style: 0x3, family: "Arial"))
+        stream += drawString(fontId: 5, sBit: true, brushId: colorGreen, formatId: 0xFFFF_FFFF,
+                             rect: (20, 170, 320, 50), string: "Bold Italic")
         stream += plusEndOfFile()
         return assemble(body: [emfPlusComment(stream)], handles: 8)
     }
@@ -347,7 +384,62 @@ enum EMFPlusCorpus {
         }
     }
 
+    /// EmfPlusFont (§2.2.1.3): Version, EmSize (f32), SizeUnit (UnitTypeWorld 0),
+    /// FontStyleFlags (§2.1.2.4: bit 0 bold, bit 1 italic), Reserved, Length
+    /// (characters), FamilyName (UTF-16LE), padded to a 4-byte boundary.
+    private static func fontPayload(emSize: Float, style: Int32, family: String) -> [UInt8] {
+        let units = Array(family.utf16)
+        var bytes = le { w in
+            w.u32(plusVersion)
+            w.f32(emSize)
+            w.u32(0)                    // SizeUnit = UnitTypeWorld
+            w.i32(style)
+            w.u32(0)                    // Reserved
+            w.u32(UInt32(units.count))  // Length (characters)
+            for unit in units { w.u16(unit) }
+        }
+        bytes.append(contentsOf: repeatElement(0, count: (4 - bytes.count % 4) % 4))
+        return bytes
+    }
+
+    /// EmfPlusStringFormat (§2.2.1.9): the fifteen fixed fields with no tab stops
+    /// or character ranges. StringAlignment/LineAlign use the §2.1.1.28 enumeration
+    /// (Near 0 / Center 1 / Far 2).
+    private static func stringFormatPayload(stringAlignment: UInt32, lineAlign: UInt32) -> [UInt8] {
+        le { w in
+            w.u32(plusVersion); w.u32(0); w.u32(0)   // Version, StringFormatFlags, Language
+            w.u32(stringAlignment); w.u32(lineAlign)
+            w.u32(0); w.u32(0)                       // DigitSubstitution, DigitLanguage
+            w.f32(0); w.i32(0)                       // FirstTabOffset, HotkeyPrefix
+            w.f32(0); w.f32(0); w.f32(0)             // Leading/TrailingMargin, Tracking
+            w.u32(0)                                 // Trimming
+            w.i32(0); w.i32(0)                       // TabStopCount, RangeCount
+        }
+    }
+
     // MARK: - EMF+ drawing records ([MS-EMFPLUS] §2.3.4)
+
+    /// EmfPlusDrawString (§2.3.4.14): Flags = S<<15 | fontId; Data = BrushId
+    /// (an ARGB colour when S is set, else an object-brush index), FormatID (a
+    /// StringFormat index, or 0xFFFFFFFF for none), Length (characters),
+    /// LayoutRect (EmfPlusRectF), StringData (UTF-16LE), padded to a 4-byte
+    /// boundary.
+    private static func drawString(
+        fontId: UInt8, sBit: Bool, brushId: UInt32, formatId: UInt32,
+        rect: (Float, Float, Float, Float), string: String
+    ) -> [UInt8] {
+        let units = Array(string.utf16)
+        let flags = (sBit ? UInt16(0x8000) : 0) | UInt16(fontId)
+        var data = le { w in
+            w.u32(brushId)
+            w.u32(formatId)
+            w.u32(UInt32(units.count))
+            w.f32(rect.0); w.f32(rect.1); w.f32(rect.2); w.f32(rect.3)
+            for unit in units { w.u16(unit) }
+        }
+        data.append(contentsOf: repeatElement(0, count: (4 - data.count % 4) % 4))
+        return plusRecord(0x401C, flags, data)
+    }
 
     /// EmfPlusFillPath (§2.3.4.17): Flags low byte = path ObjectId (S clear → the
     /// BrushId names an object-table brush). Data = BrushId.
