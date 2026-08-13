@@ -137,6 +137,8 @@ public enum EMFRenderer {
                 for _ in 0 ..< count { log.noteUnsupportedRasterOp(rasterOperation: op) }
             case .xformSrcIgnored(let count):
                 for _ in 0 ..< count { log.noteXformSrcIgnored() }
+            case .dibDownsampled(let count, let worstNative, let worstDecoded):
+                for _ in 0 ..< count { log.noteDIBDownsampled(nativePixels: worstNative, decodedPixels: worstDecoded) }
             default:
                 log.note(entry)
             }

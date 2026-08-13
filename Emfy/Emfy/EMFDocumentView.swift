@@ -408,6 +408,8 @@ private extension EMFRenderLog.Entry {
             return "Used a best-effort fallback for raster operation \(rasterOperation) (\(count) occurrence\(count == 1 ? "" : "s"))."
         case .xformSrcIgnored(let count):
             return "Ignored a source bitmap transform (\(count) occurrence\(count == 1 ? "" : "s"))."
+        case .dibDownsampled(let count, let worstNativePixels, let worstDecodedPixels):
+            return "Decoded an embedded bitmap below its full resolution to fit the destination; no visible detail was lost (largest: \(worstNativePixels) → \(worstDecodedPixels) pixels, \(count) occurrence\(count == 1 ? "" : "s"))."
         }
     }
 }

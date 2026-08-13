@@ -49,7 +49,20 @@ enum BitmapDrawer {
             log.noteUnsupportedDIB(reason: .paletteUsage(payload.usageSrc))
             return
         }
-        guard let image = decode(dib, log: &log) else { return }
+
+        // Decode no finer than the destination footprint can show; the source
+        // sub-rect crop (xSrc/ySrc/cxSrc/cySrc) folds into the sampler.
+        let full = dc.resolvedTransform.concatenating(base)
+        guard let image = decodeBounded(
+            dib,
+            srcRect: BitmapDecoder.SourceRect(
+                x: Int(payload.src.x), y: Int(payload.src.y),
+                width: Int(payload.srcSize.cx), height: Int(payload.srcSize.cy)
+            ),
+            nativeW: Int(dib.width), nativeH: abs(Int(dib.height)),
+            destTargetRect: footprint(origin: payload.dest, size: payload.destSize, full: full),
+            log: &log
+        ) else { return }
 
         // A rop other than SRCCOPY still draws as a copy (best effort, D5), with
         // one coalesced log line.
@@ -57,13 +70,8 @@ enum BitmapDrawer {
             log.noteUnsupportedRasterOp(rasterOperation: payload.rasterOperation)
         }
 
-        let cropped = crop(
-            image,
-            xSrc: payload.src.x, ySrc: payload.src.y,
-            cxSrc: payload.srcSize.cx, cySrc: payload.srcSize.cy
-        )
         drawImage(
-            cropped,
+            image,
             destOrigin: payload.dest, destSize: payload.destSize,
             into: context, dc: dc, base: base
         )
@@ -93,7 +101,22 @@ enum BitmapDrawer {
             log.noteUnsupportedDIB(reason: .paletteUsage(payload.usageSrc))
             return
         }
-        guard let image = decode(dib, log: &log) else { return }
+
+        // BITBLT's source size equals its dest size; STRETCHBLT carries its own
+        // source size. The source sub-rect crop (SOURCE pixels) folds into the
+        // sampler, decoded no finer than the destination footprint can show.
+        let srcSize = payload.srcSize ?? payload.destSize
+        let full = dc.resolvedTransform.concatenating(base)
+        guard let image = decodeBounded(
+            dib,
+            srcRect: BitmapDecoder.SourceRect(
+                x: Int(payload.src.x), y: Int(payload.src.y),
+                width: Int(srcSize.cx), height: Int(srcSize.cy)
+            ),
+            nativeW: Int(dib.width), nativeH: abs(Int(dib.height)),
+            destTargetRect: footprint(origin: payload.dest, size: payload.destSize, full: full),
+            log: &log
+        ) else { return }
 
         // Source-space transforms are vanishingly rare; log-and-ignore when
         // non-identity ([MS-EMF] §2.2.28).
@@ -106,16 +129,8 @@ enum BitmapDrawer {
             log.noteUnsupportedRasterOp(rasterOperation: payload.rasterOperation)
         }
 
-        // BITBLT's source size equals its dest size; STRETCHBLT carries its own
-        // source size. Source is cropped in SOURCE pixels.
-        let srcSize = payload.srcSize ?? payload.destSize
-        let cropped = crop(
-            image,
-            xSrc: payload.src.x, ySrc: payload.src.y,
-            cxSrc: srcSize.cx, cySrc: srcSize.cy
-        )
         drawImage(
-            cropped,
+            image,
             destOrigin: payload.dest, destSize: payload.destSize,
             into: context, dc: dc, base: base
         )
@@ -177,70 +192,90 @@ enum BitmapDrawer {
             return
         }
         guard let dib = payload.dib else { return }
-        guard let image = decode(dib, log: &log) else { return }
 
-        // Draw the scanline window (iStartScan / cScans) 1:1 at dest. The scan
-        // range is validated against the DIB height and clamped — hostile
-        // values must not trap the crop. SETDIBITSTODEVICE does NOT stretch:
-        // dest size == the drawn scanline block's pixel size.
-        let imageHeight = image.height
-        let startScan = min(Int(payload.startScan), imageHeight)
-        let requested = Int(payload.scanCount)
-        let scanCount = max(0, min(requested, imageHeight - startScan))
-        guard scanCount > 0 else { return }
+        // The scanline window (iStartScan / cScans) is validated against the
+        // DIB's native height and clamped — hostile values must not trap. The
+        // DIB's declared dimensions equal what a full decode would report, so
+        // the clamp is computed without decoding. SETDIBITSTODEVICE does NOT
+        // stretch: dest size == the drawn scanline block's native pixel size.
+        let imageWidth = Int(dib.width)
+        let imageHeight = abs(Int(dib.height))
+        let startScan = min(Int(payload.startScan), max(0, imageHeight))
+        let scanCount = max(0, min(Int(payload.scanCount), imageHeight - startScan))
+        guard scanCount > 0, imageWidth > 0 else {
+            // No scan lines to draw. Preserve the old decode-first order's
+            // honesty: an unsupported DIB still surfaces its reason.
+            if case .unsupported(let reason) = dib.content {
+                log.noteUnsupportedDIB(reason: reason)
+            }
+            return
+        }
 
         // SETDIBITSTODEVICE scan lines are counted from the DIB's FIRST scan
-        // line (bottom for a bottom-up DIB). Our decoded image is top-down, so
+        // line (bottom for a bottom-up DIB). The output image is top-down, so
         // the window [startScan, startScan+scanCount) counted from the source
         // origin lands at image rows [imageHeight-startScan-scanCount, …) for a
-        // bottom-up DIB, or [startScan, …) for a top-down DIB.
+        // bottom-up DIB, or [startScan, …) for a top-down DIB. The window folds
+        // into the sampler as a source sub-rect, decoded no finer than its
+        // 1:1 destination footprint can show.
         let cropY = dib.isTopDown ? startScan : (imageHeight - startScan - scanCount)
-        let window = image.cropping(to: CGRect(x: 0, y: cropY, width: image.width, height: scanCount)) ?? image
+        let windowSize = SizeL(cx: Int32(clamping: imageWidth), cy: Int32(clamping: scanCount))
+        let full = dc.resolvedTransform.concatenating(base)
+        guard let image = decodeBounded(
+            dib,
+            srcRect: BitmapDecoder.SourceRect(x: 0, y: cropY, width: imageWidth, height: scanCount),
+            nativeW: imageWidth, nativeH: scanCount,
+            destTargetRect: footprint(origin: payload.dest, size: windowSize, full: full),
+            log: &log
+        ) else { return }
 
-        // 1:1 mapping: the destination pixel size equals the window size.
-        // `Int32(clamping:)` — the DIB dimension cap keeps these well within
-        // Int32, but the narrowing stays saturating so no CGImage size can ever
-        // trap the conversion (§8: exceptionless).
+        // 1:1 mapping: the destination pixel size equals the window's native
+        // size (not the possibly-smaller decoded size), so the block lands at
+        // the same on-screen extent regardless of the decode budget.
         drawImage(
-            window,
+            image,
             destOrigin: payload.dest,
-            destSize: SizeL(cx: Int32(clamping: window.width), cy: Int32(clamping: window.height)),
+            destSize: windowSize,
             into: context, dc: dc, base: base
         )
     }
 
     // MARK: - Shared draw
 
-    /// Decodes a DIB to a CGImage, logging (coalesced) the reason when it is
-    /// unsupported and returning `nil`.
-    private static func decode(_ dib: DIB, log: inout EMFRenderLog) -> CGImage? {
-        let (image, reason) = BitmapDecoder.image(from: dib)
-        if image == nil {
+    /// Decodes a DIB bounded to what its destination can show (decode-in-bands):
+    /// the `srcRect` sub-rect crop folds into the sampler, and the decode budget
+    /// is the destination footprint in target space clamped to the DIB's native
+    /// size. Logs (coalesced) the unsupported reason and returns `nil`, or notes
+    /// a below-native downsample when the target could not show full resolution.
+    private static func decodeBounded(
+        _ dib: DIB,
+        srcRect: BitmapDecoder.SourceRect,
+        nativeW: Int,
+        nativeH: Int,
+        destTargetRect: CGRect,
+        log: inout EMFRenderLog
+    ) -> CGImage? {
+        let budget = BitmapDecoder.decodeBudget(destTargetRect: destTargetRect, nativeW: nativeW, nativeH: nativeH)
+        let (image, reason, downsampled) = BitmapDecoder.decode(dib, srcRect: srcRect, budget: budget)
+        guard let image else {
             log.noteUnsupportedDIB(reason: reason)
+            return nil
+        }
+        if downsampled {
+            log.noteDIBDownsampled(nativePixels: nativeW * nativeH, decodedPixels: image.width * image.height)
         }
         return image
     }
 
-    /// Crops an image to a source sub-rectangle in SOURCE pixels, clamping the
-    /// rectangle to the image bounds so hostile values cannot trap
-    /// `CGImage.cropping`. A non-positive or fully-out-of-bounds rect yields the
-    /// whole image (the common "src == whole DIB" case passes through cleanly).
-    private static func crop(_ image: CGImage, xSrc: Int32, ySrc: Int32, cxSrc: Int32, cySrc: Int32) -> CGImage {
-        let imageWidth = image.width
-        let imageHeight = image.height
-        // Whole-image fast path: (0,0) origin and a size that meets or exceeds
-        // the image needs no crop.
-        if xSrc <= 0, ySrc <= 0, Int(cxSrc) >= imageWidth, Int(cySrc) >= imageHeight {
-            return image
-        }
-        let x0 = max(0, min(Int(xSrc), imageWidth))
-        let y0 = max(0, min(Int(ySrc), imageHeight))
-        let w = max(0, min(Int(cxSrc), imageWidth - x0))
-        let h = max(0, min(Int(cySrc), imageHeight - y0))
-        guard w > 0, h > 0 else { return image }
-        // Source y is top-down in our decoded image (matching source-pixel ySrc,
-        // which counts from the top of the source bitmap).
-        return image.cropping(to: CGRect(x: x0, y: y0, width: w, height: h)) ?? image
+    /// The destination footprint in TARGET space: the logical dest box
+    /// (origin + size; a negative size is a mirror) transformed by `full`
+    /// (= dc.resolvedTransform ∘ base) and standardized. Its ceil'd pixel size
+    /// is the decode budget — the context's own width/height is NOT used (a
+    /// PDF/vector context reports 0×0).
+    private static func footprint(origin: PointL, size: SizeL, full: CGAffineTransform) -> CGRect {
+        CGRect(x: CGFloat(origin.x), y: CGFloat(origin.y), width: CGFloat(size.cx), height: CGFloat(size.cy))
+            .applying(full)
+            .standardized
     }
 
     /// Draws `image` (top-down) into the destination box. The dest origin/size

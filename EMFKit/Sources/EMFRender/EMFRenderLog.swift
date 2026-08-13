@@ -126,6 +126,14 @@ public struct EMFRenderLog: Sendable, Equatable {
         /// which the renderer ignores — source-space transforms are vanishingly
         /// rare ([MS-EMF] §2.2.28). Coalesced.
         case xformSrcIgnored(count: Int)
+        /// One or more DIBs were decoded BELOW their native resolution to bound
+        /// memory against the render target ("decode-in-bands"): the destination
+        /// footprint was smaller than the source, so the decode sampled down
+        /// (nearest-neighbor) instead of materialising the full-native bitmap.
+        /// No detail the target could have shown is lost. Coalesced into a single
+        /// count; `worstNativePixels`/`worstDecodedPixels` carry the largest
+        /// source bitmap that was reduced and the pixel count it decoded to.
+        case dibDownsampled(count: Int, worstNativePixels: Int, worstDecodedPixels: Int)
     }
 
     /// Every logged event, in the order it was raised. The coalesced families
@@ -167,6 +175,7 @@ public struct EMFRenderLog: Sendable, Equatable {
         case unsupportedDIB(DIBReasonKey)
         case rasterOp(UInt32)
         case xformSrc
+        case dibDownsampled
     }
 
     /// A `Hashable` surrogate for `DIBUnsupportedReason?` (which is not itself
@@ -303,6 +312,24 @@ public struct EMFRenderLog: Sendable, Equatable {
             return
         }
         appendDistinct(.xformSrcIgnored(count: 1), key: .xformSrc)
+    }
+
+    /// Records one below-native DIB decode, coalescing into a single count and
+    /// keeping the WORST (largest-source) reduction for playback honesty.
+    mutating func noteDIBDownsampled(nativePixels: Int, decodedPixels: Int) {
+        if let index = coalesceIndex[.dibDownsampled],
+           case .dibDownsampled(let c, let worstNative, let worstDecoded) = entries[index] {
+            if nativePixels > worstNative {
+                entries[index] = .dibDownsampled(count: c + 1, worstNativePixels: nativePixels, worstDecodedPixels: decodedPixels)
+            } else {
+                entries[index] = .dibDownsampled(count: c + 1, worstNativePixels: worstNative, worstDecodedPixels: worstDecoded)
+            }
+            return
+        }
+        appendDistinct(
+            .dibDownsampled(count: 1, worstNativePixels: nativePixels, worstDecodedPixels: decodedPixels),
+            key: .dibDownsampled
+        )
     }
 
     /// Records any non-coalesced event verbatim.
