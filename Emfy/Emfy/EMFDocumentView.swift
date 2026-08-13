@@ -61,7 +61,7 @@ struct EMFDocumentView: View {
             // renderer fills the EMF bitmap with white paper).
             .background(Color(nsColor: .underPageBackgroundColor))
             .overlay(alignment: .top) {
-                if document.plusPresence == .drawingContent {
+                if hasUnsupportedEMFPlusContent {
                     plusNotice
                 }
             }
@@ -141,8 +141,20 @@ struct EMFDocumentView: View {
 
     // MARK: - EMF+ notice
 
+    /// True when the render log recorded at least one skipped EMF+ record type.
+    /// EMF+ geometry, gradients, images, and text all render now, so this fires
+    /// only for genuinely unsupported (exotic or unknown) EMF+ records — the
+    /// honest signal that some content is missing. Approximated EMF+ features
+    /// are surfaced in Render Details, not here.
+    private var hasUnsupportedEMFPlusContent: Bool {
+        document.renderLog.contains {
+            if case .emfPlusUnsupportedRecord = $0 { return true }
+            return false
+        }
+    }
+
     private var plusNotice: some View {
-        Text("Contains EMF+ content — showing partial rendering (GDI fallback).")
+        Text("Some EMF+ content types in this file aren't supported yet — see Render Details.")
             .font(.callout)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

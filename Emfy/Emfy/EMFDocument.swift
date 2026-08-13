@@ -35,8 +35,6 @@ struct EMFDocument: FileDocument {
     /// The rendered picture at retina scale, ready to display and to export as
     /// PNG. `nil` only if the bitmap context could not be allocated.
     let image: CGImage?
-    /// Whether to show the EMF+ partial-rendering notice.
-    let plusPresence: EMFPlusPresence
     /// The log-and-skip record from the first render (unimplemented records,
     /// approximations) — surfaced for diagnostics, never blocks display.
     let renderLog: [EMFRenderLog.Entry]
@@ -58,7 +56,6 @@ struct EMFDocument: FileDocument {
             throw CocoaError(.fileReadCorruptFile)
         }
         self.file = parsed
-        self.plusPresence = parsed.emfPlusPresence()
 
         if let (rendered, log) = EMFRenderer.makeImage(parsed, scale: Self.renderScale) {
             self.image = rendered
