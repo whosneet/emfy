@@ -26,8 +26,9 @@ hand-authored files have exact headers and no exporter quirks.
 | handmade-strokes-paths | 3 | CREATEPEN, POLYLINE16, LINETO, POLYBEZIER16, path bracket → STROKEANDFILLPATH | hand-authored bytes (no .svg); solid + dashed pen STROKING, which LibreOffice exports tessellate away; stock BLACK_PEN; exact header counts |
 | gate-p4-text | 4 | EXTCREATEFONTINDIRECTW ×3, EXTTEXTOUTW ×3, SETTEXTALIGN, SETTEXTCOLOR | three text runs: Arial 28 dark, Times New Roman italic 22 blue, Arial bold 18 dark red |
 | gate-p4-image | 4 | STRETCHDIBITS, POLYGON | 8×8 hand-rolled red/blue checkerboard PNG embedded at 240×240 (chunky pixels) + green square |
+| handmade-cjk-text | 4 | EXTCREATEFONTINDIRECTW ×4, EXTTEXTOUTW ×4, SETTEXTALIGN, SETTEXTCOLOR ×4 | hand-authored bytes (deterministic generator, byte-for-byte provenance-tested); four CJK runs — Simplified Chinese (SimSun / GB2312), Japanese (MS Mincho / SHIFTJIS), Korean (Batang / HANGUL), and a non-BMP surrogate-pair glyph U+2000B; non-Latin lfCharSet + UTF-16LE surrogate coverage; exact header counts |
 
 All seven LibreOffice-converted files (everything except
-`handmade-strokes-paths`) also carry the standard LibreOffice state
+`handmade-strokes-paths` and `handmade-cjk-text`) also carry the standard LibreOffice state
 preamble: map mode, window/viewport, SAVEDC/RESTOREDC, SETROP2, and one
 full-canvas EMR_INTERSECTCLIPRECT.

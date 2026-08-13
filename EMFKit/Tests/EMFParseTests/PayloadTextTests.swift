@@ -389,4 +389,63 @@ struct PayloadTextTests {
         let payload = try decodeSingle(record)
         #expect(payload == .malformed(type: 84, reason: .nonFiniteTransform))
     }
+
+    // MARK: - CJK coverage (v1.x backlog: the phase-4 CJK gap)
+
+    @Test("EXTCREATEFONTINDIRECTW decodes CJK facenames + non-Latin charsets")
+    func cjkFontFacenameAndCharset() throws {
+        // (facename, CharacterSet value [MS-WMF] §2.1.1.5). These non-zero
+        // charsets are the first coverage of a non-Latin lfCharSet decode.
+        let entries: [(String, UInt8)] = [
+            ("SimSun", 134),      // GB2312_CHARSET
+            ("MS Mincho", 128),   // SHIFTJIS_CHARSET
+            ("Batang", 129),      // HANGUL_CHARSET
+        ]
+        for (faceName, charSet) in entries {
+            var b = FixtureBuilder()
+            b.appendUInt32(1)     // ihFonts
+            b.appendBytes(Self.logFontBytes(charSet: charSet, faceName: faceName))
+            let payload = try decodeSingle(FixtureBuilder.record(type: 82, payload: b.bytes))
+            guard case .extCreateFontIndirectW(let font) = payload else {
+                Issue.record("expected .extCreateFontIndirectW for \(faceName), got \(payload)")
+                continue
+            }
+            #expect(font.logFont.faceName == faceName)
+            #expect(font.logFont.charSet == charSet)
+        }
+    }
+
+    @Test("EXTTEXTOUTW preserves a BMP CJK string as a Swift String")
+    func cjkBMPString() throws {
+        let expected = "中文测试"
+        let str = Array(expected.utf16)
+        #expect(str.count == 4)     // four BMP code units, one each
+        let payload = try decodeSingle(Self.extTextOutRecord(
+            chars: UInt32(str.count), string: str
+        ))
+        guard case .extTextOutW(let text) = payload else {
+            Issue.record("expected .extTextOutW, got \(payload)")
+            return
+        }
+        #expect(text.string == expected)
+    }
+
+    @Test("EXTTEXTOUTW preserves a non-BMP surrogate pair as one Unicode scalar")
+    func cjkSurrogatePair() throws {
+        // U+2000B (𠀋) is the UTF-16LE surrogate pair 0xD840 0xDC0B — two code
+        // units, one scalar. Chars counts CODE UNITS ([MS-EMF] §2.2.5), so the
+        // decode MUST recombine the pair rather than emit two broken scalars.
+        let expected = "A\u{2000B}B"
+        let str = Array(expected.utf16)
+        #expect(str == [0x0041, 0xD840, 0xDC0B, 0x0042])
+        let payload = try decodeSingle(Self.extTextOutRecord(
+            chars: UInt32(str.count), string: str
+        ))
+        guard case .extTextOutW(let text) = payload else {
+            Issue.record("expected .extTextOutW, got \(payload)")
+            return
+        }
+        #expect(text.string == expected)
+        #expect(Array(text.string.unicodeScalars.map(\.value)) == [0x41, 0x2_000B, 0x42])
+    }
 }
