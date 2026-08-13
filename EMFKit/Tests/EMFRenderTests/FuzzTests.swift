@@ -13,6 +13,14 @@ import Testing
 ///   EMFFile.parse → payload(of:) for every record → emfPlusPresence →
 ///   render(into:target:) into a shared, bounded 256×256 context.
 ///
+/// The list includes the four hand-authored EMF+ files, so the mutation surface
+/// now covers EMF+ playback too: `render(into:target:)` dispatches to
+/// `EMFPlusPlayback.run` exactly when the reassembled stream still carries a
+/// drawing record (EMFRender/EMFRender.swift), which the mutants of those files
+/// routinely do — the `emfplus-drawing` tally counts how many mutants took that
+/// branch, and the run asserts it is non-zero so EMF+ coverage cannot silently
+/// lapse.
+///
 /// The PASS criterion is SURVIVAL: no crash, no trap, no hang. Diagnostics and
 /// log entries are the expected, correct output on garbage input and are not
 /// asserted on. A trap anywhere in the parse or render path crashes the test
@@ -24,8 +32,9 @@ import Testing
 @Suite("Mutation fuzz (survival)")
 struct FuzzTests {
 
-    /// The 8 committed corpus files (see corpus/README.md). Raw bytes are read
-    /// and mutated; these are NOT parsed as corpus inputs here.
+    /// The 12 committed corpus files (see corpus/README.md): the 8 GDI files plus
+    /// the 4 hand-authored EMF+ files, whose mutants drive the EMF+ playback path.
+    /// Raw bytes are read and mutated; these are NOT parsed as corpus inputs here.
     static let corpusFiles = [
         "gate-p2-star.emf",
         "gate-p2-house.emf",
@@ -35,6 +44,10 @@ struct FuzzTests {
         "gate-p4-text.emf",
         "gate-p4-image.emf",
         "handmade-strokes-paths.emf",
+        "handmade-emfplus-shapes.emf",
+        "handmade-emfplus-dual.emf",
+        "handmade-emfplus-image.emf",
+        "handmade-emfplus-text.emf",
     ]
 
     /// Fixed default seed (SplitMix64's golden-ratio constant). Reproducible
@@ -68,6 +81,9 @@ struct FuzzTests {
         var parsedWithDiagnostics = 0
         var parsedClean = 0
         var rendered = 0
+        /// Mutants whose reassembled EMF+ stream still carried a drawing record —
+        /// i.e. those `render(into:target:)` routed through EMF+ playback.
+        var emfPlusDrawing = 0
     }
 
     @Test("every corpus file survives seeded mutation across the full surface")
@@ -122,7 +138,7 @@ struct FuzzTests {
         [fuzz] seed=\(Self.seed) iterations/file=\(Self.iterations) files=\(Self.corpusFiles.count) \
         mutants=\(tally.mutants) parse-rejects=\(tally.parseRejects) \
         parsed-clean=\(tally.parsedClean) parsed-with-diagnostics=\(tally.parsedWithDiagnostics) \
-        rendered=\(tally.rendered)
+        rendered=\(tally.rendered) emfplus-drawing=\(tally.emfPlusDrawing)
         """)
 
         // Reaching here at all is the pass: no mutant trapped or hung. Assert a
@@ -136,6 +152,11 @@ struct FuzzTests {
         // renderer, and at least some must parse with a clean diagnostics list.
         #expect(tally.rendered > 0, "no mutant reached the renderer — the parse/render surface went silently empty")
         #expect(tally.parsedClean > 0, "no mutant parsed clean — the parser rejects everything")
+        // The four EMF+ files' drawing records survive most mutations, so a
+        // non-trivial share of mutants must reach EMF+ playback. Zero here means
+        // the EMF+ fuzz surface went dark (files renamed, or the render dispatch
+        // stopped taking the EMF+ branch) — a silent loss of coverage.
+        #expect(tally.emfPlusDrawing > 0, "no mutant traversed EMF+ playback — the EMF+ fuzz surface is not being exercised")
     }
 
     // MARK: - Surface exercise
@@ -171,6 +192,14 @@ struct FuzzTests {
 
         // EMF+ presence scanner walks comment records — exercise it too.
         _ = file.emfPlusPresence()
+
+        // EMF+ arbitration mirror: `render(_:into:target:)` dispatches to
+        // `EMFPlusPlayback.run` exactly when the reassembled stream still holds a
+        // drawing record. Counting that here makes "this mutant traversed EMF+
+        // playback" auditable — the identical condition the renderer branches on.
+        if file.emfPlusStream().records.contains(where: \.isDrawing) {
+            tally.emfPlusDrawing += 1
+        }
 
         // Full playback into the shared bounded context.
         _ = EMFRenderer.render(file, into: context, target: target)
