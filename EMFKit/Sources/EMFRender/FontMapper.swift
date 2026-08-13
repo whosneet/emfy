@@ -70,6 +70,19 @@ enum FontMapper {
         )
     }
 
+    /// Resolves a family name plus bold/italic to a base CTFont at `nominalSize`,
+    /// reusing the SAME substitution table and trait application as the GDI
+    /// LOGFONT path — the EMF+ text records (DrawString/DrawDriverString) carry an
+    /// EmfPlusFont with a family name and FontStyle flags ([MS-EMFPLUS] §2.1.2.4)
+    /// rather than a LOGFONT, but must resolve identically (primer §6: no parallel
+    /// font stack). Substitutions are logged (coalesced) exactly as the GDI path.
+    /// The caller sizes the returned base to the device point size at draw time.
+    static func resolveFamily(_ family: String, bold: Bool, italic: Bool, log: inout EMFRenderLog) -> CTFont {
+        let requested = family.trimmingCharacters(in: .whitespaces)
+        let base = baseFont(forFamily: requested, log: &log)
+        return applyTraits(to: base, bold: bold, italic: italic)
+    }
+
     // MARK: - Family resolution
 
     /// The base CTFont for a requested family name, at `nominalSize`, applying

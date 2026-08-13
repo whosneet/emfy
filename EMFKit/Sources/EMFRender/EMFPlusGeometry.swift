@@ -26,6 +26,13 @@ struct PlusReader {
         return value
     }
 
+    mutating func u16() -> UInt16? {
+        guard offset >= 0, offset + 2 <= bytes.count else { return nil }
+        let value = UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
+        offset += 2
+        return value
+    }
+
     mutating func i32() -> Int32? { u32().map { Int32(bitPattern: $0) } }
 
     mutating func f32() -> Float? { u32().map { Float(bitPattern: $0) } }

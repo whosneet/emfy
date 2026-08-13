@@ -459,6 +459,8 @@ private extension EMFPlusApproximation {
             return "a non-pixel image source unit as pixels"
         case .imageAttributes:
             return "image attributes wrap mode (not applied)"
+        case .stringFormatSimplified:
+            return "advanced text formatting as a single left-to-right line"
         }
     }
 }

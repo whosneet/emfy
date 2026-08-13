@@ -61,6 +61,13 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// A referenced EmfPlusImageAttributes (§2.2.1.5) requested a non-clamp wrap
     /// mode; it was not applied (the image is drawn once, clamped).
     case imageAttributes
+    /// A text run was drawn as a single left-to-right line, ignoring a non-default
+    /// text-formatting feature it carried: an EmfPlusStringFormat ([MS-EMFPLUS]
+    /// §2.2.1.9) trimming/wrap/tab-stop/hotkey/character-range setting, a
+    /// right-to-left or vertical direction flag (§2.1.2.8), or a DrawDriverString
+    /// vertical/realized-advance option (§2.1.2.3). Only string ALIGNMENT
+    /// (StringAlignment/LineAlign) is honoured; the glyphs still drew.
+    case stringFormatSimplified
 }
 
 /// The log-and-skip surface for a render pass (primer §8, §10.8).
