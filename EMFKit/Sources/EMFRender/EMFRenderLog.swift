@@ -41,6 +41,26 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// NumSegments short of the whole spline ([MS-EMFPLUS] §2.3.4.4); the entire
     /// open cardinal spline was drawn instead.
     case curveSegmentRange
+    /// A DrawImage/DrawImagePoints referenced a bitmap whose PixelFormat
+    /// ([MS-EMFPLUS] §2.1.1.24) is outside the supported set (16bpp, indexed,
+    /// PARGB, 48/64bpp); the image was not drawn. Carries the raw format value.
+    case imageBitmapPixelFormat(UInt32)
+    /// A bitmap image had non-positive/oversized dimensions or a stride/payload
+    /// too small for its declared pixels (§8 validation); it was not drawn.
+    case imageInvalid
+    /// A compressed image (§2.2.2.10) CoreGraphics could not decode — GIF/TIFF,
+    /// an unknown magic, or a corrupt PNG/JPEG; it was not drawn.
+    case imageCompressed
+    /// A DrawImage/DrawImagePoints referenced a metafile-content image
+    /// (§2.2.2.27); nested-metafile playback is out of phase-4 scope, so the
+    /// image was not drawn.
+    case imageMetafile
+    /// A DrawImage/DrawImagePoints SrcUnit was not UnitTypePixel ([MS-EMFPLUS]
+    /// §2.3.4.8/§2.3.4.9); the SrcRect was treated as pixels regardless.
+    case imageSrcUnit
+    /// A referenced EmfPlusImageAttributes (§2.2.1.5) requested a non-clamp wrap
+    /// mode; it was not applied (the image is drawn once, clamped).
+    case imageAttributes
 }
 
 /// The log-and-skip surface for a render pass (primer §8, §10.8).

@@ -447,6 +447,18 @@ private extension EMFPlusApproximation {
             return "gradient tiling as a clamped fill"
         case .curveSegmentRange:
             return "partial curve range (drew the whole curve)"
+        case .imageBitmapPixelFormat(let format):
+            return "image pixel format \(String(format: "0x%08X", format)) (unsupported; image skipped)"
+        case .imageInvalid:
+            return "an invalid or oversized bitmap image (skipped)"
+        case .imageCompressed:
+            return "a compressed image that could not be decoded (skipped)"
+        case .imageMetafile:
+            return "a metafile image (nested playback unsupported; skipped)"
+        case .imageSrcUnit:
+            return "a non-pixel image source unit as pixels"
+        case .imageAttributes:
+            return "image attributes wrap mode (not applied)"
         }
     }
 }
