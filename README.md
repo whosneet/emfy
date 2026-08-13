@@ -102,6 +102,14 @@ own signing identity if you ship a fork.
 
 ## Changelog
 
+### 1.4
+
+```
+- Large embedded bitmaps are decoded only at the size they are shown, cutting memory use in Quick Look previews, Finder thumbnails, and the viewer window.
+- Render Details notes when a bitmap was decoded below its full resolution — no visible detail is lost.
+- Expanded automated rendering coverage for Chinese, Japanese, and Korean text.
+```
+
 ### 1.3
 
 ```
