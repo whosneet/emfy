@@ -57,6 +57,39 @@ func describe(_ diagnostic: EMFDiagnostic) -> String {
     }
 }
 
+// EMF+ diagnostics carry two offset domains: `recordOffset` is a file offset of
+// the containing EMR_COMMENT_EMFPLUS; `streamOffset` is an offset into the
+// reassembled EMF+ stream (a logical record can span several comments, so it has
+// no single file offset). Both are stated explicitly below.
+func describe(_ diagnostic: EMFPlusDiagnostic) -> String {
+    switch diagnostic {
+    case .commentDataSizeClamped(let recordOffset, let declaredDataSize, let keptStreamBytes):
+        return "EMR_COMMENT_EMFPLUS at file offset \(recordOffset): DataSize \(declaredDataSize) "
+            + "overruns the record; clamped to \(keptStreamBytes) stream bytes"
+    case .recordSizeTooSmall(let streamOffset, let size):
+        return "EMF+ record at reassembled-stream offset \(streamOffset): Size \(size) is below "
+            + "the 12-byte header minimum; walk stopped"
+    case .recordSizeNotAligned(let streamOffset, let size):
+        return "EMF+ record at reassembled-stream offset \(streamOffset): Size \(size) is not a "
+            + "multiple of 4; walk stopped"
+    case .recordDataSizeExceedsSize(let streamOffset, let size, let dataSize):
+        return "EMF+ record at reassembled-stream offset \(streamOffset): DataSize \(dataSize) "
+            + "exceeds Size \(size) minus the 12-byte header; walk stopped"
+    case .recordDataTruncated(let streamOffset, let declaredDataSize, let availableBytes):
+        return "EMF+ record at reassembled-stream offset \(streamOffset): DataSize \(declaredDataSize) "
+            + "runs past the \(availableBytes) stream bytes remaining; record dropped, walk stopped"
+    case .trailingBytes(let count):
+        return "\(count) trailing stream bytes after the last EMF+ record, too few for a 12-byte header"
+    case .headerRecordMissing:
+        return "EMF+ comments present but the stream does not open with an EmfPlusHeader (0x4001); "
+            + "header left undecoded"
+    case .headerUnexpectedSize(let size):
+        return "EmfPlusHeader Size \(size) is not the required 0x1C; header decoded best-effort"
+    case .headerUnexpectedDataSize(let dataSize):
+        return "EmfPlusHeader DataSize \(dataSize) is not the required 0x10; header decoded best-effort"
+    }
+}
+
 func describe(_ variant: EMFHeaderVariant) -> String {
     switch variant {
     case .base: return "base (88-byte fixed part)"
@@ -172,6 +205,68 @@ if file.diagnostics.isEmpty {
     print("diagnostics:")
     for diagnostic in file.diagnostics {
         print("  - \(describe(diagnostic))")
+    }
+}
+
+// MARK: - EMF+ block
+
+// Appended after the GDI diagnostics. A pure-GDI file — no EMF+ records, no EMF+
+// diagnostics, and no decoded header — prints nothing here, so its output stays
+// byte-identical to a build without EMF+ support (primer §8, log-and-skip: EMF+
+// issues are diagnostics, never exit-code changes).
+let plus = file.emfPlusStream()
+if !plus.records.isEmpty || !plus.diagnostics.isEmpty || plus.header != nil {
+    print("")
+    print("emf+:")
+    if let plusHeader = plus.header {
+        let mode = plusHeader.isDual ? "dual" : "EMF+ only"
+        let device = plusHeader.isVideoDisplay ? "video display" : "printer"
+        let versionHex = String(format: "0x%08X", plusHeader.version)
+        print("  version:     \(versionHex) (\(mode), \(device), "
+            + "\(plusHeader.logicalDpiX) x \(plusHeader.logicalDpiY) dpi)")
+    } else {
+        print("  version:     (no EmfPlusHeader record)")
+    }
+    let plusAccounting = "  records walked: \(plus.records.count), "
+        + "stream bytes: \(plus.bytesConsumed) of \(plus.assembledByteCount)"
+    print(plus.leftoverByteCount != 0
+        ? plusAccounting + " (\(plus.leftoverByteCount) unwalked)"
+        : plusAccounting)
+    print("")
+
+    // Inventory table — same padding discipline as the GDI table above.
+    let plusRows: [(type: String, name: String, count: String, bytes: String)] =
+        plus.recordInventory().map { entry in
+            (
+                type: String(format: "0x%04X", entry.type),
+                name: EMFPlusRecordType.displayName(for: entry.type),
+                count: String(entry.count),
+                bytes: String(entry.totalBytes)
+            )
+        }
+    let plusTypeWidth = max("type".count, plusRows.map { $0.type.count }.max() ?? 0)
+    let plusNameWidth = max("name".count, plusRows.map { $0.name.count }.max() ?? 0)
+    let plusCountWidth = max("count".count, plusRows.map { $0.count.count }.max() ?? 0)
+    let plusBytesWidth = max("total bytes".count, plusRows.map { $0.bytes.count }.max() ?? 0)
+    print(
+        "\(leftPad("type", plusTypeWidth))  \(rightPad("name", plusNameWidth))  "
+        + "\(leftPad("count", plusCountWidth))  \(leftPad("total bytes", plusBytesWidth))"
+    )
+    for row in plusRows {
+        print(
+            "\(leftPad(row.type, plusTypeWidth))  \(rightPad(row.name, plusNameWidth))  "
+            + "\(leftPad(row.count, plusCountWidth))  \(leftPad(row.bytes, plusBytesWidth))"
+        )
+    }
+    print("")
+
+    if plus.diagnostics.isEmpty {
+        print("emf+ diagnostics: none")
+    } else {
+        print("emf+ diagnostics:")
+        for diagnostic in plus.diagnostics {
+            print("  - \(describe(diagnostic))")
+        }
     }
 }
 exit(0)
