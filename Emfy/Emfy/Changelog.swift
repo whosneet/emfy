@@ -17,7 +17,7 @@ enum Changelog {
     static let entries: [ChangelogEntry] = [
         ChangelogEntry(
             version: "1.4",
-            build: "1",
+            build: "2",
             date: "August 2026",
             changes: [
                 "Large embedded bitmaps are now decoded only at the size they are shown, reducing memory use in Quick Look previews, Finder thumbnails, and the viewer window.",
