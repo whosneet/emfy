@@ -16,6 +16,16 @@ struct ChangelogEntry: Identifiable {
 enum Changelog {
     static let entries: [ChangelogEntry] = [
         ChangelogEntry(
+            version: "1.4",
+            build: "1",
+            date: "August 2026",
+            changes: [
+                "Large embedded bitmaps are now decoded only at the size they are shown, reducing memory use in Quick Look previews, Finder thumbnails, and the viewer window.",
+                "Render Details now notes when a bitmap was decoded below its full resolution — no visible detail is lost.",
+                "Expanded automated rendering coverage for Chinese, Japanese, and Korean text.",
+            ]
+        ),
+        ChangelogEntry(
             version: "1.3",
             build: "1",
             date: "August 2026",
