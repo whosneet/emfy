@@ -91,12 +91,15 @@ private func fillRectsDirectI16(_ color: UInt32, _ rect: (Int16, Int16, Int16, I
 }
 
 /// EmfPlusLinearGradientBrushData (§2.2.2.24): a plain two-colour horizontal
-/// gradient (BrushDataFlags 0 → no transform, no blend).
-private func linearGradientBrushPayload(rect: (Float, Float, Float, Float), start: UInt32, end: UInt32) -> [UInt8] {
+/// gradient (BrushDataFlags 0 → no transform, no blend). `wrapMode` defaults to
+/// 0x04 Clamp (§2.1.1.33) — the mode the fill reproduces exactly, so no
+/// wrap-mode approximation note fires; pass a tiling value (0x00–0x03) to
+/// exercise that note.
+private func linearGradientBrushPayload(rect: (Float, Float, Float, Float), start: UInt32, end: UInt32, wrapMode: Int32 = 4) -> [UInt8] {
     le { writer in
         writer.u32(plusVersion); writer.u32(4)   // Version, Type 4 (linear gradient)
         writer.u32(0)                             // BrushDataFlags
-        writer.i32(0)                             // WrapMode
+        writer.i32(wrapMode)                      // WrapMode
         writer.f32(rect.0); writer.f32(rect.1); writer.f32(rect.2); writer.f32(rect.3)
         writer.u32(start); writer.u32(end)        // StartColor, EndColor
         writer.u32(0); writer.u32(0)              // Reserved1, Reserved2
@@ -123,6 +126,18 @@ private func drawLines(penId: UInt8, _ points: [(Float, Float)]) -> [UInt8] {
 
 private func translateWorld(_ dx: Float, _ dy: Float) -> [UInt8] {
     plusRecord(0x402D, 0x0000, le { $0.f32(dx); $0.f32(dy) })
+}
+
+/// EmfPlusDrawCurve (§2.3.4.4): Tension, Offset, NumSegments, Count, PointData
+/// (absolute f32 points; pen in the ObjectId low byte).
+private func drawCurve(penId: UInt8, tension: Float, offset: UInt32, numSegments: UInt32, _ points: [(Float, Float)]) -> [UInt8] {
+    plusRecord(0x4018, UInt16(penId), le { writer in
+        writer.f32(tension)
+        writer.u32(offset)
+        writer.u32(numSegments)
+        writer.u32(UInt32(points.count))
+        for point in points { writer.f32(point.0); writer.f32(point.1) }
+    })
 }
 
 private func save(_ index: UInt32) -> [UInt8] { plusRecord(0x4025, 0, le { $0.u32(index) }) }
@@ -371,5 +386,75 @@ struct EMFPlusPlaybackTests {
             log.entries.contains(.emfPlusUnsupportedRecord(type: 0x401C, count: 1)),
             "expected an unsupported-record note, got \(log.entries)"
         )
+    }
+
+    // MARK: - 9. Deferred approximations now logged (P3-C)
+
+    @Test("a tiling-wrap-mode linear gradient still fills but logs a wrap-mode approximation")
+    func linearGradientTileWrapModeLogged() throws {
+        // WrapModeTile (0) tiles; the fill clamps, so the approximation is noted.
+        let brush = plusObject(
+            id: 1, type: 1,
+            payload: linearGradientBrushPayload(
+                rect: (10, 40, 80, 20),
+                start: argb(255, 255, 0, 0), end: argb(255, 0, 0, 255),
+                wrapMode: 0
+            )
+        )
+        let file = try plusFile([brush, fillRectsBrush(1, (10, 40, 80, 20))])
+        let (image, log) = try renderPlus(file)
+
+        #expect(!Self.isWhite(image[20, 50]), "the gradient still filled")
+        #expect(
+            log.entries.contains(.emfPlusApproximated(feature: .linearGradientWrapMode, count: 1)),
+            "expected a wrap-mode approximation note, got \(log.entries)"
+        )
+    }
+
+    @Test("a clamp-wrap-mode linear gradient logs no wrap-mode note")
+    func linearGradientClampWrapModeClean() throws {
+        // WrapModeClamp (4, the helper default) is reproduced exactly.
+        let brush = plusObject(
+            id: 1, type: 1,
+            payload: linearGradientBrushPayload(
+                rect: (10, 40, 80, 20),
+                start: argb(255, 255, 0, 0), end: argb(255, 0, 0, 255)
+            )
+        )
+        let file = try plusFile([brush, fillRectsBrush(1, (10, 40, 80, 20))])
+        let (_, log) = try renderPlus(file)
+
+        #expect(log.isClean, "unexpected log for a clamped gradient: \(log.entries)")
+    }
+
+    @Test("a DrawCurve with a partial Offset/NumSegments range is logged as approximated")
+    func drawCurvePartialRangeLogged() throws {
+        // 5 points → 4 segments; request only 2 segments starting at offset 1.
+        let pen = plusObject(id: 1, type: 2, payload: penPayload(width: 2, argb: argb(255, 0, 0, 0)))
+        let file = try plusFile([
+            pen,
+            drawCurve(penId: 1, tension: 0.5, offset: 1, numSegments: 2,
+                      [(10, 50), (30, 20), (50, 60), (70, 20), (90, 50)]),
+        ])
+        let (_, log) = try renderPlus(file)
+
+        #expect(
+            log.entries.contains(.emfPlusApproximated(feature: .curveSegmentRange, count: 1)),
+            "expected a curve segment-range note, got \(log.entries)"
+        )
+    }
+
+    @Test("a DrawCurve covering the whole spline logs no segment-range note")
+    func drawCurveFullRangeClean() throws {
+        // offset 0, numSegments 4 == points − 1: the whole open spline.
+        let pen = plusObject(id: 1, type: 2, payload: penPayload(width: 2, argb: argb(255, 0, 0, 0)))
+        let file = try plusFile([
+            pen,
+            drawCurve(penId: 1, tension: 0.5, offset: 0, numSegments: 4,
+                      [(10, 50), (30, 20), (50, 60), (70, 20), (90, 50)]),
+        ])
+        let (_, log) = try renderPlus(file)
+
+        #expect(log.isClean, "unexpected log for a full-range curve: \(log.entries)")
     }
 }

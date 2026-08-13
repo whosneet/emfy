@@ -443,6 +443,10 @@ private extension EMFPlusApproximation {
             return "compositing as source-over"
         case .container:
             return "graphics container as a save/restore"
+        case .linearGradientWrapMode:
+            return "gradient tiling as a clamped fill"
+        case .curveSegmentRange:
+            return "partial curve range (drew the whole curve)"
         }
     }
 }

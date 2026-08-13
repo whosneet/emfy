@@ -33,6 +33,14 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// A graphics-state container was approximated by a save/restore of the
     /// full graphics state (with the container's rect transform applied).
     case container
+    /// A linear-gradient brush used a tiling wrap mode ([MS-EMFPLUS] §2.1.1.33
+    /// Tile/TileFlipX/TileFlipY/TileFlipXY); the fill clamps to the gradient
+    /// axis instead of repeating the pattern beyond it.
+    case linearGradientWrapMode
+    /// A DrawCurve requested a partial segment range — a non-zero Offset or a
+    /// NumSegments short of the whole spline ([MS-EMFPLUS] §2.3.4.4); the entire
+    /// open cardinal spline was drawn instead.
+    case curveSegmentRange
 }
 
 /// The log-and-skip surface for a render pass (primer §8, §10.8).

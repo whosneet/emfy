@@ -310,11 +310,17 @@ struct EMFPlusPlayback {
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
         case 0x4018:   // DrawCurve
-            // Tension, Offset, NumSegments, Count, then points. The Offset/
-            // NumSegments partial-range is not honoured; the whole open spline
-            // is drawn (best effort).
-            guard let tension = reader.f32(), reader.u32() != nil, reader.u32() != nil, let count = reader.u32(),
+            // Tension, Offset, NumSegments, Count, then points ([MS-EMFPLUS]
+            // §2.3.4.4). The whole open cardinal spline is drawn; a non-zero
+            // Offset or a NumSegments short of the spline's segment count
+            // (points − 1) selects a partial run we do not honour — note it.
+            guard let tension = reader.f32(), let offset = reader.u32(),
+                  let numSegments = reader.u32(), let count = reader.u32(),
                   let points = reader.points(count: Int(count), compressed: cBit) else { return }
+            let fullSegments = points.count > 1 ? points.count - 1 : 0
+            if offset != 0 || Int(numSegments) < fullSegments {
+                log.noteEMFPlusApproximated(.curveSegmentRange)
+            }
             let path = CGMutablePath()
             EMFPlusGeometry.appendCardinalSpline(points, tension: tension, closed: false, to: path, transform: full)
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
@@ -369,6 +375,10 @@ struct EMFPlusPlayback {
         case .linearGradient(let gradient):
             if let cgGradient = EMFPlusPaint.linearGradient(gradient),
                let axis = EMFPlusPaint.linearGradientAxis(gradient, full: full) {
+                // The fill clamps to the axis (drawsBefore/AfterEndLocation), so
+                // a tiling wrap mode ([MS-EMFPLUS] §2.1.1.33) is not reproduced;
+                // Clamp (0x04) is honoured exactly.
+                if Self.wrapModeTiles(gradient.wrapMode) { log.noteEMFPlusApproximated(.linearGradientWrapMode) }
                 context.addPath(path)
                 context.clip(using: rule)
                 context.drawLinearGradient(
@@ -550,6 +560,11 @@ struct EMFPlusPlayback {
             alpha: UInt8((value >> 24) & 0xFF)
         )
     }
+
+    /// True for the four tiling WrapMode values ([MS-EMFPLUS] §2.1.1.33):
+    /// 0x00 Tile and 0x01–0x03 tile-with-flip. 0x04 Clamp (and any undefined
+    /// value) is not treated as tiling.
+    private static func wrapModeTiles(_ wrapMode: Int32) -> Bool { (0 ... 3).contains(wrapMode) }
 
     /// The fill source for a drawing record: a direct colour when the S flag is
     /// set, else the object-table brush. Nil (skip the fill) when the S flag is
