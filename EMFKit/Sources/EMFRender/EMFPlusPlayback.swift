@@ -335,12 +335,149 @@ struct EMFPlusPlayback {
             EMFPlusGeometry.appendBeziers(points, to: path, transform: full)
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
-        // Images, text, driver strings — P4 scope: logged skip.
-        case 0x401A, 0x401B, 0x401C, 0x4036:
+        case 0x401A:   // DrawImage
+            drawImage(record, objectID: objectID, cBit: cBit, log: &log)
+
+        case 0x401B:   // DrawImagePoints
+            drawImagePoints(record, objectID: objectID, cBit: cBit, relative: relative, log: &log)
+
+        // Text and driver strings — phase-4-B scope: logged skip.
+        case 0x401C, 0x4036:
             log.noteEMFPlusUnsupported(type: record.type)
 
         default:
             log.noteEMFPlusUnsupported(type: record.type)
+        }
+    }
+
+    // MARK: - Images (§2.3.4.8 / §2.3.4.9)
+
+    /// EmfPlusDrawImage ([MS-EMFPLUS] §2.3.4.8): ImageAttributesID (u32), SrcUnit
+    /// (i32), SrcRect (EmfPlusRectF), RectData (EmfPlusRect if the C flag is set,
+    /// else EmfPlusRectF). The dest rect's three defining corners become the
+    /// (axis-aligned) parallelogram the SrcRect portion is scaled to fill. A
+    /// negative dest extent mirrors the image (its sign carries through).
+    private func drawImage(_ record: EMFPlusRecord, objectID: Int, cBit: Bool, log: inout EMFRenderLog) {
+        var reader = PlusReader(record.data)
+        guard let attributesID = reader.u32(), let srcUnit = reader.i32(),
+              let srcRect = reader.rectF(), let dest = reader.rect(compressed: cBit),
+              let image = table.image(objectID) else { return }
+        // Raw origin/size (not standardized) so a negative extent still mirrors.
+        let x = dest.origin.x, y = dest.origin.y
+        let w = dest.size.width, h = dest.size.height
+        drawImageMapped(
+            image, srcRect: srcRect, srcUnit: srcUnit,
+            upperLeft: CGPoint(x: x, y: y),
+            upperRight: CGPoint(x: x + w, y: y),
+            lowerLeft: CGPoint(x: x, y: y + h),
+            attributesID: attributesID, log: &log
+        )
+    }
+
+    /// EmfPlusDrawImagePoints ([MS-EMFPLUS] §2.3.4.9): ImageAttributesID (u32),
+    /// SrcUnit (i32), SrcRect (EmfPlusRectF), Count (u32, MUST be 3), PointData —
+    /// the upper-left, upper-right, and lower-left corners of a parallelogram
+    /// (the fourth corner is extrapolated). The P flag (relative points) is
+    /// unsupported like every other relative-encoded record.
+    private func drawImagePoints(_ record: EMFPlusRecord, objectID: Int, cBit: Bool, relative: Bool, log: inout EMFRenderLog) {
+        if relative { log.noteEMFPlusUnsupported(type: record.type); return }
+        var reader = PlusReader(record.data)
+        guard let attributesID = reader.u32(), let srcUnit = reader.i32(),
+              let srcRect = reader.rectF(), let count = reader.u32(),
+              let points = reader.points(count: Int(count), compressed: cBit),
+              points.count >= 3, let image = table.image(objectID) else { return }
+        drawImageMapped(
+            image, srcRect: srcRect, srcUnit: srcUnit,
+            upperLeft: points[0], upperRight: points[1], lowerLeft: points[2],
+            attributesID: attributesID, log: &log
+        )
+    }
+
+    /// Draws the SrcRect portion of `image` into the parallelogram whose three
+    /// defining corners are given (in WORLD space). Mirrors the GDI bitmap
+    /// drawer's flip: the placement affine maps the top-down unit image square to
+    /// the parallelogram, then an in-square y-flip lands image row 0 (top) on the
+    /// upper-left→upper-right edge — upright through `base`'s canvas flip.
+    private func drawImageMapped(
+        _ plusImage: EMFPlusImage,
+        srcRect: CGRect,
+        srcUnit: Int32,
+        upperLeft: CGPoint,
+        upperRight: CGPoint,
+        lowerLeft: CGPoint,
+        attributesID: UInt32,
+        log: inout EMFRenderLog
+    ) {
+        let (decoded, skip) = EMFPlusImageDecoder.decode(plusImage)
+        guard let cgFull = decoded else {
+            if let skip { note(imageSkip: skip, log: &log) }
+            return
+        }
+        // SrcUnit MUST be UnitTypePixel (2); anything else is treated as pixels.
+        if srcUnit != 2 { log.noteEMFPlusApproximated(.imageSrcUnit) }
+        // ImageAttributes are not applied in phase-4-A; note a tiling wrap.
+        if let attributes = table.imageAttributes(Int(attributesID & 0xFF)),
+           Self.wrapModeTiles(Int32(bitPattern: attributes.wrapMode)) {
+            log.noteEMFPlusApproximated(.imageAttributes)
+        }
+
+        let cgImage = cropped(cgFull, toSrcRect: srcRect)
+
+        // Placement: unit square [0,1]² → parallelogram (world space), with
+        // upper-left at the origin, upper-right along +x, lower-left along +y.
+        let placement = CGAffineTransform(
+            a: upperRight.x - upperLeft.x, b: upperRight.y - upperLeft.y,
+            c: lowerLeft.x - upperLeft.x, d: lowerLeft.y - upperLeft.y,
+            tx: upperLeft.x, ty: upperLeft.y
+        )
+        let determinant = placement.a * placement.d - placement.b * placement.c
+        guard placement.a.isFinite, placement.b.isFinite, placement.c.isFinite,
+              placement.d.isFinite, placement.tx.isFinite, placement.ty.isFinite,
+              determinant != 0 else { return }
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        state.clip.apply(to: context, deviceToTarget: base)
+        context.setShouldAntialias(state.antialias)
+        // InterpolationMode is not tracked; nearest-neighbor keeps the decode
+        // deterministic and matches the GDI bitmap path's chunky-pixel policy.
+        context.interpolationQuality = .none
+        context.concatenate(full)
+        context.concatenate(placement)
+        context.translateBy(x: 0, y: 1)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    /// Crops `image` to the SrcRect sub-rectangle (SOURCE pixels, top-down). A
+    /// whole-image, degenerate, or non-finite SrcRect passes the image through.
+    /// SrcRect is a file-derived float rect, so it is finiteness-guarded and
+    /// clamped to the image before any Int conversion (§8: no trapping casts).
+    private func cropped(_ image: CGImage, toSrcRect srcRect: CGRect) -> CGImage {
+        let width = image.width, height = image.height
+        guard srcRect.origin.x.isFinite, srcRect.origin.y.isFinite,
+              srcRect.size.width.isFinite, srcRect.size.height.isFinite else { return image }
+        // Clamp to the image in float space first, so the Int casts are bounded.
+        let fx = min(max(srcRect.origin.x, 0), CGFloat(width))
+        let fy = min(max(srcRect.origin.y, 0), CGFloat(height))
+        let fw = min(max(srcRect.size.width, 0), CGFloat(width))
+        let fh = min(max(srcRect.size.height, 0), CGFloat(height))
+        let x = Int(fx), y = Int(fy)
+        let w = min(Int(fw.rounded()), width - x)
+        let h = min(Int(fh.rounded()), height - y)
+        // Whole image (or a rect that covers it) → no crop.
+        if x == 0, y == 0, w >= width, h >= height { return image }
+        guard w > 0, h > 0 else { return image }
+        return image.cropping(to: CGRect(x: x, y: y, width: w, height: h)) ?? image
+    }
+
+    /// Maps an image-decode `Skip` to its render-log note.
+    private func note(imageSkip: EMFPlusImageDecoder.Skip, log: inout EMFRenderLog) {
+        switch imageSkip {
+        case .pixelFormat(let format): log.noteEMFPlusApproximated(.imageBitmapPixelFormat(format))
+        case .invalid: log.noteEMFPlusApproximated(.imageInvalid)
+        case .compressed: log.noteEMFPlusApproximated(.imageCompressed)
+        case .metafile: log.noteEMFPlusApproximated(.imageMetafile)
         }
     }
 
@@ -651,4 +788,6 @@ private struct ObjectTable {
     func pen(_ id: Int) -> EMFPlusPen? { if case .pen(let value)? = value(id) { return value }; return nil }
     func path(_ id: Int) -> EMFPlusPath? { if case .path(let value)? = value(id) { return value }; return nil }
     func region(_ id: Int) -> EMFPlusRegion? { if case .region(let value)? = value(id) { return value }; return nil }
+    func image(_ id: Int) -> EMFPlusImage? { if case .image(let value)? = value(id) { return value }; return nil }
+    func imageAttributes(_ id: Int) -> EMFPlusImageAttributes? { if case .imageAttributes(let value)? = value(id) { return value }; return nil }
 }

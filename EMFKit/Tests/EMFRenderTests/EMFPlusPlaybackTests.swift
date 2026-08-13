@@ -458,3 +458,213 @@ struct EMFPlusPlaybackTests {
         #expect(log.isClean, "unexpected log for a full-range curve: \(log.entries)")
     }
 }
+
+// MARK: - EMF+ image record fixtures ([MS-EMFPLUS] §2.2.2.2, §2.3.4.8/9)
+
+/// EmfPlusImage bitmap object (§2.2.2.2): a 2×2 32bpp-ARGB pixel bitmap —
+/// red (top-left), green (top-right), blue (bottom-left), white (bottom-right).
+private func imageObjectPayload() -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion)   // Version
+        writer.u32(1)             // Type = ImageDataTypeBitmap
+        writer.i32(2)             // Width
+        writer.i32(2)             // Height
+        writer.i32(8)             // Stride (2 px × 4 bytes)
+        writer.u32(0x0026_200A)   // PixelFormat = 32bpp ARGB
+        writer.u32(0)             // Type = BitmapDataTypePixel
+        writer.raw([0x00, 0x00, 0xFF, 0xFF])   // (0,0) red    B,G,R,A
+        writer.raw([0x00, 0xFF, 0x00, 0xFF])   // (1,0) green
+        writer.raw([0xFF, 0x00, 0x00, 0xFF])   // (0,1) blue
+        writer.raw([0xFF, 0xFF, 0xFF, 0xFF])   // (1,1) white
+    }
+}
+
+/// EmfPlusImage metafile object (§2.2.2.27): a metafile-content image.
+private func metafileImageObjectPayload() -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion)   // Version
+        writer.u32(2)             // Type = ImageDataTypeMetafile
+        writer.u32(1)             // MetafileType
+        writer.u32(4)             // MetafileDataSize
+        writer.raw([0, 0, 0, 0])  // (dummy embedded metafile bytes)
+    }
+}
+
+/// EmfPlusImage bitmap object with an unsupported PixelFormat (32bpp PARGB).
+private func pargbImageObjectPayload() -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(1)   // Version, ImageDataTypeBitmap
+        writer.i32(2); writer.i32(2); writer.i32(8)
+        writer.u32(0x000E_200B)   // PixelFormat = 32bpp PARGB (unsupported)
+        writer.u32(0)             // BitmapDataTypePixel
+        writer.raw([UInt8](repeating: 0, count: 16))
+    }
+}
+
+/// EmfPlusImageAttributes object (§2.2.1.5): Version, Reserved1, WrapMode,
+/// ClampColor, ObjectClamp, Reserved2.
+private func imageAttributesPayload(wrapMode: UInt32) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion)   // Version
+        writer.u32(0)             // Reserved1
+        writer.u32(wrapMode)      // WrapMode
+        writer.u32(0)             // ClampColor
+        writer.u32(0)             // ObjectClamp
+        writer.u32(0)             // Reserved2
+    }
+}
+
+/// EmfPlusDrawImage (§2.3.4.8), C flag clear (EmfPlusRectF dest).
+private func drawImageRecord(
+    imageId: UInt8,
+    src: (Float, Float, Float, Float),
+    dest: (Float, Float, Float, Float),
+    attrId: UInt32 = 0,
+    srcUnit: Int32 = 2
+) -> [UInt8] {
+    plusRecord(0x401A, UInt16(imageId), le { writer in
+        writer.u32(attrId)
+        writer.i32(srcUnit)
+        writer.f32(src.0); writer.f32(src.1); writer.f32(src.2); writer.f32(src.3)
+        writer.f32(dest.0); writer.f32(dest.1); writer.f32(dest.2); writer.f32(dest.3)
+    })
+}
+
+/// EmfPlusDrawImagePoints (§2.3.4.9), C clear; `extraFlags` can set the P bit.
+private func drawImagePointsRecord(
+    imageId: UInt8,
+    extraFlags: UInt16 = 0,
+    src: (Float, Float, Float, Float),
+    points: [(Float, Float)]
+) -> [UInt8] {
+    plusRecord(0x401B, UInt16(imageId) | extraFlags, le { writer in
+        writer.u32(0)             // ImageAttributesID
+        writer.i32(2)             // SrcUnit = UnitTypePixel
+        writer.f32(src.0); writer.f32(src.1); writer.f32(src.2); writer.f32(src.3)
+        writer.u32(UInt32(points.count))
+        for point in points { writer.f32(point.0); writer.f32(point.1) }
+    })
+}
+
+@Suite("EMF+ image playback")
+struct EMFPlusImagePlaybackTests {
+
+    private func isRed(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.r > 200 && p.g < 70 && p.b < 70 }
+    private func isGreen(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.g > 130 && p.r < 90 && p.b < 90 }
+    private func isBlue(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.b > 200 && p.r < 70 && p.g < 70 }
+    private func isWhite(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.r > 230 && p.g > 230 && p.b > 230 }
+
+    private func hasApprox(_ log: EMFRenderLog, _ feature: EMFPlusApproximation) -> Bool {
+        log.entries.contains { if case .emfPlusApproximated(let f, _) = $0 { return f == feature }; return false }
+    }
+    private func hasUnsupported(_ log: EMFRenderLog, type: UInt16) -> Bool {
+        log.entries.contains { if case .emfPlusUnsupportedRecord(let t, _) = $0 { return t == type }; return false }
+    }
+
+    @Test("DrawImage scales the bitmap into the dest rect, quadrants placed, clean log")
+    func drawImagePlacesQuadrants() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageObjectPayload()),
+            drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(log.isClean, "unexpected log: \(log.entries)")
+        #expect(isRed(pixels[18, 18]), "top-left quadrant, got \(pixels[18, 18])")
+        #expect(isGreen(pixels[42, 18]), "top-right quadrant, got \(pixels[42, 18])")
+        #expect(isBlue(pixels[18, 42]), "bottom-left quadrant, got \(pixels[18, 42])")
+        #expect(isWhite(pixels[42, 42]), "bottom-right quadrant, got \(pixels[42, 42])")
+    }
+
+    @Test("DrawImage SrcRect crops to a sub-image (the green pixel fills the dest)")
+    func drawImageCropSelectsSubImage() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageObjectPayload()),
+            // Src = the single top-right (green) pixel → the whole dest is green.
+            drawImageRecord(imageId: 1, src: (1, 0, 1, 1), dest: (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(log.isClean, "unexpected log: \(log.entries)")
+        #expect(isGreen(pixels[18, 18]), "cropped region should be all green, got \(pixels[18, 18])")
+        #expect(isGreen(pixels[42, 42]), "cropped region should be all green, got \(pixels[42, 42])")
+        #expect(!isRed(pixels[18, 18]), "crop should have excluded the red pixel")
+    }
+
+    @Test("DrawImage naming an unbound image object is a clean no-op")
+    func drawImageUnboundIsNoOp() throws {
+        let file = try plusFile([
+            drawImageRecord(imageId: 7, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(log.isClean, "an unbound image should skip silently: \(log.entries)")
+        #expect(isWhite(pixels[30, 30]), "nothing should have drawn, got \(pixels[30, 30])")
+    }
+
+    @Test("DrawImagePoints maps the image into a parallelogram")
+    func drawImagePointsMapsParallelogram() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageObjectPayload()),
+            // UL(50,10) UR(90,20) LL(60,60): a sheared parallelogram.
+            drawImagePointsRecord(imageId: 1, src: (0, 0, 2, 2), points: [(50, 10), (90, 20), (60, 60)]),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(log.isClean, "unexpected log: \(log.entries)")
+        // The red quadrant sits near the upper-left corner of the parallelogram.
+        #expect(pixels.contains(in: (x: 52, y: 14, width: 12, height: 12)) { isRed($0) },
+                "no red near the parallelogram's upper-left corner")
+    }
+
+    @Test("DrawImagePoints with the P (relative) flag logs an unsupported record")
+    func drawImagePointsRelativeLogsUnsupported() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageObjectPayload()),
+            drawImagePointsRecord(imageId: 1, extraFlags: 0x0800, src: (0, 0, 2, 2), points: [(50, 10), (90, 20), (60, 60)]),
+        ])
+        let (_, log) = try renderPlus(file)
+        #expect(hasUnsupported(log, type: 0x401B), "relative DrawImagePoints should log unsupported: \(log.entries)")
+    }
+
+    @Test("DrawImage with a non-pixel SrcUnit draws and logs the approximation")
+    func drawImageNonPixelSrcUnitLogs() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageObjectPayload()),
+            drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40), srcUnit: 0),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(hasApprox(log, .imageSrcUnit), "non-pixel SrcUnit should log .imageSrcUnit: \(log.entries)")
+        #expect(isRed(pixels[18, 18]), "the image should still have drawn, got \(pixels[18, 18])")
+    }
+
+    @Test("DrawImage of a metafile image logs .imageMetafile and draws nothing")
+    func drawImageMetafileLogsSkip() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: metafileImageObjectPayload()),
+            drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(hasApprox(log, .imageMetafile), "a metafile image should log .imageMetafile: \(log.entries)")
+        #expect(isWhite(pixels[30, 30]), "a metafile image should draw nothing, got \(pixels[30, 30])")
+    }
+
+    @Test("DrawImage of an unsupported pixel format logs the raw format value")
+    func drawImageUnsupportedFormatLogs() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: pargbImageObjectPayload()),
+            drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)),
+        ])
+        let (_, log) = try renderPlus(file)
+        #expect(hasApprox(log, .imageBitmapPixelFormat(0x000E_200B)),
+                "an unsupported format should log its raw value: \(log.entries)")
+    }
+
+    @Test("DrawImage referencing a tiling ImageAttributes logs .imageAttributes")
+    func drawImageTilingAttributesLogs() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageObjectPayload()),
+            plusObject(id: 3, type: 8, payload: imageAttributesPayload(wrapMode: 0)),   // WrapModeTile
+            drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40), attrId: 3),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(hasApprox(log, .imageAttributes), "a tiling wrap should log .imageAttributes: \(log.entries)")
+        #expect(isRed(pixels[18, 18]), "the image should still have drawn, got \(pixels[18, 18])")
+    }
+}
