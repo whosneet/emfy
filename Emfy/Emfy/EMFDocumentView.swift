@@ -410,6 +410,39 @@ private extension EMFRenderLog.Entry {
             return "Ignored a source bitmap transform (\(count) occurrence\(count == 1 ? "" : "s"))."
         case .dibDownsampled(let count, let worstNativePixels, let worstDecodedPixels):
             return "Decoded an embedded bitmap below its full resolution to fit the destination; no visible detail was lost (largest: \(worstNativePixels) → \(worstDecodedPixels) pixels, \(count) occurrence\(count == 1 ? "" : "s"))."
+        case .emfPlusUnsupportedRecord(let type, let count):
+            return "Skipped unsupported EMF+ record type \(String(format: "0x%04X", type)) (\(count) occurrence\(count == 1 ? "" : "s"))."
+        case .emfPlusApproximated(let feature, let count):
+            return "Approximated EMF+ \(feature.userDescription) (\(count) occurrence\(count == 1 ? "" : "s"))."
+        }
+    }
+}
+
+private extension EMFPlusApproximation {
+    var userDescription: String {
+        switch self {
+        case .hatchBrush:
+            return "hatch fill as a solid color"
+        case .pathGradientBrush:
+            return "path-gradient fill as its center color"
+        case .textureBrush:
+            return "texture fill (skipped)"
+        case .penNonSolidBrush:
+            return "gradient/pattern pen stroke as a solid color"
+        case .penCap:
+            return "line cap as a round cap"
+        case .clipCombineMode:
+            return "clip combination as an intersection"
+        case .regionCombine:
+            return "region combination as a union"
+        case .offsetClip:
+            return "clip offset (left unchanged)"
+        case .pageUnit:
+            return "page unit as pixels"
+        case .compositingMode:
+            return "compositing as source-over"
+        case .container:
+            return "graphics container as a save/restore"
         }
     }
 }

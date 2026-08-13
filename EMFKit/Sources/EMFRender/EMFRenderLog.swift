@@ -1,6 +1,40 @@
 import EMFParse
 import Foundation
 
+/// An EMF+ feature the phase-3 playback renders APPROXIMATELY rather than
+/// exactly (primer §8: best partial output plus an honest note). One case per
+/// approximation the playback ships, so a viewer can tell precisely what was
+/// simplified. Value-comparable and `Hashable` (used as a coalescing key).
+public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
+    /// A hatch brush was rendered as a solid fill of its foreground colour.
+    case hatchBrush
+    /// A path-gradient brush was rendered as a flat fill of its centre colour.
+    case pathGradientBrush
+    /// A texture brush's fill was skipped (the bitmap is phase-4 scope).
+    case textureBrush
+    /// A pen whose brush is not solid (gradient/hatch/texture) was stroked
+    /// with a representative solid colour.
+    case penNonSolidBrush
+    /// A pen line cap outside flat/square/round (triangle or an anchor/custom
+    /// cap) was drawn with a round cap.
+    case penCap
+    /// A clip CombineMode CoreGraphics cannot express (Union/XOR/Exclude/
+    /// Complement) was applied as an intersection (best effort).
+    case clipCombineMode
+    /// A region combine node other than a plain union was resolved as a union
+    /// of its two children (best-effort "render more").
+    case regionCombine
+    /// An EmfPlusOffsetClip was left unapplied (the clip was kept as-is).
+    case offsetClip
+    /// A page unit other than pixel was treated as pixels (no DPI conversion).
+    case pageUnit
+    /// A compositing mode other than SourceOver was kept as SourceOver.
+    case compositingMode
+    /// A graphics-state container was approximated by a save/restore of the
+    /// full graphics state (with the container's rect transform applied).
+    case container
+}
+
 /// The log-and-skip surface for a render pass (primer §8, §10.8).
 ///
 /// Rendering never fails — it always produces best-effort output. Anything the
@@ -134,6 +168,15 @@ public struct EMFRenderLog: Sendable, Equatable {
         /// count; `worstNativePixels`/`worstDecodedPixels` carry the largest
         /// source bitmap that was reduced and the pixel count it decoded to.
         case dibDownsampled(count: Int, worstNativePixels: Int, worstDecodedPixels: Int)
+        /// An EMF+ record type the phase-3 playback does not implement — images
+        /// (DrawImage/DrawImagePoints), text (DrawString/DrawDriverString),
+        /// serializable objects, terminal-server records, and unknown types —
+        /// was skipped. The rest of the file still plays. Coalesced by `type`.
+        case emfPlusUnsupportedRecord(type: UInt16, count: Int)
+        /// An EMF+ feature the playback rendered approximately rather than
+        /// exactly (see `EMFPlusApproximation`). The shape still drew; only the
+        /// fidelity of that one aspect was reduced. Coalesced by `feature`.
+        case emfPlusApproximated(feature: EMFPlusApproximation, count: Int)
     }
 
     /// Every logged event, in the order it was raised. The coalesced families
@@ -176,6 +219,8 @@ public struct EMFRenderLog: Sendable, Equatable {
         case rasterOp(UInt32)
         case xformSrc
         case dibDownsampled
+        case emfPlusUnsupported(UInt16)
+        case emfPlusApprox(EMFPlusApproximation)
     }
 
     /// A `Hashable` surrogate for `DIBUnsupportedReason?` (which is not itself
@@ -330,6 +375,27 @@ public struct EMFRenderLog: Sendable, Equatable {
             .dibDownsampled(count: 1, worstNativePixels: nativePixels, worstDecodedPixels: decodedPixels),
             key: .dibDownsampled
         )
+    }
+
+    /// Records one skipped EMF+ record, coalescing by `type` so a file with
+    /// thousands of the same unsupported EMF+ record yields one line.
+    mutating func noteEMFPlusUnsupported(type: UInt16) {
+        if let index = coalesceIndex[.emfPlusUnsupported(type)],
+           case .emfPlusUnsupportedRecord(_, let c) = entries[index] {
+            entries[index] = .emfPlusUnsupportedRecord(type: type, count: c + 1)
+            return
+        }
+        appendDistinct(.emfPlusUnsupportedRecord(type: type, count: 1), key: .emfPlusUnsupported(type))
+    }
+
+    /// Records one EMF+ approximation, coalescing by `feature`.
+    mutating func noteEMFPlusApproximated(_ feature: EMFPlusApproximation) {
+        if let index = coalesceIndex[.emfPlusApprox(feature)],
+           case .emfPlusApproximated(_, let c) = entries[index] {
+            entries[index] = .emfPlusApproximated(feature: feature, count: c + 1)
+            return
+        }
+        appendDistinct(.emfPlusApproximated(feature: feature, count: 1), key: .emfPlusApprox(feature))
     }
 
     /// Records any non-coalesced event verbatim.
