@@ -16,6 +16,17 @@ struct ChangelogEntry: Identifiable {
 enum Changelog {
     static let entries: [ChangelogEntry] = [
         ChangelogEntry(
+            version: "2.0",
+            build: "3",
+            date: "August 2026",
+            changes: [
+                "Full EMF+ (GDI+) rendering — vector shapes, gradients, images, and text now draw in the viewer, Quick Look previews, and Finder thumbnails.",
+                "Dual-format files now play their higher-fidelity EMF+ content instead of the GDI fallback.",
+                "Files whose drawing content exists only as EMF+ now render fully, instead of showing a partial-rendering notice.",
+                "Render Details now itemizes any EMF+ feature Emfy approximated or skipped.",
+            ]
+        ),
+        ChangelogEntry(
             version: "1.4",
             build: "2",
             date: "August 2026",
