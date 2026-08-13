@@ -32,18 +32,32 @@ public struct EMFPlusRecord: Sendable, Equatable {
     /// from 0 — the same hazard `ByteReader` exists to neutralise.
     public var data: Data
 
+    /// The `EMFFile.records` index of the EMR_COMMENT_EMFPLUS record in which
+    /// this record's 12-byte header begins. When the header itself straddles
+    /// consecutive comments, this is the comment that contributed the header's
+    /// FIRST byte.
+    ///
+    /// EMF+ playback walks `EMFFile.records` in file order so a GDI window
+    /// opened by EmfPlusGetDC can play the interleaved GDI records until the
+    /// next EMF+ record of any type ([MS-EMFPLUS] §1.3.1); reassembly across
+    /// comment boundaries would otherwise discard where each EMF+ record sits
+    /// relative to that GDI sequence. Always indexes a `type == 70` record.
+    public let sourceRecordIndex: Int
+
     public init(
         type: UInt16,
         flags: UInt16,
         declaredSize: UInt32,
         declaredDataSize: UInt32,
-        data: Data
+        data: Data,
+        sourceRecordIndex: Int
     ) {
         self.type = type
         self.flags = flags
         self.declaredSize = declaredSize
         self.declaredDataSize = declaredDataSize
         self.data = data
+        self.sourceRecordIndex = sourceRecordIndex
     }
 
     /// Verified [MS-EMFPLUS] §2.1.1.1 name (e.g. `"EmfPlusHeader"`), or `nil`

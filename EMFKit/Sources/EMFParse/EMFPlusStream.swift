@@ -82,6 +82,9 @@ public enum EMFPlusDiagnostic: Sendable, Equatable {
 /// every collection is empty, `header` is `nil`, and all three counts are 0.
 public struct EMFPlusStream: Sendable, Equatable {
     /// Every EMF+ record walked out of the reassembled stream, in stream order.
+    /// Each record carries `sourceRecordIndex`, the `EMFFile.records` position of
+    /// the comment its header started in — the anchor EMF+ playback uses to
+    /// interleave GDI records after an EmfPlusGetDC ([MS-EMFPLUS] §1.3.1).
     public let records: [EMFPlusRecord]
     /// The decoded EmfPlusHeader, or `nil` when the stream does not open with
     /// one (see `EMFPlusDiagnostic.headerRecordMissing`).
@@ -128,7 +131,7 @@ extension EMFFile {
     /// while keeping everything already produced (primer §8, log-and-skip).
     public func emfPlusStream() -> EMFPlusStream {
         let assembly = assembleEMFPlusStream()
-        let walk = Self.walkAssembledStream(assembly.buffer)
+        let walk = Self.walkAssembledStream(assembly.buffer, segments: assembly.segments)
         let header = Self.decodeHeaderInfo(
             from: walk.records,
             sawEMFPlusComment: assembly.sawEMFPlusComment
@@ -147,17 +150,27 @@ extension EMFFile {
     // MARK: - Pass 1: reassembly
 
     /// Concatenates the EMF+ stream bytes of every EMR_COMMENT_EMFPLUS record,
-    /// in file order, into one contiguous buffer. A comment whose `DataSize`
-    /// overruns its record is clamped (with a diagnostic). Bounded by
+    /// in file order, into one contiguous buffer, and records where each
+    /// contributing comment's bytes start in that buffer. A comment whose
+    /// `DataSize` overruns its record is clamped (with a diagnostic). Bounded by
     /// construction: the buffer never exceeds the sum of the comment payloads,
     /// itself at most the file size.
+    ///
+    /// `segments` is the ascending (by `streamStart`) boundary list mapping each
+    /// contributed run of stream bytes back to the `EMFFile.records` index of its
+    /// source comment, so the walk can stamp every EMF+ record with the source
+    /// position [MS-EMFPLUS] §1.3.1 GetDC arbitration needs.
     private func assembleEMFPlusStream()
-        -> (buffer: Data, diagnostics: [EMFPlusDiagnostic], sawEMFPlusComment: Bool) {
+        -> (buffer: Data,
+            segments: [(streamStart: Int, recordIndex: Int)],
+            diagnostics: [EMFPlusDiagnostic],
+            sawEMFPlusComment: Bool) {
         var assembled = Data()
+        var segments: [(streamStart: Int, recordIndex: Int)] = []
         var diagnostics: [EMFPlusDiagnostic] = []
         var sawEMFPlusComment = false
 
-        for record in records where record.type == Self.commentType {
+        for (index, record) in records.enumerated() where record.type == Self.commentType {
             let slice = RecordSlice(reader: reader, record: record)
 
             // EMR_COMMENT_EMFPLUS ([MS-EMF] §2.3.3.4): DataSize (u32) at record
@@ -190,11 +203,16 @@ extension EMFFile {
             let length = streamEnd - Self.emfPlusStreamOffset
             if length > 0,
                let segment = slice.bytes(at: Self.emfPlusStreamOffset, length: length) {
+                // Boundary: this comment's payload starts at the current buffer
+                // end. Recorded only when bytes are actually appended, so a
+                // comment that contributes nothing never enters the map and
+                // `streamStart` stays strictly increasing.
+                segments.append((streamStart: assembled.count, recordIndex: index))
                 assembled.append(segment)
             }
         }
 
-        return (assembled, diagnostics, sawEMFPlusComment)
+        return (assembled, segments, diagnostics, sawEMFPlusComment)
     }
 
     // MARK: - Pass 2: walk
@@ -203,9 +221,12 @@ extension EMFFile {
     /// 12-byte header (`Size` >= 12, 4-aligned, `DataSize` <= `Size` - 12) and
     /// that the data is fully present BEFORE emitting; any violation records a
     /// diagnostic and stops, keeping earlier records. The loop only ever advances
-    /// by a validated, non-zero amount (>= 12), so it cannot hang.
+    /// by a validated, non-zero amount (>= 12), so it cannot hang. `segments`
+    /// resolves each record's header offset to the source-comment records-index
+    /// stamped on `EMFPlusRecord.sourceRecordIndex`.
     private static func walkAssembledStream(
-        _ assembled: Data
+        _ assembled: Data,
+        segments: [(streamStart: Int, recordIndex: Int)]
     ) -> (records: [EMFPlusRecord], diagnostics: [EMFPlusDiagnostic], consumed: Int) {
         // Read scalars through a start-index-safe reader; slice `assembled` (a
         // freshly built, zero-based Data) for record bodies so each `data` is a
@@ -269,7 +290,8 @@ extension EMFFile {
                     flags: flags,
                     declaredSize: size,
                     declaredDataSize: dataSize,
-                    data: assembled[dataStart ..< dataStart + Int(dataSize)]
+                    data: assembled[dataStart ..< dataStart + Int(dataSize)],
+                    sourceRecordIndex: Self.sourceCommentIndex(forStreamOffset: offset, in: segments)
                 )
             )
 
@@ -290,6 +312,32 @@ extension EMFFile {
         }
 
         return (records, diagnostics, offset)
+    }
+
+    /// Resolves a walked record's stream-buffer header offset to the
+    /// `EMFFile.records` index of the EMR_COMMENT_EMFPLUS whose payload
+    /// contributed the header's FIRST byte — the last `segments` entry whose
+    /// `streamStart` is <= `offset` (the list is ascending by `streamStart`).
+    /// Falls back to the first segment for the degenerate empty / all-greater
+    /// cases, unreachable while any record exists because the first contributing
+    /// comment always starts the buffer at offset 0.
+    private static func sourceCommentIndex(
+        forStreamOffset offset: Int,
+        in segments: [(streamStart: Int, recordIndex: Int)]
+    ) -> Int {
+        var low = 0
+        var high = segments.count - 1
+        var result = segments.first?.recordIndex ?? 0
+        while low <= high {
+            let mid = (low + high) / 2
+            if segments[mid].streamStart <= offset {
+                result = segments[mid].recordIndex
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return result
     }
 
     // MARK: - Header decode
