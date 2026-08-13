@@ -87,18 +87,25 @@ public enum EMFPlusObjectDecodeFailure: Error, Sendable, Equatable {
     case regionTreeTooDeep
     /// A region node tree exceeded the total-node cap (hostile-input guard).
     case regionTooManyNodes
+    /// An EmfPlusImage carried a Type not in [MS-EMFPLUS] §2.1.1.15 (bitmap or
+    /// metafile) — including ImageDataTypeUnknown; sizes are not guessed.
+    case unknownImageType(raw: UInt32)
 }
 
-/// The decoded value of an `EMFPlusObjectDefinition`. Only Brush and Pen are
-/// decoded in this increment; other object types are returned raw as `undecoded`
-/// for a later increment, and any structural dead-end yields `malformed`.
+/// The decoded value of an `EMFPlusObjectDefinition`. Brush, Pen, Path, Region,
+/// Font, StringFormat, Image (shell), and ImageAttributes are decoded; the
+/// remaining object types are returned raw as `undecoded` for a later increment,
+/// and any structural dead-end yields `malformed`.
 public enum EMFPlusObjectValue: Sendable, Equatable {
     case brush(EMFPlusBrush)
     case pen(EMFPlusPen)
     case path(EMFPlusPath)
     case region(EMFPlusRegion)
-    /// A type not decoded yet (Image, Font, StringFormat, ImageAttributes,
-    /// standalone CustomLineCap, Invalid, unknown).
+    case font(EMFPlusFont)
+    case stringFormat(EMFPlusStringFormat)
+    case image(EMFPlusImage)
+    case imageAttributes(EMFPlusImageAttributes)
+    /// A type not decoded yet (standalone CustomLineCap, Invalid, unknown).
     case undecoded(type: EMFPlusObjectType, data: Data)
     /// A Brush or Pen whose structure could not be decoded (primer §8).
     case malformed(type: EMFPlusObjectType, reason: EMFPlusObjectDecodeFailure)
@@ -106,9 +113,10 @@ public enum EMFPlusObjectValue: Sendable, Equatable {
 
 extension EMFPlusObjectDefinition {
     /// Decodes this object's payload into a typed value. Brush ([MS-EMFPLUS]
-    /// §2.2.1.1), Pen (§2.2.1.7), Path (§2.2.1.6), and Region (§2.2.1.8) are
-    /// decoded; every other type is returned as `.undecoded`. A malformed
-    /// object returns `.malformed` and never traps.
+    /// §2.2.1.1), Pen (§2.2.1.7), Path (§2.2.1.6), Region (§2.2.1.8), Font
+    /// (§2.2.1.3), StringFormat (§2.2.1.9), Image shell (§2.2.1.4), and
+    /// ImageAttributes (§2.2.1.5) are decoded; every other type is returned as
+    /// `.undecoded`. A malformed object returns `.malformed` and never traps.
     public func decodedValue() -> EMFPlusObjectValue {
         switch objectType {
         case .brush:
@@ -133,6 +141,30 @@ extension EMFPlusObjectDefinition {
             var cursor = ByteCursor(data)
             switch decodeRegion(&cursor) {
             case .success(let region): return .region(region)
+            case .failure(let reason): return .malformed(type: objectType, reason: reason)
+            }
+        case .font:
+            var cursor = ByteCursor(data)
+            switch decodeFont(&cursor) {
+            case .success(let font): return .font(font)
+            case .failure(let reason): return .malformed(type: objectType, reason: reason)
+            }
+        case .stringFormat:
+            var cursor = ByteCursor(data)
+            switch decodeStringFormat(&cursor) {
+            case .success(let format): return .stringFormat(format)
+            case .failure(let reason): return .malformed(type: objectType, reason: reason)
+            }
+        case .image:
+            var cursor = ByteCursor(data)
+            switch decodeImage(&cursor) {
+            case .success(let image): return .image(image)
+            case .failure(let reason): return .malformed(type: objectType, reason: reason)
+            }
+        case .imageAttributes:
+            var cursor = ByteCursor(data)
+            switch decodeImageAttributes(&cursor) {
+            case .success(let attributes): return .imageAttributes(attributes)
             case .failure(let reason): return .malformed(type: objectType, reason: reason)
             }
         default:
