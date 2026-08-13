@@ -387,6 +387,113 @@ struct EMFPlusStreamTests {
         #expect(s.leftoverByteCount == 0)
         #expect(s.diagnostics.isEmpty)
     }
+
+    // MARK: - 9. Source-comment index (P3 GetDC arbitration anchor)
+
+    @Test("single comment: every record reports that comment's EMFFile.records index")
+    func singleCommentSourceIndex() throws {
+        let stream = emfPlusHeaderRecord() + emfPlusRecord(type: 0x4002)
+        let file = try parseFile(records: [emfPlusComment(stream: stream)])
+        let s = file.emfPlusStream()
+
+        // Compute k from the parsed file (header at 0, comment at 1, EOF at 2)
+        // rather than hardcoding it.
+        let commentIndices = file.records.indices.filter { file.records[$0].type == 70 }
+        #expect(commentIndices.count == 1)
+        let k = try #require(commentIndices.first)
+
+        #expect(s.records.count == 2)
+        #expect(s.records.allSatisfy { $0.sourceRecordIndex == k })
+    }
+
+    @Test("record fragmented across two comments reports the first; a record starting in the second reports the second")
+    func fragmentAcrossTwoCommentsSourceIndex() throws {
+        // Header (28) + EndOfFile (12) = 40, split 20/20: the Header's bytes
+        // straddle the boundary but its first byte is in comment 1; the
+        // EndOfFile begins at stream offset 28, cleanly inside comment 2.
+        let full = emfPlusHeaderRecord() + emfPlusRecord(type: 0x4002)
+        #expect(full.count == 40)
+        let fragA = Array(full[0 ..< 20])
+        let fragB = Array(full[20 ..< 40])
+        let file = try parseFile(records: [
+            emfPlusComment(stream: fragA),
+            emfPlusComment(stream: fragB),
+        ])
+        let s = file.emfPlusStream()
+
+        let commentIndices = file.records.indices.filter { file.records[$0].type == 70 }
+        #expect(commentIndices.count == 2)
+        let first = try #require(commentIndices.first)
+        let second = try #require(commentIndices.last)
+
+        #expect(s.records.count == 2)
+        #expect(s.records[0].type == 0x4001)                 // Header — fragmented
+        #expect(s.records[0].sourceRecordIndex == first)
+        #expect(s.records[1].type == 0x4002)                 // EndOfFile — starts in comment 2
+        #expect(s.records[1].sourceRecordIndex == second)
+    }
+
+    @Test("record whose 12-byte header straddles two comments reports the comment holding the header's first byte")
+    func headerStraddleSourceIndex() throws {
+        // 28-byte EmfPlusHeader split at offset 8: the record header itself
+        // straddles the boundary, but its first byte lives in comment 1.
+        let full = emfPlusHeaderRecord(dualFlag: true, version: 0xDBC0_1001, dpiX: 300, dpiY: 300)
+        #expect(full.count == 28)
+        let fragA = Array(full[0 ..< 8])
+        let fragB = Array(full[8 ..< 28])
+        let file = try parseFile(records: [
+            emfPlusComment(stream: fragA),
+            emfPlusComment(stream: fragB),
+        ])
+        let s = file.emfPlusStream()
+
+        let commentIndices = file.records.indices.filter { file.records[$0].type == 70 }
+        #expect(commentIndices.count == 2)
+        let first = try #require(commentIndices.first)
+
+        #expect(s.records.count == 1)
+        #expect(s.records[0].type == 0x4001)
+        #expect(s.records[0].sourceRecordIndex == first)
+    }
+
+    @Test("GDI records between comments shift the source indices to non-adjacent comment positions")
+    func interleavedGDIShiftsSourceIndex() throws {
+        // records: 0 HEADER, 1 GDI, 2 comment#1, 3 GDI, 4 comment#2, 5 EOF.
+        let file = try parseFile(records: [
+            FixtureBuilder.record(type: 17, size: 12),              // GDI SETMAPMODE
+            emfPlusComment(stream: emfPlusHeaderRecord()),          // EMF+ #1: Header
+            FixtureBuilder.record(type: 27, size: 12),              // GDI MOVETOEX
+            emfPlusComment(stream: emfPlusRecord(type: 0x4002)),    // EMF+ #2: EndOfFile
+        ])
+        let s = file.emfPlusStream()
+
+        let commentIndices = file.records.indices.filter { file.records[$0].type == 70 }
+        #expect(commentIndices.count == 2)
+        let first = try #require(commentIndices.first)
+        let second = try #require(commentIndices.last)
+        #expect(second - first >= 2)                                // a GDI record sits between them
+
+        #expect(s.records.map(\.type) == [0x4001, 0x4002])
+        #expect(s.records[0].sourceRecordIndex == first)
+        #expect(s.records[1].sourceRecordIndex == second)
+    }
+
+    @Test("gate-p2-star.emf: every sourceRecordIndex is non-decreasing and points at an EMR_COMMENT record")
+    func corpusStarSourceIndex() throws {
+        let file = try EMFFile.parse(try requireCorpus("gate-p2-star.emf"))
+        let s = file.emfPlusStream()
+        #expect(s.records.count == 7)
+
+        let sources = s.records.map(\.sourceRecordIndex)
+        // Reassembly is in file order, so header offsets and their source
+        // comment indices both only increase across the stream.
+        #expect(zip(sources, sources.dropFirst()).allSatisfy { $0 <= $1 })
+        // Each references a real EMR_COMMENT (type 70) record in the parsed file.
+        for index in sources {
+            #expect(file.records.indices.contains(index))
+            #expect(file.records[index].type == 70)
+        }
+    }
 }
 
 // MARK: - Record-type table
@@ -446,12 +553,12 @@ struct EMFPlusRecordTypeTests {
 
     @Test("EMFPlusRecord surfaces its own resolved type, display name, and drawing flag")
     func recordConvenience() {
-        let drawing = EMFPlusRecord(type: 0x400A, flags: 0, declaredSize: 12, declaredDataSize: 0, data: Data())
+        let drawing = EMFPlusRecord(type: 0x400A, flags: 0, declaredSize: 12, declaredDataSize: 0, data: Data(), sourceRecordIndex: 0)
         #expect(drawing.typeName == "EmfPlusFillRects")
         #expect(drawing.displayName == "EmfPlusFillRects")
         #expect(drawing.isDrawing == true)
 
-        let unknown = EMFPlusRecord(type: 0x4099, flags: 0, declaredSize: 12, declaredDataSize: 0, data: Data())
+        let unknown = EMFPlusRecord(type: 0x4099, flags: 0, declaredSize: 12, declaredDataSize: 0, data: Data(), sourceRecordIndex: 0)
         #expect(unknown.typeName == nil)
         #expect(unknown.displayName == "0x4099")
         #expect(unknown.isDrawing == false)
