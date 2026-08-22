@@ -475,10 +475,30 @@ struct EMFPlusPlayback {
               !decoded.values.isEmpty,
               let font = table.font(fontID),
               let color = textFillColor(sBit: sBit, brushID: decoded.brushId, log: &log) else { return }
+        // Vertical layout is still simplified to a horizontal run, and a realized-
+        // advance run is reconstructed from the font's own advances (not the
+        // original realized ones) — both approximations regardless of branch.
         if decoded.vertical || decoded.realizedAdvance {
             log.noteEMFPlusApproximated(.stringFormatSimplified)
         }
 
+        // Hybrid (audit H2): axis-aligned (b == c == 0) keeps the byte-stable
+        // device-space path; a rotated/sheared transform draws the glyph outlines
+        // through the world transform so a per-glyph run follows the rotated
+        // baseline instead of stair-stepping upright glyphs.
+        if worldToDevice.b == 0, worldToDevice.c == 0 {
+            drawDriverStringDeviceSpace(decoded, font: font, color: color, log: &log)
+        } else {
+            drawDriverStringWorldSpace(decoded, font: font, color: color, log: &log)
+        }
+    }
+
+    /// Axis-aligned DrawDriverString: the exact pre-H2 device-space path. Glyph
+    /// origins map world→device (optional per-glyph matrix first) and each glyph
+    /// is drawn upright in device space.
+    private func drawDriverStringDeviceSpace(
+        _ decoded: EMFPlusText.DriverStringRecord, font: EMFPlusFont, color: CGColor, log: inout EMFRenderLog
+    ) {
         let sized = sizedFont(font, log: &log)
         let glyphs = mapDriverGlyphs(decoded.values, cmapLookup: decoded.cmapLookup, font: sized)
 
@@ -503,6 +523,50 @@ struct EMFPlusPlayback {
         context.setShouldAntialias(state.antialias)
         context.setFillColor(color)
         context.concatenate(base)
+        context.scaleBy(x: 1, y: -1)
+        glyphs.withUnsafeBufferPointer { glyphBuffer in
+            localPositions.withUnsafeBufferPointer { positionBuffer in
+                guard let glyphBase = glyphBuffer.baseAddress,
+                      let positionBase = positionBuffer.baseAddress else { return }
+                CTFontDrawGlyphs(sized, glyphBase, positionBase, glyphs.count, context)
+            }
+        }
+    }
+
+    /// Rotated/sheared DrawDriverString (audit H2): glyph origins stay in WORLD
+    /// space (per-glyph matrix applied; `worldToDevice` comes from the CTM), the
+    /// font is world-sized, and the glyph outlines are drawn through the world
+    /// transform so they rotate. A realized-advance run walks the baseline along
+    /// WORLD +x with world-unit advances, which the CTM then rotates — fixing the
+    /// old device-+x staircase. Same per-baseline y-flip discipline as the device
+    /// branch, inside the transformed frame; clip is applied (device space) first.
+    private func drawDriverStringWorldSpace(
+        _ decoded: EMFPlusText.DriverStringRecord, font: EMFPlusFont, color: CGColor, log: inout EMFRenderLog
+    ) {
+        let sized = worldSizedFont(font, log: &log)
+        let glyphs = mapDriverGlyphs(decoded.values, cmapLookup: decoded.cmapLookup, font: sized)
+
+        // The per-glyph matrix maps into world space; `worldToDevice` is NOT
+        // folded in here — the CTM applies it below.
+        let toWorld = decoded.matrix ?? .identity
+        let worldPositions: [CGPoint]
+        if decoded.realizedAdvance {
+            worldPositions = realizedAdvancePositions(glyphs: glyphs, font: sized, firstWorld: decoded.positions.first, toDevice: toWorld)
+        } else {
+            worldPositions = decoded.positions.map { $0.applying(toWorld) }
+        }
+        guard !glyphs.isEmpty, worldPositions.count == glyphs.count else { return }
+        // Flip in the world frame (mirrors the device branch): a world point
+        // (px, py) sits at local (px, -py) after scaleBy(1,-1).
+        let localPositions = worldPositions.map { CGPoint(x: $0.x, y: -$0.y) }
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        state.clip.apply(to: context, deviceToTarget: base)
+        context.setShouldAntialias(state.antialias)
+        context.setFillColor(color)
+        context.concatenate(base)
+        context.concatenate(worldToDevice)
         context.scaleBy(x: 1, y: -1)
         glyphs.withUnsafeBufferPointer { glyphBuffer in
             localPositions.withUnsafeBufferPointer { positionBuffer in
