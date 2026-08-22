@@ -472,7 +472,7 @@ struct EMFPlusTextPlaybackTests {
         #expect(log.isClean, "an empty string should log nothing: \(log.entries)")
     }
 
-    @Test("a DrawString naming an unbound font is a clean no-op")
+    @Test("a DrawString naming an unbound font draws nothing and notes a missing reference")
     func drawStringUnboundFontNoOp() throws {
         let file = try textFile([
             tDrawString(fontID: 9, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 0xFFFF_FFFF,
@@ -480,7 +480,9 @@ struct EMFPlusTextPlaybackTests {
         ])
         let (image, log) = try renderText(file)
         #expect(!image.containsDarkPixel(in: Self.band), "an unbound font should draw nothing")
-        #expect(log.isClean, "an unbound font should skip silently: \(log.entries)")
+        // Audit M7: no longer silent — the missing font reference is surfaced.
+        #expect(log.entries.contains(.emfPlusObjectIssue(kind: .missingReference, count: 1)),
+                "an unbound font should note a missing object reference: \(log.entries)")
     }
 
     @Test("a bold-italic font object resolves its traits and draws")
