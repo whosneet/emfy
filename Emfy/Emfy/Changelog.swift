@@ -24,6 +24,8 @@ enum Changelog {
                 "Dual-format files now play their higher-fidelity EMF+ content instead of the GDI fallback.",
                 "Files whose drawing content exists only as EMF+ now render fully, instead of showing a partial-rendering notice.",
                 "Render Details now itemizes any EMF+ feature Emfy approximated or skipped.",
+                "Rendering fidelity: rotated text, standard dashed pens, elliptical arc angles, physical font and page units, and text wrapping now match GDI+.",
+                "Hardened against malformed files — stricter parsing limits, and Render Details now reports any EMF+ content that couldn't be read.",
             ]
         ),
         ChangelogEntry(
