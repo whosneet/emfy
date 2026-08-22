@@ -57,6 +57,12 @@ struct EMFPlusPlayback {
     /// separate so a container index cannot collide with a save index.
     private var savedContainers: [UInt32: State] = [:]
     private var table = ObjectTable()
+    /// Per-object decoded-image cache (audit H1 / A1): each bound image object
+    /// is decoded AT MOST ONCE, no matter how many DrawImage records reference
+    /// it; a rebind of the slot invalidates its entry (see the object dispatch).
+    /// Struct-local to this playback instance — never static — because Quick
+    /// Look renders files concurrently.
+    private var imageCache = DecodedImageCache()
 
     /// world → page → device → target.
     private var full: CGAffineTransform {
@@ -140,7 +146,8 @@ struct EMFPlusPlayback {
         case 0x4001, 0x4002, 0x4003:   // Header, EndOfFile, Comment
             break
         case Self.object:              // 0x4008 EmfPlusObject
-            table.apply(record)
+            // A rebind of a slot invalidates any image cached for it (A1).
+            if let boundID = table.apply(record) { imageCache.invalidate(Int(boundID)) }
 
         // Transforms (§2.3.9).
         case 0x402A: setWorldTransform(record)
@@ -184,7 +191,7 @@ struct EMFPlusPlayback {
 
     // MARK: - Drawing dispatch
 
-    private func playDrawing(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
+    private mutating func playDrawing(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         let sBit = (flags & 0x8000) != 0
         let cBit = (flags & 0x4000) != 0
         let relative = (flags & 0x0800) != 0    // P: relative points (unsupported)
@@ -568,16 +575,15 @@ struct EMFPlusPlayback {
     /// else EmfPlusRectF). The dest rect's three defining corners become the
     /// (axis-aligned) parallelogram the SrcRect portion is scaled to fill. A
     /// negative dest extent mirrors the image (its sign carries through).
-    private func drawImage(_ record: EMFPlusRecord, objectID: Int, cBit: Bool, log: inout EMFRenderLog) {
+    private mutating func drawImage(_ record: EMFPlusRecord, objectID: Int, cBit: Bool, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
         guard let attributesID = reader.u32(), let srcUnit = reader.i32(),
-              let srcRect = reader.rectF(), let dest = reader.rect(compressed: cBit),
-              let image = table.image(objectID) else { return }
+              let srcRect = reader.rectF(), let dest = reader.rect(compressed: cBit) else { return }
         // Raw origin/size (not standardized) so a negative extent still mirrors.
         let x = dest.origin.x, y = dest.origin.y
         let w = dest.size.width, h = dest.size.height
         drawImageMapped(
-            image, srcRect: srcRect, srcUnit: srcUnit,
+            objectID: objectID, srcRect: srcRect, srcUnit: srcUnit,
             upperLeft: CGPoint(x: x, y: y),
             upperRight: CGPoint(x: x + w, y: y),
             lowerLeft: CGPoint(x: x, y: y + h),
@@ -590,27 +596,28 @@ struct EMFPlusPlayback {
     /// the upper-left, upper-right, and lower-left corners of a parallelogram
     /// (the fourth corner is extrapolated). The P flag (relative points) is
     /// unsupported like every other relative-encoded record.
-    private func drawImagePoints(_ record: EMFPlusRecord, objectID: Int, cBit: Bool, relative: Bool, log: inout EMFRenderLog) {
+    private mutating func drawImagePoints(_ record: EMFPlusRecord, objectID: Int, cBit: Bool, relative: Bool, log: inout EMFRenderLog) {
         if relative { log.noteEMFPlusUnsupported(type: record.type); return }
         var reader = PlusReader(record.data)
         guard let attributesID = reader.u32(), let srcUnit = reader.i32(),
               let srcRect = reader.rectF(), let count = reader.u32(),
               let points = reader.points(count: Int(count), compressed: cBit),
-              points.count >= 3, let image = table.image(objectID) else { return }
+              points.count >= 3 else { return }
         drawImageMapped(
-            image, srcRect: srcRect, srcUnit: srcUnit,
+            objectID: objectID, srcRect: srcRect, srcUnit: srcUnit,
             upperLeft: points[0], upperRight: points[1], lowerLeft: points[2],
             attributesID: attributesID, log: &log
         )
     }
 
-    /// Draws the SrcRect portion of `image` into the parallelogram whose three
-    /// defining corners are given (in WORLD space). Mirrors the GDI bitmap
-    /// drawer's flip: the placement affine maps the top-down unit image square to
-    /// the parallelogram, then an in-square y-flip lands image row 0 (top) on the
-    /// upper-left→upper-right edge — upright through `base`'s canvas flip.
-    private func drawImageMapped(
-        _ plusImage: EMFPlusImage,
+    /// Draws the SrcRect portion of the object-`objectID` image into the
+    /// parallelogram whose three defining corners are given (in WORLD space).
+    /// Mirrors the GDI bitmap drawer's flip: the placement affine maps the
+    /// top-down unit image square to the parallelogram, then an in-square y-flip
+    /// lands image row 0 (top) on the upper-left→upper-right edge — upright
+    /// through `base`'s canvas flip.
+    private mutating func drawImageMapped(
+        objectID: Int,
         srcRect: CGRect,
         srcUnit: Int32,
         upperLeft: CGPoint,
@@ -619,11 +626,26 @@ struct EMFPlusPlayback {
         attributesID: UInt32,
         log: inout EMFRenderLog
     ) {
-        let (decoded, skip) = EMFPlusImageDecoder.decode(plusImage)
-        guard let cgFull = decoded else {
-            if let skip { note(imageSkip: skip, log: &log) }
+        // Placement: unit square [0,1]² → parallelogram (world space), with
+        // upper-left at the origin, upper-right along +x, lower-left along +y.
+        let placement = CGAffineTransform(
+            a: upperRight.x - upperLeft.x, b: upperRight.y - upperLeft.y,
+            c: lowerLeft.x - upperLeft.x, d: lowerLeft.y - upperLeft.y,
+            tx: upperLeft.x, ty: upperLeft.y
+        )
+
+        // Decode AT MOST ONCE per bound image object (audit H1 / A1), at a
+        // resolution bounded by the image's device-space footprint (audit H1 /
+        // A2). Many draws share one decode; an out-of-range slot is a clean
+        // no-op; an undecodable image still re-notes its skip PER DRAW below.
+        guard let decoded = decodedImage(objectID: objectID, destTargetRect: imageFootprint(placement: placement)) else { return }
+        guard let cgFull = decoded.image else {
+            if let skip = decoded.skip { note(imageSkip: skip, log: &log) }
             return
         }
+        // A pixel bitmap decoded below native to fit the destination — re-noted
+        // per draw so the coalesced count stays meaningful (audit H1 / A2).
+        if decoded.downsampled { log.noteEMFPlusApproximated(.imageDownsampled) }
         // SrcUnit MUST be UnitTypePixel (2); anything else is treated as pixels.
         if srcUnit != 2 { log.noteEMFPlusApproximated(.imageSrcUnit) }
         // ImageAttributes are not applied in phase-4-A; note a tiling wrap.
@@ -634,13 +656,6 @@ struct EMFPlusPlayback {
 
         let cgImage = cropped(cgFull, toSrcRect: srcRect)
 
-        // Placement: unit square [0,1]² → parallelogram (world space), with
-        // upper-left at the origin, upper-right along +x, lower-left along +y.
-        let placement = CGAffineTransform(
-            a: upperRight.x - upperLeft.x, b: upperRight.y - upperLeft.y,
-            c: lowerLeft.x - upperLeft.x, d: lowerLeft.y - upperLeft.y,
-            tx: upperLeft.x, ty: upperLeft.y
-        )
         let determinant = placement.a * placement.d - placement.b * placement.c
         guard placement.a.isFinite, placement.b.isFinite, placement.c.isFinite,
               placement.d.isFinite, placement.tx.isFinite, placement.ty.isFinite,
@@ -658,6 +673,44 @@ struct EMFPlusPlayback {
         context.translateBy(x: 0, y: 1)
         context.scaleBy(x: 1, y: -1)
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    /// The image square's device/target footprint: the unit square [0,1]² mapped
+    /// by `placement ∘ full`, bounding-boxed — the EMF+ analogue of the GDI
+    /// bitmap path's `destTargetRect`, driving the decode budget (audit H1 / A2).
+    /// A non-finite corner (a hostile transform) yields a non-finite rect, which
+    /// `decodeBudget` treats as "no bound" → native decode (§8: never trap).
+    private func imageFootprint(placement: CGAffineTransform) -> CGRect {
+        let toTarget = placement.concatenating(full)
+        let corners = [
+            CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0),
+            CGPoint(x: 0, y: 1), CGPoint(x: 1, y: 1),
+        ].map { $0.applying(toTarget) }
+        let xs = corners.map(\.x)
+        let ys = corners.map(\.y)
+        guard let minX = xs.min(), let maxX = xs.max(),
+              let minY = ys.min(), let maxY = ys.max() else { return .null }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// The decoded image for object slot `objectID`, decoded once and cached
+    /// (audit H1 / A1) at a resolution bounded by `destTargetRect` (audit H1 /
+    /// A2); a rebind of the slot invalidates the entry (see the object
+    /// dispatch). Returns `nil` only for an out-of-range slot. An in-range slot
+    /// holding no image object caches a nil-image entry, so a repeated draw of
+    /// an unbound slot stays a cheap, silent no-op.
+    private mutating func decodedImage(objectID: Int, destTargetRect: CGRect) -> CachedImage? {
+        if let cached = imageCache.cached(objectID) { return cached }
+        guard (0 ..< 64).contains(objectID) else { return nil }
+        let value: CachedImage
+        if let plusImage = table.image(objectID) {
+            let (image, skip, downsampled) = EMFPlusImageDecoder.decode(plusImage, destTargetRect: destTargetRect)
+            value = CachedImage(image: image, skip: skip, downsampled: downsampled)
+        } else {
+            value = CachedImage(image: nil, skip: nil)
+        }
+        imageCache.store(objectID, value)
+        return value
     }
 
     /// Crops `image` to the SrcRect sub-rectangle (SOURCE pixels, top-down). A
@@ -689,6 +742,7 @@ struct EMFPlusPlayback {
         case .invalid: log.noteEMFPlusApproximated(.imageInvalid)
         case .compressed: log.noteEMFPlusApproximated(.imageCompressed)
         case .metafile: log.noteEMFPlusApproximated(.imageMetafile)
+        case .oversized: log.noteEMFPlusApproximated(.imageOversized)
         }
     }
 
@@ -924,6 +978,60 @@ struct EMFPlusPlayback {
     }
 }
 
+// MARK: - Decoded-image cache (audit H1 / A1)
+
+/// One decoded EMF+ image, cached per object slot. `image == nil` with a `skip`
+/// is a remembered decode FAILURE, and `image == nil` with no `skip` is "the
+/// slot holds no image object" — neither is retried, but the playback still
+/// re-emits the per-draw skip note so log counts stay meaningful. `downsampled`
+/// records that the pixel decode fell below native resolution (audit H1 / A2),
+/// re-noted per draw for the same reason.
+struct CachedImage {
+    let image: CGImage?
+    let skip: EMFPlusImageDecoder.Skip?
+    let downsampled: Bool
+
+    init(image: CGImage?, skip: EMFPlusImageDecoder.Skip?, downsampled: Bool = false) {
+        self.image = image
+        self.skip = skip
+        self.downsampled = downsampled
+    }
+}
+
+/// A per-object-slot cache of decoded EMF+ images: the decode runs AT MOST ONCE
+/// per bound image object; `invalidate(_:)` drops a slot when the object table
+/// rebinds it, so a redefined id re-decodes. Kept struct-local to a playback
+/// instance — never static — because Quick Look renders files concurrently.
+struct DecodedImageCache {
+    private var slots: [CachedImage?]
+    /// How many decodes have been STORED — test-visible (via `@testable`) proof
+    /// that N draws over one object decode once, not N times.
+    private(set) var storeCount = 0
+
+    init(capacity: Int = 64) {
+        slots = Array(repeating: nil, count: max(0, capacity))
+    }
+
+    /// The cached decode for `id`, or `nil` when the slot has not been decoded
+    /// yet (or `id` is out of range).
+    func cached(_ id: Int) -> CachedImage? {
+        slots.indices.contains(id) ? slots[id] : nil
+    }
+
+    /// Stores `value` for `id` (an out-of-range id is ignored).
+    mutating func store(_ id: Int, _ value: CachedImage) {
+        guard slots.indices.contains(id) else { return }
+        slots[id] = value
+        storeCount += 1
+    }
+
+    /// Drops any cached decode for `id` (called when the slot is rebound).
+    mutating func invalidate(_ id: Int) {
+        guard slots.indices.contains(id) else { return }
+        slots[id] = nil
+    }
+}
+
 // MARK: - Object table
 
 /// The 64-slot EMF+ object table ([MS-EMFPLUS] §3.1.2), bound DURING playback
@@ -945,7 +1053,11 @@ private struct ObjectTable {
     }
     private var pending: Pending?
 
-    mutating func apply(_ record: EMFPlusRecord) {
+    /// Applies an EmfPlusObject record, returning the slot id it BOUND (wrote),
+    /// or `nil` when the record only accumulated a continuation chunk or named
+    /// an out-of-range slot. The caller uses the returned id to invalidate any
+    /// image cached for that slot (A1).
+    mutating func apply(_ record: EMFPlusRecord) -> UInt8? {
         let flags = record.flags
         let continues = (flags & 0x8000) != 0
         let rawType = UInt8((flags >> 8) & 0x7F)
@@ -955,40 +1067,45 @@ private struct ObjectTable {
         if var p = pending {
             if continues, id == p.id, rawType == p.rawType {
                 let chunk = [UInt8](record.data)
-                guard chunk.count >= 4 else { pending = nil; return }
+                guard chunk.count >= 4 else { pending = nil; return nil }
                 p.data.append(contentsOf: chunk[4...])
                 if p.data.count >= p.total {
-                    bind(id: p.id, rawType: p.rawType, data: Data(p.data.prefix(p.total)))
+                    let bound = bind(id: p.id, rawType: p.rawType, data: Data(p.data.prefix(p.total)))
                     pending = nil
+                    return bound
                 } else {
                     pending = p
+                    return nil
                 }
-                return
             }
             pending = nil   // sequence can no longer complete; reprocess fresh
         }
 
         if continues {
             let chunk = [UInt8](record.data)
-            guard chunk.count >= 4 else { return }
+            guard chunk.count >= 4 else { return nil }
             let total = Int(UInt32(chunk[0]) | (UInt32(chunk[1]) << 8) | (UInt32(chunk[2]) << 16) | (UInt32(chunk[3]) << 24))
             let objectBytes = Data(chunk[4...])
             if objectBytes.count >= total {
-                bind(id: id, rawType: rawType, data: Data(objectBytes.prefix(total)))
+                return bind(id: id, rawType: rawType, data: Data(objectBytes.prefix(total)))
             } else {
                 pending = Pending(id: id, rawType: rawType, total: total, data: objectBytes)
+                return nil
             }
         } else {
-            bind(id: id, rawType: rawType, data: record.data)
+            return bind(id: id, rawType: rawType, data: record.data)
         }
     }
 
-    private mutating func bind(id: UInt8, rawType: UInt8, data: Data) {
-        guard id < 64 else { return }
+    /// Binds a decoded object into `id`'s slot, returning `id` on success or
+    /// `nil` for an out-of-range slot.
+    private mutating func bind(id: UInt8, rawType: UInt8, data: Data) -> UInt8? {
+        guard id < 64 else { return nil }
         let definition = EMFPlusObjectDefinition(
             objectID: id, objectType: EMFPlusObjectType(rawValue: rawType), data: data
         )
         slots[Int(id)] = definition.decodedValue()
+        return id
     }
 
     private func value(_ id: Int) -> EMFPlusObjectValue? {
