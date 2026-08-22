@@ -158,6 +158,23 @@ private func translateWorld(_ dx: Float, _ dy: Float) -> [UInt8] {
     plusRecord(0x402D, 0x0000, le { $0.f32(dx); $0.f32(dy) })
 }
 
+/// RotateWorldTransform (§2.3.9.6): angle in degrees, pre-multiply.
+private func rotateWorld(_ degrees: Float) -> [UInt8] {
+    plusRecord(0x402F, 0x0000, le { $0.f32(degrees) })
+}
+
+/// SetClipRegion (§2.3.1.6): ObjectID in the low Flags byte, CombineMode in
+/// bits 8–11 (0 = Replace by default).
+private func setClipRegion(regionId: UInt8, mode: UInt16 = 0) -> [UInt8] {
+    plusRecord(0x4034, (mode << 8) | UInt16(regionId))
+}
+
+/// An EmfPlusRegion object (§2.2.1.8) whose only node is RegionNodeDataTypeEmpty
+/// (0x10000002) — an empty region (clips to nothing).
+private func emptyRegionPayload() -> [UInt8] {
+    le { $0.u32(plusVersion); $0.u32(1); $0.u32(0x1000_0002) }
+}
+
 /// EmfPlusDrawCurve (§2.3.4.4): Tension, Offset, NumSegments, Count, PointData
 /// (absolute f32 points; pen in the ObjectId low byte).
 private func drawCurve(penId: UInt8, tension: Float, offset: UInt32, numSegments: UInt32, _ points: [(Float, Float)]) -> [UInt8] {
@@ -354,6 +371,35 @@ struct EMFPlusPlaybackTests {
         #expect(Self.isRed(image[20, 20]), "ink inside the clip")
         #expect(Self.isWhite(image[60, 60]), "no ink outside the clip")
         #expect(log.isClean, "unexpected log: \(log.entries)")
+    }
+
+    // MARK: - Rotated clip exactness (M9) + empty-clip fix (L5) — audit G1b
+
+    @Test("a rotated SetClipRect clips to the exact rotated rect, not its bounding box")
+    func rotatedClipRectIsExact() throws {
+        let file = try plusFile([
+            translateWorld(50, 50),
+            rotateWorld(45),
+            setClipRectIntersect((-20, -20, 40, 40)),                          // 40×40 → rotated diamond at (50,50)
+            fillRectsDirect(argb(255, 255, 0, 0), (-100, -100, 300, 300)),     // covers the canvas, clipped
+        ])
+        let (image, _) = try renderPlus(file)
+        #expect(Self.isRed(image[50, 50]), "the diamond centre should be filled, got \(image[50, 50])")
+        // (75,75) is inside the axis-aligned bbox but OUTSIDE the rotated diamond —
+        // the old bbox clip leaked here; the exact quad clip must block it.
+        #expect(Self.isWhite(image[75, 75]), "a bbox corner outside the rotated rect must be clipped, got \(image[75, 75])")
+    }
+
+    @Test("SetClipRegion replace-with-empty blocks all subsequent drawing (L5)")
+    func emptyClipRegionBlocksDrawing() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 4, payload: emptyRegionPayload()),   // type 4 = region, empty node
+            setClipRegion(regionId: 1),                                   // Replace clip with the empty region
+            fillRectsDirect(argb(255, 255, 0, 0), (0, 0, 100, 100)),      // whole canvas
+        ])
+        let (image, _) = try renderPlus(file)
+        #expect(Self.isWhite(image[20, 20]) && Self.isWhite(image[50, 50]) && Self.isWhite(image[80, 80]),
+                "an empty clip region must block ALL drawing, got \(image[50, 50])")
     }
 
     // MARK: - 5. Object redefinition (position-sensitive binding)
