@@ -90,18 +90,30 @@ struct ClipRegion: Equatable {
             switch primitive {
             case .rects(let rects):
                 let path = CGMutablePath()
-                for rect in rects {
+                for rect in rects where !rect.isNull {
                     path.addRect(rect, transform: deviceToTarget)
                 }
-                context.addPath(path)
-                // Nonzero winding: the union of the added rectangles.
-                context.clip()
+                clipTo(path, in: context)
             case .path(let devicePath):
                 let path = CGMutablePath()
                 path.addPath(devicePath, transform: deviceToTarget)
-                context.addPath(path)
-                context.clip()
+                clipTo(path, in: context)
             }
+        }
+    }
+
+    /// Intersects the gstate clip with `path` (nonzero winding: the union of its
+    /// subpaths). L5 fix: CoreGraphics' `clip()` with an EMPTY path — and even
+    /// `clip(to: .null)` — is a NO-OP that would REMOVE clipping, so a genuinely
+    /// empty region (an empty-region replace, or a disjoint-rect intersection that
+    /// folded to `.null`) must instead clip to nothing. `clip(to: .zero)` is the
+    /// probe-confirmed way to block every subsequent draw.
+    private func clipTo(_ path: CGMutablePath, in context: CGContext) {
+        if path.isEmpty {
+            context.clip(to: .zero)
+        } else {
+            context.addPath(path)
+            context.clip()
         }
     }
 }
