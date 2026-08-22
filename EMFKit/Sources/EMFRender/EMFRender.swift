@@ -187,6 +187,8 @@ public enum EMFRenderer {
                 log.note(entry)
             }
         }
+        // Carry the non-Entry EMF+ records-played stat across the re-feed (M17).
+        log.addEMFPlusRecordsPlayed(renderLog.emfPlusRecordsPlayed)
 
         guard let image = context.makeImage() else { return nil }
         return (image, log)

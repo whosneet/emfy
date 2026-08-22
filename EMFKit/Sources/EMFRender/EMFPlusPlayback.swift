@@ -117,6 +117,7 @@ struct EMFPlusPlayback {
         for (index, record) in file.records.enumerated() {
             if let plusRecords = byComment[index] {
                 for plusRecord in plusRecords {
+                    log.addEMFPlusRecordsPlayed()   // audit M17: observe the walk consuming records
                     if plusRecord.type == Self.getDC {
                         gdiWindowOpen = true
                     } else {

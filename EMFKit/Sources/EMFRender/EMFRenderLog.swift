@@ -298,6 +298,15 @@ public struct EMFRenderLog: Sendable, Equatable {
     /// each, carrying a count.
     public private(set) var entries: [Entry] = []
 
+    /// How many EMF+ records the playback walk consumed (audit M17). This is an
+    /// observability stat, NOT a log entry: it is deliberately EXCLUDED from
+    /// `Equatable` (two logs are equal iff their `entries` match), so it never
+    /// affects the exact-entries tests. The fuzz floor asserts it is non-zero
+    /// across the corpus so a regression that stops taking the EMF+ branch — or a
+    /// walk that consumes nothing — is caught even when a textual dispatch mirror
+    /// would still pass.
+    public private(set) var emfPlusRecordsPlayed: Int = 0
+
     /// The upper bound on DISTINCT entries the log will hold — far above any
     /// real file or test (the whole render set is a few dozen record types, a
     /// handful of ROP2/rop values, a couple of missing font families). A
@@ -560,6 +569,13 @@ public struct EMFRenderLog: Sendable, Equatable {
     mutating func note(_ entry: Entry) {
         guard entries.count < Self.maxDistinctEntries else { return }
         entries.append(entry)
+    }
+
+    /// Adds to the EMF+ records-played counter (audit M17): the playback walk calls
+    /// it once per consumed record, and makeImage's re-feed once to carry the total
+    /// into the delivered log.
+    mutating func addEMFPlusRecordsPlayed(_ count: Int = 1) {
+        emfPlusRecordsPlayed += count
     }
 
     /// Appends a first-occurrence coalesced entry and records its index in the
