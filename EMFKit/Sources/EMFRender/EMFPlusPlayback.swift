@@ -941,6 +941,12 @@ struct EMFPlusPlayback {
             else { log.noteEMFPlusObjectIssue(.missingReference) }   // no image object bound
             return
         }
+        // SrcRect crop (audit M12): a SrcRect that selects NOTHING — fully outside
+        // the image, or zero/degenerate — draws nothing (GDI+ semantics), skipped
+        // silently with no log; a partial overlap crops to the intersection AND
+        // lands the surviving fraction on the matching fraction of the dest.
+        guard let (cgImage, unitRect) = croppedForSrc(cgFull, srcRect: srcRect) else { return }
+
         // A pixel bitmap decoded below native to fit the destination — re-noted
         // per draw so the coalesced count stays meaningful (audit H1 / A2).
         if decoded.downsampled { log.noteEMFPlusApproximated(.imageDownsampled) }
@@ -951,8 +957,6 @@ struct EMFPlusPlayback {
            Self.wrapModeTiles(Int32(bitPattern: attributes.wrapMode)) {
             log.noteEMFPlusApproximated(.imageAttributes)
         }
-
-        let cgImage = cropped(cgFull, toSrcRect: srcRect)
 
         let determinant = placement.a * placement.d - placement.b * placement.c
         guard placement.a.isFinite, placement.b.isFinite, placement.c.isFinite,
@@ -970,7 +974,9 @@ struct EMFPlusPlayback {
         context.concatenate(placement)
         context.translateBy(x: 0, y: 1)
         context.scaleBy(x: 1, y: -1)
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        // `unitRect` is the SrcRect crop's sub-rectangle of the (flipped) unit
+        // square — the whole unit square for a fully-in-image SrcRect (unchanged).
+        context.draw(cgImage, in: unitRect)
     }
 
     /// The image square's device/target footprint: the unit square [0,1]² mapped
@@ -1011,26 +1017,49 @@ struct EMFPlusPlayback {
         return value
     }
 
-    /// Crops `image` to the SrcRect sub-rectangle (SOURCE pixels, top-down). A
-    /// whole-image, degenerate, or non-finite SrcRect passes the image through.
-    /// SrcRect is a file-derived float rect, so it is finiteness-guarded and
-    /// clamped to the image before any Int conversion (§8: no trapping casts).
-    private func cropped(_ image: CGImage, toSrcRect srcRect: CGRect) -> CGImage {
+    /// Resolves a SrcRect (SOURCE pixels, top-down) into the cropped image and the
+    /// sub-rectangle of the (flipped) unit square it should fill (audit M12), or
+    /// `nil` when SrcRect selects nothing to draw — fully outside the image, zero,
+    /// or degenerate (GDI+ draws nothing there). A SrcRect fully INSIDE the image
+    /// (the common case) yields the whole cropped region and the whole unit square,
+    /// byte-identical to the previous whole-square draw. A PARTIAL overlap crops to
+    /// the intersection and maps the surviving FRACTION of SrcRect onto the
+    /// matching fraction of the dest. SrcRect is file-derived, so it is
+    /// finiteness-guarded and clamped before any Int conversion (§8).
+    private func croppedForSrc(_ image: CGImage, srcRect: CGRect) -> (image: CGImage, unitRect: CGRect)? {
         let width = image.width, height = image.height
-        guard srcRect.origin.x.isFinite, srcRect.origin.y.isFinite,
-              srcRect.size.width.isFinite, srcRect.size.height.isFinite else { return image }
-        // Clamp to the image in float space first, so the Int casts are bounded.
-        let fx = min(max(srcRect.origin.x, 0), CGFloat(width))
-        let fy = min(max(srcRect.origin.y, 0), CGFloat(height))
-        let fw = min(max(srcRect.size.width, 0), CGFloat(width))
-        let fh = min(max(srcRect.size.height, 0), CGFloat(height))
-        let x = Int(fx), y = Int(fy)
-        let w = min(Int(fw.rounded()), width - x)
-        let h = min(Int(fh.rounded()), height - y)
-        // Whole image (or a rect that covers it) → no crop.
-        if x == 0, y == 0, w >= width, h >= height { return image }
-        guard w > 0, h > 0 else { return image }
-        return image.cropping(to: CGRect(x: x, y: y, width: w, height: h)) ?? image
+        guard width > 0, height > 0,
+              srcRect.origin.x.isFinite, srcRect.origin.y.isFinite,
+              srcRect.size.width.isFinite, srcRect.size.height.isFinite else { return nil }
+        let r = srcRect.standardized
+        guard r.width > 0, r.height > 0 else { return nil }   // zero/degenerate → nothing
+
+        let inter = r.intersection(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+        guard !inter.isNull, inter.width > 0, inter.height > 0 else { return nil }   // fully outside → nothing
+
+        // Surviving fraction of SrcRect, in unit-square (top-down) coordinates.
+        let u0 = (inter.minX - r.minX) / r.width
+        let u1 = (inter.maxX - r.minX) / r.width
+        let t0 = (inter.minY - r.minY) / r.height
+        let t1 = (inter.maxY - r.minY) / r.height
+
+        // Integer crop rectangle, clamped inside the image (§8: bounded casts).
+        let ix = max(0, min(Int(inter.minX.rounded(.down)), width - 1))
+        let iy = max(0, min(Int(inter.minY.rounded(.down)), height - 1))
+        let iw = min(Int(inter.width.rounded()), width - ix)
+        let ih = min(Int(inter.height.rounded()), height - iy)
+        guard iw > 0, ih > 0 else { return nil }
+
+        let cropped: CGImage
+        if ix == 0, iy == 0, iw >= width, ih >= height {
+            cropped = image
+        } else {
+            cropped = image.cropping(to: CGRect(x: ix, y: iy, width: iw, height: ih)) ?? image
+        }
+        // The draw runs in the flipped unit square (translate 0→1, scale 1→−1), so a
+        // top-down y range [t0, t1] maps to flipped-y [1 − t1, 1 − t0].
+        let unitRect = CGRect(x: u0, y: 1 - t1, width: u1 - u0, height: t1 - t0)
+        return (cropped, unitRect)
     }
 
     /// Maps an image-decode `Skip` to its render-log note.
