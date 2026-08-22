@@ -79,6 +79,11 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// vertical/realized-advance option (§2.1.2.3). Only string ALIGNMENT
     /// (StringAlignment/LineAlign) is honoured; the glyphs still drew.
     case stringFormatSimplified
+    /// A path carried per-segment DashMode flags ([MS-EMFPLUS] §2.2.2.31): the
+    /// segment-level dashing was not reproduced (the path drew solid). PathMarker
+    /// flags are ignored WITHOUT a note — markers only affect GetPathPoints
+    /// enumeration, never how a path is filled or stroked (audit M14).
+    case pathDashSegment
 }
 
 /// Which EMF+ stream reassembly/walk issue reached the render log (audit M7).

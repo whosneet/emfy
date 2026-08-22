@@ -128,11 +128,18 @@ enum EMFPlusGeometry {
     static func appendPath(
         _ path: EMFPlusPath,
         to out: CGMutablePath,
-        transform t: CGAffineTransform
+        transform t: CGAffineTransform,
+        recordType: UInt16,
+        log: inout EMFRenderLog
     ) {
         let pts = path.points.map { CGPoint(x: Double($0.x), y: Double($0.y)) }
         let types = path.decodedPointTypes
         guard pts.count == types.count, !pts.isEmpty else { return }
+        // Per-segment DashMode (§2.2.2.31) is not reproduced — note it once (the
+        // path still draws solid). PathMarker (0x02) is deliberately NOT noted:
+        // markers only affect GetPathPoints enumeration, never how a path is
+        // filled or stroked, so ignoring them changes no pixels (audit M14).
+        if types.contains(where: \.isDashMode) { log.noteEMFPlusApproximated(.pathDashSegment) }
 
         var i = 0
         var hasCurrent = false
@@ -154,7 +161,9 @@ enum EMFPlusGeometry {
                 i += 1
             case .bezier:
                 // A bezier consumes this point (control 1) plus the next two.
-                guard i + 2 < pts.count else { return }
+                guard i + 2 < pts.count else {
+                    log.noteEMFPlusRecordUndecodable(type: recordType); return   // dangling bezier triple
+                }
                 if !hasCurrent {
                     out.move(to: pts[i], transform: t)
                     hasCurrent = true
@@ -169,7 +178,7 @@ enum EMFPlusGeometry {
                 i += 3
                 if closeAfter { out.closeSubpath() }
             case .unknown:
-                return
+                log.noteEMFPlusRecordUndecodable(type: recordType); return   // unknown point kind
             }
         }
     }
@@ -194,14 +203,27 @@ enum EMFPlusGeometry {
 
     /// Appends connected cubic Bezier curves: `points[0]` is the start, then
     /// control/control/end triples (EmfPlusDrawBeziers, count ≡ 1 mod 3). Any
-    /// trailing partial triple is dropped.
-    static func appendBeziers(_ points: [CGPoint], to out: CGMutablePath, transform t: CGAffineTransform) {
-        guard let first = points.first, points.count >= 4 else { return }
-        out.move(to: first, transform: t)
-        var i = 1
-        while i + 2 <= points.count - 1 {
-            out.addCurve(to: points[i + 2], control1: points[i], control2: points[i + 1], transform: t)
-            i += 3
+    /// trailing partial triple (or too few points for even one curve) is dropped
+    /// and noted as undecodable (audit M14).
+    static func appendBeziers(
+        _ points: [CGPoint],
+        to out: CGMutablePath,
+        transform t: CGAffineTransform,
+        recordType: UInt16,
+        log: inout EMFRenderLog
+    ) {
+        if let first = points.first, points.count >= 4 {
+            out.move(to: first, transform: t)
+            var i = 1
+            while i + 2 <= points.count - 1 {
+                out.addCurve(to: points[i + 2], control1: points[i], control2: points[i + 1], transform: t)
+                i += 3
+            }
+        }
+        // A well-formed run is 1 + 3k points; a leftover partial triple (or a
+        // count too small to draw one curve, e.g. 2 or 3 points) was dropped.
+        if points.count >= 1, (points.count - 1) % 3 != 0 {
+            log.noteEMFPlusRecordUndecodable(type: recordType)
         }
     }
 
@@ -354,10 +376,11 @@ enum EMFPlusGeometry {
     static func regionPath(
         _ node: EMFPlusRegionNode,
         transform t: CGAffineTransform,
+        recordType: UInt16,
         log: inout EMFRenderLog
     ) -> CGPath {
         let out = CGMutablePath()
-        appendRegion(node, to: out, transform: t, log: &log)
+        appendRegion(node, to: out, transform: t, recordType: recordType, log: &log)
         return out
     }
 
@@ -365,6 +388,7 @@ enum EMFPlusGeometry {
         _ node: EMFPlusRegionNode,
         to out: CGMutablePath,
         transform t: CGAffineTransform,
+        recordType: UInt16,
         log: inout EMFRenderLog
     ) {
         switch node {
@@ -374,15 +398,15 @@ enum EMFPlusGeometry {
                 transform: t
             )
         case .path(let path):
-            appendPath(path, to: out, transform: t)
+            appendPath(path, to: out, transform: t, recordType: recordType, log: &log)
         case .empty:
             break
         case .infinite:
             out.addRect(CGRect(x: -10_000_000, y: -10_000_000, width: 20_000_000, height: 20_000_000), transform: t)
         case .combine(let operation, let left, let right):
             if operation != .or { log.noteEMFPlusApproximated(.regionCombine) }
-            appendRegion(left, to: out, transform: t, log: &log)
-            appendRegion(right, to: out, transform: t, log: &log)
+            appendRegion(left, to: out, transform: t, recordType: recordType, log: &log)
+            appendRegion(right, to: out, transform: t, recordType: recordType, log: &log)
         }
     }
 }

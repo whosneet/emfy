@@ -335,7 +335,7 @@ struct EMFPlusPlayback {
             guard let region = table.region(objectID) else {
                 log.noteEMFPlusObjectIssue(.missingReference); return
             }
-            let path = EMFPlusGeometry.regionPath(region.root, transform: full, log: &log)
+            let path = EMFPlusGeometry.regionPath(region.root, transform: full, recordType: record.type, log: &log)
             fillTargetPath(path, fill: fill, rule: .winding, log: &log)
 
         case 0x4014:   // FillPath
@@ -347,7 +347,7 @@ struct EMFPlusPlayback {
                 log.noteEMFPlusObjectIssue(.missingReference); return
             }
             let path = CGMutablePath()
-            EMFPlusGeometry.appendPath(plusPath, to: path, transform: full)
+            EMFPlusGeometry.appendPath(plusPath, to: path, transform: full, recordType: record.type, log: &log)
             fillTargetPath(path, fill: fill, rule: .evenOdd, log: &log)
 
         case 0x4015:   // DrawPath
@@ -356,7 +356,7 @@ struct EMFPlusPlayback {
                 log.noteEMFPlusObjectIssue(.missingReference); return
             }
             let path = CGMutablePath()
-            EMFPlusGeometry.appendPath(plusPath, to: path, transform: full)
+            EMFPlusGeometry.appendPath(plusPath, to: path, transform: full, recordType: record.type, log: &log)
             strokeTargetPath(path, pen: table.pen(Int(penId & 0xFF)), log: &log)
 
         case 0x4016:   // FillClosedCurve
@@ -408,7 +408,7 @@ struct EMFPlusPlayback {
                 log.noteEMFPlusRecordUndecodable(type: record.type); return
             }
             let path = CGMutablePath()
-            EMFPlusGeometry.appendBeziers(points, to: path, transform: full)
+            EMFPlusGeometry.appendBeziers(points, to: path, transform: full, recordType: record.type, log: &log)
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
         case 0x401A:   // DrawImage
@@ -1263,7 +1263,7 @@ struct EMFPlusPlayback {
             log.noteEMFPlusObjectIssue(.missingReference); return   // clip path slot unresolved (D4)
         }
         let path = CGMutablePath()
-        EMFPlusGeometry.appendPath(plusPath, to: path, transform: worldToDevice)
+        EMFPlusGeometry.appendPath(plusPath, to: path, transform: worldToDevice, recordType: record.type, log: &log)
         combineClip(.path(path), mode: (UInt32(flags) >> 8) & 0x0F, log: &log)
     }
 
@@ -1271,7 +1271,7 @@ struct EMFPlusPlayback {
         guard let region = table.region(Int(flags & 0x00FF)) else {
             log.noteEMFPlusObjectIssue(.missingReference); return   // clip region slot unresolved (D4)
         }
-        let path = EMFPlusGeometry.regionPath(region.root, transform: worldToDevice, log: &log)
+        let path = EMFPlusGeometry.regionPath(region.root, transform: worldToDevice, recordType: record.type, log: &log)
         combineClip(.path(path), mode: (UInt32(flags) >> 8) & 0x0F, log: &log)
     }
 
