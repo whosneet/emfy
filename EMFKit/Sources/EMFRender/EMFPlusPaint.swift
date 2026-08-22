@@ -157,8 +157,23 @@ enum EMFPlusPaint {
             let scaled = pattern.map { CGFloat($0) * width }
             if scaled.contains(where: { $0 > 0 }) {
                 dash = scaled.map { max($0, 0) }
-                dashPhase = CGFloat(data.dashOffset ?? 0) * width
             }
+        }
+        // A present, non-degenerate DashedLine array wins (Custom, §2.1.1.16
+        // PenDataLineStyleCustom). Otherwise a preset PenDataLineStyle (1–4) maps
+        // to the GDI path's exact pattern (StrokeMapper precedent), also in pen-
+        // width multiples; 0/absent/unknown/Custom-without-array stays solid.
+        if dash.isEmpty {
+            switch data.lineStyle {
+            case 1: dash = [3, 1].map { $0 * width }              // PenDataLineStyleDash
+            case 2: dash = [1, 1].map { $0 * width }              // PenDataLineStyleDot
+            case 3: dash = [3, 1, 1, 1].map { $0 * width }        // PenDataLineStyleDashDot
+            case 4: dash = [3, 1, 1, 1, 1, 1].map { $0 * width }  // PenDataLineStyleDashDotDot
+            default: break                                        // Solid / Custom / unknown
+            }
+        }
+        if !dash.isEmpty {
+            dashPhase = CGFloat(data.dashOffset ?? 0) * width
         }
 
         return PlusStrokeStyle(
