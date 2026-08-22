@@ -491,6 +491,8 @@ private extension EMFPlusApproximation {
             return "a compressed image too large for this view (skipped)"
         case .stringFormatSimplified:
             return "advanced text formatting as a single left-to-right line"
+        case .pathDashSegment:
+            return "per-segment path dashing as a solid path"
         }
     }
 }
