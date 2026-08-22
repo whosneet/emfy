@@ -56,6 +56,15 @@ private func penPayload(width: Float, argb: UInt32) -> [UInt8] {
     }
 }
 
+/// One CONTINUED EmfPlusObject chunk ([MS-EMFPLUS] §2.3.5.1): C bit set in the
+/// flags, and the data is TotalObjectSize (u32) followed by `partial` object
+/// bytes. The playback ObjectTable accumulates `DataSize − 4` per chunk until it
+/// reaches TotalObjectSize, then binds `prefix(total)`.
+private func continuedObjectChunk(id: UInt8, type: UInt8, total: UInt32, partial: [UInt8]) -> [UInt8] {
+    let flags = UInt16(0x8000) | (UInt16(type) << 8) | UInt16(id)
+    return plusRecord(0x4008, flags, le { $0.u32(total) } + partial)
+}
+
 /// A pen carrying a preset PenDataLineStyle (PenDataFlags 0x20; the style Int32
 /// follows the fixed PenData fields, [MS-EMFPLUS] §2.2.2.33) — for the M4 dash tests.
 private func penPayloadLineStyle(width: Float, argb: UInt32, lineStyle: Int32) -> [UInt8] {
@@ -1034,5 +1043,349 @@ struct EMFPlusArcTests {
         let inside = image[50, 60]
         #expect(inside.r > 200 && inside.g < 60 && inside.b < 60, "the wedge interior should be red, got \(inside)")
         #expect(image[50, 15].r > 230, "the opposite side stays background, got \(image[50, 15])")
+    }
+}
+
+// MARK: - Approximation-fallback fixtures (audit H4 / F2)
+
+/// True when the log carries exactly `count` occurrences of an approximation.
+private func hasApprox(_ log: EMFRenderLog, _ feature: EMFPlusApproximation, count: Int = 1) -> Bool {
+    log.entries.contains(.emfPlusApproximated(feature: feature, count: count))
+}
+
+/// EmfPlusHatchBrushData (§2.2.2.20): Version, Type 1, HatchStyle, ForeColor, BackColor.
+private func hatchBrushPayload(style: UInt32, fore: UInt32, back: UInt32) -> [UInt8] {
+    le { $0.u32(plusVersion); $0.u32(1); $0.u32(style); $0.u32(fore); $0.u32(back) }
+}
+
+/// EmfPlusPathGradientBrushData (§2.2.2.29), minimal: no surrounding colors, an
+/// empty point boundary. The playback falls back to CenterColor.
+private func pathGradientBrushPayload(center: UInt32) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(3)   // Version, Type 3 (path gradient)
+        writer.u32(0)                             // BrushDataFlags
+        writer.i32(0)                             // WrapMode
+        writer.u32(center)                        // CenterColor (ARGB)
+        writer.f32(50); writer.f32(50)            // CenterPoint
+        writer.u32(0)                             // SurroundingColorCount
+        writer.i32(0)                             // boundary point count (BrushDataPath clear)
+    }
+}
+
+/// EmfPlusTextureBrushData (§2.2.2.45): Version, Type 2, then raw (undecoded).
+private func textureBrushPayload() -> [UInt8] {
+    le { $0.u32(plusVersion); $0.u32(2) }
+}
+
+/// A pen whose trailing BrushObject is a HATCH (non-solid) → penNonSolidBrush.
+private func penHatchBrushPayload(width: Float, fore: UInt32) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(0)          // Version, Type
+        writer.u32(0); writer.u32(0); writer.f32(width)  // PenDataFlags 0, PenUnit, PenWidth
+        writer.raw(hatchBrushPayload(style: 0, fore: fore, back: argb(255, 255, 255, 255)))
+    }
+}
+
+/// A pen with a triangle StartCap (PenDataFlags 0x2) and a solid brush → penCap.
+private func penTriangleCapPayload(width: Float, color: UInt32) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(0)
+        writer.u32(0x02); writer.u32(0); writer.f32(width)   // PenDataFlags=StartCap
+        writer.i32(3)                                        // LineCapTypeTriangle
+        writer.u32(plusVersion); writer.u32(0); writer.u32(color)   // solid brush
+    }
+}
+
+/// SetClipRect (§2.3.1.4) with CombineMode Union (CM = 2, bits 8–11).
+private func setClipRectUnion(_ rect: (Float, Float, Float, Float)) -> [UInt8] {
+    plusRecord(0x4032, UInt16(2) << 8, le { $0.f32(rect.0); $0.f32(rect.1); $0.f32(rect.2); $0.f32(rect.3) })
+}
+
+/// A RegionNodeDataTypeRect leaf (§2.2.2.40) covering `r`.
+private func regionRectLeaf(_ r: (Float, Float, Float, Float)) -> [UInt8] {
+    le { $0.u32(0x1000_0000); $0.f32(r.0); $0.f32(r.1); $0.f32(r.2); $0.f32(r.3) }
+}
+
+/// An EmfPlusRegion object (§2.2.1.8) whose root is an AND (Intersect) combine of
+/// two rect leaves — a non-union node the playback resolves as a union + note.
+private func regionAndPayload(_ a: (Float, Float, Float, Float), _ b: (Float, Float, Float, Float)) -> [UInt8] {
+    le { $0.u32(plusVersion); $0.u32(3) } + le { $0.u32(0x0000_0001) } + regionRectLeaf(a) + regionRectLeaf(b)
+}
+
+/// FillRegion (§2.3.4.13), S flag: BrushId (direct ARGB); ObjectID = region slot.
+private func fillRegionDirect(_ color: UInt32, regionId: UInt8) -> [UInt8] {
+    plusRecord(0x4013, 0x8000 | UInt16(regionId), le { $0.u32(color) })
+}
+
+private func offsetClipRecord() -> [UInt8] { plusRecord(0x4035, 0) }   // §2.3.1.3
+
+/// SetPageTransform (§2.3.9.5): PageUnit in the low Flags byte, PageScale (f32).
+private func setPageTransformRecord(scale: Float, unit: UInt16) -> [UInt8] {
+    plusRecord(0x4030, unit, le { $0.f32(scale) })
+}
+
+/// SetCompositingMode (§2.3.6.4): CompositingMode in the low Flags byte.
+private func setCompositingModeRecord(_ mode: UInt16) -> [UInt8] { plusRecord(0x4023, mode) }
+
+/// BeginContainer (§2.3.7.1): DestRect, SrcRect (RectF), StackIndex (u32).
+private func beginContainerRecord(dest: (Float, Float, Float, Float), src: (Float, Float, Float, Float), index: UInt32) -> [UInt8] {
+    plusRecord(0x4027, 0, le { writer in
+        writer.f32(dest.0); writer.f32(dest.1); writer.f32(dest.2); writer.f32(dest.3)
+        writer.f32(src.0); writer.f32(src.1); writer.f32(src.2); writer.f32(src.3)
+        writer.u32(index)
+    })
+}
+
+/// A pixel bitmap image whose Stride (4) is smaller than width·bpp (2×4) → invalid.
+private func imageInvalidStridePayload() -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(1)   // Version, ImageDataTypeBitmap
+        writer.i32(2); writer.i32(2); writer.i32(4)   // Width, Height, Stride (< 2×4)
+        writer.u32(0x0026_200A); writer.u32(0)   // 32bpp ARGB, BitmapDataTypePixel
+        writer.raw([UInt8](repeating: 0, count: 16))
+    }
+}
+
+/// A compressed image whose stream is GIF ("GIF89a") — CoreGraphics declines it.
+private func imageCompressedGIFPayload() -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(1)   // Version, ImageDataTypeBitmap
+        writer.i32(0); writer.i32(0); writer.i32(0); writer.u32(0)   // dims/format unused
+        writer.u32(1)             // BitmapDataTypeCompressed
+        writer.raw([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x00, 0x00])   // "GIF89a" padded to a 4-aligned record
+    }
+}
+
+// MARK: - Approximation fallbacks: brushes & pens (audit H4 / F2a)
+
+@Suite("EMF+ fallback: brushes & pens")
+struct EMFPlusFallbackBrushPenTests {
+    private func isColor(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8), r: UInt8, g: UInt8, b: UInt8) -> Bool {
+        abs(Int(p.r) - Int(r)) < 60 && abs(Int(p.g) - Int(g)) < 60 && abs(Int(p.b) - Int(b)) < 60
+    }
+
+    @Test("a hatch brush fills its foreground colour with a note")
+    func hatchBrush() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 1, payload: hatchBrushPayload(style: 0, fore: argb(255, 0, 160, 0), back: argb(255, 255, 255, 255))),
+            fillRectsBrush(1, (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isColor(pixels[25, 25], r: 0, g: 160, b: 0), "hatch → foreColor solid, got \(pixels[25, 25])")
+        #expect(hasApprox(log, .hatchBrush), "expected a hatchBrush note: \(log.entries)")
+    }
+
+    @Test("a path-gradient brush fills its centre colour with a note")
+    func pathGradientBrush() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 1, payload: pathGradientBrushPayload(center: argb(255, 0, 0, 200))),
+            fillRectsBrush(1, (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isColor(pixels[25, 25], r: 0, g: 0, b: 200), "path gradient → centerColor solid, got \(pixels[25, 25])")
+        #expect(hasApprox(log, .pathGradientBrush), "expected a pathGradientBrush note: \(log.entries)")
+    }
+
+    @Test("a texture brush draws no ink and notes the skip")
+    func textureBrush() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 1, payload: textureBrushPayload()),
+            fillRectsBrush(1, (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(pixels[25, 25].r > 230 && pixels[25, 25].g > 230 && pixels[25, 25].b > 230,
+                "a texture fill should leave the region blank, got \(pixels[25, 25])")
+        #expect(hasApprox(log, .textureBrush), "expected a textureBrush note: \(log.entries)")
+    }
+
+    @Test("a pen with a non-solid brush strokes a representative solid with a note")
+    func penNonSolidBrush() throws {
+        let file = try plusFile([
+            plusObject(id: 2, type: 2, payload: penHatchBrushPayload(width: 4, fore: argb(255, 0, 0, 0))),
+            drawLines(penId: 2, [(10, 50), (90, 50)]),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(pixels.containsDarkPixel(in: (x: 40, y: 47, width: 20, height: 6)), "the stroke should draw ink")
+        #expect(hasApprox(log, .penNonSolidBrush), "expected a penNonSolidBrush note: \(log.entries)")
+    }
+
+    @Test("a pen with a triangle cap strokes with a note")
+    func penCap() throws {
+        let file = try plusFile([
+            plusObject(id: 2, type: 2, payload: penTriangleCapPayload(width: 4, color: argb(255, 0, 0, 0))),
+            drawLines(penId: 2, [(10, 50), (90, 50)]),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(pixels.containsDarkPixel(in: (x: 40, y: 47, width: 20, height: 6)), "the stroke should draw ink")
+        #expect(hasApprox(log, .penCap), "expected a penCap note: \(log.entries)")
+    }
+}
+
+// MARK: - Approximation fallbacks: clip & state (audit H4 / F2b)
+
+@Suite("EMF+ fallback: clip & state")
+struct EMFPlusFallbackClipStateTests {
+    private func isRed(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.r > 200 && p.g < 60 && p.b < 60 }
+    private func isWhite(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.r > 230 && p.g > 230 && p.b > 230 }
+
+    @Test("SetClipRect Union is applied as an intersection with a note")
+    func clipCombineMode() throws {
+        let file = try plusFile([
+            setClipRectUnion((10, 10, 30, 30)),                        // CM=Union → intersect + note
+            fillRectsDirect(argb(255, 255, 0, 0), (0, 0, 100, 100)),   // whole canvas, clipped
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isRed(pixels[20, 20]), "ink inside the clip rect")
+        #expect(isWhite(pixels[60, 60]), "no ink outside — applied as an intersection")
+        #expect(hasApprox(log, .clipCombineMode), "expected a clipCombineMode note: \(log.entries)")
+    }
+
+    @Test("a non-union region combine renders as a union with a note")
+    func regionCombine() throws {
+        let file = try plusFile([
+            plusObject(id: 3, type: 4, payload: regionAndPayload((10, 10, 20, 20), (25, 25, 20, 20))),
+            fillRegionDirect(argb(255, 255, 0, 0), regionId: 3),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isRed(pixels[15, 15]) || isRed(pixels[35, 35]), "the region union should fill somewhere, got \(pixels[15, 15]) / \(pixels[35, 35])")
+        #expect(hasApprox(log, .regionCombine), "expected a regionCombine note: \(log.entries)")
+    }
+
+    @Test("OffsetClip leaves the clip in place with a note")
+    func offsetClip() throws {
+        let file = try plusFile([
+            setClipRectIntersect((10, 10, 30, 30)),                    // clip to (10..40)
+            offsetClipRecord(),                                        // no-op + note
+            fillRectsDirect(argb(255, 255, 0, 0), (0, 0, 100, 100)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isRed(pixels[20, 20]), "clip stayed at its original position")
+        #expect(isWhite(pixels[60, 60]), "outside the unchanged clip stays blank")
+        #expect(hasApprox(log, .offsetClip), "expected an offsetClip note: \(log.entries)")
+    }
+
+    @Test("a non-pixel page unit is treated as pixels with a note")
+    func pageUnit() throws {
+        let file = try plusFile([
+            setPageTransformRecord(scale: 2, unit: 3),                 // PageUnit Point → note; scale as pixels
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 10, 10)),   // world (10..20) → ×2 → (20..40)
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isRed(pixels[30, 30]), "the ×2 page scale placed the fill at (20..40), got \(pixels[30, 30])")
+        #expect(isWhite(pixels[15, 15]), "the unscaled position is empty — scale was applied")
+        #expect(hasApprox(log, .pageUnit), "expected a pageUnit note: \(log.entries)")
+    }
+
+    @Test("a non-source-over compositing mode still blends source-over with a note")
+    func compositingMode() throws {
+        let file = try plusFile([
+            setCompositingModeRecord(1),                               // non-SourceOver → note
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isRed(pixels[20, 20]), "the fill still drew (source-over)")
+        #expect(hasApprox(log, .compositingMode), "expected a compositingMode note: \(log.entries)")
+    }
+
+    @Test("BeginContainer applies its src→dest mapping with a note")
+    func container() throws {
+        let file = try plusFile([
+            beginContainerRecord(dest: (0, 0, 100, 100), src: (0, 0, 50, 50), index: 1),   // ×2 mapping
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 10, 10)),                        // (10..20) → ×2 → (20..40)
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isRed(pixels[30, 30]), "the container's ×2 mapping placed the fill at (20..40), got \(pixels[30, 30])")
+        #expect(isWhite(pixels[15, 15]), "the unmapped position is empty")
+        #expect(hasApprox(log, .container), "expected a container note: \(log.entries)")
+    }
+}
+
+// MARK: - Approximation fallbacks: images (audit H4 / F2c)
+
+@Suite("EMF+ fallback: images")
+struct EMFPlusFallbackImageTests {
+    private func isWhite(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.r > 230 && p.g > 230 && p.b > 230 }
+
+    @Test("an invalid-stride pixel bitmap draws nothing and notes imageInvalid")
+    func imageInvalid() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageInvalidStridePayload()),
+            drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isWhite(pixels[30, 30]), "an invalid image should draw nothing, got \(pixels[30, 30])")
+        #expect(hasApprox(log, .imageInvalid), "expected an imageInvalid note: \(log.entries)")
+    }
+
+    @Test("a GIF compressed image draws nothing and notes imageCompressed")
+    func imageCompressed() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageCompressedGIFPayload()),
+            drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isWhite(pixels[30, 30]), "a GIF image should draw nothing, got \(pixels[30, 30])")
+        #expect(hasApprox(log, .imageCompressed), "expected an imageCompressed note: \(log.entries)")
+    }
+}
+
+// MARK: - Continuation / cross-comment reassembly through render (audit H3 / M17 / F1)
+
+@Suite("EMF+ continuation through render")
+struct EMFPlusContinuationTests {
+
+    private func isGreen(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.g > 130 && p.r < 90 && p.b < 90 }
+
+    @Test("a solid brush split across two continued objects in two comments completes and fills")
+    func continuedObjectAcrossComments() throws {
+        let brushBytes = solidBrushPayload(argb(255, 0, 200, 0))   // 12 bytes, green
+        let total = UInt32(brushBytes.count)
+        // Split at a 4-byte boundary so each chunk record's Size stays 4-aligned.
+        let chunk1 = continuedObjectChunk(id: 1, type: 1, total: total, partial: Array(brushBytes[0 ..< 8]))
+        let chunk2 = continuedObjectChunk(id: 1, type: 1, total: total, partial: Array(brushBytes[8...]))
+
+        var fixture = RenderFixture()
+        fixture.plusComment(plusHeader() + chunk1)                        // comment 1: header + first chunk
+        fixture.plusComment(chunk2 + fillRectsBrush(1, (10, 10, 30, 30))) // comment 2: second chunk + a draw
+
+        let (pixels, log) = try renderPlus(try fixture.parsed())
+        #expect(isGreen(pixels[25, 25]), "the reassembled brush should fill green, got \(pixels[25, 25])")
+        #expect(!log.entries.contains { if case .emfPlusObjectIssue = $0 { return true }; return false },
+                "a completed continuation must not log an object issue: \(log.entries)")
+        #expect(!log.entries.contains { if case .emfPlusStreamIssue = $0 { return true }; return false },
+                "clean cross-comment reassembly must not log a stream issue: \(log.entries)")
+    }
+
+    @Test("a continuation that OVERSHOOTS TotalObjectSize binds prefix(total) and still fills")
+    func continuedObjectOvershoot() throws {
+        let brushBytes = solidBrushPayload(argb(255, 0, 200, 0))
+        let total = UInt32(brushBytes.count)
+        let chunk1 = continuedObjectChunk(id: 1, type: 1, total: total, partial: Array(brushBytes[0 ..< 8]))
+        // Second chunk carries the remaining 4 bytes PLUS 4 extra tail bytes (both
+        // 4-aligned): accumulation overshoots TotalObjectSize and binds prefix(total).
+        let chunk2 = continuedObjectChunk(id: 1, type: 1, total: total, partial: Array(brushBytes[8...]) + [0xDE, 0xAD, 0xBE, 0xEF])
+
+        var fixture = RenderFixture()
+        fixture.plusComment(plusHeader() + chunk1)
+        fixture.plusComment(chunk2 + fillRectsBrush(1, (10, 10, 30, 30)))
+
+        let (pixels, log) = try renderPlus(try fixture.parsed())
+        #expect(isGreen(pixels[25, 25]), "overshoot should still bind prefix(total), got \(pixels[25, 25])")
+        #expect(!log.entries.contains { if case .emfPlusObjectIssue = $0 { return true }; return false },
+                "overshoot completion must not log an object issue: \(log.entries)")
+    }
+
+    @Test("a single drawing record split mid-body across two comments reassembles and draws")
+    func drawingRecordSplitAcrossComments() throws {
+        let record = fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 30, 30))   // one 36-byte FillRects
+        var fixture = RenderFixture()
+        fixture.plusComment(plusHeader() + Array(record[0 ..< 20]))   // record's first 20 bytes
+        fixture.plusComment(Array(record[20...]))                      // record's remaining bytes
+
+        let (pixels, log) = try renderPlus(try fixture.parsed())
+        let ink = pixels[25, 25]
+        #expect(ink.r > 200 && ink.g < 60 && ink.b < 60, "the split record should reassemble and fill red, got \(ink)")
+        #expect(!log.entries.contains { if case .emfPlusStreamIssue = $0 { return true }; return false },
+                "byte-level cross-comment reassembly must not log a stream issue: \(log.entries)")
     }
 }
