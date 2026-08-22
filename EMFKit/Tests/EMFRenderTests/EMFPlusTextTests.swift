@@ -174,6 +174,19 @@ private func leftmostInkColumn(_ image: RasterizedImage, band: (x: Int, y: Int, 
     return nil
 }
 
+/// The largest x column carrying dark ink inside `band`, or nil if none.
+private func rightmostInkColumn(_ image: RasterizedImage, band: (x: Int, y: Int, width: Int, height: Int)) -> Int? {
+    let x0 = max(0, band.x), y0 = max(0, band.y)
+    let x1 = min(image.width, band.x + band.width), y1 = min(image.height, band.y + band.height)
+    guard x0 < x1, y0 < y1 else { return nil }
+    for x in stride(from: x1 - 1, through: x0, by: -1) {
+        for y in y0 ..< y1 where image[x, y].r < 160 {
+            return x
+        }
+    }
+    return nil
+}
+
 /// The bounding box of dark ink across the whole image, or nil if none — a
 /// transform-agnostic orientation probe (rotated runs land anywhere on canvas).
 private func inkBoundingBox(_ image: RasterizedImage, threshold: UInt8 = 160)
@@ -626,5 +639,78 @@ struct EMFPlusTextRotationTests {
         let box = try #require(inkBoundingBox(image), "translated DrawString drew no ink")
         let w = box.maxX - box.minX, h = box.maxY - box.minY
         #expect(w > h, "a non-rotated run should be wider than tall, got w=\(w) h=\(h)")
+    }
+}
+
+// MARK: - DrawString wrap + clip (audit M8 / G1a)
+
+@Suite("EMF+ text wrap & clip")
+struct EMFPlusTextWrapClipTests {
+
+    private func hasApprox(_ log: EMFRenderLog, _ feature: EMFPlusApproximation) -> Bool {
+        log.entries.contains { if case .emfPlusApproximated(let f, _) = $0 { return f == feature }; return false }
+    }
+
+    @Test("a long paragraph wraps within its rect and clips below it")
+    func drawStringWraps() throws {
+        let file = try textFile([
+            tPlusObject(id: 1, type: 6, payload: tFont(emSize: 18, family: "Arial")),
+            tPlusObject(id: 2, type: 7, payload: tStringFormat()),   // flags 0 → default wrap + clip
+            tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 2,
+                        rect: (5, 5, 40, 50), string: "AAAAAAA BBBBBBB CCCCCCC DDDDDDD"),
+        ])
+        let (image, log) = try renderText(file)
+        // Ink on a second line (a single unwrapped line would leave this band blank).
+        #expect(image.containsDarkPixel(in: (x: 6, y: 30, width: 38, height: 14)), "no second-line ink — did not wrap")
+        // Clipped: nothing below the rect bottom (y > 55).
+        #expect(!image.containsDarkPixel(in: (x: 6, y: 58, width: 38, height: 30)), "ink leaked below the rect — not clipped")
+        #expect(!hasApprox(log, .stringFormatSimplified), "a plain wrap should note nothing: \(log.entries)")
+    }
+
+    @Test("NoWrap + NoClip: a single overflowing line inks beyond the rect edge")
+    func drawStringNoWrapNoClip() throws {
+        let file = try textFile([
+            tPlusObject(id: 1, type: 6, payload: tFont(emSize: 18, family: "Arial")),
+            tPlusObject(id: 2, type: 7, payload: tStringFormat(flags: 0x5000)),   // NoWrap | NoClip
+            tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 2,
+                        rect: (5, 5, 40, 50), string: "AAAAAAA BBBBBBB CCCCCCC"),
+        ])
+        let (image, _) = try renderText(file)
+        #expect(image.containsDarkPixel(in: (x: 48, y: 6, width: 40, height: 20)), "no ink beyond the rect — NoClip not honored")
+        #expect(!image.containsDarkPixel(in: (x: 6, y: 32, width: 38, height: 20)), "second-line ink — NoWrap not honored")
+    }
+
+    @Test("NoWrap with clipping: the overflowing line is clipped at the rect edge")
+    func drawStringNoWrapClipped() throws {
+        let file = try textFile([
+            tPlusObject(id: 1, type: 6, payload: tFont(emSize: 18, family: "Arial")),
+            tPlusObject(id: 2, type: 7, payload: tStringFormat(flags: 0x1000)),   // NoWrap, clip enabled
+            tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 2,
+                        rect: (5, 5, 40, 50), string: "AAAAAAA BBBBBBB CCCCCCC"),
+        ])
+        let (image, _) = try renderText(file)
+        #expect(image.containsDarkPixel(in: (x: 6, y: 6, width: 38, height: 20)), "the visible part of the line should ink inside the rect")
+        #expect(!image.containsDarkPixel(in: (x: 48, y: 6, width: 40, height: 20)), "ink beyond the rect edge — clip not applied")
+    }
+
+    // Audit M15 (G1c): trailing whitespace is excluded from the alignment width
+    // unless MeasureTrailingSpaces (0x800) is set.
+    @Test("Far alignment excludes trailing whitespace unless MeasureTrailingSpaces is set")
+    func trailingSpaceMeasurement() throws {
+        func rightmostInk(_ string: String, flags: UInt32) throws -> Int {
+            let file = try textFile([
+                tPlusObject(id: 1, type: 6, payload: tFont(emSize: 24, family: "Arial")),
+                tPlusObject(id: 2, type: 7, payload: tStringFormat(stringAlignment: 2, flags: flags)),   // Far
+                tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 2,
+                            rect: (5, 5, 90, 40), string: string),
+            ])
+            let (image, _) = try renderText(file)
+            return try #require(rightmostInkColumn(image, band: (x: 0, y: 4, width: 100, height: 44)), "no ink for \"\(string)\"")
+        }
+        let baseX = try rightmostInk("X", flags: 0)
+        let spaceExcluded = try rightmostInk("X ", flags: 0)          // default: trailing space excluded
+        let spaceMeasured = try rightmostInk("X ", flags: 0x800)      // MeasureTrailingSpaces
+        #expect(abs(spaceExcluded - baseX) <= 1, "\"X \" should align flush like \"X\" (\(spaceExcluded) vs \(baseX))")
+        #expect(spaceMeasured < baseX - 3, "with 0x800 the trailing space shifts \"X\" left (\(spaceMeasured) vs \(baseX))")
     }
 }
