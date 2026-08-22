@@ -194,9 +194,10 @@ finish review, the verdict, and DESIGN.md
     <div class="notes">
       <p class="note"><span class="no">NOTE 1</span><span>EMF+ (GDI+) decoding shipped in 2.0.
       Dual-format files (GDI and EMF+ side by side) render from their higher-fidelity EMF+ half,
-      and files whose drawing content exists <em>only</em> as EMF+ render fully. A few features —
-      exotic image pixel formats, nested-metafile images, hatch and path-gradient fills — are
-      approximated, and Emfy itemizes every one in Render Details. WMF is on the v3 list.</span></p>
+      and files whose drawing content exists <em>only</em> as EMF+ render fully. A few features are
+      simplified — hatch and path-gradient fills draw as solid approximations; texture fills,
+      nested-metafile images, and exotic image pixel formats are skipped — and Emfy itemizes every
+      one in Render Details. WMF is on the v3 list.</span></p>
       <p class="note"><span class="no">NOTE 2</span><span>Quick Look parses files the moment Finder
       shows them, so every size and count is bounds-checked before it is trusted, unknown records
       are logged and skipped (a partial render always beats an error), and the parser is
