@@ -15,6 +15,11 @@ enum SnapshotComparator {
     static let defaultTolerance: UInt8 = 16
     /// Budget of differing pixels as a fraction of the total.
     static let defaultMaxDifferingFraction = 0.01
+    /// Budget on the MEAN absolute per-channel delta across the whole image
+    /// (audit M18): a uniform shift that stays under `defaultTolerance` per pixel
+    /// (so no pixel "differs") can still move the whole image — this catches it.
+    /// Self-generated baselines sit at ~0, so 2.0 is a wide but real guard.
+    static let defaultMeanTolerance = 2.0
 
     /// Verifies `image` against the baseline PNG named `name`.
     ///
@@ -26,7 +31,8 @@ enum SnapshotComparator {
         _ image: CGImage,
         baselineNamed name: String,
         tolerance: UInt8 = defaultTolerance,
-        maxDifferingFraction: Double = defaultMaxDifferingFraction
+        maxDifferingFraction: Double = defaultMaxDifferingFraction,
+        meanTolerance: Double = defaultMeanTolerance
     ) -> String? {
         if isRecordingBaselines {
             return record(image, name: name)
@@ -60,6 +66,7 @@ enum SnapshotComparator {
         }
 
         var differing = 0
+        var totalDelta = 0                    // summed |Δ| over EVERY channel (mean criterion)
         var diffPixels = [UInt8](repeating: 255, count: actualPixels.pixels.count)
         let count = actualPixels.pixels.count / 4
         for pixel in 0 ..< count {
@@ -68,10 +75,9 @@ enum SnapshotComparator {
             for channel in 0 ..< 4 {
                 let a = Int(actualPixels.pixels[offset + channel])
                 let b = Int(expectedPixels.pixels[offset + channel])
-                if abs(a - b) > Int(tolerance) {
-                    pixelDiffers = true
-                    break
-                }
+                let delta = abs(a - b)
+                totalDelta += delta           // accumulate ALL channels — do not break
+                if delta > Int(tolerance) { pixelDiffers = true }
             }
             if pixelDiffers {
                 differing += 1
@@ -83,7 +89,15 @@ enum SnapshotComparator {
         }
 
         let fraction = Double(differing) / Double(max(count, 1))
-        guard fraction > maxDifferingFraction else { return nil }
+        let meanDelta = Double(totalDelta) / Double(max(count * 4, 1))
+        // Early warning (audit M18): surface a non-trivial whole-image drift even
+        // when it still passes, so a creeping baseline is visible before it fails.
+        if meanDelta > 0.5 {
+            print(String(format: "[snapshot] %@: mean per-channel Δ = %.3f", name, meanDelta))
+        }
+        // Pass only when BOTH the differing-pixel budget AND the mean-delta budget
+        // hold; either one exceeded is a real change.
+        guard fraction > maxDifferingFraction || meanDelta > meanTolerance else { return nil }
 
         let diffImage = makeImage(
             rgba: diffPixels,
@@ -92,8 +106,9 @@ enum SnapshotComparator {
         )
         let artifactPath = writeArtifacts(name: name, actual: image, expected: baseline, diff: diffImage)
         return String(
-            format: "snapshot mismatch for %@: %.2f%% of pixels differ (budget %.2f%%, tolerance %d/255); artifacts at %@",
-            name, fraction * 100, maxDifferingFraction * 100, Int(tolerance), artifactPath
+            format: "snapshot mismatch for %@: %.2f%% of pixels differ (budget %.2f%%, tolerance %d/255), "
+                + "mean per-channel Δ %.3f (budget %.2f); artifacts at %@",
+            name, fraction * 100, maxDifferingFraction * 100, Int(tolerance), meanDelta, meanTolerance, artifactPath
         )
     }
 
