@@ -51,7 +51,11 @@ enum EMFPlusPaint {
                 stops.append((CGFloat(pos), EMFPlusGeometry.cgColor(color)))
             }
         case .blendFactors(let arrays):
-            if let factors = arrays.first, !factors.positions.isEmpty {
+            // The drawn ramp runs along the HORIZONTAL gradient line. The decoder
+            // appends vertical THEN horizontal when both flags are set (§2.2.2.25),
+            // so the LAST array is the horizontal one; a single array is both first
+            // and last, so `.last` leaves the only-one-array case unchanged (M13).
+            if let factors = arrays.last, !factors.positions.isEmpty {
                 for (pos, factor) in zip(factors.positions, factors.factors) {
                     stops.append((CGFloat(pos), lerp(g.startColor, g.endColor, CGFloat(factor))))
                 }
