@@ -471,6 +471,10 @@ private extension EMFPlusApproximation {
             return "a non-pixel image source unit as pixels"
         case .imageAttributes:
             return "image attributes wrap mode (not applied)"
+        case .imageDownsampled:
+            return "a large bitmap image decoded at a reduced resolution"
+        case .imageOversized:
+            return "a compressed image too large for this view (skipped)"
         case .stringFormatSimplified:
             return "advanced text formatting as a single left-to-right line"
         }
