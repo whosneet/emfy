@@ -95,6 +95,8 @@ public enum EMFPlusStreamIssueKind: Sendable, Equatable, Hashable {
     case headerRecordMissing
     case headerUnexpectedSize
     case headerUnexpectedDataSize
+    case recordCountCapped
+    case recordSizeExcessPadding
 
     /// Maps a parse-level `EMFPlusDiagnostic` onto its render-log kind (1:1).
     init(_ diagnostic: EMFPlusDiagnostic) {
@@ -104,10 +106,12 @@ public enum EMFPlusStreamIssueKind: Sendable, Equatable, Hashable {
         case .recordSizeNotAligned: self = .recordSizeNotAligned
         case .recordDataSizeExceedsSize: self = .recordDataSizeExceedsSize
         case .recordDataTruncated: self = .recordDataTruncated
+        case .recordSizeExcessPadding: self = .recordSizeExcessPadding
         case .trailingBytes: self = .trailingBytes
         case .headerRecordMissing: self = .headerRecordMissing
         case .headerUnexpectedSize: self = .headerUnexpectedSize
         case .headerUnexpectedDataSize: self = .headerUnexpectedDataSize
+        case .recordCountCapped: self = .recordCountCapped
         }
     }
 }

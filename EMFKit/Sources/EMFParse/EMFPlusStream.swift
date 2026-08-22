@@ -59,6 +59,13 @@ public enum EMFPlusDiagnostic: Sendable, Equatable {
     /// The walk stops WITHOUT emitting the truncated record. `availableBytes` is
     /// how many bytes actually remained from the record start.
     case recordDataTruncated(streamOffset: Int, declaredDataSize: UInt32, availableBytes: Int)
+    /// A record's `Size` declared more than 3 bytes beyond its 12-byte header and
+    /// `DataSize` (Size − 12 − DataSize > 3, above the spec's 4-byte alignment
+    /// maximum), so as the walk advances by `Size` it SWALLOWS the following
+    /// record(s) (audit M3). The walk continues UNCHANGED — this only FLAGS the
+    /// suspicious header; recovering the hidden records is a behaviour decision
+    /// not yet made.
+    case recordSizeExcessPadding(streamOffset: Int, size: UInt32, dataSize: UInt32)
     /// Bytes remained at the end of the stream but were too few to hold a
     /// 12-byte record header. `count` is how many.
     case trailingBytes(count: Int)
@@ -73,6 +80,12 @@ public enum EMFPlusDiagnostic: Sendable, Equatable {
     /// The first record was EmfPlusHeader but its `DataSize` was not the
     /// required 0x10 ([MS-EMFPLUS] §2.3.3.3). Still best-effort decoded.
     case headerUnexpectedDataSize(dataSize: UInt32)
+    /// The stream walk hit its record-count cap and stopped, keeping every record
+    /// walked so far (audit M2). Mirrors the GDI walker's cap
+    /// (`EMFFile.recordCountLimit`); `limit` is the cap that was reached. §8: a
+    /// crafted stream of nothing but 12-byte records would otherwise inflate the
+    /// record array without bound.
+    case recordCountCapped(limit: Int)
 }
 
 /// The reassembled and walked EMF+ record stream of an `EMFFile`: the records,
@@ -239,6 +252,15 @@ extension EMFFile {
         var stoppedEarly = false
 
         while offset + Self.emfPlusRecordHeaderSize <= count {
+            // §8 memory guard (audit M2): mirror the GDI walker's record-count cap
+            // (EMFFile.recordCountLimit — one constant, both walkers) so a hostile
+            // all-12-byte-records stream can't grow the record array without bound.
+            // Keep everything walked so far and stop.
+            if records.count >= EMFFile.recordCountLimit {
+                diagnostics.append(.recordCountCapped(limit: EMFFile.recordCountLimit))
+                stoppedEarly = true
+                break
+            }
             // The 12 header bytes are guaranteed present by the loop condition.
             guard let type = streamReader.readUInt16(at: offset),
                   let flags = streamReader.readUInt16(at: offset + 2),
@@ -281,6 +303,17 @@ extension EMFFile {
                 )
                 stoppedEarly = true
                 break
+            }
+
+            // Spec-legal AlignmentPadding is Size − 12 − DataSize ∈ [0, 3]. More
+            // than that is an inflated Size that will SWALLOW the following
+            // record(s) when the walk advances by `min(recordSize, remaining)`
+            // below — flag it, but keep that advance rule UNCHANGED (audit M3:
+            // add the diagnostic only; recovering hidden records is not decided).
+            if recordSize - Self.emfPlusRecordHeaderSize - Int(dataSize) > 3 {
+                diagnostics.append(
+                    .recordSizeExcessPadding(streamOffset: offset, size: size, dataSize: dataSize)
+                )
             }
 
             let dataStart = offset + Self.emfPlusRecordHeaderSize

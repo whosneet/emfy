@@ -78,6 +78,9 @@ func describe(_ diagnostic: EMFPlusDiagnostic) -> String {
     case .recordDataTruncated(let streamOffset, let declaredDataSize, let availableBytes):
         return "EMF+ record at reassembled-stream offset \(streamOffset): DataSize \(declaredDataSize) "
             + "runs past the \(availableBytes) stream bytes remaining; record dropped, walk stopped"
+    case .recordSizeExcessPadding(let streamOffset, let size, let dataSize):
+        return "EMF+ record at reassembled-stream offset \(streamOffset): Size \(size) exceeds "
+            + "12 + DataSize \(dataSize) by more than 3 padding bytes; following record(s) swallowed"
     case .trailingBytes(let count):
         return "\(count) trailing stream bytes after the last EMF+ record, too few for a 12-byte header"
     case .headerRecordMissing:
@@ -87,6 +90,8 @@ func describe(_ diagnostic: EMFPlusDiagnostic) -> String {
         return "EmfPlusHeader Size \(size) is not the required 0x1C; header decoded best-effort"
     case .headerUnexpectedDataSize(let dataSize):
         return "EmfPlusHeader DataSize \(dataSize) is not the required 0x10; header decoded best-effort"
+    case .recordCountCapped(let limit):
+        return "EMF+ record-count cap (\(limit)) reached; walk stopped, records kept so far"
     }
 }
 
