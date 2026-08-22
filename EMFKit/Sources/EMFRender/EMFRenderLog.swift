@@ -61,6 +61,17 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// A referenced EmfPlusImageAttributes (§2.2.1.5) requested a non-clamp wrap
     /// mode; it was not applied (the image is drawn once, clamped).
     case imageAttributes
+    /// A DrawImage/DrawImagePoints pixel bitmap was decoded BELOW its native
+    /// resolution to bound memory against the destination footprint (audit H1;
+    /// the EMF+ analogue of `dibDownsampled`). No detail the destination could
+    /// show was lost; the image still drew.
+    case imageDownsampled
+    /// A DrawImage/DrawImagePoints compressed image (§2.2.2.10) was larger than
+    /// the destination-derived budget and could not be band-decoded, so it was
+    /// skipped rather than fully materialised (audit H1). Distinct from
+    /// `imageInvalid` (a broken image): the image is fine, just too large for
+    /// this render (e.g. a big photo in a small Quick Look preview).
+    case imageOversized
     /// A text run was drawn as a single left-to-right line, ignoring a non-default
     /// text-formatting feature it carried: an EmfPlusStringFormat ([MS-EMFPLUS]
     /// §2.2.1.9) trimming/wrap/tab-stop/hotkey/character-range setting, a
