@@ -146,8 +146,9 @@ struct EMFPlusPlayback {
         case 0x4001, 0x4002, 0x4003:   // Header, EndOfFile, Comment
             break
         case Self.object:              // 0x4008 EmfPlusObject
-            // A rebind of a slot invalidates any image cached for it (A1).
-            if let boundID = table.apply(record) { imageCache.invalidate(Int(boundID)) }
+            // A rebind of a slot invalidates any image cached for it (A1); bind
+            // issues (invalid id, malformed decode) are noted through `log` (M7).
+            if let boundID = table.apply(record, log: &log) { imageCache.invalidate(Int(boundID)) }
 
         // Transforms (§2.3.9).
         case 0x402A: setWorldTransform(record)
@@ -200,11 +201,16 @@ struct EMFPlusPlayback {
 
         switch record.type {
         case 0x4009:   // Clear
-            if let color = reader.u32() { clear(argb(color), log: &log) }
+            guard let color = reader.u32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+            clear(argb(color), log: &log)
 
         case 0x400A:   // FillRects
-            guard let brushId = reader.u32(), let count = reader.u32(),
-                  let fill = fillSource(sBit: sBit, brushId: brushId) else { return }
+            guard let brushId = reader.u32(), let count = reader.u32() else {
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
+            }
+            guard let fill = fillSource(sBit: sBit, brushId: brushId) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
+            }
             let path = CGMutablePath()
             for _ in 0 ..< Int(count) {
                 guard let rect = reader.rect(compressed: cBit) else { break }
@@ -213,7 +219,7 @@ struct EMFPlusPlayback {
             fillTargetPath(path, fill: fill, rule: .evenOdd, log: &log)
 
         case 0x400B:   // DrawRects
-            guard let count = reader.u32() else { return }
+            guard let count = reader.u32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
             let path = CGMutablePath()
             for _ in 0 ..< Int(count) {
                 guard let rect = reader.rect(compressed: cBit) else { break }
@@ -222,11 +228,13 @@ struct EMFPlusPlayback {
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
         case 0x400C:   // FillPolygon
-            guard !relative, let brushId = reader.u32(), let count = reader.u32(),
-                  let points = reader.points(count: Int(count), compressed: cBit),
-                  let fill = fillSource(sBit: sBit, brushId: brushId) else {
-                if relative { log.noteEMFPlusUnsupported(type: record.type) }
-                return
+            if relative { log.noteEMFPlusUnsupported(type: record.type); return }
+            guard let brushId = reader.u32(), let count = reader.u32(),
+                  let points = reader.points(count: Int(count), compressed: cBit) else {
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
+            }
+            guard let fill = fillSource(sBit: sBit, brushId: brushId) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
             }
             let path = CGMutablePath()
             EMFPlusGeometry.appendPolygon(points, to: path, transform: full)
@@ -234,84 +242,111 @@ struct EMFPlusPlayback {
 
         case 0x400D:   // DrawLines
             let lBit = (flags & 0x2000) != 0
-            guard !relative, let count = reader.u32(),
+            if relative { log.noteEMFPlusUnsupported(type: record.type); return }
+            guard let count = reader.u32(),
                   let points = reader.points(count: Int(count), compressed: cBit) else {
-                if relative { log.noteEMFPlusUnsupported(type: record.type) }
-                return
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
             }
             let path = CGMutablePath()
             EMFPlusGeometry.appendPolyline(points, to: path, transform: full, close: lBit)
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
         case 0x400E:   // FillEllipse
-            guard let brushId = reader.u32(), let rect = reader.rect(compressed: cBit),
-                  let fill = fillSource(sBit: sBit, brushId: brushId) else { return }
+            guard let brushId = reader.u32(), let rect = reader.rect(compressed: cBit) else {
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
+            }
+            guard let fill = fillSource(sBit: sBit, brushId: brushId) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
+            }
             let path = CGMutablePath()
             EMFPlusGeometry.appendEllipse(in: rect.standardized, to: path, transform: full)
             fillTargetPath(path, fill: fill, rule: .evenOdd, log: &log)
 
         case 0x400F:   // DrawEllipse
-            guard let rect = reader.rect(compressed: cBit) else { return }
+            guard let rect = reader.rect(compressed: cBit) else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
             let path = CGMutablePath()
             EMFPlusGeometry.appendEllipse(in: rect.standardized, to: path, transform: full)
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
         case 0x4010:   // FillPie
             guard let brushId = reader.u32(), let start = reader.f32(), let sweep = reader.f32(),
-                  let rect = reader.rect(compressed: cBit),
-                  let fill = fillSource(sBit: sBit, brushId: brushId) else { return }
+                  let rect = reader.rect(compressed: cBit) else {
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
+            }
+            guard let fill = fillSource(sBit: sBit, brushId: brushId) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
+            }
             let path = CGMutablePath()
             EMFPlusGeometry.appendArc(rect: rect.standardized, startDegrees: start, sweepDegrees: sweep, pie: true, to: path, transform: full)
             fillTargetPath(path, fill: fill, rule: .evenOdd, log: &log)
 
         case 0x4011:   // DrawPie
-            guard let start = reader.f32(), let sweep = reader.f32(), let rect = reader.rect(compressed: cBit) else { return }
+            guard let start = reader.f32(), let sweep = reader.f32(), let rect = reader.rect(compressed: cBit) else {
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
+            }
             let path = CGMutablePath()
             EMFPlusGeometry.appendArc(rect: rect.standardized, startDegrees: start, sweepDegrees: sweep, pie: true, to: path, transform: full)
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
         case 0x4012:   // DrawArc
-            guard let start = reader.f32(), let sweep = reader.f32(), let rect = reader.rect(compressed: cBit) else { return }
+            guard let start = reader.f32(), let sweep = reader.f32(), let rect = reader.rect(compressed: cBit) else {
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
+            }
             let path = CGMutablePath()
             EMFPlusGeometry.appendArc(rect: rect.standardized, startDegrees: start, sweepDegrees: sweep, pie: false, to: path, transform: full)
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
         case 0x4013:   // FillRegion
-            guard let brushId = reader.u32(), let fill = fillSource(sBit: sBit, brushId: brushId),
-                  let region = table.region(objectID) else { return }
+            guard let brushId = reader.u32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+            guard let fill = fillSource(sBit: sBit, brushId: brushId) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
+            }
+            guard let region = table.region(objectID) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
+            }
             let path = EMFPlusGeometry.regionPath(region.root, transform: full, log: &log)
             fillTargetPath(path, fill: fill, rule: .winding, log: &log)
 
         case 0x4014:   // FillPath
-            guard let brushId = reader.u32(), let fill = fillSource(sBit: sBit, brushId: brushId),
-                  let plusPath = table.path(objectID) else { return }
+            guard let brushId = reader.u32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+            guard let fill = fillSource(sBit: sBit, brushId: brushId) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
+            }
+            guard let plusPath = table.path(objectID) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
+            }
             let path = CGMutablePath()
             EMFPlusGeometry.appendPath(plusPath, to: path, transform: full)
             fillTargetPath(path, fill: fill, rule: .evenOdd, log: &log)
 
         case 0x4015:   // DrawPath
-            guard let penId = reader.u32(), let plusPath = table.path(objectID) else { return }
+            guard let penId = reader.u32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+            guard let plusPath = table.path(objectID) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
+            }
             let path = CGMutablePath()
             EMFPlusGeometry.appendPath(plusPath, to: path, transform: full)
             strokeTargetPath(path, pen: table.pen(Int(penId & 0xFF)), log: &log)
 
         case 0x4016:   // FillClosedCurve
             let winding = (flags & 0x2000) != 0
-            guard !relative, let brushId = reader.u32(), let tension = reader.f32(), let count = reader.u32(),
-                  let points = reader.points(count: Int(count), compressed: cBit),
-                  let fill = fillSource(sBit: sBit, brushId: brushId) else {
-                if relative { log.noteEMFPlusUnsupported(type: record.type) }
-                return
+            if relative { log.noteEMFPlusUnsupported(type: record.type); return }
+            guard let brushId = reader.u32(), let tension = reader.f32(), let count = reader.u32(),
+                  let points = reader.points(count: Int(count), compressed: cBit) else {
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
+            }
+            guard let fill = fillSource(sBit: sBit, brushId: brushId) else {
+                log.noteEMFPlusObjectIssue(.missingReference); return
             }
             let path = CGMutablePath()
             EMFPlusGeometry.appendCardinalSpline(points, tension: tension, closed: true, to: path, transform: full)
             fillTargetPath(path, fill: fill, rule: winding ? .winding : .evenOdd, log: &log)
 
         case 0x4017:   // DrawClosedCurve
-            guard !relative, let tension = reader.f32(), let count = reader.u32(),
+            if relative { log.noteEMFPlusUnsupported(type: record.type); return }
+            guard let tension = reader.f32(), let count = reader.u32(),
                   let points = reader.points(count: Int(count), compressed: cBit) else {
-                if relative { log.noteEMFPlusUnsupported(type: record.type) }
-                return
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
             }
             let path = CGMutablePath()
             EMFPlusGeometry.appendCardinalSpline(points, tension: tension, closed: true, to: path, transform: full)
@@ -324,7 +359,9 @@ struct EMFPlusPlayback {
             // (points − 1) selects a partial run we do not honour — note it.
             guard let tension = reader.f32(), let offset = reader.u32(),
                   let numSegments = reader.u32(), let count = reader.u32(),
-                  let points = reader.points(count: Int(count), compressed: cBit) else { return }
+                  let points = reader.points(count: Int(count), compressed: cBit) else {
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
+            }
             let fullSegments = points.count > 1 ? points.count - 1 : 0
             if offset != 0 || Int(numSegments) < fullSegments {
                 log.noteEMFPlusApproximated(.curveSegmentRange)
@@ -334,10 +371,10 @@ struct EMFPlusPlayback {
             strokeTargetPath(path, pen: table.pen(objectID), log: &log)
 
         case 0x4019:   // DrawBeziers
-            guard !relative, let count = reader.u32(),
+            if relative { log.noteEMFPlusUnsupported(type: record.type); return }
+            guard let count = reader.u32(),
                   let points = reader.points(count: Int(count), compressed: cBit) else {
-                if relative { log.noteEMFPlusUnsupported(type: record.type) }
-                return
+                log.noteEMFPlusRecordUndecodable(type: record.type); return
             }
             let path = CGMutablePath()
             EMFPlusGeometry.appendBeziers(points, to: path, transform: full)
@@ -368,10 +405,16 @@ struct EMFPlusPlayback {
     /// ALIGNMENT is honoured; trimming/wrap/tabs/hotkey/ranges and RTL/vertical
     /// direction are simplified to a single left-to-right line with one note.
     private func drawString(_ record: EMFPlusRecord, sBit: Bool, fontID: Int, log: inout EMFRenderLog) {
-        guard let decoded = EMFPlusText.decodeString(record.data),
-              !decoded.string.isEmpty,
-              let font = table.font(fontID),
-              let color = textFillColor(sBit: sBit, brushID: decoded.brushId, log: &log) else { return }
+        guard let decoded = EMFPlusText.decodeString(record.data) else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
+        guard !decoded.string.isEmpty else { return }   // empty string: a valid no-op
+        guard let font = table.font(fontID) else {
+            log.noteEMFPlusObjectIssue(.missingReference); return
+        }
+        guard let color = textFillColor(sBit: sBit, brushID: decoded.brushId, log: &log) else {
+            log.noteEMFPlusObjectIssue(.missingReference); return
+        }
 
         // Optional StringFormat: alignment is honoured; other formatting is not.
         let format = table.stringFormat(Int(decoded.formatId & 0xFF))
@@ -471,10 +514,16 @@ struct EMFPlusPlayback {
     /// GlyphPos is a baseline origin in world space. Vertical and realized-advance
     /// options are simplified to a horizontal, advance-computed run.
     private func drawDriverString(_ record: EMFPlusRecord, sBit: Bool, fontID: Int, log: inout EMFRenderLog) {
-        guard let decoded = EMFPlusText.decodeDriverString(record.data),
-              !decoded.values.isEmpty,
-              let font = table.font(fontID),
-              let color = textFillColor(sBit: sBit, brushID: decoded.brushId, log: &log) else { return }
+        guard let decoded = EMFPlusText.decodeDriverString(record.data) else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
+        guard !decoded.values.isEmpty else { return }   // no glyphs: a valid no-op
+        guard let font = table.font(fontID) else {
+            log.noteEMFPlusObjectIssue(.missingReference); return
+        }
+        guard let color = textFillColor(sBit: sBit, brushID: decoded.brushId, log: &log) else {
+            log.noteEMFPlusObjectIssue(.missingReference); return
+        }
         // Vertical layout is still simplified to a horizontal run, and a realized-
         // advance run is reconstructed from the font's own advances (not the
         // original realized ones) — both approximations regardless of branch.
@@ -722,7 +771,9 @@ struct EMFPlusPlayback {
     private mutating func drawImage(_ record: EMFPlusRecord, objectID: Int, cBit: Bool, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
         guard let attributesID = reader.u32(), let srcUnit = reader.i32(),
-              let srcRect = reader.rectF(), let dest = reader.rect(compressed: cBit) else { return }
+              let srcRect = reader.rectF(), let dest = reader.rect(compressed: cBit) else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
         // Raw origin/size (not standardized) so a negative extent still mirrors.
         let x = dest.origin.x, y = dest.origin.y
         let w = dest.size.width, h = dest.size.height
@@ -746,7 +797,9 @@ struct EMFPlusPlayback {
         guard let attributesID = reader.u32(), let srcUnit = reader.i32(),
               let srcRect = reader.rectF(), let count = reader.u32(),
               let points = reader.points(count: Int(count), compressed: cBit),
-              points.count >= 3 else { return }
+              points.count >= 3 else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
         drawImageMapped(
             objectID: objectID, srcRect: srcRect, srcUnit: srcUnit,
             upperLeft: points[0], upperRight: points[1], lowerLeft: points[2],
@@ -782,9 +835,12 @@ struct EMFPlusPlayback {
         // resolution bounded by the image's device-space footprint (audit H1 /
         // A2). Many draws share one decode; an out-of-range slot is a clean
         // no-op; an undecodable image still re-notes its skip PER DRAW below.
-        guard let decoded = decodedImage(objectID: objectID, destTargetRect: imageFootprint(placement: placement)) else { return }
+        guard let decoded = decodedImage(objectID: objectID, destTargetRect: imageFootprint(placement: placement)) else {
+            log.noteEMFPlusObjectIssue(.missingReference); return   // out-of-range slot id
+        }
         guard let cgFull = decoded.image else {
             if let skip = decoded.skip { note(imageSkip: skip, log: &log) }
+            else { log.noteEMFPlusObjectIssue(.missingReference) }   // no image object bound
             return
         }
         // A pixel bitmap decoded below native to fit the destination — re-noted
@@ -946,7 +1002,8 @@ struct EMFPlusPlayback {
     }
 
     private func strokeTargetPath(_ path: CGPath, pen: EMFPlusPen?, log: inout EMFRenderLog) {
-        guard let pen, !path.isEmpty else { return }
+        guard let pen else { log.noteEMFPlusObjectIssue(.missingReference); return }
+        guard !path.isEmpty else { return }
         let style = EMFPlusPaint.strokeStyle(pen, full: full, log: &log)
         context.saveGState()
         defer { context.restoreGState() }
@@ -1200,8 +1257,9 @@ private struct ObjectTable {
     /// Applies an EmfPlusObject record, returning the slot id it BOUND (wrote),
     /// or `nil` when the record only accumulated a continuation chunk or named
     /// an out-of-range slot. The caller uses the returned id to invalidate any
-    /// image cached for that slot (A1).
-    mutating func apply(_ record: EMFPlusRecord) -> UInt8? {
+    /// image cached for that slot (A1). Bind-time issues (invalid id, malformed
+    /// decode) are surfaced through `log` (audit M7).
+    mutating func apply(_ record: EMFPlusRecord, log: inout EMFRenderLog) -> UInt8? {
         let flags = record.flags
         let continues = (flags & 0x8000) != 0
         let rawType = UInt8((flags >> 8) & 0x7F)
@@ -1214,7 +1272,7 @@ private struct ObjectTable {
                 guard chunk.count >= 4 else { pending = nil; return nil }
                 p.data.append(contentsOf: chunk[4...])
                 if p.data.count >= p.total {
-                    let bound = bind(id: p.id, rawType: p.rawType, data: Data(p.data.prefix(p.total)))
+                    let bound = bind(id: p.id, rawType: p.rawType, data: Data(p.data.prefix(p.total)), log: &log)
                     pending = nil
                     return bound
                 } else {
@@ -1231,24 +1289,29 @@ private struct ObjectTable {
             let total = Int(UInt32(chunk[0]) | (UInt32(chunk[1]) << 8) | (UInt32(chunk[2]) << 16) | (UInt32(chunk[3]) << 24))
             let objectBytes = Data(chunk[4...])
             if objectBytes.count >= total {
-                return bind(id: id, rawType: rawType, data: Data(objectBytes.prefix(total)))
+                return bind(id: id, rawType: rawType, data: Data(objectBytes.prefix(total)), log: &log)
             } else {
                 pending = Pending(id: id, rawType: rawType, total: total, data: objectBytes)
                 return nil
             }
         } else {
-            return bind(id: id, rawType: rawType, data: record.data)
+            return bind(id: id, rawType: rawType, data: record.data, log: &log)
         }
     }
 
     /// Binds a decoded object into `id`'s slot, returning `id` on success or
-    /// `nil` for an out-of-range slot.
-    private mutating func bind(id: UInt8, rawType: UInt8, data: Data) -> UInt8? {
-        guard id < 64 else { return nil }
+    /// `nil` for an out-of-range slot (which is noted `.invalidID`, audit M7). A
+    /// `.malformed` decode still takes the slot — stream truth, keeping the
+    /// clobber semantics — but is noted `.undecodable` so the honesty channel
+    /// records that nothing can use it.
+    private mutating func bind(id: UInt8, rawType: UInt8, data: Data, log: inout EMFRenderLog) -> UInt8? {
+        guard id < 64 else { log.noteEMFPlusObjectIssue(.invalidID); return nil }
         let definition = EMFPlusObjectDefinition(
             objectID: id, objectType: EMFPlusObjectType(rawValue: rawType), data: data
         )
-        slots[Int(id)] = definition.decodedValue()
+        let value = definition.decodedValue()
+        if case .malformed = value { log.noteEMFPlusObjectIssue(.undecodable) }
+        slots[Int(id)] = value
         return id
     }
 
