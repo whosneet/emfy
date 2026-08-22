@@ -352,6 +352,41 @@ struct EMFPlusTextDecodeTests {
         let far = EMFPlusText.drawStringOrigin(rectDevice: rect, lineWidth: 40, ascent: 16, descent: 4, horizontal: 2, vertical: 2)
         #expect(far == CGPoint(x: 120, y: 66))             // maxX - w, maxY - descent
     }
+
+    // RealizedAdvance dual wire shape (audit M11 / G2b)
+
+    @Test("RealizedAdvance single- and full-array shapes decode to the same run start and matrix")
+    func decodeDriverStringRealizedAdvanceShapes() throws {
+        func body(positionCount: Int, matrix: Bool) -> [UInt8] {
+            tle { writer in
+                writer.u32(0); writer.u32(0x4)               // BrushId, Options = RealizedAdvance
+                writer.u32(matrix ? 1 : 0)                    // MatrixPresent
+                writer.u32(3)                                 // GlyphCount = 3
+                writer.u16(1); writer.u16(2); writer.u16(3)   // glyphs
+                for i in 0 ..< positionCount { writer.f32(Float(10 + i)); writer.f32(20) }
+                if matrix { writer.f32(2); writer.f32(0); writer.f32(0); writer.f32(2); writer.f32(1); writer.f32(1) }
+            }
+        }
+        let expectedMatrix = CGAffineTransform(a: 2, b: 0, c: 0, d: 2, tx: 1, ty: 1)
+        let single = try #require(EMFPlusText.decodeDriverString(Data(body(positionCount: 1, matrix: false))))
+        #expect(single.positions == [CGPoint(x: 10, y: 20)] && single.matrix == nil)
+        let full = try #require(EMFPlusText.decodeDriverString(Data(body(positionCount: 3, matrix: false))))
+        #expect(full.positions == [CGPoint(x: 10, y: 20)] && full.matrix == nil, "full-array uses the first origin, ignores the rest")
+        let singleMatrix = try #require(EMFPlusText.decodeDriverString(Data(body(positionCount: 1, matrix: true))))
+        #expect(singleMatrix.positions == [CGPoint(x: 10, y: 20)] && singleMatrix.matrix == expectedMatrix)
+        let fullMatrix = try #require(EMFPlusText.decodeDriverString(Data(body(positionCount: 3, matrix: true))))
+        #expect(fullMatrix.positions == [CGPoint(x: 10, y: 20)] && fullMatrix.matrix == expectedMatrix, "full-array + matrix reads the matrix from the right place")
+    }
+
+    @Test("a RealizedAdvance record with a mismatched position count fails typed")
+    func decodeDriverStringRealizedAdvanceMismatch() {
+        let body = tle { writer in
+            writer.u32(0); writer.u32(0x4); writer.u32(0); writer.u32(3)   // RealizedAdvance, GlyphCount 3
+            writer.u16(1); writer.u16(2); writer.u16(3)
+            writer.f32(10); writer.f32(20); writer.f32(30); writer.f32(40)   // 2 positions — neither 1 nor 3
+        }
+        #expect(EMFPlusText.decodeDriverString(Data(body)) == nil, "an ambiguous RealizedAdvance remainder must fail typed")
+    }
 }
 
 // MARK: - Render tests
@@ -712,5 +747,24 @@ struct EMFPlusTextWrapClipTests {
         let spaceMeasured = try rightmostInk("X ", flags: 0x800)      // MeasureTrailingSpaces
         #expect(abs(spaceExcluded - baseX) <= 1, "\"X \" should align flush like \"X\" (\(spaceExcluded) vs \(baseX))")
         #expect(spaceMeasured < baseX - 3, "with 0x800 the trailing space shifts \"X\" left (\(spaceMeasured) vs \(baseX))")
+    }
+
+    // Audit M10/L4 (G2a): a Point-unit font converts via the header DPI (96 here →
+    // ×96/72), so at an identity world transform it is taller than a World-unit
+    // font of the same EmSize (which scales by the world→device average = 1).
+    @Test("a Point-unit font converts via the header DPI (larger than World-unit)")
+    func pointUnitFontUsesDPI() throws {
+        func inkHeight(sizeUnit: UInt32) throws -> Int {
+            let file = try textFile([
+                tPlusObject(id: 1, type: 6, payload: tFont(emSize: 20, sizeUnit: sizeUnit, family: "Arial")),
+                tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 0xFFFF_FFFF,
+                            rect: (5, 5, 90, 60), string: "Mg"),
+            ])
+            let box = try #require(inkBoundingBox(try renderText(file).0), "no ink for unit \(sizeUnit)")
+            return box.maxY - box.minY
+        }
+        let world = try inkHeight(sizeUnit: 0)   // World: EmSize × 1
+        let point = try inkHeight(sizeUnit: 3)   // Point: EmSize × 96/72 ≈ 1.33×
+        #expect(point > world + 2, "a Point-unit font should be taller than a World-unit font (\(point) vs \(world))")
     }
 }
