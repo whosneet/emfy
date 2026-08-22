@@ -67,9 +67,10 @@ updates install automatically.
 **Scope, honestly:** EMF+ (GDI+) decoding shipped in 2.0. Dual-format files
 (GDI and EMF+ side by side) now render from their higher-fidelity EMF+ half,
 and files whose drawing content exists *only* as EMF+ render fully. A few
-things are still approximated — exotic image pixel formats, nested-metafile
-images, and hatch and path-gradient fills — and Emfy itemizes every one in
-Render Details instead of rendering silently. WMF is on the v3 list.
+things are still simplified — hatch and path-gradient fills draw as solid
+approximations, while texture fills, nested-metafile images, and exotic
+image pixel formats are skipped — and Emfy itemizes every one in Render
+Details instead of rendering silently. WMF is on the v3 list.
 
 ## Screenshots
 
