@@ -174,6 +174,130 @@ struct EMFPlusImageDecoderTests {
         #expect(isBlue(try #require(RasterizedImage(blue))[2, 2]))
     }
 
+    // MARK: - Destination decode budget (audit H1 / A2)
+
+    @Test("a footprint at or above native clamps the budget to native (no upsampling)")
+    func budgetClampsToNative() {
+        let budget = EMFPlusImageDecoder.decodeBudget(
+            destTargetRect: CGRect(x: 0, y: 0, width: 9000, height: 9000), nativeW: 5000, nativeH: 5000)
+        #expect(budget.w == 5000 && budget.h == 5000)
+    }
+
+    @Test("a footprint above the floor drives a below-native budget")
+    func budgetFollowsFootprintAboveFloor() {
+        // 2500×2500 = 6.25 Mpx > the 4 Mpx floor; native 5000×5000 → follows.
+        let budget = EMFPlusImageDecoder.decodeBudget(
+            destTargetRect: CGRect(x: 0, y: 0, width: 2500, height: 2500), nativeW: 5000, nativeH: 5000)
+        #expect(budget.w == 2500 && budget.h == 2500)
+    }
+
+    @Test("a tiny footprint is floored to ~minPixelBudgetArea, capped at native")
+    func budgetFloorsSmallDestinations() {
+        // Native 3000×3000 = 9 Mpx, a 20×20 dest → floored up to ≥ 4 Mpx, < native.
+        let budget = EMFPlusImageDecoder.decodeBudget(
+            destTargetRect: CGRect(x: 0, y: 0, width: 20, height: 20), nativeW: 3000, nativeH: 3000)
+        #expect(budget.w * budget.h >= EMFPlusImageDecoder.minPixelBudgetArea, "floored to the min area, got \(budget)")
+        #expect(budget.w < 3000 && budget.h < 3000, "still below native, got \(budget)")
+        #expect(budget.w == budget.h, "a square native stays square")
+    }
+
+    @Test("an image at or below the floor always budgets to native (small images untouched)")
+    func budgetNeverShrinksSmallImages() {
+        // Native 100×100 (10k px) ≤ the floor → a 5×5 dest still budgets to
+        // native, so small images decode byte-identically (snapshot safety).
+        let budget = EMFPlusImageDecoder.decodeBudget(
+            destTargetRect: CGRect(x: 0, y: 0, width: 5, height: 5), nativeW: 100, nativeH: 100)
+        #expect(budget.w == 100 && budget.h == 100)
+    }
+
+    @Test("a non-finite footprint falls back to native")
+    func budgetNonFiniteFallsBackToNative() {
+        let nan = EMFPlusImageDecoder.decodeBudget(
+            destTargetRect: CGRect(x: 0, y: 0, width: CGFloat.nan, height: 100), nativeW: 640, nativeH: 480)
+        #expect(nan.w == 640 && nan.h == 480)
+        let unbounded = EMFPlusImageDecoder.decodeBudget(
+            destTargetRect: EMFPlusImageDecoder.unbounded, nativeW: 640, nativeH: 480)
+        #expect(unbounded.w == 640 && unbounded.h == 480)
+    }
+
+    @Test("the shared area cap bounds an at-cap native, aspect preserved")
+    func budgetHonoursAreaCap() {
+        let budget = EMFPlusImageDecoder.decodeBudget(
+            destTargetRect: CGRect(x: 0, y: 0, width: 1e9, height: 1e9), nativeW: 16_384, nativeH: 16_384)
+        #expect(budget.w == budget.h)
+        #expect(budget.w * budget.h <= EMFRenderer.canvasAreaCap)
+        #expect(budget.w <= EMFRenderer.canvasDimensionCap)
+    }
+
+    // MARK: - Pixel decode budget / downsampling (audit H1 / A2)
+
+    @Test("decodePixels honours a below-native budget: reduced dims, downsample flag, quadrants")
+    func decodePixelsDownsamples() throws {
+        let header = EMFPlusImageBitmapHeader(width: 8, height: 8, stride: 32, pixelFormat: 0x0026_200A, bitmapDataType: 0)
+        let (cg, skip, downsampled) = EMFPlusImageDecoder.decodePixels(header, quadrantARGB(), budget: (w: 4, h: 4))
+        #expect(skip == nil)
+        #expect(downsampled, "a 4×4 budget over an 8×8 image must downsample")
+        let cgImage = try #require(cg)
+        #expect(cgImage.width == 4 && cgImage.height == 4, "output sized to the budget, got \(cgImage.width)×\(cgImage.height)")
+        let raster = try #require(RasterizedImage(cgImage))
+        #expect(isRed(raster[0, 0]), "top-left quadrant, got \(raster[0, 0])")
+        #expect(isGreen(raster[3, 0]), "top-right quadrant, got \(raster[3, 0])")
+        #expect(isBlue(raster[0, 3]), "bottom-left quadrant, got \(raster[0, 3])")
+        #expect(isWhite(raster[3, 3]), "bottom-right quadrant, got \(raster[3, 3])")
+    }
+
+    @Test("decodePixels at a budget ≥ native does not downsample")
+    func decodePixelsIdentityWhenBudgetAboveNative() throws {
+        let header = EMFPlusImageBitmapHeader(width: 8, height: 8, stride: 32, pixelFormat: 0x0026_200A, bitmapDataType: 0)
+        let (cg, skip, downsampled) = EMFPlusImageDecoder.decodePixels(header, quadrantARGB(), budget: (w: 100, h: 100))
+        #expect(skip == nil)
+        #expect(!downsampled, "budget ≥ native must not downsample")
+        let cgImage = try #require(cg)
+        #expect(cgImage.width == 8 && cgImage.height == 8)
+        let raster = try #require(RasterizedImage(cgImage))
+        #expect(isRed(raster[1, 1]) && isGreen(raster[6, 1]) && isBlue(raster[1, 6]) && isWhite(raster[6, 6]))
+    }
+
+    // MARK: - Compressed destination gate (audit H1 / A3)
+    //
+    // PNG synthesis is already available here via `encodedImage` (test-only
+    // ImageIO), so the oversized-skip path is exercised against a REAL
+    // CoreGraphics decode with no new import. The playback mapping
+    // (`.oversized` → `.imageOversized`, re-noted per draw) is compiler-forced by
+    // the exhaustive `note(imageSkip:)` switch and mirrors the four sibling skip
+    // mappings already driven through playback in the image-playback suite.
+
+    @Test("an oversized compressed image drawn into a small dest is skipped as .oversized")
+    func compressedOversizedSkips() {
+        // A solid 2100×2100 PNG (4.41 Mpx > the 4 Mpx floor) compresses tiny but
+        // decodes large; a ~40px destination footprint gates it out (A3).
+        let png = encodedImage(width: 2100, height: 2100, utType: .png, r: 30, g: 120, b: 210)
+        let image = bitmap(width: 0, height: 0, stride: 0, format: 0, type: 1, data: png)
+        let (cg, skip, _) = EMFPlusImageDecoder.decode(image, destTargetRect: CGRect(x: 0, y: 0, width: 40, height: 40))
+        #expect(cg == nil)
+        #expect(skip == .oversized, "expected .oversized, got \(String(describing: skip))")
+    }
+
+    @Test("the same compressed image drawn into a large dest still renders")
+    func compressedInBudgetRenders() throws {
+        let png = encodedImage(width: 2100, height: 2100, utType: .png, r: 30, g: 120, b: 210)
+        let image = bitmap(width: 0, height: 0, stride: 0, format: 0, type: 1, data: png)
+        // A destination as large as the image → budget == native → not gated.
+        let (cg, skip, _) = EMFPlusImageDecoder.decode(image, destTargetRect: CGRect(x: 0, y: 0, width: 2100, height: 2100))
+        #expect(skip == nil, "a full-size destination must not gate, got \(String(describing: skip))")
+        let cgImage = try #require(cg)
+        #expect(cgImage.width == 2100 && cgImage.height == 2100)
+    }
+
+    @Test("a small compressed image always renders regardless of dest (the floor protects it)")
+    func compressedBelowFloorAlwaysRenders() throws {
+        let png = encodedImage(width: 100, height: 100, utType: .png, r: 200, g: 40, b: 40)
+        let image = bitmap(width: 0, height: 0, stride: 0, format: 0, type: 1, data: png)
+        let (cg, skip, _) = EMFPlusImageDecoder.decode(image, destTargetRect: CGRect(x: 0, y: 0, width: 4, height: 4))
+        #expect(skip == nil, "an image at/below the floor must render at any dest, got \(String(describing: skip))")
+        #expect(try #require(cg).width == 100)
+    }
+
     // MARK: - Fixtures
 
     private func bitmap(width: Int32, height: Int32, stride: Int32, format: UInt32, type: UInt32 = 0, data: Data) -> EMFPlusImage {
