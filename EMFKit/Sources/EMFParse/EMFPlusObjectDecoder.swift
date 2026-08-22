@@ -102,6 +102,11 @@ public enum EMFPlusObjectDiagnostic: Sendable, Equatable {
     /// A continuation-flagged EmfPlusObject chunk held fewer than the 4 bytes
     /// needed for its TotalObjectSize prefix; the chunk is dropped.
     case chunkTooShort(dataSize: Int)
+    /// A continuation chunk's repeated 4-byte TotalObjectSize prefix disagreed
+    /// with the value the opening chunk established ([MS-EMFPLUS] §2.3.5.1). The
+    /// opening value stays authoritative and the chunk is consumed unchanged —
+    /// this only surfaces the inconsistency (audit L10).
+    case continuationSizeDisagreement(objectID: UInt8, expected: Int, got: Int)
 }
 
 extension EMFPlusStream {
@@ -172,7 +177,7 @@ extension EMFPlusStream {
                     let chunk = ByteReader(record.data)
                     // Every continued chunk repeats the 4-byte TotalObjectSize
                     // prefix; strip it and accumulate the remaining DataSize-4.
-                    guard chunk.count >= 4,
+                    guard chunk.count >= 4, let chunkTotal32 = chunk.readUInt32(at: 0),
                           let objectBytes = chunk.data(at: 4, length: chunk.count - 4) else {
                         diagnostics.append(.chunkTooShort(dataSize: record.data.count))
                         diagnostics.append(.danglingContinuation(
@@ -180,6 +185,13 @@ extension EMFPlusStream {
                             accumulatedBytes: p.accumulated.count))
                         pending = nil
                         continue
+                    }
+                    // L10: the opening chunk's TotalObjectSize is authoritative; a
+                    // continuation whose repeated prefix disagrees is still consumed
+                    // exactly as before, but the inconsistency is flagged.
+                    if Int(chunkTotal32) != p.totalObjectSize {
+                        diagnostics.append(.continuationSizeDisagreement(
+                            objectID: p.objectID, expected: p.totalObjectSize, got: Int(chunkTotal32)))
                     }
                     var accumulated = p.accumulated
                     accumulated.append(objectBytes)

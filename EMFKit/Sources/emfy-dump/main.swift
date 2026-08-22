@@ -112,6 +112,9 @@ func describe(_ diagnostic: EMFPlusObjectDiagnostic) -> String {
             + "before the stream ended; dropped"
     case .chunkTooShort(let dataSize):
         return "EMF+ object chunk with \(dataSize) data bytes cannot hold its TotalObjectSize prefix; dropped"
+    case .continuationSizeDisagreement(let objectID, let expected, let got):
+        return "EMF+ continued object \(objectID): continuation TotalObjectSize \(got) disagrees with "
+            + "opening \(expected); opening kept authoritative"
     }
 }
 
