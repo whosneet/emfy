@@ -233,7 +233,10 @@ struct EMFPlusPlayback {
                 guard let rect = reader.rect(compressed: cBit) else { break }
                 path.addRect(rect.standardized, transform: full)
             }
-            fillTargetPath(path, fill: fill, rule: .evenOdd, log: &log)
+            // WINDING (audit M6): GDI+ fills the UNION of the rects in one record;
+            // even-odd would cancel overlaps to a hole. addRect winds consistently,
+            // so winding fills the union. (FillPolygon keeps even-odd = Alternate.)
+            fillTargetPath(path, fill: fill, rule: .winding, log: &log)
 
         case 0x400B:   // DrawRects
             guard let count = reader.u32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
