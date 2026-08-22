@@ -438,6 +438,8 @@ private extension EMFRenderLog.Entry {
             return "Skipped an unreadable EMF+ drawing record of type \(String(format: "0x%04X", type)) (\(count) occurrence\(count == 1 ? "" : "s"))."
         case .emfPlusObjectIssue(let kind, let count):
             return "\(kind.userDescription) (\(count) occurrence\(count == 1 ? "" : "s"))."
+        case .emfPlusSaveStackCapped(let count):
+            return "Reached the EMF+ save/container nesting limit; deeper saves were dropped (\(count) occurrence\(count == 1 ? "" : "s"))."
         }
     }
 }
@@ -506,6 +508,8 @@ private extension EMFPlusStreamIssueKind {
             return "an EMF+ record's data size exceeded its record size"
         case .recordDataTruncated:
             return "a truncated EMF+ record running past the stream"
+        case .recordSizeExcessPadding:
+            return "an over-long EMF+ record size that hid the records after it"
         case .trailingBytes:
             return "leftover bytes after the last EMF+ record"
         case .headerRecordMissing:
@@ -514,6 +518,8 @@ private extension EMFPlusStreamIssueKind {
             return "an unexpected EMF+ header size"
         case .headerUnexpectedDataSize:
             return "an unexpected EMF+ header data size"
+        case .recordCountCapped:
+            return "too many EMF+ records (the safety cap was reached)"
         }
     }
 }
