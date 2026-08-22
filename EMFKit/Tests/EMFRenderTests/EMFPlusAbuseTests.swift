@@ -341,4 +341,66 @@ struct EMFPlusAbuseTests {
         #expect(log.entries.contains(.emfPlusStreamIssue(kind: .recordDataTruncated, count: 1)),
                 "the GDI branch must still report the broken EMF+ stream, got \(log.entries)")
     }
+
+    // MARK: - (i) Record-count cap (audit M2 / D2)
+
+    @Test("an over-cap EMF+ stream stops at the record-count limit and surfaces the cap")
+    func recordCountCapReached() throws {
+        // A stream of minimal 12-byte records past the shared cap; build the bytes
+        // by repeating one chunk (fast). Non-drawing (0x4003) → GDI branch.
+        let chunk = plusRecord(0x4003, 0)   // EmfPlusComment: Size 12, DataSize 0
+        let n = EMFFile.recordCountLimit + 50
+        var stream: [UInt8] = []
+        stream.reserveCapacity(chunk.count * n)
+        for _ in 0 ..< n { stream.append(contentsOf: chunk) }
+
+        var fixture = RenderFixture()
+        fixture.plusComment(stream)
+        let file = try fixture.parsed()
+
+        // Render-level first (transient walk): the cap surfaces via the C1 path.
+        let (image, log) = try #require(EMFRenderer.makeImage(file))
+        #expect(image.width > 0 && image.height > 0)
+        #expect(log.entries.contains(.emfPlusStreamIssue(kind: .recordCountCapped, count: 1)),
+                "makeImage should surface recordCountCapped: \(log.entries)")
+
+        // Parse-level: exactly `recordCountLimit` records kept, and marked.
+        let s = file.emfPlusStream()
+        #expect(s.records.count == EMFFile.recordCountLimit, "walk should cap at the limit, got \(s.records.count)")
+        #expect(s.diagnostics.contains { if case .recordCountCapped = $0 { return true }; return false },
+                "the walk should emit recordCountCapped")
+    }
+
+    // MARK: - (j) Over-long record Size diagnostic (audit M3 / D3)
+
+    @Test("a mid-stream over-long Size swallows the following record but is flagged")
+    func recordSizeExcessPaddingSwallowsNext() throws {
+        var stream = plusHeader()
+        stream += plusRecordRawSize(0x4003, 0, size: 52, dataSize: 0)   // 40 excess bytes (> 3)
+        stream += plusEndOfFile()                                        // would-be next record
+        var fixture = RenderFixture()
+        fixture.plusComment(stream)
+        let s = try fixture.parsed().emfPlusStream()
+
+        #expect(s.diagnostics.contains { if case .recordSizeExcessPadding = $0 { return true }; return false },
+                "an over-long Size should be flagged: \(s.diagnostics)")
+        // ADVANCE RULE UNCHANGED (audit M3): the walk still advances by the
+        // declared Size, so the EndOfFile after the inflated record is swallowed
+        // — it is NOT walked. This diagnostic only flags the suspicious header.
+        #expect(s.records.map(\.type) == [0x4001, 0x4003],
+                "the record after an over-long Size is swallowed, got \(s.records.map(\.type))")
+    }
+
+    @Test("an over-long EMF+ record Size surfaces .recordSizeExcessPadding through makeImage")
+    func recordSizeExcessPaddingSurfaces() throws {
+        var stream = plusHeader()
+        stream += fillRectsDirect(argb(255, 200, 0, 0), (10, 10, 20, 20))   // real draw first
+        stream += plusRecordRawSize(0x4003, 0, size: 52, dataSize: 0)        // over-long, last record
+        var fixture = RenderFixture()
+        fixture.plusComment(stream)
+        let (image, log) = try #require(EMFRenderer.makeImage(try fixture.parsed()))
+        #expect(image.width > 0 && image.height > 0)
+        #expect(log.entries.contains(.emfPlusStreamIssue(kind: .recordSizeExcessPadding, count: 1)),
+                "an over-long record Size should surface recordSizeExcessPadding: \(log.entries)")
+    }
 }
