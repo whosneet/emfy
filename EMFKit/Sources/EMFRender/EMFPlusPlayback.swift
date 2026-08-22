@@ -444,89 +444,139 @@ struct EMFPlusPlayback {
         }
         let horizontal = format?.stringAlignment ?? 0   // StringAlignmentNear
         let vertical = format?.lineAlign ?? 0
+        // GDI+ defaults (nil format): wrap + clip enabled, trailing space excluded
+        // from alignment → StringFormatFlags 0 means all of those are OFF.
+        let flags = format?.stringFormatFlags ?? 0
+        let trimming = format?.trimming ?? 0
 
         // Hybrid (audit H2): an axis-aligned world→device transform (b == c == 0 —
-        // the overwhelmingly common case) keeps the exact device-space path, so
+        // the overwhelmingly common case) lays the text out in DEVICE space, so
         // every existing baseline stays byte-stable; a rotated/sheared transform
-        // takes the world-space branch so glyphs follow the rotated baseline
-        // (Excel/PowerPoint chart axis titles) instead of drawing a silent
-        // upright line — the GDI path already rotates via escapement.
+        // lays it out in WORLD space so glyphs follow the rotated baseline (Excel/
+        // PowerPoint chart axis titles). Both share `drawStringLaidOut`.
         if worldToDevice.b == 0, worldToDevice.c == 0 {
-            drawStringDeviceSpace(decoded.string, font: font, color: color, layoutRect: decoded.layoutRect,
-                                  horizontal: horizontal, vertical: vertical, log: &log)
+            drawStringLaidOut(decoded.string, sized: sizedFont(font, log: &log), color: color,
+                              rect: decoded.layoutRect.applying(worldToDevice),
+                              horizontal: horizontal, vertical: vertical, flags: flags, trimming: trimming,
+                              worldSpace: false, log: &log)
         } else {
-            drawStringWorldSpace(decoded.string, font: font, color: color, layoutRect: decoded.layoutRect,
-                                 horizontal: horizontal, vertical: vertical, log: &log)
+            drawStringLaidOut(decoded.string, sized: worldSizedFont(font, log: &log), color: color,
+                              rect: decoded.layoutRect,
+                              horizontal: horizontal, vertical: vertical, flags: flags, trimming: trimming,
+                              worldSpace: true, log: &log)
         }
     }
 
-    /// Axis-aligned DrawString: the exact pre-H2 device-space path. The font is
-    /// device-sized, the LayoutRect maps to device by `worldToDevice`, and the
-    /// glyph outlines are placed in device space (base carries the canvas fit +
-    /// single y-flip), then flipped per-baseline so they render UPRIGHT.
-    private func drawStringDeviceSpace(
-        _ string: String, font: EMFPlusFont, color: CGColor, layoutRect: CGRect,
-        horizontal: UInt32, vertical: UInt32, log: inout EMFRenderLog
+    /// Lays out and draws a DrawString run in TEXT space (device when
+    /// `worldSpace` is false, world when true — `rect`, `sized`, and the CTM are
+    /// all in that space, and `base [∘ worldToDevice]` maps it to the canvas).
+    ///
+    /// Audit M8: GDI+ default DrawString WRAPS within `rect` and CLIPS to it.
+    /// - The single-line CTLine path is kept EXACTLY (byte-stable baseline) except
+    ///   when wrapping can actually occur — `rect.width > 0`, NoWrap (0x1000)
+    ///   clear, AND the single line is wider than the rect — in which case a
+    ///   CTFramesetter lays out the wrapped paragraph.
+    /// - The layout rect is clipped when NoClip (0x4000) is clear and the rect is
+    ///   non-degenerate; a zero-size rect is GDI+ point-origin mode and never
+    ///   clips. The clip composes with the existing device-space clip.
+    /// - Alignment width excludes trailing whitespace unless MeasureTrailingSpaces
+    ///   (0x800) is set (audit M15).
+    private func drawStringLaidOut(
+        _ string: String, sized: CTFont, color: CGColor, rect: CGRect,
+        horizontal: UInt32, vertical: UInt32, flags: UInt32, trimming: UInt32,
+        worldSpace: Bool, log: inout EMFRenderLog
     ) {
-        let sized = sizedFont(font, log: &log)
+        let noWrap = flags & 0x1000 != 0
+        let noClip = flags & 0x4000 != 0
+        let measureTrailing = flags & 0x0800 != 0
+
         guard let line = makeCTLine(string, font: sized, color: color) else { return }
         var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
         let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        // Audit M15: GDI+ excludes trailing whitespace from the alignment width
+        // unless MeasureTrailingSpaces is set (no trailing space → no change).
+        let alignWidth = measureTrailing ? lineWidth : lineWidth - CGFloat(CTLineGetTrailingWhitespaceWidth(line))
 
-        let rectDevice = layoutRect.applying(worldToDevice)
-        let origin = EMFPlusText.drawStringOrigin(
-            rectDevice: rectDevice, lineWidth: lineWidth, ascent: ascent, descent: descent,
-            horizontal: horizontal, vertical: vertical)
+        let overflows = rect.width > 0 && lineWidth > rect.width
+        let willWrap = overflows && !noWrap
+        let willClip = !noClip && rect.width > 0 && rect.height > 0
+        // Character/Word trimming (§2.1.1.30 values 1/2) is not implemented; when a
+        // NON-wrapping line overflows, it would trim — note the simplification
+        // (ellipsis trimming ≥ 3 is already noted by `formatSimplified`).
+        if (trimming == 1 || trimming == 2) && overflows && !willWrap {
+            log.noteEMFPlusApproximated(.stringFormatSimplified)
+        }
 
         context.saveGState()
         defer { context.restoreGState() }
         state.clip.apply(to: context, deviceToTarget: base)
         context.setShouldAntialias(state.antialias)
-        // Enter device space (base carries the canvas fit + single y-flip), move to
-        // the baseline origin, then flip y so glyphs render UPRIGHT through base's
-        // y-down→y-up flip — the same discipline as the GDI TextDrawer.
+        // Enter text space: base carries the canvas fit + single y-flip; the world
+        // branch also concatenates worldToDevice so glyphs rotate with it.
         context.concatenate(base)
-        context.translateBy(x: origin.x, y: origin.y)
-        context.scaleBy(x: 1, y: -1)
-        context.textPosition = .zero
-        CTLineDraw(line, context)
+        if worldSpace { context.concatenate(worldToDevice) }
+        // Clip to the layout rect (in text space, under the current CTM). CG's
+        // clip(to:) transforms the rect corners, so a rotated CTM gives a rotated
+        // clip — exactly the world-space behaviour.
+        if willClip { context.clip(to: rect) }
+
+        if willWrap {
+            drawWrapped(string, sized: sized, color: color, rect: rect, horizontal: horizontal, vertical: vertical)
+        } else {
+            let origin = EMFPlusText.drawStringOrigin(
+                rectDevice: rect, lineWidth: alignWidth, ascent: ascent, descent: descent,
+                horizontal: horizontal, vertical: vertical)
+            context.translateBy(x: origin.x, y: origin.y)
+            context.scaleBy(x: 1, y: -1)
+            context.textPosition = .zero
+            CTLineDraw(line, context)
+        }
     }
 
-    /// Rotated/sheared DrawString (audit H2): draws in WORLD space so the world
-    /// transform rotates the glyph outlines. The font is world-sized (the CTM's
-    /// `worldToDevice` supplies the scaling), the alignment origin and metrics are
-    /// all in world units (LayoutRect is already world), and the per-baseline
-    /// y-flip is done inside the transformed frame — the same flip discipline as
-    /// the device path, just after `worldToDevice`. The clip is device-space, so
-    /// it is applied (through `base`) BEFORE entering world space.
-    private func drawStringWorldSpace(
-        _ string: String, font: EMFPlusFont, color: CGColor, layoutRect: CGRect,
-        horizontal: UInt32, vertical: UInt32, log: inout EMFRenderLog
+    /// Wraps `string` within `rect` (text space) via CTFramesetter (audit M8): the
+    /// paragraph style flushes each line by horizontal alignment; the whole block
+    /// is placed vertically by Near/Center/Far against the rect. Runs inside the
+    /// caller's gstate (CTM already at text space, clip already applied), so a
+    /// rect-overflowing paragraph is clipped by the caller's layout-rect clip.
+    private func drawWrapped(
+        _ string: String, sized: CTFont, color: CGColor, rect: CGRect, horizontal: UInt32, vertical: UInt32
     ) {
-        let sized = worldSizedFont(font, log: &log)
-        guard let line = makeCTLine(string, font: sized, color: color) else { return }
-        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
-        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        let alignment: CTTextAlignment = horizontal == 1 ? .center : (horizontal == 2 ? .right : .left)
+        var alignmentValue = alignment
+        let paragraphStyle: CTParagraphStyle = withUnsafeBytes(of: &alignmentValue) { raw in
+            var setting = CTParagraphStyleSetting(
+                spec: .alignment, valueSize: MemoryLayout<CTTextAlignment>.size, value: raw.baseAddress!)
+            return CTParagraphStyleCreate(&setting, 1)
+        }
+        let attributes: [CFString: Any] = [
+            kCTFontAttributeName: sized,
+            kCTForegroundColorAttributeName: color,
+            kCTParagraphStyleAttributeName: paragraphStyle,
+        ]
+        guard let attributed = CFAttributedStringCreate(nil, string as CFString, attributes as CFDictionary) else { return }
+        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+        let fullRange = CFRange(location: 0, length: 0)
+        let used = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter, fullRange, nil, CGSize(width: rect.width, height: .greatestFiniteMagnitude), nil)
+        guard used.height.isFinite, used.height > 0 else { return }
+        let usedHeight = used.height
+        // Vertical block placement against the rect (Near top / Center / Far
+        // bottom), never above the top; overflow is clipped by the caller.
+        let vOffset: CGFloat
+        switch vertical {
+        case 1: vOffset = max(0, (rect.height - usedHeight) / 2)
+        case 2: vOffset = max(0, rect.height - usedHeight)
+        default: vOffset = 0
+        }
+        let framePath = CGPath(rect: CGRect(x: 0, y: 0, width: rect.width, height: usedHeight), transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, fullRange, framePath, nil)
 
-        // Origin + metrics are all WORLD units; `worldToDevice` (in the CTM below)
-        // applies the rotation/scale. `drawStringOrigin` is space-agnostic — the
-        // `rectDevice` label is historical; here the rect is world.
-        let origin = EMFPlusText.drawStringOrigin(
-            rectDevice: layoutRect, lineWidth: lineWidth, ascent: ascent, descent: descent,
-            horizontal: horizontal, vertical: vertical)
-
-        context.saveGState()
-        defer { context.restoreGState() }
-        state.clip.apply(to: context, deviceToTarget: base)
-        context.setShouldAntialias(state.antialias)
-        // device→target (base) then world→device (worldToDevice): the CTM now maps
-        // world→canvas, so glyphs drawn here rotate with the world transform.
-        context.concatenate(base)
-        context.concatenate(worldToDevice)
-        context.translateBy(x: origin.x, y: origin.y)
+        // Place the block's top-left at (rect.minX, rect.minY + vOffset) in text
+        // space (y-down), then flip to CoreText's y-up so lines fill downward.
+        context.textMatrix = .identity
+        context.translateBy(x: rect.minX, y: rect.minY + vOffset + usedHeight)
         context.scaleBy(x: 1, y: -1)
-        context.textPosition = .zero
-        CTLineDraw(line, context)
+        CTFrameDraw(frame, context)
     }
 
     /// EmfPlusDrawDriverString ([MS-EMFPLUS] §2.3.4.6): per-glyph positioned text.
