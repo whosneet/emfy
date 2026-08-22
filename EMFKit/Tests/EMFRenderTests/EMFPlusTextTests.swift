@@ -591,6 +591,37 @@ struct EMFPlusTextPlaybackTests {
         #expect(image.containsDarkPixel(in: (x: 8, y: 12, width: 84, height: 30)), "realized-advance run drew no ink")
         #expect(hasApprox(log, .stringFormatSimplified), "RealizedAdvance should log a simplification: \(log.entries)")
     }
+
+    @Test("a device-branch DrawDriverString matrix with rotation/shear notes stringFormatSimplified (L6)")
+    func drawDriverStringDeviceRotatedMatrixNoted() throws {
+        // Default (axis-aligned) world → the device branch. A per-record matrix
+        // with a rotation component (m12/m21 nonzero) moves the glyph ORIGINS but
+        // leaves the outlines upright — a simplification.
+        let file = try textFile([
+            tPlusObject(id: 1, type: 6, payload: tFont(emSize: 24, family: "Arial")),
+            tDrawDriverString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), options: 0x1,   // Cmap
+                              glyphs: Array("Emfy".utf16), positions: [(10, 40), (22, 40), (34, 40), (46, 40)],
+                              matrix: (0.7, 0.7, -0.7, 0.7, 0, 0)),
+        ])
+        let (image, log) = try renderText(file)
+        #expect(image.containsDarkPixel(in: (x: 0, y: 0, width: 100, height: 100)), "the rotated-origin run still drew glyphs")
+        #expect(hasApprox(log, .stringFormatSimplified),
+                "a device-branch rotated matrix should note stringFormatSimplified: \(log.entries)")
+    }
+
+    @Test("a device-branch DrawDriverString matrix that is pure translation notes nothing (L6 control)")
+    func drawDriverStringDeviceTranslationMatrixClean() throws {
+        let file = try textFile([
+            tPlusObject(id: 1, type: 6, payload: tFont(emSize: 24, family: "Arial")),
+            tDrawDriverString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), options: 0x1,   // Cmap
+                              glyphs: Array("Emfy".utf16), positions: [(10, 40), (22, 40), (34, 40), (46, 40)],
+                              matrix: (1, 0, 0, 1, 5, 5)),   // translation only → outlines upright is correct
+        ])
+        let (image, log) = try renderText(file)
+        #expect(image.containsDarkPixel(in: (x: 0, y: 0, width: 100, height: 100)), "the translated run drew glyphs")
+        #expect(!hasApprox(log, .stringFormatSimplified),
+                "a translation-only matrix must NOT note a simplification: \(log.entries)")
+    }
 }
 
 // MARK: - Rotated / sheared text (audit H2)

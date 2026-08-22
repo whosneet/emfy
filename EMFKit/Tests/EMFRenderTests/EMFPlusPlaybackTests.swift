@@ -183,6 +183,48 @@ private func translateWorld(_ dx: Float, _ dy: Float) -> [UInt8] {
     plusRecord(0x402D, 0x0000, le { $0.f32(dx); $0.f32(dy) })
 }
 
+/// SetWorldTransform (§2.3.9.4): a raw 3x2 affine matrix (m11,m12,m21,m22,dx,dy).
+private func setWorldMatrix(_ m11: Float, _ m12: Float, _ m21: Float, _ m22: Float, _ dx: Float, _ dy: Float) -> [UInt8] {
+    plusRecord(0x402A, 0x0000, le { writer in
+        writer.f32(m11); writer.f32(m12); writer.f32(m21); writer.f32(m22); writer.f32(dx); writer.f32(dy)
+    })
+}
+
+/// DrawArc (§2.3.4.2): StartAngle, SweepAngle, then a float rect.
+private func drawArc(penId: UInt8, start: Float, sweep: Float, rect: (Float, Float, Float, Float)) -> [UInt8] {
+    plusRecord(0x4012, UInt16(penId), le { writer in
+        writer.f32(start); writer.f32(sweep)
+        writer.f32(rect.0); writer.f32(rect.1); writer.f32(rect.2); writer.f32(rect.3)
+    })
+}
+
+/// A plain two-colour linear gradient with BrushDataIsGammaCorrected (0x80) set
+/// (§2.2.2.24); the ramp interpolates linearly regardless (L8).
+private func linearGradientGammaBrushPayload(rect: (Float, Float, Float, Float), start: UInt32, end: UInt32) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(4)    // Version, Type 4 (linear gradient)
+        writer.u32(0x80)                          // BrushDataFlags = IsGammaCorrected
+        writer.i32(4)                             // WrapMode Clamp
+        writer.f32(rect.0); writer.f32(rect.1); writer.f32(rect.2); writer.f32(rect.3)
+        writer.u32(start); writer.u32(end)        // StartColor, EndColor
+        writer.u32(0); writer.u32(0)              // Reserved1, Reserved2
+    }
+}
+
+/// A linear gradient with one blend-factor array whose first position is
+/// non-finite (BlendFactorsH); the sanitation must drop that stop (L7).
+private func linearGradientNaNBlendPayload(rect: (Float, Float, Float, Float), start: UInt32, end: UInt32) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(4)    // Version, Type 4 (linear gradient)
+        writer.u32(0x08)                          // BrushDataFlags = BlendFactorsH
+        writer.i32(4)                             // WrapMode Clamp
+        writer.f32(rect.0); writer.f32(rect.1); writer.f32(rect.2); writer.f32(rect.3)
+        writer.u32(start); writer.u32(end)        // StartColor, EndColor
+        writer.u32(0); writer.u32(0)              // Reserved1, Reserved2
+        writer.u32(2); writer.f32(.nan); writer.f32(1); writer.f32(0); writer.f32(1)   // positions [NaN, 1], factors [0, 1]
+    }
+}
+
 /// RotateWorldTransform (§2.3.9.6): angle in degrees, pre-multiply.
 private func rotateWorld(_ degrees: Float) -> [UInt8] {
     plusRecord(0x402F, 0x0000, le { $0.f32(degrees) })
@@ -200,7 +242,7 @@ private func emptyRegionPayload() -> [UInt8] {
     le { $0.u32(plusVersion); $0.u32(1); $0.u32(0x1000_0002) }
 }
 
-/// EmfPlusDrawCurve (§2.3.4.4): Tension, Offset, NumSegments, Count, PointData
+/// EmfPlusDrawCurve (§2.3.4.5): Tension, Offset, NumSegments, Count, PointData
 /// (absolute f32 points; pen in the ObjectId low byte).
 private func drawCurve(penId: UInt8, tension: Float, offset: UInt32, numSegments: UInt32, _ points: [(Float, Float)]) -> [UInt8] {
     plusRecord(0x4018, UInt16(penId), le { writer in
@@ -483,6 +525,30 @@ struct EMFPlusPlaybackTests {
         #expect(Self.isWhite(image[80, 50]), "the non-windowed GDI rectangle was skipped")
     }
 
+    @Test("a hostile mid-file EMR_HEADER closes the GetDC window; following GDI is skipped (L6, §1.3.1)")
+    func midFileHeaderClosesGetDCWindow() throws {
+        var fixture = RenderFixture()
+        fixture.plusComment(plusHeader())
+        fixture.plusComment(fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)))   // EMF+ red
+        fixture.plusComment(getDC())                                                    // open window
+        // Windowed GDI green rect — renders while the window is open.
+        fixture.createSolidBrush(index: 1, r: 0, g: 200, b: 0)
+        fixture.selectObject(1)
+        fixture.selectObject(0x8000_0008)   // NULL_PEN
+        fixture.rectangle(40, 40, 60, 60)
+        // A hostile mid-file EMR_HEADER (type 1) is a window closer (§1.3.1) and is
+        // itself not played.
+        fixture.append(type: 1, payload: [UInt8](repeating: 0, count: 84))
+        // No longer windowed: this GDI rectangle must be skipped.
+        fixture.rectangle(70, 40, 90, 60)
+
+        let (image, _) = try renderPlus(try fixture.parsed())
+
+        #expect(Self.isRed(image[20, 20]), "EMF+ red rendered")
+        #expect(Self.isGreen(image[50, 50]), "GDI before the mid-file header rendered (window open)")
+        #expect(Self.isWhite(image[80, 50]), "GDI after the mid-file header was skipped (window closed)")
+    }
+
     // MARK: - 7. Compressed (i16) rect variant
 
     @Test("a C-flag (16-bit) FillRects fills the same region as the float form")
@@ -663,6 +729,103 @@ struct EMFPlusPlaybackTests {
         #expect(drewInk, "the complete first bezier curve should stroke some ink")
         #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x4019, count: 1)),
                 "a leftover bezier point should note recordUndecodable(0x4019): \(log.entries)")
+    }
+
+    // MARK: - Non-finite wire values ([MS-EMFPLUS] §2.3.9 validate-and-ignore, §8 sanitation, audit L1/L2/L7)
+
+    @Test("a non-finite SetWorldTransform is ignored, the previous transform survives, and it notes undecodable (L2)")
+    func setWorldTransformNaNIgnored() throws {
+        let file = try plusFile([
+            translateWorld(40, 0),                                    // world = +40 in x
+            setWorldMatrix(.nan, 0, 0, 1, 0, 0),                      // non-finite → ignored
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)),  // drawn under the surviving +40
+        ])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isRed(image[55, 20]), "the fill lands under the surviving +40 translate, got \(image[55, 20])")
+        #expect(Self.isWhite(image[20, 20]), "nothing at the un-translated origin, got \(image[20, 20])")
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x402A, count: 1)),
+                "a non-finite SetWorldTransform should note undecodable(0x402A): \(log.entries)")
+    }
+
+    @Test("a singular (determinant-zero) SetWorldTransform is ignored and noted (L2)")
+    func setWorldTransformSingularIgnored() throws {
+        let file = try plusFile([
+            translateWorld(40, 0),
+            setWorldMatrix(0, 0, 0, 0, 0, 0),                         // det 0 → singular → ignored
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)),
+        ])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isRed(image[55, 20]), "the surviving translate still places the fill, got \(image[55, 20])")
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x402A, count: 1)),
+                "a singular SetWorldTransform should note undecodable(0x402A): \(log.entries)")
+    }
+
+    @Test("a non-finite TranslateWorldTransform is ignored and noted (L2)")
+    func translateWorldTransformNaNIgnored() throws {
+        let file = try plusFile([
+            translateWorld(40, 0),
+            translateWorld(.nan, 0),                                  // non-finite → ignored
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)),
+        ])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isRed(image[55, 20]), "the NaN translate was ignored, +40 survives, got \(image[55, 20])")
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x402D, count: 1)),
+                "a non-finite TranslateWorldTransform should note undecodable(0x402D): \(log.entries)")
+    }
+
+    @Test("an infinite pen width falls back to 1 and still strokes, no crash (L1)")
+    func infinitePenWidthStrokes() throws {
+        let pen = plusObject(id: 1, type: 2, payload: penPayload(width: .infinity, argb: argb(255, 0, 0, 0)))
+        let file = try plusFile([pen, drawLines(penId: 1, [(10, 50), (90, 50)])])
+        let (image, _) = try renderPlus(file)
+
+        // The fallback width is 1px, so scan the y-band around the line for any
+        // non-white ink (an antialiased thin line may not be fully dark).
+        var drewInk = false
+        outer: for x in stride(from: 20, to: 80, by: 4) {
+            for y in 48 ... 52 where !Self.isWhite(image[x, y]) { drewInk = true; break outer }
+        }
+        #expect(drewInk, "an infinite-width line should still stroke at the fallback width")
+    }
+
+    @Test("a non-finite arc angle draws nothing without crashing (L7)")
+    func nonFiniteArcAngleDrawsNothing() throws {
+        let pen = plusObject(id: 1, type: 2, payload: penPayload(width: 3, argb: argb(255, 0, 0, 0)))
+        let file = try plusFile([pen, drawArc(penId: 1, start: .nan, sweep: 90, rect: (10, 10, 80, 80))])
+        let (image, _) = try renderPlus(file)
+
+        for x in stride(from: 0, to: 100, by: 5) {
+            for y in stride(from: 0, to: 100, by: 5) {
+                #expect(Self.isWhite(image[x, y]), "a NaN-angle arc must emit nothing, got ink at (\(x),\(y))")
+            }
+        }
+    }
+
+    @Test("a gradient blend array with a non-finite position drops that stop and still fills (L7)")
+    func nonFiniteGradientBlendPositionFills() throws {
+        let brush = plusObject(id: 1, type: 1, payload: linearGradientNaNBlendPayload(
+            rect: (10, 40, 80, 20), start: argb(255, 255, 0, 0), end: argb(255, 0, 0, 255)))
+        let file = try plusFile([brush, fillRectsBrush(1, (10, 40, 80, 20))])
+        let (image, _) = try renderPlus(file)
+
+        #expect(!Self.isWhite(image[50, 50]), "the gradient must still fill after dropping the NaN stop, got \(image[50, 50])")
+    }
+
+    // MARK: - Gradient gamma ([MS-EMFPLUS] §2.2.2.24, audit L8)
+
+    @Test("a gamma-corrected linear gradient still fills (linearly) and notes gradientGamma (L8)")
+    func gammaCorrectedGradientNoted() throws {
+        let brush = plusObject(id: 1, type: 1, payload: linearGradientGammaBrushPayload(
+            rect: (10, 40, 80, 20), start: argb(255, 255, 0, 0), end: argb(255, 0, 0, 255)))
+        let file = try plusFile([brush, fillRectsBrush(1, (10, 40, 80, 20))])
+        let (image, log) = try renderPlus(file)
+
+        #expect(!Self.isWhite(image[50, 50]), "the gamma gradient still fills, got \(image[50, 50])")
+        #expect(log.entries.contains(.emfPlusApproximated(feature: .gradientGamma, count: 1)),
+                "a gamma-corrected gradient should note gradientGamma: \(log.entries)")
     }
 }
 
@@ -985,6 +1148,18 @@ struct EMFPlusImagePlaybackTests {
         // The red quadrant sits near the upper-left corner of the parallelogram.
         #expect(pixels.contains(in: (x: 52, y: 14, width: 12, height: 12)) { isRed($0) },
                 "no red near the parallelogram's upper-left corner")
+    }
+
+    @Test("DrawImagePoints with the E (effects) flag draws the image plain and notes imageEffect (L6)")
+    func drawImagePointsEffectFlagNoted() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageObjectPayload()),
+            drawImagePointsRecord(imageId: 1, extraFlags: 0x2000, src: (0, 0, 2, 2), points: [(50, 10), (90, 20), (60, 60)]),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(hasApprox(log, .imageEffect), "the E flag should note imageEffect: \(log.entries)")
+        #expect(pixels.contains(in: (x: 52, y: 14, width: 12, height: 12)) { isRed($0) },
+                "the image should still draw plain despite the ignored effect")
     }
 
     @Test("DrawImagePoints with the P (relative) flag logs an unsupported record")
