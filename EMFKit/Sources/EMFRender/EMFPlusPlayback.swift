@@ -50,6 +50,10 @@ struct EMFPlusPlayback {
 
     let context: CGContext
     let base: CGAffineTransform
+    /// The EmfPlusHeader LogicalDpiX/Y ([MS-EMFPLUS] §2.3.3.3), for physical-unit
+    /// conversion (audit M10/L4). A zero/absent header DPI falls back to 96.
+    let dpiX: CGFloat
+    let dpiY: CGFloat
     private var state = State()
     /// Index-keyed saved states for EmfPlusSave/Restore ([MS-EMFPLUS] §2.3.7.4/5).
     private var savedStates: [UInt32: State] = [:]
@@ -91,7 +95,13 @@ struct EMFPlusPlayback {
         base: CGAffineTransform,
         log: inout EMFRenderLog
     ) {
-        var player = EMFPlusPlayback(context: context, base: base)
+        // Header LogicalDpi drives physical-unit conversion; 0/absent → 96 (§8).
+        let rawX = stream.header.map { CGFloat($0.logicalDpiX) } ?? 0
+        let rawY = stream.header.map { CGFloat($0.logicalDpiY) } ?? 0
+        var player = EMFPlusPlayback(
+            context: context, base: base,
+            dpiX: rawX.isFinite && rawX > 0 ? rawX : 96,
+            dpiY: rawY.isFinite && rawY > 0 ? rawY : 96)
         player.walk(file: file, stream: stream, dc: &dc, log: &log)
     }
 
@@ -739,14 +749,31 @@ struct EMFPlusPlayback {
         return result
     }
 
+    /// Device pixels per one unit of a §2.1.1.32 UnitType, using the header DPI
+    /// (audit M10/L4). Pixel = 1; Point = dpi/72; Inch = dpi; Document = dpi/300;
+    /// Millimeter = dpi/25.4. World(0)/Display(1)/unknown return `nil` — the caller
+    /// falls back to the world→device average scale (World's correct treatment;
+    /// Display is spec-unused).
+    private static func physicalUnitFactor(_ unit: UInt32, dpi: CGFloat) -> CGFloat? {
+        switch unit {
+        case 0x02: return 1              // Pixel
+        case 0x03: return dpi / 72       // Point
+        case 0x04: return dpi            // Inch
+        case 0x05: return dpi / 300      // Document
+        case 0x06: return dpi / 25.4     // Millimeter
+        default: return nil              // World / Display / unknown
+        }
+    }
+
     /// The DEVICE-space point size for `font`. EmSize is interpreted per its
-    /// SizeUnit ([MS-EMFPLUS] §2.1.1.32): World/Display units scale by the
-    /// world→device average scale (the same basis as pen widths and GDI text);
-    /// Pixel is already device pixels. Guarded like FontMapper.devicePointSize —
-    /// floored at 1 and capped so a hostile EmSize cannot feed CoreText an
-    /// enormous outline-flatten size (§8).
+    /// SizeUnit ([MS-EMFPLUS] §2.1.1.32): a physical unit (Point/Inch/Document/mm)
+    /// converts EXACTLY via the header DPI; Pixel is already device pixels; World
+    /// (and spec-unused Display) scales by the world→device average scale (the
+    /// same basis as pen widths and GDI text). Guarded like
+    /// FontMapper.devicePointSize — floored at 1 and capped so a hostile EmSize
+    /// cannot feed CoreText an enormous outline-flatten size (§8).
     private func deviceFontSize(_ font: EMFPlusFont) -> CGFloat {
-        let scale: CGFloat = font.sizeUnit == 0x02 ? 1 : StrokeMapper.averageScale(worldToDevice)
+        let scale = Self.physicalUnitFactor(font.sizeUnit, dpi: dpiY) ?? StrokeMapper.averageScale(worldToDevice)
         var size = CGFloat(font.emSize) * scale
         if !size.isFinite || size < 1 { size = FontMapper.defaultHeight }
         return min(size, FontMapper.maxDevicePointSize)
@@ -1144,11 +1171,15 @@ struct EMFPlusPlayback {
     private mutating func setPageTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
         guard let scale = reader.f32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
-        // PageUnit is the low byte of Flags; only UnitTypePixel (2) is honoured
-        // exactly. Other units are treated as pixels (§2.3.9.5) with a note.
-        let pageUnit = flags & 0x00FF
-        if pageUnit != 0x02 && pageUnit != 0x00 { log.noteEMFPlusApproximated(.pageUnit) }
-        let s = CGFloat(scale)
+        // PageUnit is the low byte of Flags (§2.3.9.5). A physical unit converts
+        // EXACTLY via the header DPI; Pixel and World stay as a raw scale; only
+        // spec-unused Display (and any unknown unit) is a noted approximation.
+        let pageUnit = UInt32(flags & 0x00FF)
+        let physical = Self.physicalUnitFactor(pageUnit, dpi: dpiX)      // nil = World/Display/unknown
+        if physical == nil, pageUnit != 0x00 {                          // Display / unknown (World stays note-free)
+            log.noteEMFPlusApproximated(.pageUnit)
+        }
+        let s = CGFloat(scale) * (physical ?? 1)
         state.page = CGAffineTransform(scaleX: s, y: s)
     }
 
