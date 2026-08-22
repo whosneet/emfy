@@ -181,6 +181,8 @@ public enum EMFRenderer {
                 for _ in 0 ..< count { log.noteEMFPlusRecordUndecodable(type: type) }
             case .emfPlusObjectIssue(let kind, let count):
                 for _ in 0 ..< count { log.noteEMFPlusObjectIssue(kind) }
+            case .emfPlusSaveStackCapped(let count):
+                for _ in 0 ..< count { log.noteEMFPlusSaveStackCapped() }
             default:
                 log.note(entry)
             }

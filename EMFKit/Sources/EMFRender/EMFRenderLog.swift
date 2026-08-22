@@ -277,14 +277,20 @@ public struct EMFRenderLog: Sendable, Equatable {
         /// BOTH branches — a dual file that fell back to GDI still reports its
         /// broken EMF+ half. Coalesced by `kind`.
         case emfPlusStreamIssue(kind: EMFPlusStreamIssueKind, count: Int)
-        /// A drawing record's body failed its reader/decode guards and was
-        /// skipped (audit M7): a truncated/garbled DrawString, FillRects, image
-        /// record, etc. Coalesced by record `type`.
+        /// A record's body failed its reader/decode guards and was skipped (audit
+        /// M7 / D4): a truncated/garbled drawing record (DrawString, FillRects,
+        /// image), or a state/clip/transform record (SetWorldTransform,
+        /// SetClipRect, EmfPlusSave, …). Coalesced by record `type`.
         case emfPlusRecordUndecodable(type: UInt16, count: Int)
         /// A drawing record referenced an object the table could not supply, or an
         /// EmfPlusObject could not be bound (audit M7 — see `EMFPlusObjectIssueKind`).
         /// Coalesced by `kind`.
         case emfPlusObjectIssue(kind: EMFPlusObjectIssueKind, count: Int)
+        /// The EMF+ save/container maps hit their shared capacity cap (audit M1):
+        /// at the cap, EmfPlusSave/BeginContainer stop storing (no eviction — a
+        /// GDI+ stream nested this deep is already broken). A CAPACITY note, not
+        /// lost content. Coalesced into a single count.
+        case emfPlusSaveStackCapped(count: Int)
     }
 
     /// Every logged event, in the order it was raised. The coalesced families
@@ -332,6 +338,7 @@ public struct EMFRenderLog: Sendable, Equatable {
         case emfPlusStreamIssue(EMFPlusStreamIssueKind)
         case emfPlusRecordUndecodable(UInt16)
         case emfPlusObjectIssue(EMFPlusObjectIssueKind)
+        case emfPlusSaveStackCapped
     }
 
     /// A `Hashable` surrogate for `DIBUnsupportedReason?` (which is not itself
@@ -537,6 +544,16 @@ public struct EMFRenderLog: Sendable, Equatable {
             return
         }
         appendDistinct(.emfPlusObjectIssue(kind: kind, count: 1), key: .emfPlusObjectIssue(kind))
+    }
+
+    /// Records one save/container-map overflow, coalescing into a single count (audit M1).
+    mutating func noteEMFPlusSaveStackCapped() {
+        if let index = coalesceIndex[.emfPlusSaveStackCapped],
+           case .emfPlusSaveStackCapped(let c) = entries[index] {
+            entries[index] = .emfPlusSaveStackCapped(count: c + 1)
+            return
+        }
+        appendDistinct(.emfPlusSaveStackCapped(count: 1), key: .emfPlusSaveStackCapped)
     }
 
     /// Records any non-coalesced event verbatim.

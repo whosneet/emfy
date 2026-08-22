@@ -56,6 +56,13 @@ struct EMFPlusPlayback {
     /// Index-keyed saved states for graphics containers (§2.3.7.1–3), kept
     /// separate so a container index cannot collide with a save index.
     private var savedContainers: [UInt32: State] = [:]
+    /// Shared capacity cap on the two save maps COMBINED (audit M1), reusing the
+    /// GDI DC's constant so the number lives in one place. At the cap,
+    /// EmfPlusSave/BeginContainer stop storing (no eviction — a GDI+ stream this
+    /// deeply nested is already broken) and note it; ≈ 512 × 112 B bounds both
+    /// maps together (§8). Restore/EndContainer of an unknown index stays a
+    /// silent no-op, matching GDI+.
+    private static let saveMapCap = DeviceContext.saveStackCap
     private var table = ObjectTable()
     /// Per-object decoded-image cache (audit H1 / A1): each bound image object
     /// is decoded AT MOST ONCE, no matter how many DrawImage records reference
@@ -151,20 +158,30 @@ struct EMFPlusPlayback {
             if let boundID = table.apply(record, log: &log) { imageCache.invalidate(Int(boundID)) }
 
         // Transforms (§2.3.9).
-        case 0x402A: setWorldTransform(record)
+        case 0x402A: setWorldTransform(record, log: &log)
         case 0x402B: state.world = .identity                      // ResetWorldTransform
-        case 0x402C: multiplyWorldTransform(record, flags: flags)
-        case 0x402D: translateWorldTransform(record, flags: flags)
-        case 0x402E: scaleWorldTransform(record, flags: flags)
-        case 0x402F: rotateWorldTransform(record, flags: flags)
+        case 0x402C: multiplyWorldTransform(record, flags: flags, log: &log)
+        case 0x402D: translateWorldTransform(record, flags: flags, log: &log)
+        case 0x402E: scaleWorldTransform(record, flags: flags, log: &log)
+        case 0x402F: rotateWorldTransform(record, flags: flags, log: &log)
         case 0x4030: setPageTransform(record, flags: flags, log: &log)
 
-        // Save / restore / containers (§2.3.7).
-        case 0x4025: if let idx = firstU32(record) { savedStates[idx] = state }
-        case 0x4026: if let idx = firstU32(record), let saved = savedStates[idx] { state = saved; savedStates[idx] = nil }
+        // Save / restore / containers (§2.3.7). A truncated StackIndex is an
+        // undecodable body (D4); storing is capped (M1); Restore/EndContainer of
+        // an unknown index is a silent no-op (GDI+-matching).
+        case 0x4025:
+            guard let idx = firstU32(record) else { log.noteEMFPlusRecordUndecodable(type: record.type); break }
+            if hasSaveRoom(log: &log) { savedStates[idx] = state }
+        case 0x4026:
+            guard let idx = firstU32(record) else { log.noteEMFPlusRecordUndecodable(type: record.type); break }
+            if let saved = savedStates[idx] { state = saved; savedStates[idx] = nil }
         case 0x4027: beginContainer(record, log: &log)
-        case 0x4028: if let idx = firstU32(record) { savedContainers[idx] = state }
-        case 0x4029: if let idx = firstU32(record), let saved = savedContainers[idx] { state = saved; savedContainers[idx] = nil }
+        case 0x4028:
+            guard let idx = firstU32(record) else { log.noteEMFPlusRecordUndecodable(type: record.type); break }
+            if hasSaveRoom(log: &log) { savedContainers[idx] = state }
+        case 0x4029:
+            guard let idx = firstU32(record) else { log.noteEMFPlusRecordUndecodable(type: record.type); break }
+            if let saved = savedContainers[idx] { state = saved; savedContainers[idx] = nil }
 
         // Clipping (§2.3.1).
         case 0x4031: state.clip = .none                           // ResetClip
@@ -1034,30 +1051,31 @@ struct EMFPlusPlayback {
 
     // MARK: - Transform handlers
 
-    private mutating func setWorldTransform(_ record: EMFPlusRecord) {
-        if let m = readMatrix(record) { state.world = m }
+    private mutating func setWorldTransform(_ record: EMFPlusRecord, log: inout EMFRenderLog) {
+        guard let m = readMatrix(record) else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+        state.world = m
     }
 
-    private mutating func multiplyWorldTransform(_ record: EMFPlusRecord, flags: UInt16) {
-        guard let m = readMatrix(record) else { return }
+    private mutating func multiplyWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
+        guard let m = readMatrix(record) else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
         applyWorld(m, postMultiply: (flags & 0x2000) != 0)
     }
 
-    private mutating func translateWorldTransform(_ record: EMFPlusRecord, flags: UInt16) {
+    private mutating func translateWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let dx = reader.f32(), let dy = reader.f32() else { return }
+        guard let dx = reader.f32(), let dy = reader.f32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
         applyWorld(CGAffineTransform(translationX: CGFloat(dx), y: CGFloat(dy)), postMultiply: (flags & 0x2000) != 0)
     }
 
-    private mutating func scaleWorldTransform(_ record: EMFPlusRecord, flags: UInt16) {
+    private mutating func scaleWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let sx = reader.f32(), let sy = reader.f32() else { return }
+        guard let sx = reader.f32(), let sy = reader.f32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
         applyWorld(CGAffineTransform(scaleX: CGFloat(sx), y: CGFloat(sy)), postMultiply: (flags & 0x2000) != 0)
     }
 
-    private mutating func rotateWorldTransform(_ record: EMFPlusRecord, flags: UInt16) {
+    private mutating func rotateWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let angle = reader.f32() else { return }
+        guard let angle = reader.f32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
         applyWorld(CGAffineTransform(rotationAngle: CGFloat(angle) * .pi / 180), postMultiply: (flags & 0x2000) != 0)
     }
 
@@ -1071,7 +1089,7 @@ struct EMFPlusPlayback {
 
     private mutating func setPageTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let scale = reader.f32() else { return }
+        guard let scale = reader.f32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
         // PageUnit is the low byte of Flags; only UnitTypePixel (2) is honoured
         // exactly. Other units are treated as pixels (§2.3.9.5) with a note.
         let pageUnit = flags & 0x00FF
@@ -1082,7 +1100,12 @@ struct EMFPlusPlayback {
 
     private mutating func beginContainer(_ record: EMFPlusRecord, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let dest = reader.rectF(), let src = reader.rectF(), let index = reader.u32() else { return }
+        guard let dest = reader.rectF(), let src = reader.rectF(), let index = reader.u32() else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
+        // At the shared save/container cap, drop the container entirely (M1): no
+        // store, no transform, so a later EndContainer can't leak its transform.
+        guard hasSaveRoom(log: &log) else { return }
         savedContainers[index] = state
         // Apply the src → dest mapping as an additional world transform. The
         // page-unit conversion is not modelled, so this is a logged
@@ -1101,20 +1124,24 @@ struct EMFPlusPlayback {
 
     private mutating func setClipRect(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let rect = reader.rectF() else { return }
+        guard let rect = reader.rectF() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
         let deviceRect = rect.standardized.applying(worldToDevice)
         combineClip(.rects([deviceRect]), mode: (UInt32(flags) >> 8) & 0x0F, log: &log)
     }
 
     private mutating func setClipPath(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
-        guard let plusPath = table.path(Int(flags & 0x00FF)) else { return }
+        guard let plusPath = table.path(Int(flags & 0x00FF)) else {
+            log.noteEMFPlusObjectIssue(.missingReference); return   // clip path slot unresolved (D4)
+        }
         let path = CGMutablePath()
         EMFPlusGeometry.appendPath(plusPath, to: path, transform: worldToDevice)
         combineClip(.path(path), mode: (UInt32(flags) >> 8) & 0x0F, log: &log)
     }
 
     private mutating func setClipRegion(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
-        guard let region = table.region(Int(flags & 0x00FF)) else { return }
+        guard let region = table.region(Int(flags & 0x00FF)) else {
+            log.noteEMFPlusObjectIssue(.missingReference); return   // clip region slot unresolved (D4)
+        }
         let path = EMFPlusGeometry.regionPath(region.root, transform: worldToDevice, log: &log)
         combineClip(.path(path), mode: (UInt32(flags) >> 8) & 0x0F, log: &log)
     }
@@ -1141,6 +1168,18 @@ struct EMFPlusPlayback {
     private func firstU32(_ record: EMFPlusRecord) -> UInt32? {
         var reader = PlusReader(record.data)
         return reader.u32()
+    }
+
+    /// Total entries across both save maps — the shared budget the M1 cap bounds.
+    private var savedStateCount: Int { savedStates.count + savedContainers.count }
+
+    /// Whether the shared save/container budget (audit M1) has room for one more
+    /// entry; at the cap it records the overflow and returns false so the caller
+    /// stops storing (no eviction).
+    private func hasSaveRoom(log: inout EMFRenderLog) -> Bool {
+        if savedStateCount < Self.saveMapCap { return true }
+        log.noteEMFPlusSaveStackCapped()
+        return false
     }
 
     /// A 24-byte EmfPlusTransformMatrix (§2.2.2.47) as a CGAffineTransform.
