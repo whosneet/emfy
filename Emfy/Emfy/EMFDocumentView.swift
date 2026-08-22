@@ -471,6 +471,8 @@ private extension EMFPlusApproximation {
             return "graphics container as a save/restore"
         case .linearGradientWrapMode:
             return "gradient tiling as a clamped fill"
+        case .gradientGamma:
+            return "gamma-corrected gradient as a linear blend"
         case .curveSegmentRange:
             return "partial curve range (drew the whole curve)"
         case .imageBitmapPixelFormat(let format):
@@ -489,6 +491,8 @@ private extension EMFPlusApproximation {
             return "a large bitmap image decoded at a reduced resolution"
         case .imageOversized:
             return "a compressed image too large for this view (skipped)"
+        case .imageEffect:
+            return "an image effect (drawn without it)"
         case .stringFormatSimplified:
             return "advanced text formatting as a single left-to-right line"
         case .pathDashSegment:

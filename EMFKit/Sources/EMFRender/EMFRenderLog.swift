@@ -37,8 +37,12 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// Tile/TileFlipX/TileFlipY/TileFlipXY); the fill clamps to the gradient
     /// axis instead of repeating the pattern beyond it.
     case linearGradientWrapMode
+    /// A linear-gradient brush set BrushDataIsGammaCorrected ([MS-EMFPLUS]
+    /// §2.2.2.24, flag 0x80); gamma-corrected interpolation is not reproduced —
+    /// the ramp is interpolated linearly instead.
+    case gradientGamma
     /// A DrawCurve requested a partial segment range — a non-zero Offset or a
-    /// NumSegments short of the whole spline ([MS-EMFPLUS] §2.3.4.4); the entire
+    /// NumSegments short of the whole spline ([MS-EMFPLUS] §2.3.4.5); the entire
     /// open cardinal spline was drawn instead.
     case curveSegmentRange
     /// A DrawImage/DrawImagePoints referenced a bitmap whose PixelFormat
@@ -72,6 +76,10 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// `imageInvalid` (a broken image): the image is fine, just too large for
     /// this render (e.g. a big photo in a small Quick Look preview).
     case imageOversized
+    /// A DrawImagePoints carried the EffectsApplied flag ([MS-EMFPLUS] §2.3.4.9):
+    /// an image effect from a prior EmfPlusSerializableObject applies to the draw.
+    /// Image effects are not implemented, so the image was drawn plain.
+    case imageEffect
     /// A text run was drawn as a single left-to-right line, ignoring a non-default
     /// text-formatting feature it carried: an EmfPlusStringFormat ([MS-EMFPLUS]
     /// §2.2.1.9) trimming/wrap/tab-stop/hotkey/character-range setting, a

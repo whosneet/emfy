@@ -643,6 +643,13 @@ struct EMFPlusPlayback {
             devicePositions = decoded.positions.map { $0.applying(toDevice) }
         }
         guard !glyphs.isEmpty, devicePositions.count == glyphs.count else { return }
+        // A per-record matrix with a rotation/shear component (b or c nonzero) is
+        // applied to the glyph ORIGINS here but not to the upright outlines — a
+        // simplification. (The world branch rotates the outlines properly and
+        // needs no note.) Audit L6.
+        if let m = decoded.matrix, m.b != 0 || m.c != 0 {
+            log.noteEMFPlusApproximated(.stringFormatSimplified)
+        }
         // In the flipped device frame (after scaleBy(1,-1)) a device point (px, py)
         // sits at local (px, -py); the flip makes the glyph outlines upright.
         let localPositions = devicePositions.map { CGPoint(x: $0.x, y: -$0.y) }
@@ -898,6 +905,10 @@ struct EMFPlusPlayback {
               points.count >= 3 else {
             log.noteEMFPlusRecordUndecodable(type: record.type); return
         }
+        // E flag (bit 0x2000, §2.3.4.9): an image effect from a prior
+        // EmfPlusSerializableObject applies to this draw. Effects are not
+        // implemented — note it; the image still draws plain (audit L6).
+        if (record.flags & 0x2000) != 0 { log.noteEMFPlusApproximated(.imageEffect) }
         drawImageMapped(
             objectID: objectID, srcRect: srcRect, srcUnit: srcUnit,
             upperLeft: points[0], upperRight: points[1], lowerLeft: points[2],
@@ -1108,6 +1119,9 @@ struct EMFPlusPlayback {
                 // a tiling wrap mode ([MS-EMFPLUS] §2.1.1.33) is not reproduced;
                 // Clamp (0x04) is honoured exactly.
                 if Self.wrapModeTiles(gradient.wrapMode) { log.noteEMFPlusApproximated(.linearGradientWrapMode) }
+                // BrushDataIsGammaCorrected (0x80, §2.2.2.24): gamma-corrected
+                // interpolation is not reproduced — the ramp is linear. Note it (L8).
+                if gradient.brushDataFlags & 0x80 != 0 { log.noteEMFPlusApproximated(.gradientGamma) }
                 context.addPath(path)
                 context.clip(using: rule)
                 context.drawLinearGradient(
