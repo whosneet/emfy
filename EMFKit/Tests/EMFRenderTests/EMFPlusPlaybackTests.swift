@@ -620,6 +620,54 @@ struct EMFPlusHonestyTests {
         #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x400A, count: 3)),
                 "three truncated FillRects should coalesce to count 3: \(log.entries)")
     }
+
+    // MARK: - Audit M1 (D1): save/container map cap
+
+    @Test("a Save flood past the cap survives, notes the cap, and a pre-flood save still restores")
+    func saveFloodCappedButPreservesEarlierSaves() throws {
+        var records: [[UInt8]] = [
+            translateWorld(40, 0),   // world = +40 in x
+            save(5),                 // savedStates[5] captures the translated state
+            translateWorld(-40, 0),  // back to identity
+        ]
+        for index in 0 ..< 600 { records.append(save(UInt32(1000 + index))) }   // flood distinct indices
+        records.append(restore(5))   // no eviction → index 5 is still there
+        records.append(fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)))   // → device (50..70, 10..30)
+        let (pixels, log) = try renderPlus(try plusFile(records))
+
+        #expect(log.entries.contains { if case .emfPlusSaveStackCapped = $0 { return true }; return false },
+                "the save flood should note the cap: \(log.entries)")
+        let restored = pixels[60, 20]
+        #expect(restored.r > 200 && restored.g < 60 && restored.b < 60,
+                "the pre-flood save (index 5) restored the +40 translate, got \(restored)")
+        let original = pixels[20, 20]
+        #expect(original.r > 230 && original.g > 230 && original.b > 230,
+                "the untranslated position stays empty, got \(original)")
+    }
+
+    // MARK: - Clip/state honesty follow-up (D4)
+
+    @Test("SetClipPath referencing an unbound path slot notes .missingReference")
+    func setClipPathUnboundNoted() throws {
+        let file = try plusFile([
+            plusRecord(0x4033, 5),   // SetClipPath, pathId 5 (unbound), mode 0
+            fillRectsDirect(argb(255, 0, 0, 0), (10, 10, 20, 20)),   // drawing → EMF+ branch
+        ])
+        let (_, log) = try renderPlus(file)
+        #expect(log.entries.contains(.emfPlusObjectIssue(kind: .missingReference, count: 1)),
+                "an unbound clip path should note missingReference: \(log.entries)")
+    }
+
+    @Test("a truncated SetWorldTransform body notes .emfPlusRecordUndecodable with type 0x402A")
+    func truncatedWorldTransformNoted() throws {
+        let file = try plusFile([
+            plusRecord(0x402A, 0, le { $0.f32(1); $0.f32(0) }),      // 8 of the 24 matrix bytes
+            fillRectsDirect(argb(255, 0, 0, 0), (10, 10, 20, 20)),   // drawing → EMF+ branch
+        ])
+        let (_, log) = try renderPlus(file)
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x402A, count: 1)),
+                "a truncated SetWorldTransform should note recordUndecodable(0x402A): \(log.entries)")
+    }
 }
 
 @Suite("EMF+ image playback")
