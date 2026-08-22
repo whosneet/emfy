@@ -51,6 +51,13 @@ public enum EMFRenderer {
         // file, or an EMF+ shell) takes the unchanged GDI path below, so every
         // existing output stays byte-identical.
         let plus = file.emfPlusStream()
+        // Surface EMF+ stream reassembly/walk diagnostics REGARDLESS of branch
+        // (audit M7): a dual file whose EMF+ stream died still renders its GDI
+        // fallback, but the log must say the EMF+ half was broken. A pure-GDI
+        // file has no EMF+ comments → no diagnostics → this is a no-op.
+        for diagnostic in plus.diagnostics {
+            log.noteEMFPlusStreamIssue(EMFPlusStreamIssueKind(diagnostic))
+        }
         if plus.records.contains(where: \.isDrawing) {
             EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, log: &log)
             return log
@@ -168,6 +175,12 @@ public enum EMFRenderer {
                 for _ in 0 ..< count { log.noteEMFPlusUnsupported(type: type) }
             case .emfPlusApproximated(let feature, let count):
                 for _ in 0 ..< count { log.noteEMFPlusApproximated(feature) }
+            case .emfPlusStreamIssue(let kind, let count):
+                for _ in 0 ..< count { log.noteEMFPlusStreamIssue(kind) }
+            case .emfPlusRecordUndecodable(let type, let count):
+                for _ in 0 ..< count { log.noteEMFPlusRecordUndecodable(type: type) }
+            case .emfPlusObjectIssue(let kind, let count):
+                for _ in 0 ..< count { log.noteEMFPlusObjectIssue(kind) }
             default:
                 log.note(entry)
             }
