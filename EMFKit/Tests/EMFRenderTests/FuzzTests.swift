@@ -84,6 +84,10 @@ struct FuzzTests {
         /// Mutants whose reassembled EMF+ stream still carried a drawing record —
         /// i.e. those `render(into:target:)` routed through EMF+ playback.
         var emfPlusDrawing = 0
+        /// Total EMF+ records the playback walk actually CONSUMED across the run
+        /// (the render log's `emfPlusRecordsPlayed` stat, audit M17). Non-zero
+        /// only if the EMF+ branch ran AND the walk consumed records.
+        var emfPlusRecordsPlayed = 0
     }
 
     @Test("every corpus file survives seeded mutation across the full surface")
@@ -138,7 +142,8 @@ struct FuzzTests {
         [fuzz] seed=\(Self.seed) iterations/file=\(Self.iterations) files=\(Self.corpusFiles.count) \
         mutants=\(tally.mutants) parse-rejects=\(tally.parseRejects) \
         parsed-clean=\(tally.parsedClean) parsed-with-diagnostics=\(tally.parsedWithDiagnostics) \
-        rendered=\(tally.rendered) emfplus-drawing=\(tally.emfPlusDrawing)
+        rendered=\(tally.rendered) emfplus-drawing=\(tally.emfPlusDrawing) \
+        emfplus-records-played=\(tally.emfPlusRecordsPlayed)
         """)
 
         // Reaching here at all is the pass: no mutant trapped or hung. Assert a
@@ -157,6 +162,10 @@ struct FuzzTests {
         // the EMF+ fuzz surface went dark (files renamed, or the render dispatch
         // stopped taking the EMF+ branch) — a silent loss of coverage.
         #expect(tally.emfPlusDrawing > 0, "no mutant traversed EMF+ playback — the EMF+ fuzz surface is not being exercised")
+        // The stat observed on the delivered log (audit M17): a regression that
+        // stops taking the EMF+ branch, or a walk that consumes nothing, drives
+        // this to zero even if the `emfPlusDrawing` mirror above still passed.
+        #expect(tally.emfPlusRecordsPlayed > 0, "the EMF+ playback walk consumed no records — the branch is not actually running")
     }
 
     // MARK: - Surface exercise
@@ -201,8 +210,10 @@ struct FuzzTests {
             tally.emfPlusDrawing += 1
         }
 
-        // Full playback into the shared bounded context.
-        _ = EMFRenderer.render(file, into: context, target: target)
+        // Full playback into the shared bounded context. Observe how many EMF+
+        // records the walk consumed (audit M17) — the stat, not the mirror.
+        let renderLog = EMFRenderer.render(file, into: context, target: target)
+        tally.emfPlusRecordsPlayed += renderLog.emfPlusRecordsPlayed
         tally.rendered += 1
     }
 
