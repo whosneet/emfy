@@ -1179,8 +1179,23 @@ struct EMFPlusPlayback {
     private mutating func setClipRect(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
         guard let rect = reader.rectF() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
-        let deviceRect = rect.standardized.applying(worldToDevice)
-        combineClip(.rects([deviceRect]), mode: (UInt32(flags) >> 8) & 0x0F, log: &log)
+        let mode = (UInt32(flags) >> 8) & 0x0F
+        let r = rect.standardized
+        if worldToDevice.b == 0, worldToDevice.c == 0 {
+            // Axis-aligned world→device: the transformed rect is still a rect, so
+            // the device-rect fast path is EXACT (and baseline-safe). Audit M9.
+            combineClip(.rects([r.applying(worldToDevice)]), mode: mode, log: &log)
+        } else {
+            // Rotated/sheared: store the transformed 4-point quad as a device-space
+            // path so the clip is exact, not its axis-aligned bounding box (M9).
+            let quad = CGMutablePath()
+            quad.move(to: CGPoint(x: r.minX, y: r.minY), transform: worldToDevice)
+            quad.addLine(to: CGPoint(x: r.maxX, y: r.minY), transform: worldToDevice)
+            quad.addLine(to: CGPoint(x: r.maxX, y: r.maxY), transform: worldToDevice)
+            quad.addLine(to: CGPoint(x: r.minX, y: r.maxY), transform: worldToDevice)
+            quad.closeSubpath()
+            combineClip(.path(quad), mode: mode, log: &log)
+        }
     }
 
     private mutating func setClipPath(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
