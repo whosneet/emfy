@@ -1162,30 +1162,43 @@ struct EMFPlusPlayback {
     // MARK: - Transform handlers
 
     private mutating func setWorldTransform(_ record: EMFPlusRecord, log: inout EMFRenderLog) {
-        guard let m = readMatrix(record) else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+        // Truncated body OR a non-finite/singular matrix → ignore, keep the
+        // previous transform (GDI+ validate-and-ignore), and note it (L2).
+        guard let m = readMatrix(record), Self.isUsableTransform(m) else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
         state.world = m
     }
 
     private mutating func multiplyWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
-        guard let m = readMatrix(record) else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+        guard let m = readMatrix(record), Self.isUsableTransform(m) else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
         applyWorld(m, postMultiply: (flags & 0x2000) != 0)
     }
 
     private mutating func translateWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let dx = reader.f32(), let dy = reader.f32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+        // Non-finite dx/dy → ignore + note (L2), so no NaN enters the world CTM.
+        guard let dx = reader.f32(), let dy = reader.f32(), dx.isFinite, dy.isFinite else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
         applyWorld(CGAffineTransform(translationX: CGFloat(dx), y: CGFloat(dy)), postMultiply: (flags & 0x2000) != 0)
     }
 
     private mutating func scaleWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let sx = reader.f32(), let sy = reader.f32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+        guard let sx = reader.f32(), let sy = reader.f32(), sx.isFinite, sy.isFinite else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
         applyWorld(CGAffineTransform(scaleX: CGFloat(sx), y: CGFloat(sy)), postMultiply: (flags & 0x2000) != 0)
     }
 
     private mutating func rotateWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let angle = reader.f32() else { log.noteEMFPlusRecordUndecodable(type: record.type); return }
+        guard let angle = reader.f32(), angle.isFinite else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
         applyWorld(CGAffineTransform(rotationAngle: CGFloat(angle) * .pi / 180), postMultiply: (flags & 0x2000) != 0)
     }
 
@@ -1320,6 +1333,17 @@ struct EMFPlusPlayback {
             a: CGFloat(m11), b: CGFloat(m12), c: CGFloat(m21), d: CGFloat(m22),
             tx: CGFloat(dx), ty: CGFloat(dy)
         )
+    }
+
+    /// GDI+ validates a Set/MultiplyWorldTransform matrix and IGNORES an invalid
+    /// one, keeping the previous transform (§2.3.9). A matrix is unusable if any
+    /// element is non-finite or it is singular (determinant zero or non-finite) —
+    /// either would corrupt the world→device pipeline. Callers that reject a
+    /// matrix note it undecodable (a well-formed body that cannot be honoured).
+    private static func isUsableTransform(_ m: CGAffineTransform) -> Bool {
+        guard m.a.isFinite, m.b.isFinite, m.c.isFinite, m.d.isFinite, m.tx.isFinite, m.ty.isFinite else { return false }
+        let det = m.a * m.d - m.b * m.c
+        return det.isFinite && det != 0
     }
 
     /// An EmfPlusARGB (§2.2.2.1) from a little-endian u32 (0xAARRGGBB).

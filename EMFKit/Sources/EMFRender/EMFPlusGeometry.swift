@@ -254,6 +254,10 @@ enum EMFPlusGeometry {
         let rx = rect.width / 2
         let ry = rect.height / 2
         guard rx != 0, ry != 0, rect.width.isFinite, rect.height.isFinite else { return }
+        // §8 input sanitation: a non-finite Start/Sweep angle would seed every
+        // emitted point with NaN — draw nothing. (The rect guard covers the
+        // sides.) Malformed wire data, not a fidelity note.
+        guard startDegrees.isFinite, sweepDegrees.isFinite else { return }
         // §2.3.4.2 / GDI+ DrawArc: a zero sweep draws nothing — arc AND pie (L12).
         guard sweepDegrees != 0 else { return }
         let cx = rect.midX

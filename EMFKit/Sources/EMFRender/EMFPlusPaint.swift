@@ -47,7 +47,10 @@ enum EMFPlusPaint {
         var stops: [(CGFloat, CGColor)] = []
         switch g.blend {
         case .presetColors(let preset):
-            for (pos, color) in zip(preset.positions, preset.colors) {
+            // §8 input sanitation: a non-finite position cannot enter CGGradient's
+            // sorted locations — drop it (an emptied set falls through to the
+            // two-stop fallback below). Malformed wire data, not fidelity loss.
+            for (pos, color) in zip(preset.positions, preset.colors) where pos.isFinite {
                 stops.append((CGFloat(pos), EMFPlusGeometry.cgColor(color)))
             }
         case .blendFactors(let arrays):
@@ -56,7 +59,9 @@ enum EMFPlusPaint {
             // so the LAST array is the horizontal one; a single array is both first
             // and last, so `.last` leaves the only-one-array case unchanged (M13).
             if let factors = arrays.last, !factors.positions.isEmpty {
-                for (pos, factor) in zip(factors.positions, factors.factors) {
+                // §8: drop non-finite position/factor pairs before lerp and the
+                // sorted locations; an emptied set falls back to two stops below.
+                for (pos, factor) in zip(factors.positions, factors.factors) where pos.isFinite && factor.isFinite {
                     stops.append((CGFloat(pos), lerp(g.startColor, g.endColor, CGFloat(factor))))
                 }
             }
@@ -118,7 +123,9 @@ enum EMFPlusPaint {
         let data = pen.penData
         let scale = StrokeMapper.averageScale(full)
         let rawWidth = CGFloat(data.width) * scale
-        let width = rawWidth > 0 ? rawWidth : 1
+        // §8 input sanitation: a non-finite width (e.g. +inf from the wire) must
+        // not reach CGContext.setLineWidth; fall back to 1 like the zero/NaN case.
+        let width = (rawWidth > 0 && rawWidth.isFinite) ? rawWidth : 1
 
         // Colour: solid pen brush → its colour; otherwise a representative
         // solid with a logged approximation.
@@ -158,9 +165,12 @@ enum EMFPlusPaint {
         var dash: [CGFloat] = []
         var dashPhase: CGFloat = 0
         if let pattern = data.dashedLine {
-            let scaled = pattern.map { CGFloat($0) * width }
+            // §8 input sanitation: drop non-finite dash lengths and clamp negatives
+            // before they reach CGContext.setLineDash; if nothing positive remains
+            // the line stays solid. Malformed wire data, not a fidelity note.
+            let scaled = pattern.map { CGFloat($0) * width }.filter { $0.isFinite }.map { max($0, 0) }
             if scaled.contains(where: { $0 > 0 }) {
-                dash = scaled.map { max($0, 0) }
+                dash = scaled
             }
         }
         // A present, non-degenerate DashedLine array wins (Custom, §2.1.1.16
@@ -177,7 +187,8 @@ enum EMFPlusPaint {
             }
         }
         if !dash.isEmpty {
-            dashPhase = CGFloat(data.dashOffset ?? 0) * width
+            let phase = CGFloat(data.dashOffset ?? 0) * width   // §8: keep the phase finite for setLineDash
+            dashPhase = phase.isFinite ? phase : 0
         }
 
         return PlusStrokeStyle(
