@@ -174,6 +174,33 @@ private func leftmostInkColumn(_ image: RasterizedImage, band: (x: Int, y: Int, 
     return nil
 }
 
+/// The bounding box of dark ink across the whole image, or nil if none — a
+/// transform-agnostic orientation probe (rotated runs land anywhere on canvas).
+private func inkBoundingBox(_ image: RasterizedImage, threshold: UInt8 = 160)
+    -> (minX: Int, minY: Int, maxX: Int, maxY: Int)? {
+    var minX = image.width, minY = image.height, maxX = -1, maxY = -1
+    for y in 0 ..< image.height {
+        for x in 0 ..< image.width where image[x, y].r < threshold {
+            minX = min(minX, x); maxX = max(maxX, x)
+            minY = min(minY, y); maxY = max(maxY, y)
+        }
+    }
+    guard maxX >= 0 else { return nil }
+    return (minX, minY, maxX, maxY)
+}
+
+/// EmfPlusTranslateWorldTransform ([MS-EMFPLUS] §2.3.9.8): dx, dy (f32), applied
+/// pre-multiply (flags 0). b == c == 0, so playback keeps the axis-aligned path.
+private func tTranslateWorld(_ dx: Float, _ dy: Float) -> [UInt8] {
+    tPlusRecord(0x402D, 0, tle { $0.f32(dx); $0.f32(dy) })
+}
+
+/// EmfPlusRotateWorldTransform ([MS-EMFPLUS] §2.3.9.6): angle in DEGREES (f32),
+/// applied pre-multiply (flags 0) — introduces a rotation (b, c != 0).
+private func tRotateWorld(_ degrees: Float) -> [UInt8] {
+    tPlusRecord(0x402F, 0, tle { $0.f32(degrees) })
+}
+
 // MARK: - Decode unit tests (byte fixtures)
 
 @Suite("EMF+ text decode")
@@ -513,5 +540,89 @@ struct EMFPlusTextPlaybackTests {
         let (image, log) = try renderText(file)
         #expect(image.containsDarkPixel(in: (x: 8, y: 12, width: 84, height: 30)), "realized-advance run drew no ink")
         #expect(hasApprox(log, .stringFormatSimplified), "RealizedAdvance should log a simplification: \(log.entries)")
+    }
+}
+
+// MARK: - Rotated / sheared text (audit H2)
+
+/// A rotated/sheared world transform must ROTATE text, not draw a silent upright
+/// line (the GDI path rotates via escapement, so dual files regressed). The
+/// axis-aligned branch stays byte-stable (pinned by the existing snapshots); a
+/// translated-but-unrotated transform is probed here to confirm it still takes
+/// the device path.
+@Suite("EMF+ text rotation")
+struct EMFPlusTextRotationTests {
+
+    /// Rotate about the world origin, then shift the result onto the 100×100
+    /// canvas (records play in order: translate first, rotate second, which
+    /// composes to "rotate then translate").
+    private func rotatedPrefix(degrees: Float, tx: Float, ty: Float) -> [[UInt8]] {
+        [tTranslateWorld(tx, ty), tRotateWorld(degrees)]
+    }
+
+    @Test("a 90° world rotation draws DrawString along a vertical baseline")
+    func drawStringRotated90() throws {
+        let file = try textFile(
+            [tPlusObject(id: 1, type: 6, payload: tFont(emSize: 20, family: "Arial"))]
+            + rotatedPrefix(degrees: 90, tx: 50, ty: 50)
+            + [tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 0xFFFF_FFFF,
+                           rect: (-30, -8, 60, 16), string: "Emfy")]
+        )
+        let (image, _) = try renderText(file)
+        let box = try #require(inkBoundingBox(image), "rotated DrawString drew no ink")
+        let w = box.maxX - box.minX, h = box.maxY - box.minY
+        #expect(h > w, "a 90°-rotated run should be taller than wide (vertical baseline), got w=\(w) h=\(h)")
+    }
+
+    @Test("90° rotates a DrawDriverString run vertical; unrotated it is horizontal")
+    func drawDriverStringRotationOrientation() throws {
+        func box(_ transforms: [[UInt8]]) throws -> (w: Int, h: Int) {
+            let records =
+                [tPlusObject(id: 1, type: 6, payload: tFont(emSize: 20, family: "Arial"))]
+                + transforms
+                + [tDrawDriverString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), options: 0x1,
+                                     glyphs: Array("AAAA".utf16),
+                                     positions: [(0, 0), (14, 0), (28, 0), (42, 0)])]
+            let (image, _) = try renderText(textFile(records))
+            let bb = try #require(inkBoundingBox(image), "driver string drew no ink")
+            return (bb.maxX - bb.minX, bb.maxY - bb.minY)
+        }
+        let rotated = try box(rotatedPrefix(degrees: 90, tx: 40, ty: 25))
+        #expect(rotated.h > rotated.w, "90° driver-string run should be taller than wide, got \(rotated)")
+        let flat = try box([tTranslateWorld(15, 45)])
+        #expect(flat.w > flat.h, "an unrotated driver-string run should be wider than tall, got \(flat)")
+    }
+
+    @Test("a realized-advance run follows the rotated baseline, not device +x")
+    func realizedAdvanceFollowsRotatedBaseline() throws {
+        let file = try textFile(
+            [tPlusObject(id: 1, type: 6, payload: tFont(emSize: 20, family: "Arial"))]
+            + rotatedPrefix(degrees: 90, tx: 50, ty: 20)
+            + [tDrawDriverString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), options: 0x1 | 0x4,
+                                 glyphs: Array("Emfy".utf16), positions: [(0, 0)])]
+        )
+        let (image, _) = try renderText(file)
+        // Under 90° the baseline runs down device +y: the first glyph near the
+        // start, a later glyph further DOWN — both present.
+        #expect(image.containsDarkPixel(in: (x: 44, y: 20, width: 26, height: 18)), "no ink near the rotated run start")
+        #expect(image.containsDarkPixel(in: (x: 44, y: 46, width: 26, height: 22)), "no ink further down the rotated baseline")
+        // The OLD bug advanced along device +x, which would place later glyphs far
+        // to the right on the START row; that region must stay empty.
+        #expect(!image.containsDarkPixel(in: (x: 80, y: 16, width: 18, height: 14)),
+                "ink leaked along device +x — the realized-advance baseline was not rotated")
+    }
+
+    @Test("a translated (non-rotated) DrawString still draws horizontally via the device path")
+    func drawStringTranslatedAxisAligned() throws {
+        let file = try textFile([
+            tPlusObject(id: 1, type: 6, payload: tFont(emSize: 20, family: "Arial")),
+            tTranslateWorld(10, 20),   // b == c == 0 → axis-aligned device branch
+            tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 0xFFFF_FFFF,
+                        rect: (5, 5, 80, 30), string: "Emfy"),
+        ])
+        let (image, _) = try renderText(file)
+        let box = try #require(inkBoundingBox(image), "translated DrawString drew no ink")
+        let w = box.maxX - box.minX, h = box.maxY - box.minY
+        #expect(w > h, "a non-rotated run should be wider than tall, got w=\(w) h=\(h)")
     }
 }
