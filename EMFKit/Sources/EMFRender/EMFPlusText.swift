@@ -91,8 +91,26 @@ enum EMFPlusText {
             guard let value = reader.u16() else { return nil }
             values.append(value)
         }
-        let positionCount = realizedAdvance ? min(count, 1) : count
-        guard let positions = reader.points(count: positionCount, compressed: false) else { return nil }
+        // Positions: normally GlyphCount entries. Under RealizedAdvance the wire is
+        // AMBIGUOUS (audit M11) — the spec's size formula says GlyphCount positions,
+        // but real emitters write ONE. Disambiguate by the bytes remaining after the
+        // glyphs: they are the positions plus an optional 24-byte matrix. A mismatch
+        // (e.g. reading a matrix out of a phantom second position) is undecodable.
+        let matrixBytes = matrixPresent == 1 ? 24 : 0
+        let positionCount: Int
+        if realizedAdvance {
+            let remaining = reader.remaining
+            if remaining == 8 + matrixBytes {
+                positionCount = min(count, 1)          // single-position wire shape
+            } else if remaining == 8 * count + matrixBytes {
+                positionCount = count                  // full-array shape (spec size formula)
+            } else {
+                return nil                             // neither → typed nil (undecodable)
+            }
+        } else {
+            positionCount = count
+        }
+        guard let readPositions = reader.points(count: positionCount, compressed: false) else { return nil }
         var matrix: CGAffineTransform?
         if matrixPresent == 1 {
             guard let m11 = reader.f32(), let m12 = reader.f32(), let m21 = reader.f32(),
@@ -101,6 +119,9 @@ enum EMFPlusText {
                 a: CGFloat(m11), b: CGFloat(m12), c: CGFloat(m21),
                 d: CGFloat(m22), tx: CGFloat(dx), ty: CGFloat(dy))
         }
+        // RealizedAdvance keeps only the run START; the rest (full-array shape) are
+        // ignored — the run advances from the first origin by the font's advances.
+        let positions = realizedAdvance ? Array(readPositions.prefix(1)) : readPositions
         return DriverStringRecord(
             brushId: brushId, options: options,
             values: values, positions: positions, matrix: matrix)
