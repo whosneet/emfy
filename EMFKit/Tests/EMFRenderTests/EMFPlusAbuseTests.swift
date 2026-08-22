@@ -82,7 +82,7 @@ private func fillRectsDirect(_ color: UInt32, _ rect: (Float, Float, Float, Floa
     })
 }
 
-/// EmfPlusSetClipRegion (§2.3.1.6): Flags low byte = region ObjectID; bits 8-11
+/// EmfPlusSetClipRegion (§2.3.1.5): Flags low byte = region ObjectID; bits 8-11
 /// carry the CombineMode (0 = Replace). No data — the region lives in the table.
 private func setClipRegion(regionId: UInt8, mode: UInt16 = 0) -> [UInt8] {
     plusRecord(0x4034, (mode << 8) | UInt16(regionId))

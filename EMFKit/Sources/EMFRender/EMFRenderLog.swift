@@ -1,8 +1,8 @@
 import EMFParse
 import Foundation
 
-/// An EMF+ feature the phase-3 playback renders APPROXIMATELY rather than
-/// exactly (primer §8: best partial output plus an honest note). One case per
+/// An EMF+ feature the playback renders APPROXIMATELY rather than exactly
+/// (primer §8: best partial output plus an honest note). One case per
 /// approximation the playback ships, so a viewer can tell precisely what was
 /// simplified. Value-comparable and `Hashable` (used as a coalescing key).
 public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
@@ -10,7 +10,8 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     case hatchBrush
     /// A path-gradient brush was rendered as a flat fill of its centre colour.
     case pathGradientBrush
-    /// A texture brush's fill was skipped (the bitmap is phase-4 scope).
+    /// A texture brush's fill was skipped — its bitmap pattern is not rendered;
+    /// a representative solid colour is used wherever one is needed instead.
     case textureBrush
     /// A pen whose brush is not solid (gradient/hatch/texture) was stroked
     /// with a representative solid colour.
@@ -275,10 +276,11 @@ public struct EMFRenderLog: Sendable, Equatable {
         /// count; `worstNativePixels`/`worstDecodedPixels` carry the largest
         /// source bitmap that was reduced and the pixel count it decoded to.
         case dibDownsampled(count: Int, worstNativePixels: Int, worstDecodedPixels: Int)
-        /// An EMF+ record type the phase-3 playback does not implement — images
-        /// (DrawImage/DrawImagePoints), text (DrawString/DrawDriverString),
-        /// serializable objects, terminal-server records, and unknown types —
-        /// was skipped. The rest of the file still plays. Coalesced by `type`.
+        /// An EMF+ record type the playback does not implement — the MultiFormat
+        /// records (0x4005–0x4007), serializable objects and terminal-server
+        /// records (0x4037–0x403A), any unknown type, and relative-point drawing
+        /// records (the P flag) — was skipped. The rest of the file still plays.
+        /// Coalesced by `type`.
         case emfPlusUnsupportedRecord(type: UInt16, count: Int)
         /// An EMF+ feature the playback rendered approximately rather than
         /// exactly (see `EMFPlusApproximation`). The shape still drew; only the

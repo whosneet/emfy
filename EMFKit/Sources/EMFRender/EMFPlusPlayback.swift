@@ -55,7 +55,7 @@ struct EMFPlusPlayback {
     let dpiX: CGFloat
     let dpiY: CGFloat
     private var state = State()
-    /// Index-keyed saved states for EmfPlusSave/Restore ([MS-EMFPLUS] §2.3.7.4/5).
+    /// Index-keyed saved states for EmfPlusSave (§2.3.7.5) / EmfPlusRestore (§2.3.7.4).
     private var savedStates: [UInt32: State] = [:]
     /// Index-keyed saved states for graphics containers (§2.3.7.1–3), kept
     /// separate so a container index cannot collide with a save index.
@@ -389,7 +389,7 @@ struct EMFPlusPlayback {
 
         case 0x4018:   // DrawCurve
             // Tension, Offset, NumSegments, Count, then points ([MS-EMFPLUS]
-            // §2.3.4.4). The whole open cardinal spline is drawn; a non-zero
+            // §2.3.4.5). The whole open cardinal spline is drawn; a non-zero
             // Offset or a NumSegments short of the spline's segment count
             // (points − 1) selects a partial run we do not honour — note it.
             guard let tension = reader.f32(), let offset = reader.u32(),

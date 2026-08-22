@@ -1,16 +1,16 @@
 import Foundation
 
-/// Deterministic byte generator for the two committed EMF+ corpus files
-/// (`corpus/handmade-emfplus-shapes.emf` and `corpus/handmade-emfplus-dual.emf`).
+/// Deterministic byte generator for the four committed EMF+ corpus files
+/// (`corpus/handmade-emfplus-{shapes,dual,image,text}.emf`).
 ///
 /// The CJK precedent (`CJKTextCorpus`): a self-contained, hand-authored EMF whose
 /// bytes are a pure function of the literals below, so each committed file is
 /// provenance-verifiable — `SnapshotEMFPlusTests` asserts the on-disk file equals
 /// the generator byte-for-byte, and re-materialises it under `EMFY_RECORD=1`.
 ///
-/// No committed EMF+ file with real EMF+ DRAWING content exists in any corpus, so
-/// these are hand-authored to cover the phase-3 EMF+ playback path that the
-/// LibreOffice shell files cannot reach:
+/// These carry real EMF+ DRAWING content: the local dual-mode corpus reaches its
+/// picture through GDI fallback records, so these hand-authored files are the only
+/// coverage for the EMF+ playback path the LibreOffice shell files cannot reach:
 ///
 /// - **shapes** is EMF+-ONLY (EmfPlusHeader Dual flag CLEAR): every EMF+ record
 ///   lives in one EMR_COMMENT_EMFPLUS, exercising object-table paths/brushes/
@@ -20,6 +20,10 @@ import Foundation
 ///   the EMF+ arbitration ([MS-EMFPLUS] §1.3.1) renders the EMF+ half plus only
 ///   the GDI records inside a GetDC window — a GDI-only rectangle placed outside
 ///   any window renders in a v1-style GDI player but MUST NOT here.
+/// - **image** is EMF+-only with an EmfPlusImage bitmap object drawn by both
+///   DrawImage (scaled) and DrawImagePoints (sheared into a parallelogram).
+/// - **text** is EMF+-only with DrawString runs (font + string-format objects)
+///   and a DrawDriverString glyph run.
 ///
 /// Every field layout is cited against [MS-EMF] / [MS-EMFPLUS]. EMF record types
 /// are the [MS-EMF] §2.1.1 RecordType values; EMF+ record types are the
@@ -325,8 +329,8 @@ enum EMFPlusCorpus {
 
     private static func plusEndOfFile() -> [UInt8] { plusRecord(0x4002, 0) }   // §2.3.3.1
     private static func getDC() -> [UInt8] { plusRecord(0x4004, 0) }           // §2.3.3.2
-    private static func resetWorldTransform() -> [UInt8] { plusRecord(0x402B, 0) }  // §2.3.9.6
-    private static func resetClip() -> [UInt8] { plusRecord(0x4031, 0) }       // §2.3.1.1
+    private static func resetWorldTransform() -> [UInt8] { plusRecord(0x402B, 0) }  // §2.3.9.2
+    private static func resetClip() -> [UInt8] { plusRecord(0x4031, 0) }       // §2.3.1.2
 
     /// EmfPlusSetAntiAliasMode (§2.3.6.1): SmoothingMode + antialias bit live in
     /// Flags; no data. Used here purely to close the preceding GetDC window.
@@ -447,7 +451,7 @@ enum EMFPlusCorpus {
         plusRecord(0x4014, UInt16(pathId), le { $0.u32(brushId) })
     }
 
-    /// EmfPlusDrawPath (§2.3.4.8): Flags low byte = path ObjectId; Data = PenId.
+    /// EmfPlusDrawPath (§2.3.4.11): Flags low byte = path ObjectId; Data = PenId.
     private static func drawPath(pathId: UInt8, penId: UInt32) -> [UInt8] {
         plusRecord(0x4015, UInt16(pathId), le { $0.u32(penId) })
     }
@@ -548,7 +552,7 @@ enum EMFPlusCorpus {
 
     // MARK: - EMF+ state records
 
-    /// EmfPlusTranslateWorldTransform (§2.3.9.8), A flag clear (pre-multiply).
+    /// EmfPlusTranslateWorldTransform (§2.3.9.7), A flag clear (pre-multiply).
     private static func translateWorld(_ dx: Float, _ dy: Float) -> [UInt8] {
         plusRecord(0x402D, 0x0000, le { $0.f32(dx); $0.f32(dy) })
     }
