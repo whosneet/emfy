@@ -474,6 +474,28 @@ private func imageObjectPayload() -> [UInt8] {
     }
 }
 
+/// A solid-colour 24bpp-RGB pixel bitmap image object (§2.2.2.2) of `side × side`
+/// source pixels — used to exercise the destination decode budget (audit H1 /
+/// A2). Bytes are B,G,R per pixel, rows padded to a 4-aligned stride.
+private func largeSolid24ImageObjectPayload(side: Int, b: UInt8, g: UInt8, r: UInt8) -> [UInt8] {
+    let stride = ((side * 24 + 31) / 32) * 4
+    var pixels = [UInt8](repeating: 0, count: stride * side)
+    for row in 0 ..< side {
+        var i = row * stride
+        for _ in 0 ..< side { pixels[i] = b; pixels[i + 1] = g; pixels[i + 2] = r; i += 3 }
+    }
+    return le { writer in
+        writer.u32(plusVersion)      // Version
+        writer.u32(1)                // Type = ImageDataTypeBitmap
+        writer.i32(Int32(side))      // Width
+        writer.i32(Int32(side))      // Height
+        writer.i32(Int32(stride))    // Stride
+        writer.u32(0x0002_1808)      // PixelFormat = 24bpp RGB
+        writer.u32(0)                // BitmapDataType = Pixel
+        writer.raw(pixels)
+    }
+}
+
 /// EmfPlusImage metafile object (§2.2.2.27): a metafile-content image.
 private func metafileImageObjectPayload() -> [UInt8] {
     le { writer in
@@ -661,5 +683,54 @@ struct EMFPlusImagePlaybackTests {
         let (pixels, log) = try renderPlus(file)
         #expect(hasApprox(log, .imageAttributes), "a tiling wrap should log .imageAttributes: \(log.entries)")
         #expect(isRed(pixels[18, 18]), "the image should still have drawn, got \(pixels[18, 18])")
+    }
+
+    // MARK: - Audit H1 / A1: one decode per object, note per draw
+
+    @Test("200 DrawImage records over one image object still render correctly (cached decode)")
+    func repeatedDrawImageRendersCorrectly() throws {
+        var records: [[UInt8]] = [plusObject(id: 1, type: 5, payload: imageObjectPayload())]
+        for _ in 0 ..< 200 {
+            records.append(drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)))
+        }
+        let (pixels, log) = try renderPlus(try plusFile(records))
+        #expect(log.isClean, "unexpected log: \(log.entries)")
+        #expect(isRed(pixels[18, 18]), "top-left quadrant, got \(pixels[18, 18])")
+        #expect(isGreen(pixels[42, 18]), "top-right quadrant, got \(pixels[42, 18])")
+        #expect(isBlue(pixels[18, 42]), "bottom-left quadrant, got \(pixels[18, 42])")
+        #expect(isWhite(pixels[42, 42]), "bottom-right quadrant, got \(pixels[42, 42])")
+    }
+
+    @Test("200 draws of an undecodable image note the skip ONCE PER DRAW (decode runs once)")
+    func repeatedUndecodableImageNotesPerDraw() throws {
+        var records: [[UInt8]] = [plusObject(id: 1, type: 5, payload: pargbImageObjectPayload())]
+        for _ in 0 ..< 200 {
+            records.append(drawImageRecord(imageId: 1, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)))
+        }
+        let (_, log) = try renderPlus(try plusFile(records))
+        // The decode is cached (see DecodedImageCacheTests), but the skip note
+        // still fires per draw so the coalesced count stays meaningful.
+        #expect(
+            log.entries.contains(.emfPlusApproximated(feature: .imageBitmapPixelFormat(0x000E_200B), count: 200)),
+            "the skip note must fire once per draw (count 200), got \(log.entries)"
+        )
+    }
+
+    // MARK: - Audit H1 / A2: pixel-path destination decode budget
+
+    @Test("a large pixel bitmap drawn into a small dest decodes downsampled and still renders")
+    func largePixelImageDownsamples() throws {
+        // 2100×2100 = 4.41 Mpx > the 4 Mpx floor → decoding for a ~40px dest
+        // falls below native (audit H1 / A2). The sampling MAGNITUDE is covered
+        // by EMFPlusImageDecoderTests.decodePixelsDownsamples; here the point is
+        // the footprint→budget→note→render wiring. Solid blue so the probe is blue.
+        let img = largeSolid24ImageObjectPayload(side: 2100, b: 255, g: 0, r: 0)
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: img),
+            drawImageRecord(imageId: 1, src: (0, 0, 2100, 2100), dest: (10, 10, 40, 40)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(hasApprox(log, .imageDownsampled), "expected .imageDownsampled, got \(log.entries)")
+        #expect(isBlue(pixels[30, 30]), "the downsampled image still rendered, got \(pixels[30, 30])")
     }
 }
