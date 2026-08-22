@@ -137,6 +137,14 @@ private extension RenderFixture {
     }
 }
 
+// Count-bomb drawing records (audit M16 / F3): a hostile u32-max count with a
+// body too short to hold the points/glyphs — the reader validates the count
+// against the record's own bytes and skips (recordUndecodable), never allocating.
+private func drawLinesCountBomb() -> [UInt8] { plusRecord(0x400D, 0, le { $0.u32(0xFFFF_FFFF) }) }
+private func fillPolygonCountBomb() -> [UInt8] { plusRecord(0x400C, 0x8000, le { $0.u32(argb(255, 0, 0, 0)); $0.u32(0xFFFF_FFFF) }) }
+private func drawCurveCountBomb() -> [UInt8] { plusRecord(0x4018, 0, le { $0.f32(0.5); $0.u32(0); $0.u32(0); $0.u32(0xFFFF_FFFF) }) }
+private func drawDriverStringCountBomb() -> [UInt8] { plusRecord(0x4036, 0x8000, le { $0.u32(argb(255, 0, 0, 0)); $0.u32(0); $0.u32(0); $0.u32(0xFFFF_FFFF) }) }
+
 @Suite("EMF+ abuse (survival through makeImage)")
 struct EMFPlusAbuseTests {
 
@@ -150,6 +158,29 @@ struct EMFPlusAbuseTests {
             return
         }
         #expect(image.width > 0 && image.height > 0, "\(label): produced a degenerate image")
+    }
+
+    /// Survives AND hands back the raster + log so a test can assert a POSITIVE
+    /// signal beyond survival (audit M16): the leading well-formed drawing's ink
+    /// and/or the honesty-channel entry the abuse produced.
+    private func rasterAndLog(_ file: EMFFile, _ label: String) -> (RasterizedImage, EMFRenderLog)? {
+        guard let (image, log) = EMFRenderer.makeImage(file) else {
+            Issue.record("\(label): makeImage returned nil"); return nil
+        }
+        guard let raster = RasterizedImage(image) else {
+            Issue.record("\(label): could not rasterize"); return nil
+        }
+        return (raster, log)
+    }
+
+    private static func isColorRed(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.r > 150 && p.g < 70 && p.b < 70 }
+    private static func isColorGreen(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.g > 110 && p.r < 90 && p.b < 90 }
+    private static func isColorBlue(_ p: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Bool { p.b > 160 && p.r < 90 && p.g < 90 }
+    private func hasUndecodable(_ log: EMFRenderLog, type: UInt16) -> Bool {
+        log.entries.contains { if case .emfPlusRecordUndecodable(let t, _) = $0 { return t == type }; return false }
+    }
+    private func hasObjectIssue(_ log: EMFRenderLog, _ kind: EMFPlusObjectIssueKind) -> Bool {
+        log.entries.contains { if case .emfPlusObjectIssue(let k, _) = $0 { return k == kind }; return false }
     }
 
     // MARK: - (a) Continued-object bomb: TotalObjectSize = u32-max, tiny chunks
@@ -170,7 +201,10 @@ struct EMFPlusAbuseTests {
 
         var fixture = RenderFixture()
         fixture.plusComment(stream)
-        expectSurvives(try fixture.parsed(), "continued-object bomb")
+        guard let (raster, _) = rasterAndLog(try fixture.parsed(), "continued-object bomb") else { return }
+        // Positive signal (M16): the trailing well-formed FillRects still drew; the
+        // 4 GiB continuation never binds or over-allocates — it simply dangles.
+        #expect(Self.isColorRed(raster[20, 20]), "the well-formed red fill should render, got \(raster[20, 20])")
     }
 
     // MARK: - (b) 64-deep and 65-deep region trees on a SetClipRegion path
@@ -193,7 +227,14 @@ struct EMFPlusAbuseTests {
 
             var fixture = RenderFixture()
             fixture.plusComment(stream)
-            expectSurvives(try fixture.parsed(), "region depth \(depth) clip")
+            guard let (raster, log) = rasterAndLog(try fixture.parsed(), "region depth \(depth) clip") else { continue }
+            #expect(Self.isColorBlue(raster[5, 5]), "the blue fill should render at depth \(depth), got \(raster[5, 5])")
+            if depth == 64 {
+                // The over-deep region decodes malformed; SetClipRegion then finds
+                // no usable region — both now surface (audit M7/D4).
+                #expect(hasObjectIssue(log, .undecodable), "a too-deep region should bind malformed: \(log.entries)")
+                #expect(hasObjectIssue(log, .missingReference), "SetClipRegion on it should note missingReference: \(log.entries)")
+            }
         }
     }
 
@@ -218,7 +259,9 @@ struct EMFPlusAbuseTests {
 
         var fixture = RenderFixture()
         fixture.plusComment(stream)
-        expectSurvives(try fixture.parsed(), "DrawString length bomb")
+        guard let (_, log) = rasterAndLog(try fixture.parsed(), "DrawString length bomb") else { return }
+        // Positive signal (M16): the lying Length is caught and the record noted.
+        #expect(hasUndecodable(log, type: 0x401C), "a 4 Gi-char DrawString should note recordUndecodable(0x401C): \(log.entries)")
     }
 
     // MARK: - (d) FillRects Count = u32-max with the S flag (no rect bytes)
@@ -235,12 +278,16 @@ struct EMFPlusAbuseTests {
             writer.u32(0xFFFF_FFFF)            // Count — the bomb
         }
         var stream = plusHeader()
-        stream += plusRecord(0x400A, 0x8000, data)
+        stream += fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20))   // well-formed leading draw
+        stream += plusRecord(0x400A, 0x8000, data)                          // the count bomb
         stream += plusEndOfFile()
 
         var fixture = RenderFixture()
         fixture.plusComment(stream)
-        expectSurvives(try fixture.parsed(), "FillRects count bomb")
+        guard let (raster, _) = rasterAndLog(try fixture.parsed(), "FillRects count bomb") else { return }
+        // Positive signal (M16): the leading fill drew; the bomb's Count is never
+        // used to size an allocation (the rect loop breaks on the first short read).
+        #expect(Self.isColorRed(raster[15, 15]), "the leading well-formed fill should render, got \(raster[15, 15])")
     }
 
     // MARK: - (e) Object record redefining id 63 ten thousand times (table churn)
@@ -261,7 +308,10 @@ struct EMFPlusAbuseTests {
 
         var fixture = RenderFixture()
         fixture.plusComment(stream)
-        expectSurvives(try fixture.parsed(), "object table churn")
+        guard let (raster, _) = rasterAndLog(try fixture.parsed(), "object table churn") else { return }
+        // Positive signal (M16): the trailing well-formed green fill still drew
+        // after 10k redefinitions churned one slot.
+        #expect(Self.isColorGreen(raster[25, 25]), "the green fill should render after the churn, got \(raster[25, 25])")
     }
 
     // MARK: - (f) GetDC window holding a GDI record whose count lies about its size
@@ -286,7 +336,10 @@ struct EMFPlusAbuseTests {
         fixture.plusComment(getDC())                        // open the GDI window
         fixture.append(type: 86, payload: poly16Body)       // EMR_POLYGON16 in-window
         fixture.plusComment(plusEndOfFile())                // close the window
-        expectSurvives(try fixture.parsed(), "GDI-in-window lying record")
+        guard let (raster, _) = rasterAndLog(try fixture.parsed(), "GDI-in-window lying record") else { return }
+        // Positive signal (M16): the EMF+ green fill rendered; the lying GDI
+        // record was caught by the point-count guard, not rendered.
+        #expect(Self.isColorGreen(raster[20, 20]), "the EMF+ green fill should render, got \(raster[20, 20])")
     }
 
     // MARK: - (g) EMF+ record claiming Size = 0x7FFFFFFC
@@ -403,4 +456,32 @@ struct EMFPlusAbuseTests {
         #expect(log.entries.contains(.emfPlusStreamIssue(kind: .recordSizeExcessPadding, count: 1)),
                 "an over-long record Size should surface recordSizeExcessPadding: \(log.entries)")
     }
+
+    // MARK: - (k) Count bombs on the remaining reader paths (audit M16 / F3)
+
+    /// A leading well-formed red fill (probed) + a count-bomb record (asserted as
+    /// recordUndecodable). Survival, positive ink, AND the honesty entry.
+    private func expectCountBomb(_ bomb: [UInt8], type: UInt16, _ label: String) throws {
+        var stream = plusHeader()
+        stream += fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20))   // well-formed leading draw
+        stream += bomb
+        stream += plusEndOfFile()
+        var fixture = RenderFixture()
+        fixture.plusComment(stream)
+        guard let (raster, log) = rasterAndLog(try fixture.parsed(), label) else { return }
+        #expect(Self.isColorRed(raster[15, 15]), "\(label): the leading fill should render, got \(raster[15, 15])")
+        #expect(hasUndecodable(log, type: type), "\(label): expected recordUndecodable(\(type)): \(log.entries)")
+    }
+
+    @Test("a DrawLines count bomb is rejected, not allocated")
+    func drawLinesCountBombSurvives() throws { try expectCountBomb(drawLinesCountBomb(), type: 0x400D, "DrawLines count bomb") }
+
+    @Test("a FillPolygon count bomb is rejected, not allocated")
+    func fillPolygonCountBombSurvives() throws { try expectCountBomb(fillPolygonCountBomb(), type: 0x400C, "FillPolygon count bomb") }
+
+    @Test("a DrawCurve count bomb is rejected, not allocated")
+    func drawCurveCountBombSurvives() throws { try expectCountBomb(drawCurveCountBomb(), type: 0x4018, "DrawCurve count bomb") }
+
+    @Test("a DrawDriverString glyph-count bomb is rejected, not allocated")
+    func drawDriverStringCountBombSurvives() throws { try expectCountBomb(drawDriverStringCountBomb(), type: 0x4036, "DrawDriverString glyph-count bomb") }
 }
