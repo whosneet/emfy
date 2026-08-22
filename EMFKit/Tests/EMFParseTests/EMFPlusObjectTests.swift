@@ -130,6 +130,27 @@ struct EMFPlusObjectEnvelopeTests {
         #expect(diags.isEmpty)
     }
 
+    @Test("a continuation chunk that lies about TotalObjectSize decodes as usual but is flagged (L10)")
+    func continuationSizeDisagreementFlagged() throws {
+        let total: UInt32 = 172
+        let chunk1 = (0 ..< 100).map { UInt8($0) }
+        let chunk2 = (100 ..< 172).map { UInt8($0) }
+        let expected = (0 ..< 172).map { UInt8($0) }
+
+        let (defs, diags) = try parseObjects([
+            objectRecord(continues: true, objectType: 1, objectID: 7, totalObjectSize: total, objectBytes: chunk1),
+            // Same id/type, but the repeated TotalObjectSize prefix lies (999 vs 172).
+            objectRecord(continues: true, objectType: 1, objectID: 7, totalObjectSize: 999, objectBytes: chunk2),
+        ])
+        // Accounting is unchanged: the opening total (172) stays authoritative.
+        #expect(defs.count == 1)
+        let def = try #require(defs.first)
+        #expect(def.objectID == 7)
+        #expect(Array(def.data) == expected, "the object decodes byte-exactly as with an honest prefix")
+        #expect(diags == [.continuationSizeDisagreement(objectID: 7, expected: 172, got: 999)],
+                "the disagreement should be the only diagnostic: \(diags)")
+    }
+
     @Test("continued object, 4 chunks → one definition, byte-exact, accounting-terminated")
     func continuedFourChunks() throws {
         let total: UInt32 = 144                          // 4 × (40-4)

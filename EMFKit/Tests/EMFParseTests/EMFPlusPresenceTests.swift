@@ -25,22 +25,24 @@ private func emfPlusRecord(
 
 /// Wraps an EMF+ record stream in an EMR_COMMENT_EMFPLUS record
 /// ([MS-EMF] §2.3.3.4): Type (70), nSize, DataSize (u32), CommentIdentifier
-/// (u32), then the stream. DataSize counts from the identifier, so it is
-/// `4 + stream.count`. Pass `identifier` to forge a non-EMF+ comment.
+/// (u32), then the stream. DataSize counts from the identifier, so honestly it
+/// is `4 + stream.count`; `dataSizeOverride` forges a lying value while nSize
+/// stays truthful. Pass `identifier` to forge a non-EMF+ comment.
 private func emfPlusComment(
     stream: [UInt8],
-    identifier: UInt32 = 0x2B46_4D45   // "EMF+"
+    identifier: UInt32 = 0x2B46_4D45,   // "EMF+"
+    dataSizeOverride: UInt32? = nil
 ) -> [UInt8] {
     var payload = FixtureBuilder()
     payload.appendUInt32(identifier)
     payload.appendBytes(stream)
-    let data = payload.bytes                      // identifier + stream
+    let data = payload.bytes                              // identifier + stream
 
     var b = FixtureBuilder()
-    b.appendUInt32(70)                            // 0  iType = EMR_COMMENT
-    b.appendUInt32(UInt32(8 + 4 + data.count))    // 4  nSize = hdr + DataSize + data
-    b.appendUInt32(UInt32(data.count))            // 8  DataSize (from identifier on)
-    b.appendBytes(data)                           // 12 identifier + EMF+ stream
+    b.appendUInt32(70)                                    // 0  iType = EMR_COMMENT
+    b.appendUInt32(UInt32(8 + 4 + data.count))            // 4  nSize = hdr + DataSize + data (truthful)
+    b.appendUInt32(dataSizeOverride ?? UInt32(data.count)) // 8  DataSize (from identifier on)
+    b.appendBytes(data)                                  // 12 identifier + EMF+ stream
     return b.bytes
 }
 
@@ -118,6 +120,17 @@ struct EMFPlusPresenceTests {
         )
         let file = try parseFile(records: [gdic])
         #expect(file.emfPlusPresence() == .none)
+    }
+
+    @Test("a DataSize<4 comment whose tail spells EMF+ is not counted → none (L9)")
+    func dataSizeBelowFourNotEMFPlus() throws {
+        // DataSize forged to 0, but the 4 identifier bytes physically follow at
+        // record offset 12. The identifier lives inside the comment DATA, so a
+        // DataSize < 4 cannot carry it — the comment must be ignored, not
+        // misread as an EMF+ shell.
+        let file = try parseFile(records: [emfPlusComment(stream: [], dataSizeOverride: 0)])
+        #expect(file.emfPlusPresence() == .none,
+                "a DataSize<4 pseudo-EMF+ comment must not flip the verdict")
     }
 
     // MARK: - Hostile streams (§8: safe stop, keep verdict, never hang)

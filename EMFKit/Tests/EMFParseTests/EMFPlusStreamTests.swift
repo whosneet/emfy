@@ -304,6 +304,20 @@ struct EMFPlusStreamTests {
         #expect(s.diagnostics == [.headerRecordMissing])
     }
 
+    @Test("a DataSize<4 comment whose tail spells EMF+ contributes nothing and raises no diagnostic (L9)")
+    func dataSizeBelowFourNotEMFPlus() throws {
+        // DataSize forged to 0, but the 4 identifier bytes physically follow at
+        // record offset 12. The identifier lives inside the comment DATA, so a
+        // DataSize < 4 cannot carry it: the comment is ignored, the saw-flag stays
+        // clear, and no spurious headerRecordMissing is raised (contrast the test
+        // above, where a genuine EMF+ comment lacks its required header).
+        let s = try parseFile(records: [emfPlusComment(stream: [], dataSizeOverride: 0)]).emfPlusStream()
+        #expect(s.records.isEmpty, "no EMF+ records: \(s.records.map(\.type))")
+        #expect(s.header == nil)
+        #expect(s.assembledByteCount == 0, "no stream bytes contributed: \(s.assembledByteCount)")
+        #expect(s.diagnostics.isEmpty, "a pseudo-EMF+ comment must not raise a diagnostic: \(s.diagnostics)")
+    }
+
     @Test("EmfPlusHeader with wrong Size/DataSize → diagnostics + best-effort decode")
     func headerSizeMustViolation() throws {
         // A header-typed record padded to 20 bytes of data (Size 32, DataSize 20)
