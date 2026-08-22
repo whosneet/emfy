@@ -136,6 +136,23 @@ private func linearGradientBrushPayload(rect: (Float, Float, Float, Float), star
     }
 }
 
+/// A linear gradient carrying BOTH blend-factor arrays (BlendFactorsV | H).
+/// Decode order is vertical THEN horizontal (§2.2.2.25). The vertical array is
+/// REVERSED (factors 1→0) and the horizontal NORMAL (0→1), so the drawn ramp
+/// reveals which array the paint uses (audit M13).
+private func linearGradientBothBlendPayload(rect: (Float, Float, Float, Float), start: UInt32, end: UInt32) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(4)    // Version, Type 4 (linear gradient)
+        writer.u32(0x18)                          // BrushDataFlags = BlendFactorsV | BlendFactorsH
+        writer.i32(4)                             // WrapMode Clamp
+        writer.f32(rect.0); writer.f32(rect.1); writer.f32(rect.2); writer.f32(rect.3)
+        writer.u32(start); writer.u32(end)        // StartColor, EndColor
+        writer.u32(0); writer.u32(0)              // Reserved1, Reserved2
+        writer.u32(2); writer.f32(0); writer.f32(1); writer.f32(1); writer.f32(0)   // Vertical:  reversed (1→0)
+        writer.u32(2); writer.f32(0); writer.f32(1); writer.f32(0); writer.f32(1)   // Horizontal: normal (0→1)
+    }
+}
+
 private func fillRectsBrush(_ brushId: UInt32, _ rect: (Float, Float, Float, Float)) -> [UInt8] {
     plusRecord(0x400A, 0x0000, le { writer in
         writer.u32(brushId); writer.u32(1)
@@ -149,6 +166,14 @@ private func fillPathDirect(_ color: UInt32, pathId: UInt8) -> [UInt8] {
 
 private func drawLines(penId: UInt8, _ points: [(Float, Float)]) -> [UInt8] {
     plusRecord(0x400D, UInt16(penId), le { writer in
+        writer.u32(UInt32(points.count))
+        for point in points { writer.f32(point.0); writer.f32(point.1) }
+    })
+}
+
+/// DrawBeziers (§2.3.4.3): float points, C flag clear. Count then the points.
+private func drawBeziers(penId: UInt8, _ points: [(Float, Float)]) -> [UInt8] {
+    plusRecord(0x4019, UInt16(penId), le { writer in
         writer.u32(UInt32(points.count))
         for point in points { writer.f32(point.0); writer.f32(point.1) }
     })
@@ -323,6 +348,21 @@ struct EMFPlusPlaybackTests {
         #expect(Int(left.r) > Int(left.b) + 40, "left of the gradient is redder, got \(left)")
         #expect(Int(right.b) > Int(right.r) + 40, "right of the gradient is bluer, got \(right)")
         #expect(log.isClean, "unexpected log: \(log.entries)")
+    }
+
+    @Test("with both blend arrays the HORIZONTAL ramp drives the fill (M13)")
+    func dualBlendArraysPickHorizontal() throws {
+        // Vertical array is reversed (blue→red), horizontal normal (red→blue). The
+        // horizontal must win, so the LEFT of the axis is red, the right blue.
+        let brush = plusObject(
+            id: 3, type: 1,
+            payload: linearGradientBothBlendPayload(
+                rect: (10, 40, 80, 20), start: argb(255, 255, 0, 0), end: argb(255, 0, 0, 255)))
+        let file = try plusFile([brush, fillRectsBrush(3, (10, 40, 80, 20))])
+        let (image, _) = try renderPlus(file)
+        let left = image[20, 50], right = image[80, 50]
+        #expect(Int(left.r) > Int(left.b) + 40, "left should be red (horizontal ramp won), got \(left)")
+        #expect(Int(right.b) > Int(right.r) + 40, "right should be blue (horizontal ramp won), got \(right)")
     }
 
     // MARK: - 2. World transform
@@ -541,6 +581,89 @@ struct EMFPlusPlaybackTests {
 
         #expect(log.isClean, "unexpected log for a full-range curve: \(log.entries)")
     }
+
+    // MARK: - Path replay honesty ([MS-EMFPLUS] §2.2.1.6 / §2.2.2.31, audit M14)
+
+    @Test("a FillPath whose last figure is a dangling bezier triple notes undecodable but still draws the completed part")
+    func fillPathDanglingBezierNoted() throws {
+        // A square (start + 3 lines) then a bezier that begins with only two of
+        // its three required points — the triple is dropped, the square remains.
+        let path = plusObject(
+            id: 1, type: 3,
+            payload: pathPayload(
+                points: [(10, 10), (40, 10), (40, 40), (10, 40), (50, 50), (60, 60)],
+                types: [0x00, 0x01, 0x01, 0x01, 0x03, 0x03]
+            )
+        )
+        let file = try plusFile([path, fillPathDirect(argb(255, 0, 0, 0), pathId: 1)])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isDark(image[25, 25]), "the completed square still fills, got \(image[25, 25])")
+        #expect(Self.isWhite(image[70, 20]), "outside the square stays background, got \(image[70, 20])")
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x4014, count: 1)),
+                "a dangling bezier triple should note recordUndecodable(0x4014): \(log.entries)")
+    }
+
+    @Test("a FillPath with an unknown point kind notes undecodable but still draws the preceding figure")
+    func fillPathUnknownKindNoted() throws {
+        // start + 3 lines (a square) then a point whose kind nibble (0x02) is not
+        // start/line/bezier — the walk stops there.
+        let path = plusObject(
+            id: 1, type: 3,
+            payload: pathPayload(
+                points: [(10, 10), (40, 10), (40, 40), (10, 40), (99, 99)],
+                types: [0x00, 0x01, 0x01, 0x01, 0x02]
+            )
+        )
+        let file = try plusFile([path, fillPathDirect(argb(255, 0, 0, 0), pathId: 1)])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isDark(image[25, 25]), "the figure before the unknown kind still fills, got \(image[25, 25])")
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x4014, count: 1)),
+                "an unknown point kind should note recordUndecodable(0x4014): \(log.entries)")
+    }
+
+    @Test("a FillPath carrying per-segment DashMode flags renders solid and notes pathDashSegment (M14)")
+    func fillPathDashModeNoted() throws {
+        // A well-formed closed square where one line point carries the DashMode
+        // flag (raw bit 4, i.e. the flags nibble's 0x01 bit → raw 0x11).
+        let path = plusObject(
+            id: 1, type: 3,
+            payload: pathPayload(
+                points: [(10, 10), (40, 10), (40, 40), (10, 40)],
+                types: [0x00, 0x11, 0x01, 0x81]
+            )
+        )
+        let file = try plusFile([path, fillPathDirect(argb(255, 0, 0, 0), pathId: 1)])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isDark(image[25, 25]), "the dashed path still fills solid, got \(image[25, 25])")
+        #expect(Self.isWhite(image[60, 60]), "outside the path stays background, got \(image[60, 60])")
+        #expect(log.entries.contains(.emfPlusApproximated(feature: .pathDashSegment, count: 1)),
+                "per-segment DashMode should note pathDashSegment: \(log.entries)")
+        #expect(!log.entries.contains(where: { if case .emfPlusRecordUndecodable = $0 { return true }; return false }),
+                "a well-formed dashed path must NOT be undecodable: \(log.entries)")
+    }
+
+    @Test("a DrawBeziers with a trailing partial triple strokes the complete curve and notes undecodable")
+    func drawBeziersDanglingRemainderNoted() throws {
+        // 5 points: start + one full control/control/end triple + a leftover
+        // point that cannot form a second curve.
+        let pen = plusObject(id: 1, type: 2, payload: penPayload(width: 3, argb: argb(255, 0, 0, 0)))
+        let file = try plusFile([
+            pen,
+            drawBeziers(penId: 1, [(10, 50), (30, 10), (70, 90), (90, 50), (95, 55)]),
+        ])
+        let (image, log) = try renderPlus(file)
+
+        var drewInk = false
+        for x in stride(from: 0, to: 100, by: 2) where !drewInk {
+            for y in stride(from: 0, to: 100, by: 2) where Self.isDark(image[x, y]) { drewInk = true; break }
+        }
+        #expect(drewInk, "the complete first bezier curve should stroke some ink")
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x4019, count: 1)),
+                "a leftover bezier point should note recordUndecodable(0x4019): \(log.entries)")
+    }
 }
 
 // MARK: - EMF+ image record fixtures ([MS-EMFPLUS] §2.2.2.2, §2.3.4.8/9)
@@ -582,6 +705,18 @@ private func largeSolid24ImageObjectPayload(side: Int, b: UInt8, g: UInt8, r: UI
         writer.u32(0x0002_1808)      // PixelFormat = 24bpp RGB
         writer.u32(0)                // BitmapDataType = Pixel
         writer.raw(pixels)
+    }
+}
+
+/// A 2×2 32bpp-ARGB image whose LEFT column is red and RIGHT column is blue —
+/// for SrcRect crop tests where the surviving column must be identifiable.
+private func twoColumnImagePayload() -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(1)        // Version, ImageDataTypeBitmap
+        writer.i32(2); writer.i32(2); writer.i32(8)   // Width, Height, Stride
+        writer.u32(0x0026_200A); writer.u32(0)        // 32bpp ARGB, BitmapDataTypePixel
+        writer.raw([0, 0, 0xFF, 0xFF, 0xFF, 0, 0, 0xFF])   // row 0: red, blue (B,G,R,A)
+        writer.raw([0, 0, 0xFF, 0xFF, 0xFF, 0, 0, 0xFF])   // row 1: red, blue
     }
 }
 
@@ -800,6 +935,30 @@ struct EMFPlusImagePlaybackTests {
         #expect(isGreen(pixels[18, 18]), "cropped region should be all green, got \(pixels[18, 18])")
         #expect(isGreen(pixels[42, 42]), "cropped region should be all green, got \(pixels[42, 42])")
         #expect(!isRed(pixels[18, 18]), "crop should have excluded the red pixel")
+    }
+
+    @Test("a fully-outside SrcRect draws nothing (M12)")
+    func drawImageFullyOutsideSrc() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: imageObjectPayload()),
+            drawImageRecord(imageId: 1, src: (5, 5, 2, 2), dest: (10, 10, 40, 40)),   // src fully outside 2×2
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isWhite(pixels[30, 30]), "a fully-outside SrcRect must draw nothing, got \(pixels[30, 30])")
+        #expect(log.isClean, "drawing nothing for an out-of-range SrcRect is correct — no log: \(log.entries)")
+    }
+
+    @Test("a half-outside SrcRect paints only the surviving fraction on the matching dest half (M12)")
+    func drawImageHalfOutsideSrc() throws {
+        let file = try plusFile([
+            plusObject(id: 1, type: 5, payload: twoColumnImagePayload()),                // left red, right blue
+            drawImageRecord(imageId: 1, src: (1, 0, 2, 2), dest: (10, 10, 40, 40)),        // src x 1..3 → right column survives
+        ])
+        let (pixels, _) = try renderPlus(file)
+        // The surviving right column (blue) maps to the dest LEFT half (x 10..30);
+        // the dest right half (nonexistent source x 2..3) stays blank.
+        #expect(isBlue(pixels[18, 25]), "the surviving blue column should paint the dest left half, got \(pixels[18, 25])")
+        #expect(isWhite(pixels[42, 25]), "the dest right half stays blank, got \(pixels[42, 25])")
     }
 
     @Test("DrawImage naming an unbound image object draws nothing and notes a missing reference")
@@ -1310,16 +1469,31 @@ struct EMFPlusFallbackClipStateTests {
         #expect(hasApprox(log, .offsetClip), "expected an offsetClip note: \(log.entries)")
     }
 
-    @Test("a non-pixel page unit is treated as pixels with a note")
-    func pageUnit() throws {
+    @Test("a Point page unit converts EXACTLY via the header DPI, with no note (M10)")
+    func pageUnitPointExact() throws {
+        // Header DPI 96 (plusHeader default) → Point factor 96/72 = 1.333, so page
+        // scale 2 becomes 2.667 device px/unit. The fill at world (10..20) lands at
+        // device (26.7..53.3) — a raw ×2 would stop at 40, so ink at (48,48) binds
+        // the DPI conversion.
         let file = try plusFile([
-            setPageTransformRecord(scale: 2, unit: 3),                 // PageUnit Point → note; scale as pixels
+            setPageTransformRecord(scale: 2, unit: 3),                 // PageUnit Point
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 10, 10)),
+        ])
+        let (pixels, log) = try renderPlus(file)
+        #expect(isRed(pixels[48, 48]), "DPI-converted extent should reach (48,48), got \(pixels[48, 48])")
+        #expect(isWhite(pixels[22, 22]), "the DPI-converted start is beyond the raw-scale start, got \(pixels[22, 22])")
+        #expect(!hasApprox(log, .pageUnit), "an exact physical unit must NOT note: \(log.entries)")
+    }
+
+    @Test("a Display page unit is a noted approximation (spec-unused)")
+    func pageUnitDisplayNote() throws {
+        let file = try plusFile([
+            setPageTransformRecord(scale: 2, unit: 1),                 // PageUnit Display → note, raw ×2
             fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 10, 10)),   // world (10..20) → ×2 → (20..40)
         ])
         let (pixels, log) = try renderPlus(file)
-        #expect(isRed(pixels[30, 30]), "the ×2 page scale placed the fill at (20..40), got \(pixels[30, 30])")
-        #expect(isWhite(pixels[15, 15]), "the unscaled position is empty — scale was applied")
-        #expect(hasApprox(log, .pageUnit), "expected a pageUnit note: \(log.entries)")
+        #expect(isRed(pixels[30, 30]), "the raw ×2 fill should render at (20..40), got \(pixels[30, 30])")
+        #expect(hasApprox(log, .pageUnit), "Display should note a pageUnit approximation: \(log.entries)")
     }
 
     @Test("a non-source-over compositing mode still blends source-over with a note")
