@@ -7,12 +7,16 @@ extension EMFPlusStream {
     /// sorted by type id ascending.
     ///
     /// `totalBytes` sums each record's on-stream footprint — the 12-byte record
-    /// header plus its `data.count` — rather than its declared `Size`. On a clean
-    /// stream this keeps the inventory total equal to `bytesConsumed`: a final
-    /// record whose declared alignment padding is cut off by the assembled-stream
-    /// boundary still contributes only the bytes actually present, so the two
-    /// figures agree. Using `declaredSize` would over-count in that case and break
-    /// the agreement, which is a phase-1 gate property.
+    /// header plus its `data.count` — rather than its declared `Size`. This equals
+    /// `bytesConsumed` ONLY when every record's `Size` is exactly 12 + DataSize
+    /// (plus a final record whose alignment padding is cut off by the assembled-
+    /// stream boundary, which contributes just the bytes present). A record with an
+    /// over-long `Size` — flagged by `EMFPlusDiagnostic.recordSizeExcessPadding`
+    /// (audit M3) — advances `bytesConsumed` by its inflated `Size` while the
+    /// inventory counts only 12 + `data.count`, so the two figures DIVERGE for that
+    /// stream. Counting the footprint (not `declaredSize`) is what keeps the two
+    /// equal on a clean stream — the phase-1 gate property — where `declaredSize`
+    /// would over-count the alignment-cut final record.
     ///
     /// This is the inventory-level view for tooling such as `emfy-dump`; resolve
     /// display names separately via `EMFPlusRecordType.displayName(for:)`.
