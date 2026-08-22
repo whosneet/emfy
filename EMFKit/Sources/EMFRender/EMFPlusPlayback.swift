@@ -138,10 +138,14 @@ struct EMFPlusPlayback {
                 continue
             }
 
-            // A non-sourcing EMF+/other comment, and the control records, never
-            // render.
+            // A non-sourcing EMF+/other comment never renders and does not affect
+            // the window (a comment that SOURCES EMF+ records is handled above).
             if record.type == Self.emrComment { continue }
-            if record.type == Self.emrHeader || record.type == Self.emrEOF { continue }
+            // A mid-file EMR_HEADER closes any open GetDC window (§1.3.1 lists the
+            // header among the window closers) and is itself not playable
+            // mid-stream; EOF ends the walk. Neither renders.
+            if record.type == Self.emrHeader { gdiWindowOpen = false; continue }
+            if record.type == Self.emrEOF { continue }
 
             if gdiWindowOpen {
                 EMFRenderer.playGDIRecord(
