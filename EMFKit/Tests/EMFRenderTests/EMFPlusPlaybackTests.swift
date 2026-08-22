@@ -56,6 +56,17 @@ private func penPayload(width: Float, argb: UInt32) -> [UInt8] {
     }
 }
 
+/// A pen carrying a preset PenDataLineStyle (PenDataFlags 0x20; the style Int32
+/// follows the fixed PenData fields, [MS-EMFPLUS] §2.2.2.33) — for the M4 dash tests.
+private func penPayloadLineStyle(width: Float, argb: UInt32, lineStyle: Int32) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(0)              // Version, Type
+        writer.u32(0x20); writer.u32(0); writer.f32(width)  // PenDataFlags=LineStyle, PenUnit, PenWidth
+        writer.i32(lineStyle)                               // OptionalData: PenDataLineStyle
+        writer.u32(plusVersion); writer.u32(0); writer.u32(argb)   // BrushObject (solid)
+    }
+}
+
 /// EmfPlusPath (§2.2.1.6) with absolute 32-bit points (Flags 0).
 private func pathPayload(points: [(Float, Float)], types: [UInt8]) -> [UInt8] {
     le { writer in
@@ -80,6 +91,16 @@ private func fillRectsDirect(_ color: UInt32, _ rect: (Float, Float, Float, Floa
     plusRecord(0x400A, 0x8000, le { writer in
         writer.u32(color); writer.u32(1)
         writer.f32(rect.0); writer.f32(rect.1); writer.f32(rect.2); writer.f32(rect.3)
+    })
+}
+
+/// A single FillRects record carrying TWO direct-colour rects — for the M6
+/// winding (union) test.
+private func fillRectsDirectTwo(_ color: UInt32, _ r1: (Float, Float, Float, Float), _ r2: (Float, Float, Float, Float)) -> [UInt8] {
+    plusRecord(0x400A, 0x8000, le { writer in
+        writer.u32(color); writer.u32(2)
+        writer.f32(r1.0); writer.f32(r1.1); writer.f32(r1.2); writer.f32(r1.3)
+        writer.f32(r2.0); writer.f32(r2.1); writer.f32(r2.2); writer.f32(r2.3)
     })
 }
 
@@ -229,6 +250,19 @@ struct EMFPlusPlaybackTests {
         let pixel = image[20, 20]
         #expect(pixel.r == 255 && pixel.g == 0 && pixel.b == 0, "expected exact red, got \(pixel)")
         #expect(Self.isWhite(image[60, 60]), "outside the rect stays background")
+        #expect(log.isClean, "unexpected log: \(log.entries)")
+    }
+
+    @Test("FillRects fills the UNION of overlapping rects in one record (winding, M6)")
+    func fillRectsUnionOverlap() throws {
+        // r1 (10,10)-(40,40), r2 (30,30)-(60,60) → overlap (30,30)-(40,40). Even-odd
+        // would leave the overlap an unfilled hole; winding fills the union.
+        let file = try plusFile([fillRectsDirectTwo(argb(255, 255, 0, 0), (10, 10, 30, 30), (30, 30, 30, 30))])
+        let (image, log) = try renderPlus(file)
+        #expect(Self.isRed(image[35, 35]), "the overlap center must be FILLED (winding), got \(image[35, 35])")
+        #expect(Self.isRed(image[15, 15]), "r1 non-overlap filled, got \(image[15, 15])")
+        #expect(Self.isRed(image[55, 55]), "r2 non-overlap filled, got \(image[55, 55])")
+        #expect(Self.isWhite(image[80, 80]), "outside stays background, got \(image[80, 80])")
         #expect(log.isClean, "unexpected log: \(log.entries)")
     }
 
@@ -841,5 +875,164 @@ struct EMFPlusImagePlaybackTests {
         let (pixels, log) = try renderPlus(file)
         #expect(hasApprox(log, .imageDownsampled), "expected .imageDownsampled, got \(log.entries)")
         #expect(isBlue(pixels[30, 30]), "the downsampled image still rendered, got \(pixels[30, 30])")
+    }
+}
+
+// MARK: - Preset pen dash styles (audit M4 / E1)
+
+@Suite("EMF+ preset pen dashes")
+struct EMFPlusPenDashTests {
+
+    private func makePenData(width: Float = 4, lineStyle: Int32? = nil, dashedLine: [Float]? = nil, dashOffset: Float? = nil) -> EMFPlusPenData {
+        EMFPlusPenData(
+            flags: 0, unit: 0, width: width, transform: nil, startCap: nil, endCap: nil, join: nil,
+            miterLimit: nil, lineStyle: lineStyle, dashedLineCap: nil, dashOffset: dashOffset,
+            dashedLine: dashedLine, penAlignment: nil, compoundLine: nil, customStartCap: nil, customEndCap: nil)
+    }
+    private func makePen(_ data: EMFPlusPenData) -> EMFPlusPen {
+        EMFPlusPen(
+            version: plusVersion, type: 0, penData: data,
+            brush: EMFPlusBrush(version: plusVersion, brushType: EMFPlusBrushType(rawValue: 0),
+                                data: .solid(EMFPlusARGB(blue: 0, green: 0, red: 0, alpha: 255))))
+    }
+    private func dashOf(_ data: EMFPlusPenData) -> [CGFloat] {
+        var log = EMFRenderLog()
+        return EMFPlusPaint.strokeStyle(makePen(data), full: .identity, log: &log).dash
+    }
+
+    @Test("a preset LineStyle maps to the GDI dash pattern (× width)")
+    func presetPatterns() {
+        #expect(dashOf(makePenData(width: 4, lineStyle: 1)) == [12, 4])              // Dash [3,1]
+        #expect(dashOf(makePenData(width: 4, lineStyle: 2)) == [4, 4])               // Dot [1,1]
+        #expect(dashOf(makePenData(width: 4, lineStyle: 3)) == [12, 4, 4, 4])        // DashDot
+        #expect(dashOf(makePenData(width: 4, lineStyle: 4)) == [12, 4, 4, 4, 4, 4])  // DashDotDot
+    }
+
+    @Test("a custom DashedLine array wins over a preset LineStyle")
+    func customArrayWins() {
+        #expect(dashOf(makePenData(width: 4, lineStyle: 1, dashedLine: [5, 2])) == [20, 8],
+                "custom [5,2]×4 should win over the Dash preset")
+    }
+
+    @Test("an absent/zero/unknown/Custom LineStyle stays solid")
+    func unknownStaysSolid() {
+        #expect(dashOf(makePenData(lineStyle: nil)).isEmpty)
+        #expect(dashOf(makePenData(lineStyle: 0)).isEmpty)
+        #expect(dashOf(makePenData(lineStyle: 99)).isEmpty)
+        #expect(dashOf(makePenData(lineStyle: 5)).isEmpty, "Custom with no array stays solid")
+    }
+
+    @Test("a LineStyle=Dash pen strokes a dashed line (on-dash inked, in-gap clean)")
+    func dashPenStrokesDashed() throws {
+        // width 6 → Dash [3,1]×6 = [18,6]; line from x=5 → on [5,23), gap [23,29).
+        let pen = plusObject(id: 1, type: 2, payload: penPayloadLineStyle(width: 6, argb: argb(255, 0, 0, 0), lineStyle: 1))
+        let file = try plusFile([pen, drawLines(penId: 1, [(5, 50), (95, 50)])])
+        let (image, log) = try renderPlus(file)
+        #expect(image.containsDarkPixel(in: (x: 8, y: 46, width: 8, height: 8)), "on-dash segment should be inked")
+        #expect(!image.containsDarkPixel(in: (x: 24, y: 46, width: 3, height: 8)), "in-gap window should be clean")
+        #expect(log.isClean, "a preset dash is correct behavior — no note expected: \(log.entries)")
+    }
+}
+
+/// EmfPlusFillPie (§2.3.4.12), S flag (direct ARGB): BrushId, StartAngle,
+/// SweepAngle (f32), RectData (RectF) — for the E2 makeImage probe.
+private func fillPieDirect(_ color: UInt32, start: Float, sweep: Float, _ rect: (Float, Float, Float, Float)) -> [UInt8] {
+    plusRecord(0x4010, 0x8000, le { writer in
+        writer.u32(color)
+        writer.f32(start); writer.f32(sweep)
+        writer.f32(rect.0); writer.f32(rect.1); writer.f32(rect.2); writer.f32(rect.3)
+    })
+}
+
+/// Every point emitted by a path, in order (curve control points included) —
+/// so an arc's FIRST point is the on-ellipse start and its LAST is the endpoint.
+private func pathPoints(_ path: CGPath) -> [CGPoint] {
+    var points: [CGPoint] = []
+    path.applyWithBlock { elementPtr in
+        let element = elementPtr.pointee
+        switch element.type {
+        case .moveToPoint, .addLineToPoint:
+            points.append(element.points[0])
+        case .addQuadCurveToPoint:
+            points.append(element.points[0]); points.append(element.points[1])
+        case .addCurveToPoint:
+            points.append(element.points[0]); points.append(element.points[1]); points.append(element.points[2])
+        case .closeSubpath:
+            break
+        @unknown default:
+            break
+        }
+    }
+    return points
+}
+
+private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+    (((a.x - b.x) * (a.x - b.x)) + ((a.y - b.y) * (a.y - b.y))).squareRoot()
+}
+
+// MARK: - Arc/pie true-angle convention (audit M5 / E2 + L12)
+
+@Suite("EMF+ arc angle convention")
+struct EMFPlusArcTests {
+
+    @Test("an elliptical arc's start point is the TRUE-angle ray∩ellipse, not the parametric point")
+    func ellipticalArcStartIsTrueAngle() {
+        let path = CGMutablePath()
+        // rect 200×100 → rx=100, ry=50, center (100,50). Start 45° true, sweep 90°.
+        EMFPlusGeometry.appendArc(rect: CGRect(x: 0, y: 0, width: 200, height: 100),
+                                  startDegrees: 45, sweepDegrees: 90, pie: false, to: path, transform: .identity)
+        let start = pathPoints(path).first!
+        #expect(distance(start, CGPoint(x: 144.72, y: 94.72)) < 0.5,
+                "true-angle start should be ≈(144.72, 94.72), got \(start)")
+        // Bind the CONVERSION, not just the tolerance: far from the old parametric
+        // point (170.71, 85.36).
+        #expect(distance(start, CGPoint(x: 170.71, y: 85.36)) > 10,
+                "must differ from the old parametric point, got \(start)")
+    }
+
+    @Test("a circular arc is unchanged (parametric == true)")
+    func circularArcIsIdentity() {
+        let path = CGMutablePath()
+        // rect 100×100 → circle rx=ry=50, center (50,50). Start 45° → (85.36, 85.36).
+        EMFPlusGeometry.appendArc(rect: CGRect(x: 0, y: 0, width: 100, height: 100),
+                                  startDegrees: 45, sweepDegrees: 90, pie: false, to: path, transform: .identity)
+        let start = pathPoints(path).first!
+        #expect(distance(start, CGPoint(x: 85.36, y: 85.36)) < 0.5,
+                "a circle's start point is unchanged, got \(start)")
+    }
+
+    @Test("a zero-sweep arc and pie emit an empty path (L12)")
+    func zeroSweepEmpty() {
+        let arc = CGMutablePath()
+        EMFPlusGeometry.appendArc(rect: CGRect(x: 0, y: 0, width: 100, height: 100),
+                                  startDegrees: 30, sweepDegrees: 0, pie: false, to: arc, transform: .identity)
+        #expect(arc.isEmpty, "a zero-sweep arc draws nothing")
+        let pie = CGMutablePath()
+        EMFPlusGeometry.appendArc(rect: CGRect(x: 0, y: 0, width: 100, height: 100),
+                                  startDegrees: 30, sweepDegrees: 0, pie: true, to: pie, transform: .identity)
+        #expect(pie.isEmpty, "a zero-sweep pie draws nothing")
+    }
+
+    @Test("a negative sweep lands its endpoint on the correct (lower) side")
+    func negativeSweepEndpoint() {
+        let path = CGMutablePath()
+        // Start 45° (upper right), sweep -90° → end at true -45° (lower right).
+        EMFPlusGeometry.appendArc(rect: CGRect(x: 0, y: 0, width: 200, height: 100),
+                                  startDegrees: 45, sweepDegrees: -90, pie: false, to: path, transform: .identity)
+        let points = pathPoints(path)
+        let start = points.first!, end = points.last!
+        #expect(start.y > 50 && end.y < 50, "start is above center, endpoint below, got start \(start) end \(end)")
+        #expect(end.x > 100, "endpoint stays on the right (true -45°), got \(end)")
+    }
+
+    @Test("a FillPie renders its wedge on the true-angle side (makeImage probe)")
+    func fillPieRendersWedge() throws {
+        // Ellipse rect (10,10,80,60) → rx=40, ry=30, center (50,40). Start 45°,
+        // sweep 90° → wedge spans true 45°→135° (the lower-middle region).
+        let file = try plusFile([fillPieDirect(argb(255, 255, 0, 0), start: 45, sweep: 90, (10, 10, 80, 60))])
+        let (image, _) = try renderPlus(file)
+        let inside = image[50, 60]
+        #expect(inside.r > 200 && inside.g < 60 && inside.b < 60, "the wedge interior should be red, got \(inside)")
+        #expect(image[50, 15].r > 230, "the opposite side stays background, got \(image[50, 15])")
     }
 }
