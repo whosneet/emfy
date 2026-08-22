@@ -81,6 +81,50 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     case stringFormatSimplified
 }
 
+/// Which EMF+ stream reassembly/walk issue reached the render log (audit M7).
+/// One case per `EMFPlusDiagnostic` ([MS-EMFPLUS] §2.3), payload dropped — the
+/// parse-level diagnostics keep the offsets/sizes; the log keeps kind + count so
+/// a viewer can say the EMF+ stream was truncated, clamped, or malformed.
+public enum EMFPlusStreamIssueKind: Sendable, Equatable, Hashable {
+    case commentDataSizeClamped
+    case recordSizeTooSmall
+    case recordSizeNotAligned
+    case recordDataSizeExceedsSize
+    case recordDataTruncated
+    case trailingBytes
+    case headerRecordMissing
+    case headerUnexpectedSize
+    case headerUnexpectedDataSize
+
+    /// Maps a parse-level `EMFPlusDiagnostic` onto its render-log kind (1:1).
+    init(_ diagnostic: EMFPlusDiagnostic) {
+        switch diagnostic {
+        case .commentDataSizeClamped: self = .commentDataSizeClamped
+        case .recordSizeTooSmall: self = .recordSizeTooSmall
+        case .recordSizeNotAligned: self = .recordSizeNotAligned
+        case .recordDataSizeExceedsSize: self = .recordDataSizeExceedsSize
+        case .recordDataTruncated: self = .recordDataTruncated
+        case .trailingBytes: self = .trailingBytes
+        case .headerRecordMissing: self = .headerRecordMissing
+        case .headerUnexpectedSize: self = .headerUnexpectedSize
+        case .headerUnexpectedDataSize: self = .headerUnexpectedDataSize
+        }
+    }
+}
+
+/// Which unresolved-object condition a draw hit (audit M7).
+public enum EMFPlusObjectIssueKind: Sendable, Equatable, Hashable {
+    /// A draw referenced a slot with no usable value — unbound, the wrong type,
+    /// or a malformed decode (all read as nil through the typed accessors).
+    case missingReference
+    /// An EmfPlusObject named a table index outside 0–63; the object was dropped
+    /// ([MS-EMFPLUS] §3.1.2 caps the table at 64 slots).
+    case invalidID
+    /// An EmfPlusObject's payload could not be decoded (`.malformed`); the slot
+    /// still took the malformed value (stream truth), but nothing can use it.
+    case undecodable
+}
+
 /// The log-and-skip surface for a render pass (primer §8, §10.8).
 ///
 /// Rendering never fails — it always produces best-effort output. Anything the
@@ -223,6 +267,20 @@ public struct EMFRenderLog: Sendable, Equatable {
         /// exactly (see `EMFPlusApproximation`). The shape still drew; only the
         /// fidelity of that one aspect was reduced. Coalesced by `feature`.
         case emfPlusApproximated(feature: EMFPlusApproximation, count: Int)
+        /// An EMF+ stream reassembly/walk issue surfaced from parse-time
+        /// diagnostics (audit M7): the EMF+ record stream was truncated, clamped,
+        /// or malformed, so playback saw only a prefix (or nothing). Surfaced on
+        /// BOTH branches — a dual file that fell back to GDI still reports its
+        /// broken EMF+ half. Coalesced by `kind`.
+        case emfPlusStreamIssue(kind: EMFPlusStreamIssueKind, count: Int)
+        /// A drawing record's body failed its reader/decode guards and was
+        /// skipped (audit M7): a truncated/garbled DrawString, FillRects, image
+        /// record, etc. Coalesced by record `type`.
+        case emfPlusRecordUndecodable(type: UInt16, count: Int)
+        /// A drawing record referenced an object the table could not supply, or an
+        /// EmfPlusObject could not be bound (audit M7 — see `EMFPlusObjectIssueKind`).
+        /// Coalesced by `kind`.
+        case emfPlusObjectIssue(kind: EMFPlusObjectIssueKind, count: Int)
     }
 
     /// Every logged event, in the order it was raised. The coalesced families
@@ -267,6 +325,9 @@ public struct EMFRenderLog: Sendable, Equatable {
         case dibDownsampled
         case emfPlusUnsupported(UInt16)
         case emfPlusApprox(EMFPlusApproximation)
+        case emfPlusStreamIssue(EMFPlusStreamIssueKind)
+        case emfPlusRecordUndecodable(UInt16)
+        case emfPlusObjectIssue(EMFPlusObjectIssueKind)
     }
 
     /// A `Hashable` surrogate for `DIBUnsupportedReason?` (which is not itself
@@ -442,6 +503,36 @@ public struct EMFRenderLog: Sendable, Equatable {
             return
         }
         appendDistinct(.emfPlusApproximated(feature: feature, count: 1), key: .emfPlusApprox(feature))
+    }
+
+    /// Records one EMF+ stream reassembly/walk issue, coalescing by `kind` (audit M7).
+    mutating func noteEMFPlusStreamIssue(_ kind: EMFPlusStreamIssueKind) {
+        if let index = coalesceIndex[.emfPlusStreamIssue(kind)],
+           case .emfPlusStreamIssue(_, let c) = entries[index] {
+            entries[index] = .emfPlusStreamIssue(kind: kind, count: c + 1)
+            return
+        }
+        appendDistinct(.emfPlusStreamIssue(kind: kind, count: 1), key: .emfPlusStreamIssue(kind))
+    }
+
+    /// Records one undecodable drawing record, coalescing by record `type` (audit M7).
+    mutating func noteEMFPlusRecordUndecodable(type: UInt16) {
+        if let index = coalesceIndex[.emfPlusRecordUndecodable(type)],
+           case .emfPlusRecordUndecodable(_, let c) = entries[index] {
+            entries[index] = .emfPlusRecordUndecodable(type: type, count: c + 1)
+            return
+        }
+        appendDistinct(.emfPlusRecordUndecodable(type: type, count: 1), key: .emfPlusRecordUndecodable(type))
+    }
+
+    /// Records one unresolved-object issue, coalescing by `kind` (audit M7).
+    mutating func noteEMFPlusObjectIssue(_ kind: EMFPlusObjectIssueKind) {
+        if let index = coalesceIndex[.emfPlusObjectIssue(kind)],
+           case .emfPlusObjectIssue(_, let c) = entries[index] {
+            entries[index] = .emfPlusObjectIssue(kind: kind, count: c + 1)
+            return
+        }
+        appendDistinct(.emfPlusObjectIssue(kind: kind, count: 1), key: .emfPlusObjectIssue(kind))
     }
 
     /// Records any non-coalesced event verbatim.
