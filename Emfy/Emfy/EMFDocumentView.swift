@@ -141,20 +141,26 @@ struct EMFDocumentView: View {
 
     // MARK: - EMF+ notice
 
-    /// True when the render log recorded at least one skipped EMF+ record type.
-    /// EMF+ geometry, gradients, images, and text all render now, so this fires
-    /// only for genuinely unsupported (exotic or unknown) EMF+ records — the
-    /// honest signal that some content is missing. Approximated EMF+ features
-    /// are surfaced in Render Details, not here.
+    /// True when the render log shows EMF+ content that was NOT rendered: an
+    /// unsupported record type, a stream that couldn't be fully read, a drawing
+    /// record whose body was undecodable, or an unresolved/invalid object
+    /// reference (audit M7). EMF+ geometry, gradients, images, and text all
+    /// render now, so this is the honest signal that some content is missing or
+    /// broken. Approximated EMF+ features (still drawn) are surfaced in Render
+    /// Details, not here.
     private var hasUnsupportedEMFPlusContent: Bool {
-        document.renderLog.contains {
-            if case .emfPlusUnsupportedRecord = $0 { return true }
-            return false
+        document.renderLog.contains { entry in
+            switch entry {
+            case .emfPlusUnsupportedRecord, .emfPlusStreamIssue, .emfPlusRecordUndecodable, .emfPlusObjectIssue:
+                return true
+            default:
+                return false
+            }
         }
     }
 
     private var plusNotice: some View {
-        Text("Some EMF+ content types in this file aren't supported yet — see Render Details.")
+        Text("Some EMF+ content in this file isn't supported or couldn't be read — see Render Details.")
             .font(.callout)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -426,6 +432,12 @@ private extension EMFRenderLog.Entry {
             return "Skipped unsupported EMF+ record type \(String(format: "0x%04X", type)) (\(count) occurrence\(count == 1 ? "" : "s"))."
         case .emfPlusApproximated(let feature, let count):
             return "Approximated EMF+ \(feature.userDescription) (\(count) occurrence\(count == 1 ? "" : "s"))."
+        case .emfPlusStreamIssue(let kind, let count):
+            return "Couldn't fully read the EMF+ data — \(kind.userDescription) (\(count) occurrence\(count == 1 ? "" : "s"))."
+        case .emfPlusRecordUndecodable(let type, let count):
+            return "Skipped an unreadable EMF+ drawing record of type \(String(format: "0x%04X", type)) (\(count) occurrence\(count == 1 ? "" : "s"))."
+        case .emfPlusObjectIssue(let kind, let count):
+            return "\(kind.userDescription) (\(count) occurrence\(count == 1 ? "" : "s"))."
         }
     }
 }
@@ -477,6 +489,44 @@ private extension EMFPlusApproximation {
             return "a compressed image too large for this view (skipped)"
         case .stringFormatSimplified:
             return "advanced text formatting as a single left-to-right line"
+        }
+    }
+}
+
+private extension EMFPlusStreamIssueKind {
+    var userDescription: String {
+        switch self {
+        case .commentDataSizeClamped:
+            return "an EMF+ comment's declared size ran past its record"
+        case .recordSizeTooSmall:
+            return "an EMF+ record size below the header minimum"
+        case .recordSizeNotAligned:
+            return "an unaligned EMF+ record size"
+        case .recordDataSizeExceedsSize:
+            return "an EMF+ record's data size exceeded its record size"
+        case .recordDataTruncated:
+            return "a truncated EMF+ record running past the stream"
+        case .trailingBytes:
+            return "leftover bytes after the last EMF+ record"
+        case .headerRecordMissing:
+            return "a missing EMF+ header record"
+        case .headerUnexpectedSize:
+            return "an unexpected EMF+ header size"
+        case .headerUnexpectedDataSize:
+            return "an unexpected EMF+ header data size"
+        }
+    }
+}
+
+private extension EMFPlusObjectIssueKind {
+    var userDescription: String {
+        switch self {
+        case .missingReference:
+            return "A drawing record referenced an EMF+ object that wasn't available"
+        case .invalidID:
+            return "An EMF+ object used an out-of-range table slot and was dropped"
+        case .undecodable:
+            return "An EMF+ object definition couldn't be decoded"
         }
     }
 }
