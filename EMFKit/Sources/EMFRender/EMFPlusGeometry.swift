@@ -214,11 +214,13 @@ enum EMFPlusGeometry {
 
     /// Appends the arc (open) or pie wedge (closed, through the centre) of the
     /// ellipse inscribed in `rect`, from `startDegrees` sweeping `sweepDegrees`
-    /// ([MS-EMFPLUS] §2.3.4.2/§2.3.4.12). EMF+ angles are measured from the
-    /// x-axis with a POSITIVE sweep clockwise in the (y-down) world space, so a
-    /// point at angle θ is (cx + rx·cosθ, cy + ry·sinθ). The arc is emitted as
-    /// cubic segments of at most 90° using the standard 4/3·tan(Δ/4) control
-    /// construction (the same auditable approach as the GDI `PathBuilder`).
+    /// ([MS-EMFPLUS] §2.3.4.2/§2.3.4.12). StartAngle/SweepAngle are TRUE angles —
+    /// the endpoint is the ray∩ellipse at that angle (matching GDI+ DrawArc), NOT
+    /// the ellipse's parametric angle. A point on the ellipse in true direction θ
+    /// has tan t = (rx/ry)·tan θ (quadrant-preserved), so the parametric angle is
+    /// t = atan2(rx·sinθ, ry·cosθ). For a circle (rx==ry) this is the identity,
+    /// and at 90° multiples t == θ. The arc is emitted as cubic segments of at
+    /// most 90° (parametric) via the standard 4/3·tan(Δ/4) control construction.
     static func appendArc(
         rect: CGRect,
         startDegrees: Float,
@@ -230,13 +232,35 @@ enum EMFPlusGeometry {
         let rx = rect.width / 2
         let ry = rect.height / 2
         guard rx != 0, ry != 0, rect.width.isFinite, rect.height.isFinite else { return }
+        // §2.3.4.2 / GDI+ DrawArc: a zero sweep draws nothing — arc AND pie (L12).
+        guard sweepDegrees != 0 else { return }
         let cx = rect.midX
         let cy = rect.midY
 
-        let start = Double(startDegrees) * .pi / 180
+        let startTrue = Double(startDegrees) * .pi / 180
         // §2.3.4.2: SweepAngle is clamped to [-360, 360].
         let sweepClamped = max(-360, min(360, Double(sweepDegrees)))
-        let sweep = sweepClamped * .pi / 180
+        let endTrue = startTrue + sweepClamped * .pi / 180
+
+        // True angle → parametric angle (see the doc comment).
+        func parametric(_ theta: Double) -> Double { atan2(rx * sin(theta), ry * cos(theta)) }
+        let t0 = parametric(startTrue)
+        // Continuous unwrap: t(θ) increases monotonically and gains 2π per turn,
+        // so the parametric sweep takes the sign and winding of the true sweep.
+        let sweepParam: Double
+        if abs(sweepClamped) == 360 {
+            sweepParam = sweepClamped > 0 ? 2 * .pi : -2 * .pi
+        } else {
+            var delta = parametric(endTrue) - t0
+            if sweepClamped > 0 {
+                while delta <= 0 { delta += 2 * .pi }
+                while delta > 2 * .pi { delta -= 2 * .pi }
+            } else {
+                while delta >= 0 { delta -= 2 * .pi }
+                while delta < -2 * .pi { delta += 2 * .pi }
+            }
+            sweepParam = delta
+        }
 
         func point(_ theta: Double) -> CGPoint {
             CGPoint(x: cx + rx * cos(theta), y: cy + ry * sin(theta))
@@ -245,17 +269,17 @@ enum EMFPlusGeometry {
             CGVector(dx: -rx * sin(theta), dy: ry * cos(theta))
         }
 
-        let segments = max(1, Int((abs(sweep) / (.pi / 2)).rounded(.up)))
-        let step = sweep / Double(segments)
+        let segments = max(1, Int((abs(sweepParam) / (.pi / 2)).rounded(.up)))
+        let step = sweepParam / Double(segments)
 
         if pie {
             out.move(to: CGPoint(x: cx, y: cy), transform: t)
-            out.addLine(to: point(start), transform: t)
+            out.addLine(to: point(t0), transform: t)
         } else {
-            out.move(to: point(start), transform: t)
+            out.move(to: point(t0), transform: t)
         }
 
-        var theta = start
+        var theta = t0
         for _ in 0 ..< segments {
             let next = theta + step
             let alpha = 4.0 / 3.0 * tan(step / 4)
