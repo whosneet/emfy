@@ -97,7 +97,7 @@ struct EMFPlusPerfTests {
         return try fixture.parsed()
     }
 
-    @Test("render time scales sub-quadratically with EMF+ record count", .serialized)
+    @Test("render time scales sub-quadratically with EMF+ record count")
     func fillRectsScalingSubQuadratic() throws {
         let small = try Self.makeFillRectsFile(count: 1000)
         let large = try Self.makeFillRectsFile(count: 8000)   // 8× the records
