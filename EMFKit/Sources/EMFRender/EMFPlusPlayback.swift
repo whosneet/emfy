@@ -381,16 +381,35 @@ struct EMFPlusPlayback {
         let horizontal = format?.stringAlignment ?? 0   // StringAlignmentNear
         let vertical = format?.lineAlign ?? 0
 
+        // Hybrid (audit H2): an axis-aligned world→device transform (b == c == 0 —
+        // the overwhelmingly common case) keeps the exact device-space path, so
+        // every existing baseline stays byte-stable; a rotated/sheared transform
+        // takes the world-space branch so glyphs follow the rotated baseline
+        // (Excel/PowerPoint chart axis titles) instead of drawing a silent
+        // upright line — the GDI path already rotates via escapement.
+        if worldToDevice.b == 0, worldToDevice.c == 0 {
+            drawStringDeviceSpace(decoded.string, font: font, color: color, layoutRect: decoded.layoutRect,
+                                  horizontal: horizontal, vertical: vertical, log: &log)
+        } else {
+            drawStringWorldSpace(decoded.string, font: font, color: color, layoutRect: decoded.layoutRect,
+                                 horizontal: horizontal, vertical: vertical, log: &log)
+        }
+    }
+
+    /// Axis-aligned DrawString: the exact pre-H2 device-space path. The font is
+    /// device-sized, the LayoutRect maps to device by `worldToDevice`, and the
+    /// glyph outlines are placed in device space (base carries the canvas fit +
+    /// single y-flip), then flipped per-baseline so they render UPRIGHT.
+    private func drawStringDeviceSpace(
+        _ string: String, font: EMFPlusFont, color: CGColor, layoutRect: CGRect,
+        horizontal: UInt32, vertical: UInt32, log: inout EMFRenderLog
+    ) {
         let sized = sizedFont(font, log: &log)
-        guard let line = makeCTLine(decoded.string, font: sized, color: color) else { return }
+        guard let line = makeCTLine(string, font: sized, color: color) else { return }
         var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
         let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
 
-        // LayoutRect (world) → device. An axis-aligned world transform (the common
-        // case) maps exactly; a rotated/sheared transform yields its bounding box
-        // (best-effort — glyphs stay upright, the same approximation family as the
-        // GDI text path's average-scale sizing).
-        let rectDevice = decoded.layoutRect.applying(worldToDevice)
+        let rectDevice = layoutRect.applying(worldToDevice)
         let origin = EMFPlusText.drawStringOrigin(
             rectDevice: rectDevice, lineWidth: lineWidth, ascent: ascent, descent: descent,
             horizontal: horizontal, vertical: vertical)
@@ -403,6 +422,43 @@ struct EMFPlusPlayback {
         // the baseline origin, then flip y so glyphs render UPRIGHT through base's
         // y-down→y-up flip — the same discipline as the GDI TextDrawer.
         context.concatenate(base)
+        context.translateBy(x: origin.x, y: origin.y)
+        context.scaleBy(x: 1, y: -1)
+        context.textPosition = .zero
+        CTLineDraw(line, context)
+    }
+
+    /// Rotated/sheared DrawString (audit H2): draws in WORLD space so the world
+    /// transform rotates the glyph outlines. The font is world-sized (the CTM's
+    /// `worldToDevice` supplies the scaling), the alignment origin and metrics are
+    /// all in world units (LayoutRect is already world), and the per-baseline
+    /// y-flip is done inside the transformed frame — the same flip discipline as
+    /// the device path, just after `worldToDevice`. The clip is device-space, so
+    /// it is applied (through `base`) BEFORE entering world space.
+    private func drawStringWorldSpace(
+        _ string: String, font: EMFPlusFont, color: CGColor, layoutRect: CGRect,
+        horizontal: UInt32, vertical: UInt32, log: inout EMFRenderLog
+    ) {
+        let sized = worldSizedFont(font, log: &log)
+        guard let line = makeCTLine(string, font: sized, color: color) else { return }
+        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+
+        // Origin + metrics are all WORLD units; `worldToDevice` (in the CTM below)
+        // applies the rotation/scale. `drawStringOrigin` is space-agnostic — the
+        // `rectDevice` label is historical; here the rect is world.
+        let origin = EMFPlusText.drawStringOrigin(
+            rectDevice: layoutRect, lineWidth: lineWidth, ascent: ascent, descent: descent,
+            horizontal: horizontal, vertical: vertical)
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        state.clip.apply(to: context, deviceToTarget: base)
+        context.setShouldAntialias(state.antialias)
+        // device→target (base) then world→device (worldToDevice): the CTM now maps
+        // world→canvas, so glyphs drawn here rotate with the world transform.
+        context.concatenate(base)
+        context.concatenate(worldToDevice)
         context.translateBy(x: origin.x, y: origin.y)
         context.scaleBy(x: 1, y: -1)
         context.textPosition = .zero
@@ -499,17 +555,41 @@ struct EMFPlusPlayback {
         return result
     }
 
-    /// The DC font resolved through the shared `FontMapper` substitution machinery
-    /// (family + bold/italic traits) and sized to DEVICE units. EmSize is
-    /// interpreted per its SizeUnit ([MS-EMFPLUS] §2.1.1.32): World/Display units
-    /// scale by the world→device average scale (the same basis as pen widths and
-    /// GDI text); Pixel is already device pixels. Guarded like
-    /// FontMapper.devicePointSize — floored at 1 and capped so a hostile EmSize
-    /// cannot feed CoreText an enormous outline-flatten size (§8).
-    private func sizedFont(_ font: EMFPlusFont, log: inout EMFRenderLog) -> CTFont {
+    /// The DEVICE-space point size for `font`. EmSize is interpreted per its
+    /// SizeUnit ([MS-EMFPLUS] §2.1.1.32): World/Display units scale by the
+    /// world→device average scale (the same basis as pen widths and GDI text);
+    /// Pixel is already device pixels. Guarded like FontMapper.devicePointSize —
+    /// floored at 1 and capped so a hostile EmSize cannot feed CoreText an
+    /// enormous outline-flatten size (§8).
+    private func deviceFontSize(_ font: EMFPlusFont) -> CGFloat {
         let scale: CGFloat = font.sizeUnit == 0x02 ? 1 : StrokeMapper.averageScale(worldToDevice)
         var size = CGFloat(font.emSize) * scale
         if !size.isFinite || size < 1 { size = FontMapper.defaultHeight }
+        return min(size, FontMapper.maxDevicePointSize)
+    }
+
+    /// The DC font resolved through the shared `FontMapper` substitution machinery
+    /// (family + bold/italic traits) and sized to DEVICE units — for the
+    /// axis-aligned draw path, where the glyph outlines are placed in device space.
+    private func sizedFont(_ font: EMFPlusFont, log: inout EMFRenderLog) -> CTFont {
+        let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, log: &log)
+        return CTFontCreateCopyWithAttributes(base, deviceFontSize(font), nil, nil)
+    }
+
+    /// The DC font sized in WORLD units for the rotated/sheared draw branch
+    /// (audit H2): there the CTM carries `worldToDevice`, so it supplies the
+    /// scaling — the world point size is the DEVICE size (computed exactly as
+    /// `deviceFontSize`, cap and all) divided by the world→device average scale.
+    /// World/Display units thus reduce to EmSize; Pixel units become EmSize/scale
+    /// so they still land at EmSize DEVICE pixels once the CTM scales them
+    /// (§2.1.1.32). A degenerate (non-finite/zero) scale falls back to the device
+    /// size, and the result is re-capped so a hostile transform cannot inflate the
+    /// outline-flatten size (§8).
+    private func worldSizedFont(_ font: EMFPlusFont, log: inout EMFRenderLog) -> CTFont {
+        let deviceSize = deviceFontSize(font)
+        let worldScale = StrokeMapper.averageScale(worldToDevice)
+        var size = worldScale.isFinite && worldScale > 0 ? deviceSize / worldScale : deviceSize
+        if !size.isFinite || size < 1 { size = deviceSize }
         size = min(size, FontMapper.maxDevicePointSize)
         let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, log: &log)
         return CTFontCreateCopyWithAttributes(base, size, nil, nil)
