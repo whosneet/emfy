@@ -306,4 +306,39 @@ struct EMFPlusAbuseTests {
         fixture.plusComment(stream)
         expectSurvives(try fixture.parsed(), "EMF+ giant-Size record")
     }
+
+    // MARK: - (h) Stream truncation reaches the render log on BOTH branches (audit M7 / C1)
+
+    /// A trailing record header claiming `declaredDataSize` data bytes with NONE
+    /// present → the walk stops with `.recordDataTruncated` (Size == DataSize+12,
+    /// so it is not flagged as size-exceeds first). Placed last in the stream.
+    private func truncatedTailRecord(type: UInt16, declaredDataSize: UInt32) -> [UInt8] {
+        plusRecordRawSize(type, 0x8000, size: 12 + declaredDataSize, dataSize: declaredDataSize)
+    }
+
+    @Test("a truncated EMF+ record surfaces .recordDataTruncated on the drawing (EMF+) branch")
+    func streamTruncationDrawingBranch() throws {
+        var stream = plusHeader()
+        stream += fillRectsDirect(argb(255, 200, 0, 0), (10, 10, 20, 20))   // real drawing → EMF+ branch
+        stream += truncatedTailRecord(type: 0x400A, declaredDataSize: 40)   // claims 40 bytes, none follow
+        var fixture = RenderFixture()
+        fixture.plusComment(stream)
+        let (image, log) = try #require(EMFRenderer.makeImage(try fixture.parsed()))
+        #expect(image.width > 0 && image.height > 0)
+        #expect(log.entries.contains(.emfPlusStreamIssue(kind: .recordDataTruncated, count: 1)),
+                "expected a recordDataTruncated stream issue, got \(log.entries)")
+    }
+
+    @Test("a truncated EMF+ record surfaces .recordDataTruncated even on the GDI (no-drawing) branch")
+    func streamTruncationGDIBranch() throws {
+        // Dual header, NO surviving EMF+ drawing record → the file plays its GDI
+        // fallback, but the broken EMF+ half must still be reported (audit M7).
+        var stream = plusHeader(dual: true)
+        stream += truncatedTailRecord(type: 0x400A, declaredDataSize: 40)   // stops the walk before it emits
+        var fixture = RenderFixture()
+        fixture.plusComment(stream)
+        let (_, log) = try #require(EMFRenderer.makeImage(try fixture.parsed()))
+        #expect(log.entries.contains(.emfPlusStreamIssue(kind: .recordDataTruncated, count: 1)),
+                "the GDI branch must still report the broken EMF+ stream, got \(log.entries)")
+    }
 }
