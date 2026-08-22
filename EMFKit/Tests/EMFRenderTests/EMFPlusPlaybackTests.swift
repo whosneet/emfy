@@ -563,6 +563,65 @@ private func drawImagePointsRecord(
     })
 }
 
+// MARK: - Honesty channel (audit M7 / C2)
+
+@Suite("EMF+ honesty channel")
+struct EMFPlusHonestyTests {
+
+    @Test("a drawing record with a truncated body notes .emfPlusRecordUndecodable with its type")
+    func truncatedDrawingBodyNoted() throws {
+        // FillRects (S flag) with only the BrushId present — the Count read fails.
+        let file = try plusFile([plusRecord(0x400A, 0x8000, le { $0.u32(argb(255, 0, 0, 0)) })])
+        let (_, log) = try renderPlus(file)
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x400A, count: 1)),
+                "a truncated FillRects body should note recordUndecodable: \(log.entries)")
+    }
+
+    @Test("a FillRects referencing an unbound brush slot notes .missingReference")
+    func fillRectsUnboundBrushNoted() throws {
+        // S clear → BrushId is an object-table index (5) that was never bound.
+        let file = try plusFile([fillRectsBrush(5, (10, 10, 20, 20))])
+        let (_, log) = try renderPlus(file)
+        #expect(log.entries.contains(.emfPlusObjectIssue(kind: .missingReference, count: 1)),
+                "an unbound brush should note missingReference: \(log.entries)")
+    }
+
+    @Test("an EmfPlusObject with an out-of-range id (70) notes .invalidID")
+    func objectInvalidIDNoted() throws {
+        let file = try plusFile([
+            plusObject(id: 70, type: 1, payload: solidBrushPayload(argb(255, 255, 0, 0))),
+            fillRectsDirect(argb(255, 0, 0, 255), (10, 10, 20, 20)),   // a real draw → EMF+ branch
+        ])
+        let (_, log) = try renderPlus(file)
+        #expect(log.entries.contains(.emfPlusObjectIssue(kind: .invalidID, count: 1)),
+                "an id past 63 should note invalidID: \(log.entries)")
+    }
+
+    @Test("a malformed brush definition then a draw notes .undecodable (bind) and .missingReference (draw)")
+    func malformedBrushNoted() throws {
+        // A brush object whose payload is too short to decode → .malformed on
+        // bind; the fill then finds no usable brush → missingReference.
+        let file = try plusFile([
+            plusObject(id: 2, type: 1, payload: le { $0.u32(plusVersion) }),   // truncated brush (Version only)
+            fillRectsBrush(2, (10, 10, 20, 20)),
+        ])
+        let (_, log) = try renderPlus(file)
+        #expect(log.entries.contains(.emfPlusObjectIssue(kind: .undecodable, count: 1)),
+                "a malformed brush should note undecodable at bind: \(log.entries)")
+        #expect(log.entries.contains(.emfPlusObjectIssue(kind: .missingReference, count: 1)),
+                "the draw over the malformed slot should note missingReference: \(log.entries)")
+    }
+
+    @Test("repeated undecodable records coalesce into a single counted entry")
+    func recordUndecodableCoalesces() throws {
+        let truncated = plusRecord(0x400A, 0x8000, le { $0.u32(argb(255, 0, 0, 0)) })   // BrushId only
+        let file = try plusFile([truncated, truncated, truncated])
+        let (_, log) = try renderPlus(file)
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x400A, count: 3)),
+                "three truncated FillRects should coalesce to count 3: \(log.entries)")
+    }
+}
+
 @Suite("EMF+ image playback")
 struct EMFPlusImagePlaybackTests {
 
@@ -606,13 +665,15 @@ struct EMFPlusImagePlaybackTests {
         #expect(!isRed(pixels[18, 18]), "crop should have excluded the red pixel")
     }
 
-    @Test("DrawImage naming an unbound image object is a clean no-op")
+    @Test("DrawImage naming an unbound image object draws nothing and notes a missing reference")
     func drawImageUnboundIsNoOp() throws {
         let file = try plusFile([
             drawImageRecord(imageId: 7, src: (0, 0, 2, 2), dest: (10, 10, 40, 40)),
         ])
         let (pixels, log) = try renderPlus(file)
-        #expect(log.isClean, "an unbound image should skip silently: \(log.entries)")
+        // Audit M7: no longer silent — the missing image reference is surfaced.
+        #expect(log.entries.contains(.emfPlusObjectIssue(kind: .missingReference, count: 1)),
+                "an unbound image should note a missing object reference: \(log.entries)")
         #expect(isWhite(pixels[30, 30]), "nothing should have drawn, got \(pixels[30, 30])")
     }
 
