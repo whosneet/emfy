@@ -187,9 +187,12 @@ extension EMFFile {
             let slice = RecordSlice(reader: reader, record: record)
 
             // EMR_COMMENT_EMFPLUS ([MS-EMF] §2.3.3.4): DataSize (u32) at record
-            // offset 8, CommentIdentifier (u32) at offset 12. The identifier must
-            // be readable and equal "EMF+" for this to be an EMF+ comment.
-            guard let dataSize = slice.u32(8),
+            // offset 8, CommentIdentifier (u32) at offset 12. The identifier lives
+            // inside the comment DATA, so DataSize must be at least 4 to carry it;
+            // otherwise a DataSize < 4 whose trailing padding happens to spell
+            // "EMF+" would be misread as an EMF+ comment (audit L9). The identifier
+            // must be readable and equal "EMF+".
+            guard let dataSize = slice.u32(8), dataSize >= 4,
                   let identifier = slice.u32(Self.commentIdentifierOffset),
                   identifier == Self.emfPlusIdentifier
             else {

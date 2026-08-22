@@ -50,9 +50,11 @@ extension EMFFile {
 
             // EMR_COMMENT_EMFPLUS ([MS-EMF] §2.3.3.4): DataSize (u32) at record
             // offset 8, then the comment data from offset 12; its first 4 bytes
-            // are the CommentIdentifier. The identifier must be readable and
-            // equal to "EMF+" for this to be an EMF+ comment at all.
-            guard let dataSize = slice.u32(8),
+            // are the CommentIdentifier. The identifier lives inside the comment
+            // DATA, so DataSize must be at least 4 to carry it; otherwise trailing
+            // padding that happens to spell "EMF+" would flip the verdict (audit
+            // L9). The identifier must then be readable and equal to "EMF+".
+            guard let dataSize = slice.u32(8), dataSize >= 4,
                   let identifier = slice.u32(Self.commentIdentifierOffset),
                   identifier == Self.emfPlusIdentifier
             else {
