@@ -215,25 +215,15 @@ fi
 
 # --- 4. Build, sign, notarize, and staple the DMG ----------------------------
 
-step "Build the DMG (UDZO, volume \"${VOLUME_NAME}\", app + /Applications)"
+step "Build the styled DMG (UDZO, volume \"${VOLUME_NAME}\", custom Finder window)"
 DMG_PATH="${WORK_DIR}/${DMG_NAME}"
-DMG_STAGE="${WORK_DIR}/dmg-stage"
-rm -rf "${DMG_STAGE}" "${DMG_PATH}"
-mkdir -p "${DMG_STAGE}"
+rm -f "${DMG_PATH}"
 
-# Standard drag-to-install layout: the app plus a symlink to /Applications.
-ditto "${STAGED_APP}" "${DMG_STAGE}/${APP_NAME}"
-xattr -cr "${DMG_STAGE}/${APP_NAME}"
-ln -s /Applications "${DMG_STAGE}/Applications"
-
-info "creating compressed DMG: ${DMG_PATH}"
-hdiutil create \
-    -volname "${VOLUME_NAME}" \
-    -srcfolder "${DMG_STAGE}" \
-    -fs HFS+ \
-    -format UDZO \
-    -ov \
-    "${DMG_PATH}"
+# Styled drag-to-install layout — custom Finder window (background art + saved
+# icon positions) plus a custom volume icon — is assembled by make-dmg.sh from
+# the staged, signed app.
+info "assembling styled DMG via scripts/make-dmg.sh"
+"${REPO_ROOT}/scripts/make-dmg.sh" "${STAGED_APP}" "${DMG_PATH}"
 
 step "Sign the DMG with Developer ID"
 codesign --force --timestamp --sign "${DEVELOPER_ID_APP}" "${DMG_PATH}" \
