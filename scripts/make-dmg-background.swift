@@ -30,7 +30,7 @@ let canvasH: CGFloat = 450
 
 let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
 
-// MARK: - Palette (Emfy site palette — exact)
+// MARK: - Palette (from the retired project site's stylesheet — values kept verbatim)
 
 func color(_ hex: String, alpha: CGFloat = 1) -> NSColor {
     var s = hex
