@@ -83,7 +83,8 @@ Details instead of rendering silently. WMF is on the v3 list.
 
 ## Building from source
 
-Xcode 26 or newer (Swift 6.2 toolchain).
+Xcode 26.6 or newer (Swift 6.2+ toolchain). The package, the app, and both
+extensions build and pass their tests on Xcode 26.6 and on Xcode 27 / macOS 27.
 
 The EMFKit package — parser, renderer, and the `emfy-dump` debugging CLI:
 
@@ -92,6 +93,15 @@ cd EMFKit
 swift test                                   # fixtures, snapshots, fuzz
 swift build -c release
 .build/release/emfy-dump path/to/file.emf    # record inventory + diagnostics
+```
+
+If the checkout lives in an iCloud Drive (or other file-provider) folder,
+Swift 6.4's build system cannot sign the test bundles: the sync service stamps
+extended attributes onto `.build/` that `codesign` rejects. Keep the build
+directory outside the synced folder instead:
+
+```sh
+swift test --scratch-path ~/Library/Caches/emfy-build
 ```
 
 The app and both Quick Look extensions:

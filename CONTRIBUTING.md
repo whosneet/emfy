@@ -73,6 +73,11 @@ xcodebuild -project ../Emfy/Emfy.xcodeproj -scheme Emfy build   # the app + QL e
 Both must be green before review. For anything touching the parse path, run
 the extended fuzz pass: `EMFY_FUZZ_ITERATIONS=2000 swift test`.
 
+If your checkout lives in an iCloud Drive (or other file-provider) folder, add
+`--scratch-path ~/Library/Caches/emfy-build` to `swift test`: Swift 6.4's build
+system signs the test bundles, and `codesign` rejects the extended attributes
+the sync service stamps onto `.build/`.
+
 ## Scope notes
 
 - EMF+ (the GDI+ record set) is out of scope for v1: dual-format files render
