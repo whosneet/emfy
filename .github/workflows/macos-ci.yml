@@ -9,15 +9,32 @@ permissions:
 
 jobs:
   test-and-build:
-    name: Test EMFKit and verify app bundles
-    runs-on: macos-26
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pin the toolchain explicitly rather than trusting each image default.
+        # Lane 1 (macos-26) pins Xcode 26.6: Xcode 26.3's asset-catalog compiler
+        # crashes compiling the app's Icon Composer icon (CI runs 29089294171,
+        # 30737411554), while 26.6 — the version the shipped 1.3 release was
+        # built with locally — compiles it cleanly.
+        # Lane 2 runs the public-preview `xcode-27` image (Xcode 27) to verify
+        # the next toolchain early; it is advisory only — experimental: true
+        # drives continue-on-error so a preview-image failure never blocks the
+        # required check.
+        include:
+          - name: Test EMFKit and verify app bundles
+            runner: macos-26
+            developer_dir: /Applications/Xcode_26.6.app/Contents/Developer
+            experimental: false
+          - name: Test EMFKit and verify app bundles (Xcode 27 preview)
+            runner: xcode-27
+            developer_dir: /Applications/Xcode_27.0.app/Contents/Developer
+            experimental: true
     env:
-      # Pin the toolchain explicitly rather than trusting the image default:
-      # Xcode 26.3's asset-catalog compiler crashes compiling the app's Icon
-      # Composer icon (CI runs 29089294171, 30737411554), while 26.6 — the
-      # version the shipped 1.3 release was built with locally — compiles it
-      # cleanly.
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DEVELOPER_DIR: ${{ matrix.developer_dir }}
 
     steps:
       - uses: actions/checkout@v4
