@@ -9,7 +9,7 @@ import Foundation
 /// point size and applies underline/strike-out/rotation at draw time.
 ///
 /// Resolution order:
-///  1. Try `CTFontCreateWithName(faceName)`. CoreText silently substitutes a
+///  1. Try the face name (auto-activation off). CoreText silently substitutes a
 ///     fallback when a family is missing, so a MISS is detected by comparing
 ///     the created font's family name against the request (case- and
 ///     space-insensitive). On a miss, consult the substitution table.
@@ -47,7 +47,7 @@ enum FontMapper {
     /// CoreText caches descriptors internally, so this is cheap.
     static func systemBaseFont() -> CTFont {
         CTFontCreateUIFontForLanguage(.system, nominalSize, nil)
-            ?? CTFontCreateWithName(defaultFamily as CFString, nominalSize, nil)
+            ?? font(named: defaultFamily)
     }
 
     /// Resolves a LogFont ([MS-EMF] §2.2.13) to a `ResolvedFont`, appending one
@@ -83,6 +83,20 @@ enum FontMapper {
         return applyTraits(to: base, bold: bold, italic: italic)
     }
 
+    // MARK: - Font creation
+
+    /// Creates a font by family/PostScript name at `nominalSize` WITHOUT font
+    /// auto-activation. Plain `CTFontCreateWithName` asks the system's font
+    /// providers whether they can supply a missing family, a synchronous XPC
+    /// round trip per lookup. The family name comes straight from the file
+    /// (§8: hostile input), so a file must not be able to trigger font
+    /// downloads, and a stalled provider must not hang Quick Look: on macOS
+    /// 27.2 concurrent renders were observed blocked indefinitely in that
+    /// provider query. Resolution among installed fonts is unchanged.
+    private static func font(named name: String) -> CTFont {
+        CTFontCreateWithNameAndOptions(name as CFString, nominalSize, nil, .preventAutoActivation)
+    }
+
     // MARK: - Family resolution
 
     /// The base CTFont for a requested family name, at `nominalSize`, applying
@@ -92,13 +106,13 @@ enum FontMapper {
         // An empty face name goes straight to the default (font mapper choice).
         guard !requested.isEmpty else {
             log.noteFontSubstituted(requested: requested, used: defaultFamily)
-            return CTFontCreateWithName(defaultFamily as CFString, nominalSize, nil)
+            return font(named: defaultFamily)
         }
 
         // Direct try. If CoreText returns a font whose family matches the
         // request, use it as-is (Arial, Times New Roman, Tahoma, … resolve
         // directly on macOS; Calibri resolves too when Office is installed).
-        let direct = CTFontCreateWithName(requested as CFString, nominalSize, nil)
+        let direct = font(named: requested)
         if familyMatches(direct, requested) {
             return direct
         }
@@ -106,7 +120,7 @@ enum FontMapper {
         // Miss: CoreText silently substituted. Consult the table.
         let replacement = substitution(for: requested)
         log.noteFontSubstituted(requested: requested, used: replacement)
-        return CTFontCreateWithName(replacement as CFString, nominalSize, nil)
+        return font(named: replacement)
     }
 
     /// The substitution-table target for a Windows family CoreText could not
