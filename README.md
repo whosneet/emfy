@@ -120,7 +120,7 @@ own signing identity if you ship a fork.
 
 ```
 - Verified on macOS 27.2: the viewer, Quick Look previews, and Finder thumbnails.
-- Fixed a hang where text could stall rendering while macOS searched font providers for a missing font. Emfy now uses only installed fonts, so a file can never trigger a font download.
+- Text now renders using only the fonts installed on your Mac, so opening or previewing a file can never trigger a font download.
 ```
 
 ### 2.0

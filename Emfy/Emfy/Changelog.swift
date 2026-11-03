@@ -21,7 +21,7 @@ enum Changelog {
             date: "November 2026",
             changes: [
                 "Verified on macOS 27.2: the viewer, Quick Look previews, and Finder thumbnails.",
-                "Fixed a hang where text in a file could stall rendering while macOS searched online font providers for a font that isn't installed. Emfy now uses only the fonts on your Mac, so a file can never trigger a font download.",
+                "Text now renders using only the fonts installed on your Mac, so opening or previewing a file can never trigger a font download.",
             ]
         ),
         ChangelogEntry(
