@@ -16,6 +16,15 @@ struct ChangelogEntry: Identifiable {
 enum Changelog {
     static let entries: [ChangelogEntry] = [
         ChangelogEntry(
+            version: "2.0.1",
+            build: "4",
+            date: "November 2026",
+            changes: [
+                "Verified on macOS 27.2: the viewer, Quick Look previews, and Finder thumbnails.",
+                "Fixed a hang where text in a file could stall rendering while macOS searched online font providers for a font that isn't installed. Emfy now uses only the fonts on your Mac, so a file can never trigger a font download.",
+            ]
+        ),
+        ChangelogEntry(
             version: "2.0",
             build: "3",
             date: "August 2026",

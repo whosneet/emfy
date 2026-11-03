@@ -12,7 +12,7 @@ Quick Look previews, Finder thumbnails, and a small viewer app.</p>
 <p>
 <a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" alt="Platform: macOS 14+"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-green" alt="Licence: MIT"></a>
-<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/release-v2.0-blue" alt="Latest release: v2.0"></a>
+<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/release-v2.0.1-blue" alt="Latest release: v2.0.1"></a>
 </p>
 
 <p>
@@ -84,7 +84,7 @@ Details instead of rendering silently. WMF is on the v3 list.
 ## Building from source
 
 Xcode 26.6 or newer (Swift 6.2+ toolchain). The package, the app, and both
-extensions build and pass their tests on Xcode 26.6 and on Xcode 27 / macOS 27.
+extensions build and pass their tests on Xcode 26.6 and on Xcode 27.2 / macOS 27.2.
 
 The EMFKit package — parser, renderer, and the `emfy-dump` debugging CLI:
 
@@ -115,6 +115,13 @@ xcodebuild -project Emfy/Emfy.xcodeproj -scheme Emfy -configuration Debug build
 own signing identity if you ship a fork.
 
 ## Changelog
+
+### 2.0.1
+
+```
+- Verified on macOS 27.2: the viewer, Quick Look previews, and Finder thumbnails.
+- Fixed a hang where text could stall rendering while macOS searched font providers for a missing font. Emfy now uses only installed fonts, so a file can never trigger a font download.
+```
 
 ### 2.0
 
