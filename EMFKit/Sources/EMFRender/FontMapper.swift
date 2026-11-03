@@ -46,20 +46,22 @@ enum FontMapper {
     /// The system font, used for stock FONT selections. Created once per call;
     /// CoreText caches descriptors internally, so this is cheap.
     static func systemBaseFont() -> CTFont {
-        CTFontCreateUIFontForLanguage(.system, nominalSize, nil)
-            ?? font(named: defaultFamily)
+        FontLookupQueue.run {
+            CTFontCreateUIFontForLanguage(.system, nominalSize, nil)
+                ?? font(named: defaultFamily)
+        }
     }
 
     /// Resolves a LogFont ([MS-EMF] §2.2.13) to a `ResolvedFont`, appending one
     /// coalesced `fontSubstituted` entry per requested family that had to be
     /// remapped.
     static func resolve(_ logFont: LogFont, log: inout EMFRenderLog) -> ResolvedFont {
-        let requested = logFont.faceName.trimmingCharacters(in: .whitespaces)
-        let base = baseFont(forFamily: requested, log: &log)
-
-        let bold = logFont.weight >= 600
-        let italic = logFont.italic != 0
-        let styled = applyTraits(to: base, bold: bold, italic: italic)
+        let styled = resolveFamily(
+            logFont.faceName,
+            bold: logFont.weight >= 600,
+            italic: logFont.italic != 0,
+            log: &log
+        )
 
         return ResolvedFont(
             base: styled,
@@ -79,8 +81,14 @@ enum FontMapper {
     /// The caller sizes the returned base to the device point size at draw time.
     static func resolveFamily(_ family: String, bold: Bool, italic: Bool, log: inout EMFRenderLog) -> CTFont {
         let requested = family.trimmingCharacters(in: .whitespaces)
-        let base = baseFont(forFamily: requested, log: &log)
-        return applyTraits(to: base, bold: bold, italic: italic)
+        let lookup = FontLookupQueue.run { () -> (font: CTFont, substitute: String?) in
+            let base = baseFont(forFamily: requested)
+            return (applyTraits(to: base.font, bold: bold, italic: italic), base.substitute)
+        }
+        if let substitute = lookup.substitute {
+            log.noteFontSubstituted(requested: requested, used: substitute)
+        }
+        return lookup.font
     }
 
     // MARK: - Font creation
@@ -90,9 +98,7 @@ enum FontMapper {
     /// providers whether they can supply a missing family, a synchronous XPC
     /// round trip per lookup. The family name comes straight from the file
     /// (§8: hostile input), so a file must not be able to trigger font
-    /// downloads, and a stalled provider must not hang Quick Look: on macOS
-    /// 27.2 concurrent renders were observed blocked indefinitely in that
-    /// provider query. Resolution among installed fonts is unchanged.
+    /// downloads. Resolution among installed fonts is unchanged.
     private static func font(named name: String) -> CTFont {
         CTFontCreateWithNameAndOptions(name as CFString, nominalSize, nil, .preventAutoActivation)
     }
@@ -100,13 +106,13 @@ enum FontMapper {
     // MARK: - Family resolution
 
     /// The base CTFont for a requested family name, at `nominalSize`, applying
-    /// the substitution table on a CoreText miss. Logs (coalesced) any
-    /// substitution.
-    private static func baseFont(forFamily requested: String, log: inout EMFRenderLog) -> CTFont {
+    /// the substitution table on a CoreText miss. Returns the family used when
+    /// it had to substitute, so the caller can log it (the log is caller-owned
+    /// and never crosses to the lookup queue). Runs on `FontLookupQueue`.
+    private static func baseFont(forFamily requested: String) -> (font: CTFont, substitute: String?) {
         // An empty face name goes straight to the default (font mapper choice).
         guard !requested.isEmpty else {
-            log.noteFontSubstituted(requested: requested, used: defaultFamily)
-            return font(named: defaultFamily)
+            return (font(named: defaultFamily), defaultFamily)
         }
 
         // Direct try. If CoreText returns a font whose family matches the
@@ -114,13 +120,12 @@ enum FontMapper {
         // directly on macOS; Calibri resolves too when Office is installed).
         let direct = font(named: requested)
         if familyMatches(direct, requested) {
-            return direct
+            return (direct, nil)
         }
 
         // Miss: CoreText silently substituted. Consult the table.
         let replacement = substitution(for: requested)
-        log.noteFontSubstituted(requested: requested, used: replacement)
-        return font(named: replacement)
+        return (font(named: replacement), replacement)
     }
 
     /// The substitution-table target for a Windows family CoreText could not
@@ -201,5 +206,45 @@ enum FontMapper {
         // CoreText an enormous outline-flattening size (the anti-hang for a
         // hostile lfHeight). Normal sizes are far below the cap, so untouched.
         return min(sized, maxDevicePointSize)
+    }
+}
+
+/// Runs FontMapper's CoreText font-registry lookups on one private serial
+/// queue instead of the caller's thread.
+///
+/// On macOS 27.2, when every Swift-concurrency cooperative thread is blocked
+/// in a synchronous CoreText font lookup (`CTFontCreateWithName*`, trait
+/// variants), none of those lookups ever receives its font-service reply and
+/// the process deadlocks. The same lookups made from a non-cooperative thread
+/// complete normally, even while the whole cooperative pool is blocked.
+/// Quick Look's async `providePreview` and the Swift Testing runner both render
+/// on that pool, so a saturating burst of text renders could wedge them.
+///
+/// Dispatch queues run on the workqueue, not the cooperative pool, so the
+/// caller blocks on a semaphore while the lookup runs here. Lookups are short
+/// and CoreText caches them, so serialising costs microseconds per text
+/// object. The body never re-enters FontMapper, so it cannot wait on itself.
+enum FontLookupQueue {
+    private static let queue = DispatchQueue(label: "com.avneetsingh.emfkit.font-lookup", qos: .userInitiated)
+
+    /// Holds a value across the queue hop. CTFont is immutable and CoreText
+    /// fonts are safe to use from any thread once created.
+    private final class Box<Value>: @unchecked Sendable {
+        var value: Value?
+    }
+
+    static func run<Value>(_ body: @escaping @Sendable () -> Value) -> Value {
+        let box = Box<Value>()
+        let done = DispatchSemaphore(value: 0)
+        queue.async {
+            box.value = body()
+            done.signal()
+        }
+        done.wait()
+        // `queue.async` always runs the block, and the semaphore orders its
+        // write before this read, so the value is present. The inline
+        // fallback only keeps this free of a force-unwrap.
+        guard let value = box.value else { return body() }
+        return value
     }
 }

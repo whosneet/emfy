@@ -799,3 +799,39 @@ struct EMFPlusTextWrapClipTests {
         #expect(point > world + 2, "a Point-unit font should be taller than a World-unit font (\(point) vs \(world))")
     }
 }
+
+// MARK: - Concurrent font resolution
+
+/// Regression for a macOS 27.2 deadlock: when every Swift-concurrency
+/// cooperative thread is blocked inside a synchronous CoreText font lookup,
+/// none of the lookups ever receives its font-service reply. Quick Look's
+/// async `providePreview` and this test runner both render on that pool, so
+/// FontMapper must not make its CoreText lookups on the caller's thread.
+/// Before the fix this test hung the suite every time on a machine where the
+/// task count below reached the pool width.
+@Suite("EMF+ text — concurrent font resolution")
+struct EMFPlusTextConcurrencyTests {
+    @Test("rendering text from more tasks than cooperative threads completes")
+    func saturatedPoolStillResolvesFonts() async throws {
+        let families = ["Arial", "Times New Roman", "Courier New", "Georgia",
+                        "Verdana", "Nonexistent Family QZX", "Tahoma", "Calibri"]
+        let files = try families.map { family in
+            try textFile([
+                tPlusObject(id: 1, type: 6, payload: tFont(emSize: 24, style: 1, family: family)),   // bold
+                tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 0xFFFF_FFFF,
+                            rect: (5, 5, 90, 40), string: "Pool"),
+            ])
+        }
+        let tasks = max(ProcessInfo.processInfo.activeProcessorCount * 2, 16)
+        let rendered = await withTaskGroup(of: Bool.self) { group in
+            for index in 0..<tasks {
+                let file = files[index % files.count]
+                group.addTask { EMFRenderer.makeImage(file) != nil }
+            }
+            var count = 0
+            for await ok in group where ok { count += 1 }
+            return count
+        }
+        #expect(rendered == tasks, "every concurrent render should finish with an image")
+    }
+}
