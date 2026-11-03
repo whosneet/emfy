@@ -120,6 +120,7 @@ own signing identity if you ship a fork.
 
 ```
 - Verified on macOS 27.2: the viewer, Quick Look previews, and Finder thumbnails.
+- Fixed a hang on macOS 27.2 where rendering text could stall indefinitely when several previews or thumbnails were drawn at once.
 - Text now renders using only the fonts installed on your Mac, so opening or previewing a file can never trigger a font download.
 ```
 
