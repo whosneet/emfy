@@ -167,6 +167,92 @@ func describe(_ variant: EMFHeaderVariant) -> String {
     }
 }
 
+// MARK: - Front-door formatting (W2: signature detection + gzip unwrap)
+
+func formatName(_ format: MetafileFormat) -> String {
+    switch format {
+    case .emf: return "EMF"
+    case .placeableWMF: return "placeable WMF"
+    case .wmf: return "WMF"
+    case .gzip: return "gzip"
+    case .unknown: return "unknown"
+    }
+}
+
+/// The detected-format banner line. A gzip wrapper is shown as "gzip → <inner>".
+func formatBanner(_ opened: OpenedMetafile) -> String {
+    opened.wasDecompressed
+        ? "gzip (.emz/.wmz) → \(formatName(opened.format))"
+        : formatName(opened.format)
+}
+
+/// Failure text for an unrecognised file, matching the existing failure voice.
+func unknownDescription(_ opened: OpenedMetafile) -> String {
+    opened.wasDecompressed
+        ? "gzip payload has no recognised metafile signature (not EMF or WMF)"
+        : "unrecognised signature (not EMF, WMF, or gzip)"
+}
+
+func describe(_ error: MetafileOpenError) -> String {
+    switch error {
+    case .gzip(let gzipError):
+        return describe(gzipError)
+    case .nestedGzip:
+        return "nested gzip refused: the gzip payload is itself gzip-compressed"
+    }
+}
+
+func describe(_ diagnostic: MetafileDiagnostic) -> String {
+    switch diagnostic {
+    case .sniff(let sniff): return describe(sniff)
+    case .gzip(let gzip): return describe(gzip)
+    }
+}
+
+func describe(_ diagnostic: MetafileSniffDiagnostic) -> String {
+    switch diagnostic {
+    case .placeableChecksumMismatch(let stored, let computed):
+        return String(
+            format: "placeable WMF checksum 0x%04X does not match computed 0x%04X "
+                + "(advisory; still treated as placeable WMF)",
+            stored, computed
+        )
+    }
+}
+
+func describe(_ diagnostic: GzipDiagnostic) -> String {
+    switch diagnostic {
+    case .isizeMismatch(let stored, let actual):
+        return "gzip ISIZE \(stored) does not match the \(actual) bytes inflated "
+            + "(advisory; ISIZE is only the size mod 2^32)"
+    case .trailingBytesAfterMember(let count):
+        return "\(count) trailing bytes after the first gzip member (ignored; "
+            + "only the first member is used)"
+    }
+}
+
+func describe(_ error: GzipError) -> String {
+    switch error {
+    case .tooShort:
+        return "gzip: fewer bytes than a 10-byte header plus 8-byte trailer"
+    case .badMagic(let id1, let id2):
+        return String(format: "gzip: bad magic 0x%02X 0x%02X, expected 0x1F 0x8B", id1, id2)
+    case .unsupportedMethod(let cm):
+        return "gzip: compression method \(cm) is not DEFLATE (8)"
+    case .reservedFlagsSet(let flags):
+        return String(format: "gzip: reserved FLG bits set (0x%02X)", flags)
+    case .truncatedHeader:
+        return "gzip: a header field runs past the end of the data"
+    case .inflateFailed:
+        return "gzip: the DEFLATE stream is malformed or truncated"
+    case .outputTooLarge(let ceiling):
+        return "gzip: inflated output would exceed the \(ceiling)-byte ceiling "
+            + "(possible decompression bomb)"
+    case .crcMismatch(let stored, let computed):
+        return String(format: "gzip: CRC32 0x%08X does not match computed 0x%08X", stored, computed)
+    }
+}
+
 func leftPad(_ string: String, _ width: Int) -> String {
     string.count >= width
         ? string
@@ -188,7 +274,7 @@ guard arguments.count == 2 else {
 }
 let path = arguments[1]
 
-// MARK: - Load and parse
+// MARK: - Load
 
 let data: Data
 do {
@@ -198,9 +284,45 @@ do {
     exit(1)
 }
 
+// MARK: - Front door: detect format, unwrap gzip (.emz/.wmz) at most once
+
+let opened: OpenedMetafile
+do {
+    opened = try OpenedMetafile.open(data)
+} catch {
+    printErr("emfy-dump: '\(path)': \(describe(error))")
+    exit(1)
+}
+
+// Unrecognised input: existing failure voice + nonzero exit.
+if opened.format == .unknown {
+    printErr("emfy-dump: '\(path)': \(unknownDescription(opened))")
+    exit(1)
+}
+
+// Format banner — printed for everything EXCEPT a plain EMF with no sniff
+// diagnostics, so a plain .emf dump stays byte-identical to the pre-W2 tool.
+let isPlainEMF = opened.format == .emf && !opened.wasDecompressed && opened.diagnostics.isEmpty
+if !isPlainEMF {
+    print("format: \(formatBanner(opened))")
+    for diagnostic in opened.diagnostics {
+        print("  - \(describe(diagnostic))")
+    }
+    print("")
+}
+
+// WMF record decode arrives in W3 (plan §3). Report and stop for now.
+if opened.format == .placeableWMF || opened.format == .wmf {
+    print("WMF detected — record dump arrives in W3")
+    exit(0)
+}
+
+// MARK: - Parse the EMF (possibly the inflated payload of a .emz)
+
+let emfData = opened.data
 let file: EMFFile
 do {
-    file = try EMFFile.parse(data)
+    file = try EMFFile.parse(emfData)
 } catch {
     printErr("emfy-dump: '\(path)': \(describe(error))")
     exit(1)
@@ -236,7 +358,7 @@ let claimed = Int(header.records)
 let recordsPart = claimed == walked
     ? "records walked: \(walked)"
     : "records walked: \(walked) (header claims \(claimed))"
-print("\(recordsPart), bytes walked: \(file.bytesWalked) of \(data.count)")
+print("\(recordsPart), bytes walked: \(file.bytesWalked) of \(emfData.count)")
 print("")
 
 // MARK: - Inventory table
