@@ -4,15 +4,15 @@
 
 <h1>Emfy</h1>
 
-<p><strong>Press space on an <code>.emf</code> file. See the picture.</strong></p>
+<p><strong>Open an <code>.emf</code> or <code>.wmf</code> file. See the picture.</strong></p>
 
-<p>A free, open-source viewer for EMF (Enhanced Metafile) files on macOS —<br>
-Quick Look previews, Finder thumbnails, and a small viewer app.</p>
+<p>A free, open-source viewer for EMF and WMF metafiles on Mac, iPhone and iPad —<br>
+Quick Look previews, thumbnails, and a viewer app.</p>
 
 <p>
-<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" alt="Platform: macOS 14+"></a>
+<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20iOS%2017%2B-blue" alt="Platform: macOS 14+ | iOS 17+"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-green" alt="Licence: MIT"></a>
-<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/release-v2.0.2-blue" alt="Latest release: v2.0.2"></a>
+<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/release-v3.1-blue" alt="Latest release: v3.1"></a>
 </p>
 
 <p>
@@ -25,10 +25,11 @@ Quick Look previews, Finder thumbnails, and a small viewer app.</p>
 
 ---
 
-EMF is the vector format Windows tools quietly export: diagrams out of
-PowerPoint and Visio, charts out of Excel, drawings out of engineering
-tools. macOS opens none of it. Emfy fixes that where you actually work —
-the spacebar and the Finder window.
+EMF and WMF are the vector formats Windows tools quietly export: diagrams
+out of PowerPoint and Visio, charts out of Excel, drawings out of
+engineering tools, and clip art from older Office documents. Apple's
+platforms open none of it. Emfy fixes that where you actually work — the
+spacebar and Finder on the Mac, the Files app and Mail on iPhone and iPad.
 
 <img src="assets/screenshots/viewer-dark-flowchart.png" alt="Emfy rendering a complex dark-mode flowchart exported as an EMF file" width="100%">
 
@@ -44,17 +45,28 @@ Prefer the store? The same app is on the
 [Mac App Store](https://apps.apple.com/app/emfy/id6787715125?mt=12), where
 updates install automatically.
 
+On **iPhone and iPad**, Emfy is a universal app on the App Store (one
+purchase covers Mac, iPhone and iPad). Open a file from Files or a Mail
+attachment to view, zoom, share or export it, and Quick Look previews and
+thumbnails show in Files, Mail and Messages. Requires iOS or iPadOS 17.0 or
+later.
+
 ## What it does
 
-- **Quick Look, first-class.** Spacebar previews and Finder thumbnails for
-  `.emf` files — the two things no free macOS tool offered.
+- **Quick Look, first-class.** Spacebar previews and Finder thumbnails on
+  the Mac, plus previews and thumbnails in Files, Mail and Messages on iPhone
+  and iPad — for `.emf`, `.wmf`, `.emz` and `.wmz` files.
 - **Real-world record coverage.** Vector shapes, path brackets, clipping,
   dashed and styled pens, brushes, transforms, text (Windows font names
   mapped to macOS fonts — rotated and accented runs included), embedded
   bitmaps, and EMF+ (GDI+) records — vector shapes, gradients, images, and
   text.
+- **WMF too.** Windows Metafile (`.wmf`), placeable and plain, and the
+  gzip-compressed `.emz` and `.wmz` forms. When a WMF carries a complete
+  embedded EMF, Emfy plays that for higher fidelity.
 - **A viewer, not just a peek.** Zoom, pan, fit-to-window; export to PNG
-  or true-vector PDF.
+  or true-vector PDF. On iPhone and iPad, pinch-zoom stays sharp at any
+  scale, with file details, sharing and Save to Photos.
 - **Built for hostile input.** Quick Look parses files the moment Finder
   shows them, so every size and count is bounds-checked before it is
   trusted, unknown records are logged and skipped (a partial render always
@@ -70,7 +82,9 @@ and files whose drawing content exists *only* as EMF+ render fully. A few
 things are still simplified — hatch and path-gradient fills draw as solid
 approximations, while texture fills, nested-metafile images, and exotic
 image pixel formats are skipped — and Emfy itemizes every one in Render
-Details instead of rendering silently. WMF is on the v3 list.
+Details instead of rendering silently. WMF support landed in 3.1; its gate
+uses LibreOffice exports and hand-built fixtures, so Office-made WMFs that
+render wrongly get fixed as they are reported.
 
 ## Screenshots
 
@@ -115,6 +129,18 @@ xcodebuild -project Emfy/Emfy.xcodeproj -scheme Emfy -configuration Debug build
 own signing identity if you ship a fork.
 
 ## Changelog
+
+### 3.1
+
+```
+- Windows Metafile (.wmf) files now open, preview, and thumbnail, alongside EMF.
+- Compressed metafiles open too: .wmz (gzip-wrapped WMF) and .emz (gzip-wrapped EMF).
+- WMF coverage spans the record types LibreOffice exports; when a WMF carries a complete embedded EMF, Emfy plays that for higher fidelity.
+- New iPhone and iPad app: a viewer with sharp zoom at any scale, file details, and sharing or export to PNG and PDF.
+- Quick Look previews and thumbnails for EMF and WMF files in Files, Mail, and Messages on iPhone and iPad.
+- The iPhone and iPad app supports iPhone Duo.
+- Steadier rendering of unusual and malformed metafiles.
+```
 
 ### 2.0.2
 
