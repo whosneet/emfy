@@ -13,13 +13,34 @@ import SwiftUI
 struct EmfyiOSApp: App {
     var body: some Scene {
         WindowGroup {
-            RecentsView()
-                // One shared store, loaded once. The app is single-window
-                // (`UIApplicationSupportsMultipleScenes` = false), so an incoming
-                // file open reuses this window and navigates it — never a new
-                // iPad window per open (the I1 "3 Hidden Windows" fix).
-                .environment(RecentsStore.shared)
+            #if DEBUG
+            // DEBUG-only Quick Look probes (I4 gates b/c): launched with
+            // EMFY_QLPROBE_INDEX, the window roots on a QLPreviewController over
+            // the Documents metafiles (preview extension); launched with
+            // EMFY_QLPROBE_THUMBS, it roots on a QLThumbnailGenerator grid
+            // (thumbnail extension). Both let the extensions be screenshotted
+            // from the simulator. Compiled out of release builds.
+            if let probeIndex = QuickLookProbeView.requestedStartIndex {
+                QuickLookProbeView(startIndex: probeIndex)
+                    .ignoresSafeArea()
+            } else if QuickLookThumbnailProbeView.isRequested {
+                QuickLookThumbnailProbeView()
+            } else {
+                recentsHome
+            }
+            #else
+            recentsHome
+            #endif
         }
+    }
+
+    private var recentsHome: some View {
+        RecentsView()
+            // One shared store, loaded once. The app is single-window
+            // (`UIApplicationSupportsMultipleScenes` = false), so an incoming
+            // file open reuses this window and navigates it — never a new
+            // iPad window per open (the I1 "3 Hidden Windows" fix).
+            .environment(RecentsStore.shared)
     }
 }
 

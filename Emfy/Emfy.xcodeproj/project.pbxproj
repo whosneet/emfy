@@ -55,6 +55,7 @@
 		B01100000000000000000091 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000091 /* ShareSheet.swift */; };
 		B01100000000000000000092 /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000092 /* PhotoLibrarySaver.swift */; };
 		B01100000000000000000093 /* MetafileExportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000093 /* MetafileExportController.swift */; };
+		B011000000000000000000C0 /* QuickLookProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000C0 /* QuickLookProbeView.swift */; };
 		B011000000000000000000A0 /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000A0 /* PreviewProvider.swift */; };
 		B011000000000000000000A3 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000009 /* EMFParse */; };
 		B011000000000000000000A4 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B0300000000000000000000A /* EMFRender */; };
@@ -169,6 +170,7 @@
 		B00200000000000000000002 /* EmfyQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00200000000000000000003 /* EmfyThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00500000000000000000001 /* EMFKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = EMFKit; path = ../EMFKit; sourceTree = "<group>"; };
+		B001000000000000000000C0 /* QuickLookProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookProbeView.swift; sourceTree = "<group>"; };
 		B001000000000000000000A0 /* PreviewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
 		B001000000000000000000A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B001000000000000000000B0 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
@@ -327,6 +329,7 @@
 				B00100000000000000000091 /* ShareSheet.swift */,
 				B00100000000000000000092 /* PhotoLibrarySaver.swift */,
 				B00100000000000000000093 /* MetafileExportController.swift */,
+				B001000000000000000000C0 /* QuickLookProbeView.swift */,
 				B00100000000000000000078 /* AboutView.swift */,
 				B00100000000000000000071 /* RecentsStore.swift */,
 				B00100000000000000000072 /* RecentEntry.swift */,
@@ -623,6 +626,7 @@
 				B0110000000000000000007B /* Changelog.swift in Sources */,
 				B0110000000000000000007C /* WhatsNewView.swift in Sources */,
 				B0110000000000000000007D /* ChangelogView.swift in Sources */,
+				B011000000000000000000C0 /* QuickLookProbeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
