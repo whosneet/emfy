@@ -62,7 +62,7 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// an unknown magic, or a corrupt PNG/JPEG; it was not drawn.
     case imageCompressed
     /// A DrawImage/DrawImagePoints referenced a metafile-content image
-    /// (§2.2.2.27); nested-metafile playback is out of phase-4 scope, so the
+    /// (§2.2.2.27); nested-metafile playback is not implemented, so the
     /// image was not drawn.
     case imageMetafile
     /// A DrawImage/DrawImagePoints SrcUnit was not UnitTypePixel ([MS-EMFPLUS]
@@ -259,7 +259,7 @@ public struct EMFRenderLog: Sendable, Equatable {
         /// was skipped (primer §6 phase 4). Coalesced.
         case glyphIndexTextSkipped(count: Int)
         /// A DIB the renderer could not draw — a compression, bit-count, or
-        /// palette-usage the phase-4 raster path does not support — was skipped.
+        /// palette-usage the raster path does not support — was skipped.
         /// Coalesced. `reason` is the parse-side unsupported verdict, or `nil`
         /// when the render path itself declined it (DIB_PAL_COLORS usage).
         case unsupportedDIB(reason: DIBUnsupportedReason?, count: Int)

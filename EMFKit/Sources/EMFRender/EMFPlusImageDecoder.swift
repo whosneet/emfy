@@ -52,8 +52,8 @@ enum EMFPlusImageDecoder {
         /// A compressed stream CoreGraphics could not decode: GIF/TIFF, an
         /// unknown magic, or a corrupt PNG/JPEG.
         case compressed
-        /// A metafile-content image — nested-metafile playback is out of phase-4
-        /// scope (§2.2.2.27), so the image is not drawn.
+        /// A metafile-content image — nested-metafile playback is not
+        /// implemented (§2.2.2.27), so the image is not drawn.
         case metafile
         /// A compressed image (§2.2.2.10) far larger than the destination-derived
         /// budget: CoreGraphics would decode the whole stream at draw time (no
