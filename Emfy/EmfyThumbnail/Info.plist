@@ -28,14 +28,20 @@
 		<string>$(PRODUCT_MODULE_NAME).ThumbnailProvider</string>
 		<key>NSExtensionAttributes</key>
 		<dict>
-			<!-- .emf has no system UTI; whichever installed app's imported
-			     declaration wins LaunchServices arbitration becomes the file's
-			     type, so we claim the known contenders (Microsoft's identifier
-			     plus LibreOffice's, which wins when LibreOffice is installed). -->
+			<!-- Each metafile extension has no system UTI; whichever installed
+			     app's imported declaration wins LaunchServices arbitration
+			     becomes the file's type, so we claim the known contenders
+			     (Microsoft's identifiers plus LibreOffice's emf/wmf types, which
+			     win when LibreOffice is installed). .emz / .wmz are the gzip-
+			     wrapped forms. -->
 			<key>QLSupportedContentTypes</key>
 			<array>
 				<string>com.microsoft.emf</string>
 				<string>org.libreoffice.emf-document</string>
+				<string>com.microsoft.wmf</string>
+				<string>org.libreoffice.wmf-document</string>
+				<string>com.microsoft.emz</string>
+				<string>com.microsoft.wmz</string>
 			</array>
 			<key>QLThumbnailMinimumDimension</key>
 			<integer>1</integer>

@@ -50,6 +50,50 @@ Copyright © 2026 Arrley Pty Ltd. MIT licensed.</string>
 				<string>org.libreoffice.emf-document</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Windows Metafile image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<!-- .wmf has no system UTI either; same arbitration as .emf.
+			     LibreOffice exports org.libreoffice.wmf-document, which wins
+			     when LibreOffice is installed, so it is claimed too. -->
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.microsoft.wmf</string>
+				<string>org.libreoffice.wmf-document</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Compressed Enhanced Metafile image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<!-- .emz is a gzip-wrapped .emf; no app declares it, so Emfy's
+			     imported type resolves it. -->
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.microsoft.emz</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Compressed Windows Metafile image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<!-- .wmz is a gzip-wrapped .wmf; no app declares it, so Emfy's
+			     imported type resolves it. -->
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.microsoft.wmz</string>
+			</array>
+		</dict>
 	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
@@ -67,6 +111,62 @@ Copyright © 2026 Arrley Pty Ltd. MIT licensed.</string>
 				<key>public.filename-extension</key>
 				<array>
 					<string>emf</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.wmf</string>
+			<key>UTTypeDescription</key>
+			<string>Windows Metafile image</string>
+			<!-- WMF is directly an image, like EMF → public.image. -->
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.image</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>wmf</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.emz</string>
+			<key>UTTypeDescription</key>
+			<string>Compressed Enhanced Metafile image</string>
+			<!-- .emz is a gzip container that must be inflated before it is an
+			     image → public.data, not public.image. -->
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>emz</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.wmz</string>
+			<key>UTTypeDescription</key>
+			<string>Compressed Windows Metafile image</string>
+			<!-- .wmz is a gzip container that must be inflated before it is an
+			     image → public.data, not public.image. -->
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>wmz</string>
 				</array>
 			</dict>
 		</dict>
