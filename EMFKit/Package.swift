@@ -29,6 +29,10 @@ let package = Package(
             dependencies: ["EMFParse"]
         ),
         .testTarget(
+            name: "WMFParseTests",
+            dependencies: ["WMFParse", "EMFParse"]
+        ),
+        .testTarget(
             name: "EMFRenderTests",
             dependencies: ["EMFRender", "EMFParse"],
             resources: [.copy("__Baselines__")]
