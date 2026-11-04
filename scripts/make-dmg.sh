@@ -7,7 +7,7 @@
 # Usage:
 #   scripts/make-dmg.sh <path-to-Emfy.app> <output-dmg-path>
 #
-# Uses only system tools: hdiutil, osascript, tiffutil, ditto, xattr, sips,
+# Uses only system tools: diskutil, osascript, tiffutil, ditto, xattr, sips,
 # and SetFile when present. No third-party tooling.
 #
 # All staging happens in a mktemp dir OUTSIDE the repo — the repo lives in a
@@ -54,7 +54,7 @@ BG2="${REPO_ROOT}/assets/dmg/background@2x.png"
 # --- Pre-flight: refuse to start against a stale mount (task step c) ----------
 
 if [[ -e "${MOUNT}" ]]; then
-    die "${MOUNT} already exists — a stale Emfy volume is mounted. Eject it (hdiutil detach \"${MOUNT}\") and re-run."
+    die "${MOUNT} already exists — a stale Emfy volume is mounted. Eject it (diskutil eject \"${MOUNT}\") and re-run."
 fi
 
 # --- (a) Background: combine the two PNGs into one hidpi TIFF -----------------
@@ -66,14 +66,18 @@ fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/emfy-dmg.XXXXXX")"
 STAGE="${WORK}/stage"
+# The writable intermediate is a UDSB sparse bundle — the read-write format
+# `diskutil image create` produces (there is no UDRW equivalent). It is converted
+# to the compressed read-only UDZO final image at the end.
+RW_IMAGE="${WORK}/rw.sparsebundle"
 DEVICE=""
 
 cleanup() {
     # Detach the read-write volume if it is still attached (any failure path),
-    # retrying once with -force. Then remove the scratch dir.
+    # retrying once with force. Then remove the scratch dir.
     if [[ -n "${DEVICE}" ]]; then
-        hdiutil detach "${DEVICE}" >/dev/null 2>&1 \
-            || hdiutil detach "${DEVICE}" -force >/dev/null 2>&1 \
+        diskutil eject "${DEVICE}" >/dev/null 2>&1 \
+            || diskutil eject force "${DEVICE}" >/dev/null 2>&1 \
             || true
     fi
     rm -rf "${WORK}"
@@ -105,22 +109,27 @@ APP_ICNS="${APP}/Contents/Resources/emfy.icns"
 
 STAGE_KB="$(du -sk "${STAGE}" | awk '{print $1}')"
 SIZE_KB=$(( STAGE_KB + 20480 ))
+SIZE_BYTES=$(( SIZE_KB * 1024 ))
 info "staged ${STAGE_KB} KB; creating a ${SIZE_KB} KB read-write image"
 
 # --- (d) Create the read-write image and attach it ---------------------------
 
-hdiutil create \
-    -volname "${VOLUME_NAME}" \
-    -fs HFS+ \
-    -format UDRW \
-    -size "${SIZE_KB}k" \
-    -srcfolder "${STAGE}" \
-    "${WORK}/rw.dmg" >/dev/null \
-    || die "hdiutil create failed"
+# `diskutil image create from <folder>` sizes the image to the staged content
+# with almost no slack, so grow it afterwards (the image must be detached for the
+# resize) to leave room for Finder's .DS_Store and step (g)'s .VolumeIcon.icns.
+diskutil image create from "${STAGE}" \
+    --format UDSB \
+    --volname "${VOLUME_NAME}" \
+    "${RW_IMAGE}" >/dev/null 2>&1 \
+    || die "diskutil image create failed"
+diskutil image resize "${RW_IMAGE}" --size "${SIZE_BYTES}" >/dev/null 2>&1 \
+    || die "diskutil image resize failed"
 
 info "attaching read-write volume"
-ATTACH_OUT="$(hdiutil attach -readwrite -noverify -noautoopen "${WORK}/rw.dmg")" \
-    || die "hdiutil attach failed"
+# `diskutil image attach` mounts read-write by default (no --readOnly); its first
+# output line is the backing /dev/diskN, so the device parse is unchanged.
+ATTACH_OUT="$(diskutil image attach "${RW_IMAGE}")" \
+    || die "diskutil image attach failed"
 DEVICE="$(echo "${ATTACH_OUT}" | grep -Eo '^/dev/disk[0-9]+' | head -1)"
 [[ -n "${DEVICE}" ]] || die "could not determine attached device node"
 [[ -d "${MOUNT}" ]] || die "volume did not mount at ${MOUNT}"
@@ -314,17 +323,18 @@ sync
 
 sync
 info "detaching read-write volume"
-hdiutil detach "${DEVICE}" >/dev/null \
-    || hdiutil detach "${DEVICE}" -force >/dev/null \
+diskutil eject "${DEVICE}" >/dev/null \
+    || diskutil eject force "${DEVICE}" >/dev/null \
     || die "could not detach ${DEVICE}"
 DEVICE=""   # detached cleanly — stop the EXIT trap from re-detaching
 
 info "compressing to UDZO: ${OUTPUT}"
 rm -f "${OUTPUT}"
-hdiutil convert "${WORK}/rw.dmg" \
-    -format UDZO \
-    -imagekey zlib-level=9 \
-    -o "${OUTPUT}" >/dev/null \
-    || die "hdiutil convert failed"
+# `create from` a detached disk image with --format UDZO is the compressed
+# read-only conversion (hdiutil convert's replacement; UDZO is zlib-compressed).
+diskutil image create from "${RW_IMAGE}" \
+    --format UDZO \
+    "${OUTPUT}" >/dev/null 2>&1 \
+    || die "diskutil image convert to UDZO failed"
 
 info "styled DMG written: ${OUTPUT}"
