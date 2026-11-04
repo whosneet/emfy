@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "EMFKit",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "EMFParse", targets: ["EMFParse"]),
         .library(name: "WMFParse", targets: ["WMFParse"]),

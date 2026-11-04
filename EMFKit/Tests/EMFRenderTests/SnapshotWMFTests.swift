@@ -1,3 +1,7 @@
+// Snapshot baselines are macOS-only: CoreText rasterises text differently
+// per platform, so these committed-PNG comparisons are gated to macOS and
+// skipped on iOS (v3-plan I0). Not deleted — they are the Mac phase gates.
+#if os(macOS)
 import CoreGraphics
 import Foundation
 import Testing
@@ -71,3 +75,4 @@ struct SnapshotWMFTests {
         try Self.verify("\(name).wmf", baseline: name)
     }
 }
+#endif
