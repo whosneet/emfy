@@ -12,7 +12,7 @@ Quick Look previews, Finder thumbnails, and a small viewer app.</p>
 <p>
 <a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" alt="Platform: macOS 14+"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-green" alt="Licence: MIT"></a>
-<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/release-v2.0.1-blue" alt="Latest release: v2.0.1"></a>
+<a href="https://github.com/whosneet/emfy/releases/latest"><img src="https://img.shields.io/badge/release-v2.0.2-blue" alt="Latest release: v2.0.2"></a>
 </p>
 
 <p>
@@ -115,6 +115,13 @@ xcodebuild -project Emfy/Emfy.xcodeproj -scheme Emfy -configuration Debug build
 own signing identity if you ship a fork.
 
 ## Changelog
+
+### 2.0.2
+
+```
+- Refreshed app icon with the Liquid Glass effect.
+- Leaner build: unused code is now stripped from the app and its Quick Look extensions.
+```
 
 ### 2.0.1
 
