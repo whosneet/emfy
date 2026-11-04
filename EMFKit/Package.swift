@@ -6,18 +6,23 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "EMFParse", targets: ["EMFParse"]),
+        .library(name: "WMFParse", targets: ["WMFParse"]),
         .library(name: "EMFRender", targets: ["EMFRender"]),
         .executable(name: "emfy-dump", targets: ["emfy-dump"]),
     ],
     targets: [
         .target(name: "EMFParse"),
         .target(
+            name: "WMFParse",
+            dependencies: ["EMFParse"]
+        ),
+        .target(
             name: "EMFRender",
             dependencies: ["EMFParse"]
         ),
         .executableTarget(
             name: "emfy-dump",
-            dependencies: ["EMFParse"]
+            dependencies: ["EMFParse", "WMFParse"]
         ),
         .testTarget(
             name: "EMFParseTests",
