@@ -18,7 +18,7 @@ let package = Package(
         ),
         .target(
             name: "EMFRender",
-            dependencies: ["EMFParse"]
+            dependencies: ["EMFParse", "WMFParse"]
         ),
         .executableTarget(
             name: "emfy-dump",
