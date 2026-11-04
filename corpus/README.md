@@ -38,3 +38,20 @@ files — `handmade-strokes-paths`, `handmade-cjk-text`, `handmade-emfplus-shape
 also carry the standard LibreOffice state preamble:
 map mode, window/viewport, SAVEDC/RESTOREDC, SETROP2, and one full-canvas
 EMR_INTERSECTCLIPRECT.
+
+## W2 — signature detection and gzip fixtures
+
+These files exercise the W2 front door (signature detection + streaming gzip
+inflate). All are self-generated.
+
+| File | Kind | Provenance | Notes |
+|---|---|---|---|
+| gate-p2-star.emz | gzip → EMF | `gzip -9 -n -c gate-p2-star.emf` | `.emz` wrapper of the committed EMF. `-n` omits the original filename and mtime (no name/timestamp leak); the tests assert it inflates byte-identical to `gate-p2-star.emf`. |
+| gate-p3-shapes.emz | gzip → EMF | `gzip -9 -n -c gate-p3-shapes.emf` | as above, for `gate-p3-shapes.emf`. |
+| gate-p4-text.emz | gzip → EMF | `gzip -9 -n -c gate-p4-text.emf` | as above, for `gate-p4-text.emf`. |
+| handmade-wmf-standard.wmf | standard WMF | hand-authored bytes | 24 bytes: a META_HEADER ([MS-WMF] §2.3.2.2; DISKMETAFILE, HeaderSize 9, METAVERSION300) followed by META_EOF. A valid header + EOF is all W2 detection needs; record decode arrives in W3. |
+| handmade-wmf-placeable.wmf | placeable WMF | hand-authored bytes | 46 bytes: a META_PLACEABLE ([MS-WMF] §2.3.2.3; key 0x9AC6CDD7, 0–1000 bounding box, 1440 units/inch, checksum 0x52B1) then a MEMORYMETAFILE META_HEADER and META_EOF. The checksum is correct, so detection raises no diagnostic; corrupting it is covered in the tests as a diagnostic, never a rejection. |
+
+The WMF corpus grows in W3/W4 with LibreOffice-exported drawings once the WMF
+record walker and renderer land; these two hand-built headers cover W2's
+detection path only.
