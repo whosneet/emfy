@@ -190,6 +190,8 @@ the clean-room policy, and code expectations.
 
 ## Licence & references
 
+Product of Arrley, built by Neet Singh in Sydney, Australia
+
 MIT © 2026 Arrley Pty Ltd
 
 - [MS-EMF] Enhanced Metafile Format — https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/

@@ -27,7 +27,8 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 Arrley Pty Ltd. MIT licensed.</string>
+	<string>Product of Arrley, built by Neet Singh in Sydney, Australia.
+Copyright © 2026 Arrley Pty Ltd. MIT licensed.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>CFBundleDocumentTypes</key>
