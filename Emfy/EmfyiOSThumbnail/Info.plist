@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Emfy Thumbnail</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.quicklook.thumbnail</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).ThumbnailProvider</string>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<!-- Each metafile extension has no system UTI; whichever installed
+			     app's imported declaration wins LaunchServices arbitration
+			     becomes the file's type, so we claim the known contenders
+			     (Microsoft's identifiers plus LibreOffice's emf/wmf types, which
+			     win when LibreOffice is installed), exactly as the iOS app's
+			     Info.plist declares them. .emz / .wmz are the gzip-wrapped forms. -->
+			<key>QLSupportedContentTypes</key>
+			<array>
+				<string>com.microsoft.emf</string>
+				<string>org.libreoffice.emf-document</string>
+				<string>com.microsoft.wmf</string>
+				<string>org.libreoffice.wmf-document</string>
+				<string>com.microsoft.emz</string>
+				<string>com.microsoft.wmz</string>
+			</array>
+			<key>QLThumbnailMinimumDimension</key>
+			<integer>1</integer>
+		</dict>
+	</dict>
+</dict>
+</plist>

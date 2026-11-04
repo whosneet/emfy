@@ -55,6 +55,15 @@
 		B01100000000000000000091 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000091 /* ShareSheet.swift */; };
 		B01100000000000000000092 /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000092 /* PhotoLibrarySaver.swift */; };
 		B01100000000000000000093 /* MetafileExportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000093 /* MetafileExportController.swift */; };
+		B011000000000000000000A0 /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000A0 /* PreviewProvider.swift */; };
+		B011000000000000000000A3 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000009 /* EMFParse */; };
+		B011000000000000000000A4 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B0300000000000000000000A /* EMFRender */; };
+		B011000000000000000000A5 /* EmfyiOSQuickLook.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B00200000000000000000005 /* EmfyiOSQuickLook.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B011000000000000000000B0 /* ThumbnailProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000B0 /* ThumbnailProvider.swift */; };
+		B011000000000000000000B2 /* ThumbnailSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000021 /* ThumbnailSizing.swift */; };
+		B011000000000000000000B3 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B0300000000000000000000B /* EMFParse */; };
+		B011000000000000000000B4 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B0300000000000000000000C /* EMFRender */; };
+		B011000000000000000000B5 /* EmfyiOSThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B00200000000000000000006 /* EmfyiOSThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -72,6 +81,20 @@
 			remoteGlobalIDString = B00400000000000000000003;
 			remoteInfo = EmfyThumbnail;
 		};
+		B09000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B00400000000000000000005;
+			remoteInfo = "Emfy iOS Quick Look";
+		};
+		B09000000000000000000004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B00400000000000000000006;
+			remoteInfo = "Emfy iOS Thumbnail";
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -83,6 +106,18 @@
 			files = (
 				B01100000000000000000040 /* EmfyQuickLook.appex in Embed Foundation Extensions */,
 				B01100000000000000000041 /* EmfyThumbnail.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B08000000000000000000002 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B011000000000000000000A5 /* EmfyiOSQuickLook.appex in Embed Foundation Extensions */,
+				B011000000000000000000B5 /* EmfyiOSThumbnail.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -134,6 +169,12 @@
 		B00200000000000000000002 /* EmfyQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00200000000000000000003 /* EmfyThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00500000000000000000001 /* EMFKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = EMFKit; path = ../EMFKit; sourceTree = "<group>"; };
+		B001000000000000000000A0 /* PreviewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewProvider.swift; sourceTree = "<group>"; };
+		B001000000000000000000A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B001000000000000000000B0 /* ThumbnailProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailProvider.swift; sourceTree = "<group>"; };
+		B001000000000000000000B1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B00200000000000000000005 /* EmfyiOSQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyiOSQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00200000000000000000006 /* EmfyiOSThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyiOSThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -173,6 +214,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B07000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B011000000000000000000A3 /* EMFParse in Frameworks */,
+				B011000000000000000000A4 /* EMFRender in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B07000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B011000000000000000000B3 /* EMFParse in Frameworks */,
+				B011000000000000000000B4 /* EMFRender in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -183,6 +242,8 @@
 				B06000000000000000000003 /* EmfyQuickLook */,
 				B06000000000000000000004 /* EmfyThumbnail */,
 				B06000000000000000000007 /* EmfyiOS */,
+				B06000000000000000000008 /* EmfyiOSQuickLook */,
+				B06000000000000000000009 /* EmfyiOSThumbnail */,
 				B06000000000000000000006 /* Packages */,
 				B06000000000000000000005 /* Products */,
 			);
@@ -236,6 +297,8 @@
 				B00200000000000000000002 /* EmfyQuickLook.appex */,
 				B00200000000000000000003 /* EmfyThumbnail.appex */,
 				B00200000000000000000004 /* Emfy.app */,
+				B00200000000000000000005 /* EmfyiOSQuickLook.appex */,
+				B00200000000000000000006 /* EmfyiOSThumbnail.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -272,6 +335,24 @@
 				B00100000000000000000079 /* Info.plist */,
 			);
 			path = EmfyiOS;
+			sourceTree = "<group>";
+		};
+		B06000000000000000000008 /* EmfyiOSQuickLook */ = {
+			isa = PBXGroup;
+			children = (
+				B001000000000000000000A0 /* PreviewProvider.swift */,
+				B001000000000000000000A1 /* Info.plist */,
+			);
+			path = EmfyiOSQuickLook;
+			sourceTree = "<group>";
+		};
+		B06000000000000000000009 /* EmfyiOSThumbnail */ = {
+			isa = PBXGroup;
+			children = (
+				B001000000000000000000B0 /* ThumbnailProvider.swift */,
+				B001000000000000000000B1 /* Info.plist */,
+			);
+			path = EmfyiOSThumbnail;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -348,10 +429,13 @@
 				B06600000000000000000004 /* Sources */,
 				B07000000000000000000004 /* Frameworks */,
 				B06700000000000000000004 /* Resources */,
+				B08000000000000000000002 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B09100000000000000000003 /* PBXTargetDependency */,
+				B09100000000000000000004 /* PBXTargetDependency */,
 			);
 			name = "Emfy iOS";
 			packageProductDependencies = (
@@ -361,6 +445,46 @@
 			productName = "Emfy iOS";
 			productReference = B00200000000000000000004 /* Emfy.app */;
 			productType = "com.apple.product-type.application";
+		};
+		B00400000000000000000005 /* Emfy iOS Quick Look */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B05000000000000000000006 /* Build configuration list for PBXNativeTarget "Emfy iOS Quick Look" */;
+			buildPhases = (
+				B06600000000000000000005 /* Sources */,
+				B07000000000000000000005 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Emfy iOS Quick Look";
+			packageProductDependencies = (
+				B03000000000000000000009 /* EMFParse */,
+				B0300000000000000000000A /* EMFRender */,
+			);
+			productName = "Emfy iOS Quick Look";
+			productReference = B00200000000000000000005 /* EmfyiOSQuickLook.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		B00400000000000000000006 /* Emfy iOS Thumbnail */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B05000000000000000000007 /* Build configuration list for PBXNativeTarget "Emfy iOS Thumbnail" */;
+			buildPhases = (
+				B06600000000000000000006 /* Sources */,
+				B07000000000000000000006 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Emfy iOS Thumbnail";
+			packageProductDependencies = (
+				B0300000000000000000000B /* EMFParse */,
+				B0300000000000000000000C /* EMFRender */,
+			);
+			productName = "Emfy iOS Thumbnail";
+			productReference = B00200000000000000000006 /* EmfyiOSThumbnail.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -382,6 +506,12 @@
 						CreatedOnToolsVersion = 26.6;
 					};
 					B00400000000000000000004 = {
+						CreatedOnToolsVersion = 27.2;
+					};
+					B00400000000000000000005 = {
+						CreatedOnToolsVersion = 27.2;
+					};
+					B00400000000000000000006 = {
 						CreatedOnToolsVersion = 27.2;
 					};
 				};
@@ -406,6 +536,8 @@
 				B00400000000000000000002 /* EmfyQuickLook */,
 				B00400000000000000000003 /* EmfyThumbnail */,
 				B00400000000000000000004 /* Emfy iOS */,
+				B00400000000000000000005 /* Emfy iOS Quick Look */,
+				B00400000000000000000006 /* Emfy iOS Thumbnail */,
 			);
 		};
 /* End PBXProject section */
@@ -494,6 +626,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B06600000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B011000000000000000000A0 /* PreviewProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B06600000000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B011000000000000000000B0 /* ThumbnailProvider.swift in Sources */,
+				B011000000000000000000B2 /* ThumbnailSizing.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -506,6 +655,16 @@
 			isa = PBXTargetDependency;
 			target = B00400000000000000000003 /* EmfyThumbnail */;
 			targetProxy = B09000000000000000000002 /* PBXContainerItemProxy */;
+		};
+		B09100000000000000000003 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B00400000000000000000005 /* Emfy iOS Quick Look */;
+			targetProxy = B09000000000000000000003 /* PBXContainerItemProxy */;
+		};
+		B09100000000000000000004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B00400000000000000000006 /* Emfy iOS Thumbnail */;
+			targetProxy = B09000000000000000000004 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -839,6 +998,110 @@
 			};
 			name = Release;
 		};
+		B05600000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 6Y294JNMJ2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyiOSQuickLook/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy.quicklook;
+				PRODUCT_NAME = EmfyiOSQuickLook;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B05600000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 6Y294JNMJ2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyiOSQuickLook/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy.quicklook;
+				PRODUCT_NAME = EmfyiOSQuickLook;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B05700000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 6Y294JNMJ2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyiOSThumbnail/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy.thumbnail;
+				PRODUCT_NAME = EmfyiOSThumbnail;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B05700000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 6Y294JNMJ2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyiOSThumbnail/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy.thumbnail;
+				PRODUCT_NAME = EmfyiOSThumbnail;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -883,6 +1146,24 @@
 			buildConfigurations = (
 				B05500000000000000000001 /* Debug */,
 				B05500000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B05000000000000000000006 /* Build configuration list for PBXNativeTarget "Emfy iOS Quick Look" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05600000000000000000001 /* Debug */,
+				B05600000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B05000000000000000000007 /* Build configuration list for PBXNativeTarget "Emfy iOS Thumbnail" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05700000000000000000001 /* Debug */,
+				B05700000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -933,6 +1214,26 @@
 			productName = EMFParse;
 		};
 		B03000000000000000000008 /* EMFRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFRender;
+		};
+		B03000000000000000000009 /* EMFParse */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFParse;
+		};
+		B0300000000000000000000A /* EMFRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFRender;
+		};
+		B0300000000000000000000B /* EMFParse */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFParse;
+		};
+		B0300000000000000000000C /* EMFRender */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
 			productName = EMFRender;
