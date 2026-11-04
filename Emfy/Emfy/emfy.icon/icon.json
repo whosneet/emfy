@@ -10,7 +10,7 @@
           "fill" : {
             "solid" : "display-p3:0.99554,1.00000,0.97991,1.00000"
           },
-          "glass" : false,
+          "glass" : true,
           "image-name" : "emfy.png",
           "name" : "emfy"
         }
