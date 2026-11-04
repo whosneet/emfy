@@ -19,6 +19,11 @@ public enum EMFPlusApproximation: Sendable, Equatable, Hashable {
     /// A pen line cap outside flat/square/round (triangle or an anchor/custom
     /// cap) was drawn with a round cap.
     case penCap
+    /// A pen's PenDataMiterLimit ([MS-EMFPLUS] §2.2.2.33) was non-finite
+    /// (NaN/±inf) or non-positive and could not reach CGContext.setMiterLimit;
+    /// CoreGraphics' default miter limit (10) was used, so miter joins may
+    /// differ from the file's intent (§8 input sanitation).
+    case penMiterLimit
     /// A clip CombineMode CoreGraphics cannot express (Union/XOR/Exclude/
     /// Complement) was applied as an intersection (best effort).
     case clipCombineMode

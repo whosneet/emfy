@@ -157,7 +157,21 @@ enum EMFPlusPaint {
         default: join = .miter     // Miter / MiterClipped
         }
 
-        let miterLimit = data.miterLimit.map { CGFloat(max($0, 1)) } ?? 10
+        // §8 input sanitation: a non-finite (NaN/±inf) or non-positive miter
+        // limit must never reach CGContext.setMiterLimit — fall back to CG's
+        // default of 10 and note it. An absent value is the plain default (no
+        // note); a present sub-unit value is clamped up to CG's floor of 1.
+        let miterLimit: CGFloat
+        if let rawMiter = data.miterLimit {
+            if rawMiter.isFinite && rawMiter > 0 {
+                miterLimit = CGFloat(max(rawMiter, 1))
+            } else {
+                log.noteEMFPlusApproximated(.penMiterLimit)
+                miterLimit = 10
+            }
+        } else {
+            miterLimit = 10
+        }
 
         // Dash pattern (§2.2.2.16): DashedLineData values are multiples of the
         // pen width, so a dash in target units is value × width. The offset

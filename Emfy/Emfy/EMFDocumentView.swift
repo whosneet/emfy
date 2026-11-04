@@ -457,6 +457,8 @@ private extension EMFPlusApproximation {
             return "gradient/pattern pen stroke as a solid color"
         case .penCap:
             return "line cap as a round cap"
+        case .penMiterLimit:
+            return "an invalid pen miter limit as the default"
         case .clipCombineMode:
             return "clip combination as an intersection"
         case .regionCombine:

@@ -76,6 +76,18 @@ private func penPayloadLineStyle(width: Float, argb: UInt32, lineStyle: Int32) -
     }
 }
 
+/// A pen carrying a PenDataMiterLimit (PenDataFlags 0x10; the MiterLimit float
+/// follows the fixed PenData fields, [MS-EMFPLUS] §2.2.2.33) — for the miter
+/// sanitation tests.
+private func penPayloadMiterLimit(width: Float, argb: UInt32, miterLimit: Float) -> [UInt8] {
+    le { writer in
+        writer.u32(plusVersion); writer.u32(0)              // Version, Type
+        writer.u32(0x10); writer.u32(0); writer.f32(width)  // PenDataFlags=MiterLimit, PenUnit, PenWidth
+        writer.f32(miterLimit)                              // OptionalData: PenDataMiterLimit
+        writer.u32(plusVersion); writer.u32(0); writer.u32(argb)   // BrushObject (solid)
+    }
+}
+
 /// EmfPlusPath (§2.2.1.6) with absolute 32-bit points (Flags 0).
 private func pathPayload(points: [(Float, Float)], types: [UInt8]) -> [UInt8] {
     le { writer in
@@ -789,6 +801,36 @@ struct EMFPlusPlaybackTests {
             for y in 48 ... 52 where !Self.isWhite(image[x, y]) { drewInk = true; break outer }
         }
         #expect(drewInk, "an infinite-width line should still stroke at the fallback width")
+    }
+
+    @Test("a non-finite or non-positive pen miterLimit falls back to the default, notes penMiterLimit, and still strokes (L1)",
+          arguments: [Float.nan, .infinity, -.infinity, 0, -5])
+    func penMiterLimitSanitized(_ badMiter: Float) throws {
+        // A sharp V (two segments meeting at a point) so the default miter join
+        // is exercised; width 6 makes the stroke easy to detect.
+        let pen = plusObject(id: 1, type: 2, payload: penPayloadMiterLimit(width: 6, argb: argb(255, 0, 0, 0), miterLimit: badMiter))
+        let file = try plusFile([pen, drawLines(penId: 1, [(20, 20), (50, 70), (80, 20)])])
+        let (image, log) = try renderPlus(file)
+
+        // The stroke must still render — a bad miter limit never reaches CG, so
+        // the line is drawn at the default limit rather than crashing or blanking.
+        var drewInk = false
+        outer: for x in stride(from: 10, to: 90, by: 3) {
+            for y in stride(from: 10, to: 80, by: 3) where !Self.isWhite(image[x, y]) { drewInk = true; break outer }
+        }
+        #expect(drewInk, "a sanitized-miter pen should still stroke for miterLimit \(badMiter)")
+        #expect(log.entries.contains(.emfPlusApproximated(feature: .penMiterLimit, count: 1)),
+                "miterLimit \(badMiter) should note penMiterLimit: \(log.entries)")
+    }
+
+    @Test("a finite, positive pen miterLimit is honoured and NOT noted (control for the miter sanitation)")
+    func penMiterLimitValidNotNoted() throws {
+        let pen = plusObject(id: 1, type: 2, payload: penPayloadMiterLimit(width: 6, argb: argb(255, 0, 0, 0), miterLimit: 5))
+        let file = try plusFile([pen, drawLines(penId: 1, [(20, 20), (50, 70), (80, 20)])])
+        let (_, log) = try renderPlus(file)
+
+        #expect(!log.entries.contains(.emfPlusApproximated(feature: .penMiterLimit, count: 1)),
+                "a valid miterLimit must NOT note penMiterLimit: \(log.entries)")
     }
 
     @Test("a non-finite arc angle draws nothing without crashing (L7)")
