@@ -58,6 +58,13 @@ struct WMFByteReader: Equatable {
         return Int16(bitPattern: u)
     }
 
+    /// Reads a single byte at `offset`, or `nil` if out of range. Used for the
+    /// 8-bit fields of the Font and Bitmap16 objects ([MS-WMF] §2.2.1.2/.2.2.1).
+    func readUInt8(at offset: Int) -> UInt8? {
+        guard offset >= 0, offset < bytes.count else { return nil }
+        return bytes[offset]
+    }
+
     /// Returns the raw bytes in `[offset, offset + length)` as `Data`, or `nil`
     /// if the range is not fully inside the buffer. `length` must be >= 0.
     func data(at offset: Int, length: Int) -> Data? {

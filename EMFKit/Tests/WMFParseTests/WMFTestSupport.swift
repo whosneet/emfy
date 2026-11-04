@@ -41,6 +41,21 @@ enum WMFCorpus {
         "handmade-wmf-placeable.wmf",
     ]
 
+    /// The WMF-only GDI variants (escape records stripped) that exercise the
+    /// W4b record path: the committed p2/p3 vector variants plus the p4 image
+    /// (META_STRETCHDIB) and text (META_CREATEFONTINDIRECT/META_TEXTOUT) ones.
+    /// Fuzz readers skip any that are absent (the p4 pair is uncommitted until
+    /// the main session accepts the candidate baselines).
+    static let gdiVariantFiles: [String] = [
+        "gate-wmf-gdi-p2-house.wmf",
+        "gate-wmf-gdi-p2-star.wmf",
+        "gate-wmf-gdi-p2-triangles.wmf",
+        "gate-wmf-gdi-p3-curves.wmf",
+        "gate-wmf-gdi-p3-shapes.wmf",
+        "gate-wmf-gdi-p4-image.wmf",
+        "gate-wmf-gdi-p4-text.wmf",
+    ]
+
     /// The committed placeable WMFs (checksum must verify).
     static let placeableFiles: [String] = [
         "gate-wmf-p2-house.wmf",

@@ -65,6 +65,82 @@ struct WMFFuzzTests {
         #expect(runs == WMFCorpus.wmfFiles.count * perFile)
     }
 
+    @Test("mutated GDI-variant WMFs survive translation of the W4b decoders")
+    func fuzzMutatedGDIVariants() throws {
+        var prng = WMFPRNG(seed: 0x2C9F_18A7_44E1_6B0D)
+        let perFile = 200
+        var runs = 0
+        for name in WMFCorpus.gdiVariantFiles {
+            // The p4 pair is uncommitted until the gate is accepted; skip if absent.
+            guard let original = try? WMFCorpus.data(name) else { continue }
+            let bytes = Array(original)
+            for _ in 0 ..< perFile {
+                let mutated = Data(mutate(bytes, using: &prng))
+                if let file = try? WMFFile.parse(mutated) {
+                    // Text, bitmap, region and pattern-brush decoders must never
+                    // trap or hang on a hostile WMF (§8) — bounded work, any result.
+                    _ = WMFTranslator.translate(file)
+                }
+                runs += 1
+            }
+        }
+        #expect(runs >= 0)
+    }
+
+    @Test("mutated hand-built content records survive the new decoders")
+    func fuzzHandBuiltContentRecords() throws {
+        var prng = WMFPRNG(seed: 0x9D41_77C2_5EA0_3B16)
+        // A standard WMF carrying one of each new record kind (text, DIB blits,
+        // DDB, region, pattern brush), each mutated and translated.
+        let records: [[UInt8]] = [
+            // CREATEFONTINDIRECT (18-byte fixed + 32-byte facename).
+            WMFFixtureBuilder.record(function: 0x02FB, payload: [UInt8](repeating: 0x41, count: 50)),
+            WMFFixtureBuilder.record(function: 0x012D, payload: [0, 0]),                 // SELECTOBJECT 0
+            // TEXTOUT: StringLength 4, "test", YStart, XStart.
+            WMFFixtureBuilder.record(function: 0x0521, payload: [4, 0] + Array("test".utf8) + [0, 0, 0, 0]),
+            // EXTTEXTOUT: Y, X, len=2, fwOpts=ETO_CLIPPED, rect, "ab", dx.
+            WMFFixtureBuilder.record(function: 0x0A32, payload: [0, 0, 0, 0, 2, 0, 4, 0, 1, 0, 2, 0, 3, 0, 4, 0] + Array("ab".utf8) + [9, 0, 8, 0]),
+            // STRETCHDIB with a 1×1 24-bit DIB.
+            WMFFixtureBuilder.record(function: 0x0F43, payload: [0x20, 0, 0xCC, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0, 0, 0]
+                + Self.bitmapInfoHeader24(1, 1) + [0, 0, 255, 0]),
+            // BITBLT carrying a 1-bpp mono Bitmap16.
+            WMFFixtureBuilder.record(function: 0x0922, payload: [0x20, 0, 0xCC, 0, 0, 0, 0, 0, 1, 0, 8, 0, 0, 0, 0, 0]
+                + [0, 0, 8, 0, 1, 0, 2, 0, 1, 1, 0xAA, 0]),
+            // CREATEREGION with one scan.
+            WMFFixtureBuilder.record(function: 0x06FF, payload: [0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 50, 0, 50, 0, 2, 0, 0, 0, 30, 0, 0, 0, 40, 0, 2, 0]),
+            WMFFixtureBuilder.record(function: 0x012C, payload: [1, 0]),                 // SELECTCLIPREGION 1
+            WMFFixtureBuilder.record(function: 0x0228, payload: [1, 0, 0, 0]),           // FILLREGION
+            WMFFixtureBuilder.record(function: 0x0142, payload: [5, 0, 0, 0] + Self.bitmapInfoHeader24(1, 1) + [0, 0, 0, 0]),   // DIBCREATEPATTERNBRUSH
+        ]
+        let base = Array(WMFFixtureBuilder.file(
+            header: WMFFixtureBuilder.metaHeader(),
+            records: records + [WMFFixtureBuilder.eof()]
+        ))
+        var runs = 0
+        for _ in 0 ..< 3000 {
+            let mutated = Data(mutate(base, using: &prng))
+            if let file = try? WMFFile.parse(mutated) {
+                _ = WMFTranslator.translate(file)
+                _ = WMFEmbeddedEMF.reassemble(file)
+            }
+            runs += 1
+        }
+        #expect(runs == 3000)
+    }
+
+    /// A 40-byte BitmapInfoHeader for a tiny BI_RGB DIB fixture.
+    private static func bitmapInfoHeader24(_ width: Int32, _ height: Int32) -> [UInt8] {
+        var b = WMFFixtureBuilder()
+        b.appendUInt32(40)
+        b.appendUInt32(UInt32(bitPattern: width))
+        b.appendUInt32(UInt32(bitPattern: height))
+        b.appendUInt16(1); b.appendUInt16(24)
+        b.appendUInt32(0)
+        b.appendUInt32(0); b.appendUInt32(0); b.appendUInt32(0)
+        b.appendUInt32(0); b.appendUInt32(0)
+        return b.bytes
+    }
+
     /// 1–6 bounded mutations: byte flip, 4-byte stomp, truncation, small append.
     private func mutate(_ bytes: [UInt8], using prng: inout WMFPRNG) -> [UInt8] {
         var out = bytes
