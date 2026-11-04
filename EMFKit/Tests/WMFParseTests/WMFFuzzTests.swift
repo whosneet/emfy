@@ -44,6 +44,27 @@ struct WMFFuzzTests {
         #expect(runs == 400)
     }
 
+    @Test("mutated corpus WMF bytes survive the translator and embedded-EMF reassembly")
+    func fuzzMutatedTranslation() throws {
+        var prng = WMFPRNG(seed: 0x7A3C_1F08_55B2_90E1)
+        let perFile = 200
+        var runs = 0
+        for name in WMFCorpus.wmfFiles {
+            let original = Array(try WMFCorpus.data(name))
+            for _ in 0 ..< perFile {
+                let mutated = Data(mutate(original, using: &prng))
+                if let file = try? WMFFile.parse(mutated) {
+                    // The translation and reassembly paths must never trap or
+                    // hang on a hostile WMF (§8) — bounded work, any result.
+                    _ = WMFTranslator.translate(file)
+                    _ = WMFEmbeddedEMF.reassemble(file)
+                }
+                runs += 1
+            }
+        }
+        #expect(runs == WMFCorpus.wmfFiles.count * perFile)
+    }
+
     /// 1–6 bounded mutations: byte flip, 4-byte stomp, truncation, small append.
     private func mutate(_ bytes: [UInt8], using prng: inout WMFPRNG) -> [UInt8] {
         var out = bytes
