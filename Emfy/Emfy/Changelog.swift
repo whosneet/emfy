@@ -16,6 +16,20 @@ struct ChangelogEntry: Identifiable {
 enum Changelog {
     static let entries: [ChangelogEntry] = [
         ChangelogEntry(
+            version: "3.1",
+            build: "6",
+            date: "November 2026",
+            changes: [
+                "Windows Metafile (.wmf) files now open, preview, and thumbnail, alongside EMF.",
+                "Compressed metafiles open too: .wmz (gzip-wrapped WMF) and .emz (gzip-wrapped EMF).",
+                "WMF coverage spans the record types LibreOffice exports; when a WMF carries a complete embedded EMF, Emfy plays that for higher fidelity.",
+                "New iPhone and iPad app: a viewer with sharp zoom at any scale, file details, and sharing or export to PNG and PDF.",
+                "Quick Look previews and thumbnails for EMF and WMF files in Files, Mail, and Messages on iPhone and iPad.",
+                "The iPhone and iPad app supports iPhone Duo.",
+                "Steadier rendering of unusual and malformed metafiles.",
+            ]
+        ),
+        ChangelogEntry(
             version: "2.0.2",
             build: "5",
             date: "November 2026",
