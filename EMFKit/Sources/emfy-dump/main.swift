@@ -305,6 +305,93 @@ func wmfTypeName(_ type: UInt16) -> String {
     }
 }
 
+// MARK: - WMF-only variant generation (strip embedded EMF)
+
+// `emfy-dump --strip-emf <in.wmf> <out.wmf>` removes the
+// META_ESCAPE_ENHANCED_METAFILE records that carry an embedded EMF and
+// re-accounts the META_HEADER (SizeLow/SizeHigh and MaxRecord) so the result is
+// a self-consistent WMF that exercises the WMF record-playback path instead of
+// the embedded EMF. The placeable header (if any) is copied unchanged — its
+// checksum covers only its own ten WORDs, not the META_HEADER. Chosen over a
+// standalone script: it reuses WMFParse's walker and keeps the one permanent
+// WMF tool (emfy-dump) authoritative for anything WMF.
+
+/// True when `record` is a META_ESCAPE whose EscapeFunction is the
+/// enhanced-metafile comment ([MS-WMF] §2.3.6.25).
+func isEmbeddedEMFEscape(_ record: WMFRawRecord, in wmf: WMFFile) -> Bool {
+    guard record.function == 0x0626 else { return false }
+    let body = wmf.payload(of: record)
+    guard body.count >= 2 else { return false }
+    let escapeFunction = UInt16(body[body.startIndex]) | (UInt16(body[body.startIndex + 1]) << 8)
+    return escapeFunction == 0x000F
+}
+
+func stripEmbeddedEMFMode(input: String, output: String) -> Never {
+    let data: Data
+    do {
+        data = try Data(contentsOf: URL(fileURLWithPath: input))
+    } catch {
+        printErr("emfy-dump --strip-emf: cannot read '\(input)': \(error.localizedDescription)")
+        exit(1)
+    }
+
+    let wmf: WMFFile
+    do {
+        wmf = try WMFFile.parse(data)
+    } catch {
+        printErr("emfy-dump --strip-emf: '\(input)': \(describe(error))")
+        exit(1)
+    }
+
+    let metaOffset = wmf.placeable != nil ? 22 : 0
+    guard data.count >= metaOffset + 18 else {
+        printErr("emfy-dump --strip-emf: '\(input)': too short for a META_HEADER")
+        exit(1)
+    }
+
+    let kept = wmf.records.filter { !isEmbeddedEMFEscape($0, in: wmf) }
+    let removed = wmf.records.count - kept.count
+
+    // Total metafile size in WORDs = (18-byte META_HEADER + kept record bytes) / 2.
+    let keptRecordBytes = kept.reduce(0) { $0 + $1.byteSize }
+    let totalWords = (18 + keptRecordBytes) / 2
+    let maxRecordWords = kept.map { $0.sizeWords }.max() ?? 0
+
+    var metaHeader = [UInt8](data.subdata(in: metaOffset ..< metaOffset + 18))
+    func writeU16(_ value: Int, at offset: Int) {
+        metaHeader[offset] = UInt8(value & 0xFF)
+        metaHeader[offset + 1] = UInt8((value >> 8) & 0xFF)
+    }
+    func writeU32(_ value: UInt32, at offset: Int) {
+        metaHeader[offset] = UInt8(value & 0xFF)
+        metaHeader[offset + 1] = UInt8((value >> 8) & 0xFF)
+        metaHeader[offset + 2] = UInt8((value >> 16) & 0xFF)
+        metaHeader[offset + 3] = UInt8((value >> 24) & 0xFF)
+    }
+    writeU16(totalWords & 0xFFFF, at: 6)          // SizeLow
+    writeU16((totalWords >> 16) & 0xFFFF, at: 8)  // SizeHigh
+    writeU32(maxRecordWords, at: 12)              // MaxRecord
+
+    var out = Data()
+    if wmf.placeable != nil {
+        out.append(data.subdata(in: 0 ..< 22))
+    }
+    out.append(contentsOf: metaHeader)
+    for record in kept {
+        out.append(data.subdata(in: record.offset ..< record.offset + record.byteSize))
+    }
+
+    do {
+        try out.write(to: URL(fileURLWithPath: output))
+    } catch {
+        printErr("emfy-dump --strip-emf: cannot write '\(output)': \(error.localizedDescription)")
+        exit(1)
+    }
+
+    print("stripped \(removed) embedded-EMF escape record(s); wrote \(out.count) bytes to \(output)")
+    exit(0)
+}
+
 func leftPad(_ string: String, _ width: Int) -> String {
     string.count >= width
         ? string
@@ -320,8 +407,15 @@ func rightPad(_ string: String, _ width: Int) -> String {
 // MARK: - Arguments
 
 let arguments = CommandLine.arguments
+
+// WMF-only variant generation: strip the embedded EMF and re-account the header.
+if arguments.count == 4, arguments[1] == "--strip-emf" {
+    stripEmbeddedEMFMode(input: arguments[2], output: arguments[3])
+}
+
 guard arguments.count == 2 else {
     printErr("usage: emfy-dump <file.emf>")
+    printErr("       emfy-dump --strip-emf <in.wmf> <out.wmf>")
     exit(2)
 }
 let path = arguments[1]
