@@ -20,6 +20,7 @@ struct MetafileViewerScreen: View {
 
     @State private var phase: Phase = .loading
     @State private var controller = MetafileZoomController()
+    @State private var exporter = MetafileExportController()
 
     @State private var chromeHidden = false
     @State private var showInspector = false
@@ -59,6 +60,31 @@ struct MetafileViewerScreen: View {
         // compact and regular width — so a hand-placed column + sheet gives the
         // same adaptive UX without breaking navigation.
         .sheet(isPresented: compactSheetBinding) { inspectorContent }
+        // Share sheet for Share File / Share as PNG / Share as PDF. The temp file
+        // is removed once the sheet dismisses.
+        .sheet(item: shareSheetBinding, onDismiss: { exporter.cleanupTemp() }) { payload in
+            ShareSheet(items: payload.items)
+        }
+        .alert(
+            "Export Failed",
+            isPresented: shareErrorBinding,
+            presenting: exporter.shareError
+        ) { _ in
+            Button("OK", role: .cancel) { exporter.shareError = nil }
+        } message: { message in
+            Text(message)
+        }
+        .alert("Allow Photo Access", isPresented: photosDeniedBinding) {
+            Button("Open Settings") { openSettings() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Emfy needs permission to add pictures to your photo library. You can allow access in Settings.")
+        }
+        .overlay {
+            if exporter.isRendering {
+                RenderingOverlay()
+            }
+        }
         .background(keyboardCommands)
         .background {
             GeometryReader { proxy in
@@ -81,7 +107,35 @@ struct MetafileViewerScreen: View {
                 UIAccessibility.post(notification: .announcement, argument: message)
             }
         }
-        .onDisappear { pillHideTask?.cancel() }
+        .onDisappear {
+            pillHideTask?.cancel()
+            exporter.cancelOngoing()
+        }
+    }
+
+    // Computed bindings keep the share/export presentation state on the
+    // `@Observable` controller while using the plain `Binding(get:set:)` form.
+    private var shareSheetBinding: Binding<SharePayload?> {
+        Binding(get: { exporter.sharePayload }, set: { exporter.sharePayload = $0 })
+    }
+
+    private var shareErrorBinding: Binding<Bool> {
+        Binding(
+            get: { exporter.shareError != nil },
+            set: { if !$0 { exporter.shareError = nil } }
+        )
+    }
+
+    private var photosDeniedBinding: Binding<Bool> {
+        Binding(
+            get: { exporter.showPhotosDeniedAlert },
+            set: { exporter.showPhotosDeniedAlert = $0 }
+        )
+    }
+
+    private func openSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     private var backgroundColor: Color {
@@ -155,23 +209,70 @@ struct MetafileViewerScreen: View {
 
     // MARK: - Bottom toolbar (system-managed; one glass capsule)
 
-    // Fit and Info are grouped so the system renders them as a single glass
-    // capsule (the mockup), and on iPhone Duo they move to the side vertical bar
-    // together. `.visibilityPriority(.high)` (gated) keeps the pair in the bar
-    // longest when the outer display overflows. Share is NOT here yet — I3 adds
-    // it; no dead items (dead items would waste a vertical-bar slot on Duo).
+    // Share, Fit, and Info are grouped so the system renders them as a single
+    // glass capsule (the mockup), and on iPhone Duo they move to the side
+    // vertical bar together, in that order. `.visibilityPriority(.high)` (gated)
+    // keeps the trio in the bar longest when the outer display overflows. Every
+    // item is a Label (title + image), so it reads correctly in the vertical bar
+    // and the overflow menu.
     @ToolbarContentBuilder
     private var bottomBar: some ToolbarContent {
         if #available(iOS 27.0, *) {
             ToolbarItemGroup(placement: .bottomBar) {
+                shareMenu
                 fitButton
                 infoButton
             }
             .visibilityPriority(.high)
         } else {
             ToolbarItemGroup(placement: .bottomBar) {
+                shareMenu
                 fitButton
                 infoButton
+            }
+        }
+    }
+
+    // The Share button is a system-managed toolbar Menu (the approved Share
+    // menu). It renders the picture itself — Copy/Save/Share all run through the
+    // same EMFKit export path — so it's disabled until the file has loaded.
+    private var shareMenu: some View {
+        Menu {
+            shareMenuItems
+        } label: {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+        .disabled(loaded == nil)
+    }
+
+    @ViewBuilder
+    private var shareMenuItems: some View {
+        if let model = loaded, let entry {
+            Button {
+                exporter.shareOriginal(entry: entry, store: store)
+            } label: {
+                Label("Share File", systemImage: "square.and.arrow.up")
+            }
+            Button {
+                exporter.share(.png, prepared: model.prepared, baseName: entry.baseName)
+            } label: {
+                Label("Share as PNG", systemImage: "photo")
+            }
+            Button {
+                exporter.share(.pdf, prepared: model.prepared, baseName: entry.baseName)
+            } label: {
+                Label("Share as PDF", systemImage: "doc.richtext")
+            }
+            Divider()
+            Button {
+                exporter.copyImage(prepared: model.prepared)
+            } label: {
+                Label("Copy Image", systemImage: "doc.on.doc")
+            }
+            Button {
+                exporter.saveToPhotos(prepared: model.prepared)
+            } label: {
+                Label("Save to Photos", systemImage: "square.and.arrow.down")
             }
         }
     }
@@ -339,6 +440,7 @@ struct MetafileViewerScreen: View {
         if let model = loaded, let entry {
             FileInfoInspector(
                 entry: entry,
+                prepared: model.prepared,
                 diagnostics: model.diagnostics,
                 naturalSize: model.naturalSize,
                 zoomPercent: zoomPercent,

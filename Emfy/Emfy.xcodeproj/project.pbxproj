@@ -51,6 +51,10 @@
 		B01100000000000000000083 /* FileInfoInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007C /* FileInfoInspector.swift */; };
 		B01100000000000000000084 /* MetafileDiagnosticText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007D /* MetafileDiagnosticText.swift */; };
 		B01100000000000000000085 /* DuoRegions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007E /* DuoRegions.swift */; };
+		B01100000000000000000090 /* MetafileExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000090 /* MetafileExport.swift */; };
+		B01100000000000000000091 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000091 /* ShareSheet.swift */; };
+		B01100000000000000000092 /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000092 /* PhotoLibrarySaver.swift */; };
+		B01100000000000000000093 /* MetafileExportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000093 /* MetafileExportController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -121,6 +125,10 @@
 		B0010000000000000000007C /* FileInfoInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileInfoInspector.swift; sourceTree = "<group>"; };
 		B0010000000000000000007D /* MetafileDiagnosticText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileDiagnosticText.swift; sourceTree = "<group>"; };
 		B0010000000000000000007E /* DuoRegions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoRegions.swift; sourceTree = "<group>"; };
+		B00100000000000000000090 /* MetafileExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileExport.swift; sourceTree = "<group>"; };
+		B00100000000000000000091 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
+		B00100000000000000000092 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
+		B00100000000000000000093 /* MetafileExportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileExportController.swift; sourceTree = "<group>"; };
 		B00200000000000000000001 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00200000000000000000004 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00200000000000000000002 /* EmfyQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -252,6 +260,10 @@
 				B0010000000000000000007C /* FileInfoInspector.swift */,
 				B0010000000000000000007D /* MetafileDiagnosticText.swift */,
 				B0010000000000000000007E /* DuoRegions.swift */,
+				B00100000000000000000090 /* MetafileExport.swift */,
+				B00100000000000000000091 /* ShareSheet.swift */,
+				B00100000000000000000092 /* PhotoLibrarySaver.swift */,
+				B00100000000000000000093 /* MetafileExportController.swift */,
 				B00100000000000000000078 /* AboutView.swift */,
 				B00100000000000000000071 /* RecentsStore.swift */,
 				B00100000000000000000072 /* RecentEntry.swift */,
@@ -468,6 +480,10 @@
 				B01100000000000000000083 /* FileInfoInspector.swift in Sources */,
 				B01100000000000000000084 /* MetafileDiagnosticText.swift in Sources */,
 				B01100000000000000000085 /* DuoRegions.swift in Sources */,
+				B01100000000000000000090 /* MetafileExport.swift in Sources */,
+				B01100000000000000000091 /* ShareSheet.swift in Sources */,
+				B01100000000000000000092 /* PhotoLibrarySaver.swift in Sources */,
+				B01100000000000000000093 /* MetafileExportController.swift in Sources */,
 				B01100000000000000000077 /* MetafileLoader.swift in Sources */,
 				B01100000000000000000078 /* AboutView.swift in Sources */,
 				B01100000000000000000079 /* EMFDocument.swift in Sources */,

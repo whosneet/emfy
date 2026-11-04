@@ -1,5 +1,6 @@
 import EMFRender
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Where VoiceOver focus moves as the regular-width inspector opens and closes.
 enum ViewerA11yFocus: Hashable {
@@ -10,15 +11,23 @@ enum ViewerA11yFocus: Hashable {
 /// The file-details panel: a trailing column at regular width (iPad, Duo inner)
 /// and a bottom sheet at compact width (iPhone, Duo outer, Split View halves).
 /// Content follows the approved iPhone-Info and iPad-Viewer-Inspector mockups:
-/// the file name and when it was opened, a grouped details list, and a "What
-/// Emfy couldn't show" section. No export rows yet — those arrive in I3.
+/// the file name and when it was opened, a grouped details list, a "What Emfy
+/// couldn't show" section, and "Export as PNG/PDF…" rows that save to Files.
 ///
 /// This view deliberately has NO internal `NavigationStack`: as a column it sits
 /// inside the viewer, which is already pushed on the app's NavigationStack, and a
 /// nested stack there pops the outer one. A close button in the header replaces
 /// the nav-bar Done; the compact sheet also swipe-dismisses.
+///
+/// The export rows present their own `fileExporter` from here (not through the
+/// viewer's share controller) so the save dialog presents correctly whether the
+/// panel is an iPad column or an iPhone sheet; the render reuses the shared,
+/// off-main `MetafileExport` path with the same spinner/cancel behaviour.
 struct FileInfoInspector: View {
     let entry: RecentEntry
+    /// The parsed metafile, rendered to PNG/PDF for the export rows (byte-identical
+    /// to the Mac's export).
+    let prepared: MetafileRenderer.Prepared
     let diagnostics: ViewerDiagnostics
     let naturalSize: CGSize
     /// The live zoom percentage, shown only where it fits (regular width).
@@ -30,6 +39,16 @@ struct FileInfoInspector: View {
     var headerFocus: AccessibilityFocusState<ViewerA11yFocus?>.Binding
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    // Files-export state, local to this panel so the save dialog, error alert,
+    // and spinner present from whichever surface (column or sheet) is on top.
+    @State private var exportRunner = ExportTaskRunner()
+    @State private var isRenderingExport = false
+    @State private var isExportingPNG = false
+    @State private var isExportingPDF = false
+    @State private var pngDocument = PNGExportDocument(data: Data())
+    @State private var pdfDocument = PDFExportDocument(data: Data())
+    @State private var filesError: String?
 
     var body: some View {
         Form {
@@ -67,6 +86,20 @@ struct FileInfoInspector: View {
                 }
                 .listRowBackground(Color(.secondarySystemGroupedBackground))
             }
+
+            Section {
+                Button {
+                    exportToFiles(.png)
+                } label: {
+                    Label("Export as PNG…", systemImage: "photo")
+                }
+                Button {
+                    exportToFiles(.pdf)
+                } label: {
+                    Label("Export as PDF…", systemImage: "doc.richtext")
+                }
+            }
+            .listRowBackground(Color(.secondarySystemGroupedBackground))
         }
         // No-ops in the regular-width column; for the compact sheet they set the
         // detents and give it an opaque grouped background so the drawing behind
@@ -74,6 +107,68 @@ struct FileInfoInspector: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(Color(.systemGroupedBackground))
+        .fileExporter(
+            isPresented: $isExportingPNG,
+            document: pngDocument,
+            contentType: .png,
+            defaultFilename: entry.baseName
+        ) { result in
+            if case .failure(let error) = result { filesError = error.localizedDescription }
+        }
+        .fileExporter(
+            isPresented: $isExportingPDF,
+            document: pdfDocument,
+            contentType: .pdf,
+            defaultFilename: entry.baseName
+        ) { result in
+            if case .failure(let error) = result { filesError = error.localizedDescription }
+        }
+        .alert(
+            "Export Failed",
+            isPresented: filesErrorBinding,
+            presenting: filesError
+        ) { _ in
+            Button("OK", role: .cancel) { filesError = nil }
+        } message: { message in
+            Text(message)
+        }
+        .overlay {
+            if isRenderingExport {
+                RenderingOverlay()
+            }
+        }
+        .onDisappear { exportRunner.cancel() }
+    }
+
+    /// Renders `format` off-main (cancellably, with a spinner past ~0.3 s) and
+    /// opens `fileExporter` to save it to Files. Bytes are identical to the Mac.
+    private func exportToFiles(_ format: ExportFormat) {
+        let prepared = self.prepared
+        exportRunner.run(
+            setBusy: { busy in isRenderingExport = busy },
+            render: { MetafileExport.data(for: format, prepared: prepared) },
+            done: { data in
+                guard let data else {
+                    filesError = format.failureMessage
+                    return
+                }
+                switch format {
+                case .png:
+                    pngDocument = PNGExportDocument(data: data)
+                    isExportingPNG = true
+                case .pdf:
+                    pdfDocument = PDFExportDocument(data: data)
+                    isExportingPDF = true
+                }
+            }
+        )
+    }
+
+    private var filesErrorBinding: Binding<Bool> {
+        Binding(
+            get: { filesError != nil },
+            set: { if !$0 { filesError = nil } }
+        )
     }
 
     private var header: some View {
