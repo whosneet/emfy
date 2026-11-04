@@ -14,8 +14,10 @@ struct EmfyiOSApp: App {
     var body: some Scene {
         WindowGroup {
             RecentsView()
-                // One shared store across every window (iPad multiple windows /
-                // Stage Manager); per-window state lives in `@SceneStorage`.
+                // One shared store, loaded once. The app is single-window
+                // (`UIApplicationSupportsMultipleScenes` = false), so an incoming
+                // file open reuses this window and navigates it — never a new
+                // iPad window per open (the I1 "3 Hidden Windows" fix).
                 .environment(RecentsStore.shared)
         }
     }

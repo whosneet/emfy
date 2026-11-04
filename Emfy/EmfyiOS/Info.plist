@@ -26,13 +26,15 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<!-- Multiple windows / Stage Manager on iPad (v3-plan I2). SwiftUI manages
-	     the scenes, so no UISceneConfigurations is needed. There is no
-	     "open in new window" affordance in the UI in v3.1. -->
+	<!-- Single window. Opening a file (onOpenURL) then reuses the one window
+	     instead of spawning a new iPad window per open — the I1 "3 Hidden
+	     Windows" fix — and there is no "open in new window" affordance in v3.1
+	     (the Duo rules forbid one). A viewer needs no second window; this is the
+	     simplest, most robust way to guarantee reuse. -->
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<true/>
+		<false/>
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>

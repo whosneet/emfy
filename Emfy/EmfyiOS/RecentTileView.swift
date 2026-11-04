@@ -5,6 +5,7 @@ import SwiftUI
 /// red remove badge sits on the thumbnail.
 struct RecentTileView: View {
     @Environment(RecentsStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let entry: RecentEntry
     let isSelecting: Bool
     let onRemove: () -> Void
@@ -15,17 +16,25 @@ struct RecentTileView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.displayName)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
+                    // Big text gets up to three lines before truncating (A7).
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
                     .truncationMode(.middle)
                 Text(metaLine)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(sizeString)")
         .accessibilityAddTraits(isSelecting ? [] : .isButton)
+        // While selecting, expose Remove as a VoiceOver action — the red badge is
+        // otherwise hidden by `children: .ignore`.
+        .accessibilityActions {
+            if isSelecting {
+                Button("Remove from Recents", action: onRemove)
+            }
+        }
     }
 
     private var thumbnail: some View {
@@ -57,9 +66,10 @@ struct RecentTileView: View {
                         .font(.title2)
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(.white, .red)
-                        .padding(6)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .accessibilityLabel("Remove \(entry.baseName) from Recents")
+                .accessibilityHidden(true)  // reached via the tile's Remove action (A1)
             }
         }
     }

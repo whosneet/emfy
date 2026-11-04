@@ -14,11 +14,11 @@ import UIKit
 @MainActor
 @Observable
 final class RecentsStore {
-    /// One store for the whole app, shared by every window. iPad multiple
-    /// windows / Stage Manager open several scenes against the same recents;
-    /// a per-scene store would let each window's `persist()` clobber the
-    /// others. The navigation path and search text stay per-scene
-    /// (`@SceneStorage`); the recents data is app-wide.
+    /// One store for the whole app. The app is single-window
+    /// (`UIApplicationSupportsMultipleScenes` = false), so there is one scene
+    /// against these recents; the shared instance also keeps the data in one
+    /// place for the Quick Look extensions later. The navigation path and search
+    /// text stay per-scene (`@SceneStorage`); the recents data is app-wide.
     static let shared = RecentsStore()
 
     /// Remembered files, newest first.
@@ -58,6 +58,11 @@ final class RecentsStore {
     /// can navigate to the viewer. Returns `nil` and sets `lastErrorMessage`
     /// when the file can't be read.
     func handleOpenedURL(_ url: URL) async -> UUID? {
+        // Load the persisted history first: a cold-launch open can arrive before
+        // RecentsView's `.task` runs `loadIfNeeded()`, and persisting an
+        // empty-then-one-entry list would wipe the real history.
+        loadIfNeeded()
+
         let prepared = await Task.detached(priority: .userInitiated) {
             Self.prepareAdd(url: url)
         }.value
@@ -101,17 +106,23 @@ final class RecentsStore {
     }
 
     /// Reads the bytes for an entry by resolving its bookmark off the main
-    /// actor. Prunes the entry and throws when it no longer resolves.
+    /// actor. Prunes the entry and throws when it no longer resolves. A stale
+    /// bookmark is refreshed in place so the next open resolves cleanly.
     func resolveData(for entry: RecentEntry) async throws -> Data {
         let bookmark = entry.bookmark
-        let data = await Task.detached(priority: .userInitiated) {
-            Self.readBookmarkedData(bookmark)
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.resolveBookmark(bookmark)
         }.value
-        guard let data else {
+        guard let result else {
             remove(entry.id)
             throw MetafileLoader.UnreadableFile()
         }
-        return data
+        if let refreshed = result.refreshed, !refreshed.isEmpty,
+           let index = entries.firstIndex(where: { $0.id == entry.id }) {
+            entries[index].bookmark = refreshed
+            persist()
+        }
+        return result.data
     }
 
     func entry(id: UUID) -> RecentEntry? {
@@ -191,10 +202,14 @@ final class RecentsStore {
 
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
         // Reject here what the viewer could not show, so the user gets a clear
-        // alert instead of a broken recents tile.
-        guard (try? MetafileLoader.load(data)) != nil else { return nil }
+        // alert instead of a broken recents tile. A cheap open/prepare check —
+        // no full render — since the thumbnail render below also validates.
+        guard MetafileLoader.canOpen(data) else { return nil }
 
-        let bookmark = (try? url.bookmarkData()) ?? Data()
+        // A security-scoped bookmark is required to re-open the file later. If it
+        // can't be made, reject the add rather than store empty Data (which would
+        // resolve to nothing on the next open).
+        guard let bookmark = try? url.bookmarkData(), !bookmark.isEmpty else { return nil }
         let names = MetafileFormatLabel.names(for: url.lastPathComponent)
 
         var thumbnailFileName: String?
@@ -218,9 +233,11 @@ final class RecentsStore {
         )
     }
 
-    /// Resolves a bookmark and reads its bytes while scoped. `nil` on any
-    /// failure (a moved, deleted, or permission-lost file).
-    private nonisolated static func readBookmarkedData(_ bookmark: Data) -> Data? {
+    /// Resolves a bookmark and reads its bytes while scoped. Returns the bytes
+    /// and, when the bookmark was stale, a freshly-minted replacement for the
+    /// caller to store. `nil` on any failure (a moved, deleted, or
+    /// permission-lost file).
+    private nonisolated static func resolveBookmark(_ bookmark: Data) -> (data: Data, refreshed: Data?)? {
         guard !bookmark.isEmpty else { return nil }
         var isStale = false
         guard let url = try? URL(
@@ -231,7 +248,9 @@ final class RecentsStore {
         ) else { return nil }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        return try? Data(contentsOf: url, options: .mappedIfSafe)
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        let refreshed: Data? = isStale ? try? url.bookmarkData() : nil
+        return (data, refreshed)
     }
 
     // MARK: - Locations (nonisolated)
