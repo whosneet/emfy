@@ -105,6 +105,8 @@ emfy-dump's byte accounting equals the file size for each, with zero escapes lef
 | gate-wmf-gdi-p2-triangles.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p2-triangles.wmf` | 1 escape stripped; 1936 bytes. |
 | gate-wmf-gdi-p3-curves.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p3-curves.wmf` | 2 escapes stripped; 4508 bytes. |
 | gate-wmf-gdi-p3-shapes.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p3-shapes.wmf` | 2 escapes stripped; 4374 bytes. |
+| gate-wmf-gdi-p4-image.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p4-image.wmf` | 1 escape stripped; 640 bytes; META_STRETCHDIB kept. |
+| gate-wmf-gdi-p4-text.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p4-text.wmf` | 1 escape stripped; 890 bytes; CREATEFONTINDIRECT + META_TEXTOUT kept. |
 
 Hand-built walker-abuse fixtures (RecordSize 0/1/2, RecordSize past the end,
 overflow-sized RecordSize, missing EOF, trailing bytes, unknown functions, huge
