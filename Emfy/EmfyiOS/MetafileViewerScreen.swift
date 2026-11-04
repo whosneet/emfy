@@ -6,9 +6,10 @@ import SwiftUI
 /// format + size as its subtitle. The paper stays white in dark mode because a
 /// metafile assumes a white page.
 ///
-/// Zoom, chrome-hiding, the inspector, the partial-support banner, and live
-/// Share / Fit / Info are I2/I3 — here those three sit in the bottom bar as
-/// disabled placeholders.
+/// Zoom, chrome-hiding, the inspector, the partial-support banner, and the
+/// Share / Fit / Info bottom bar are I2/I3 — this basic viewer shows only the
+/// drawing, the nav title, and Back. No disabled placeholders are shown (dead
+/// items would occupy vertical-bar slots on iPhone Duo).
 struct MetafileViewerScreen: View {
     @Environment(RecentsStore.self) private var store
     let entryID: UUID
@@ -31,7 +32,6 @@ struct MetafileViewerScreen: View {
         .navigationTitle(entry?.baseName ?? "Metafile")
         .navigationBarTitleDisplayMode(.inline)
         .metafileNavigationSubtitle(subtitle)
-        .toolbar { bottomPlaceholders }
         .task(id: entryID) { await load() }
     }
 
@@ -70,28 +70,6 @@ struct MetafileViewerScreen: View {
             Label("Can’t show this file", systemImage: "exclamationmark.triangle")
         } description: {
             Text(text)
-        }
-    }
-
-    // MARK: - Bottom placeholders (wired in I2 / I3)
-
-    @ToolbarContentBuilder
-    private var bottomPlaceholders: some ToolbarContent {
-        ToolbarItemGroup(placement: .bottomBar) {
-            Button { } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
-            }
-            .disabled(true)
-            Spacer()
-            Button { } label: {
-                Label("Fit", systemImage: "arrow.up.left.and.arrow.down.right")
-            }
-            .disabled(true)
-            Spacer()
-            Button { } label: {
-                Label("Info", systemImage: "info.circle")
-            }
-            .disabled(true)
         }
     }
 

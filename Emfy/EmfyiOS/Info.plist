@@ -26,6 +26,14 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Multiple windows / Stage Manager on iPad (v3-plan I2). SwiftUI manages
+	     the scenes, so no UISceneConfigurations is needed. There is no
+	     "open in new window" affordance in the UI in v3.1. -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

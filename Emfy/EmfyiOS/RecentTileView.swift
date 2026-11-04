@@ -30,7 +30,9 @@ struct RecentTileView: View {
 
     private var thumbnail: some View {
         ZStack(alignment: .topTrailing) {
-            // The metafile paper is white in both appearances.
+            // One white paper surface (white in both appearances); the drawing
+            // is drawn directly onto it with inner padding. The thumbnail has a
+            // transparent background, so there is no inner card-inside-a-card.
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.white)
                 .aspectRatio(372.0 / 272.0, contentMode: .fit)
@@ -42,6 +44,7 @@ struct RecentTileView: View {
                             .padding(10)
                     }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)

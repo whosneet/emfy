@@ -13,10 +13,14 @@ struct RecentsView: View {
     @Environment(\.openURL) private var openURL
 
     @State private var path: [ViewerRoute] = []
-    @State private var searchText = ""
     @State private var isSelecting = false
     @State private var isImporting = false
     @State private var activeSheet: RecentsSheet?
+
+    // Scene-scoped so each window (iPad multiple windows / Stage Manager)
+    // restores its own search text and navigation stack.
+    @SceneStorage("recents.search") private var searchText = ""
+    @SceneStorage("recents.navPath") private var persistedPath: Data?
 
     private let columns = [GridItem(.adaptive(minimum: 158, maximum: 240), spacing: 16)]
 
@@ -24,6 +28,7 @@ struct RecentsView: View {
         NavigationStack(path: $path) {
             content
                 .navigationTitle("Recents")
+                .searchable(text: $searchText, prompt: "Search recent files")
                 .toolbar { toolbarContent }
                 .navigationDestination(for: ViewerRoute.self) { route in
                     MetafileViewerScreen(entryID: route.entryID)
@@ -36,7 +41,6 @@ struct RecentsView: View {
                     handleImport(result)
                 }
         }
-        .searchable(text: $searchText, prompt: "Search recent files")
         .onOpenURL { url in
             Task { await open(url) }
         }
@@ -59,7 +63,27 @@ struct RecentsView: View {
         } message: { message in
             Text(message)
         }
-        .task { store.loadIfNeeded() }
+        .task {
+            store.loadIfNeeded()
+            restorePath()
+        }
+        .onChange(of: path) { _, newValue in
+            savePath(newValue)
+        }
+    }
+
+    // MARK: - Navigation restoration (scene-scoped)
+
+    private func restorePath() {
+        guard path.isEmpty, let data = persistedPath,
+              let routes = try? JSONDecoder().decode([ViewerRoute].self, from: data) else { return }
+        // Stale ids are kept — the viewer resolves each and falls to its
+        // failed/pruned path if the entry is gone (never a crash).
+        path = routes
+    }
+
+    private func savePath(_ routes: [ViewerRoute]) {
+        persistedPath = try? JSONEncoder().encode(routes)
     }
 
     // MARK: - Content
@@ -126,12 +150,12 @@ struct RecentsView: View {
     }
 
     // The prominent action, first in the vertical bar (Duo: back → prominent →
-    // rest). `.visibilityPriority(.high)` keeps it in the bar longest when the
-    // outer display overflows (iOS 27+).
+    // rest). `.topBarPinnedTrailing` resists overflow on the outer display;
+    // `.primaryAction` is the pre-27 fallback.
     @ToolbarContentBuilder
     private var openItem: some ToolbarContent {
         if #available(iOS 27.0, *) {
-            ToolbarItem(placement: .primaryAction) { openButton }
+            ToolbarItem(placement: .topBarPinnedTrailing) { openButton }
                 .visibilityPriority(.high)
         } else {
             ToolbarItem(placement: .primaryAction) { openButton }
@@ -149,20 +173,29 @@ struct RecentsView: View {
         }
     }
 
+    // The mockups' blue "Open from Files" — the system's prominent treatment
+    // (glass on iOS 26+, bordered prominent before), still a system toolbar item.
     private var openButton: some View {
         Button {
             isImporting = true
         } label: {
             Label("Open from Files", systemImage: "folder")
         }
+        .prominentOpenStyle()
     }
 
+    // Distinct symbol per state and the title shown while selecting, so edit
+    // mode is unmistakable (the two states previously shared one icon).
     private var selectButton: some View {
         Button {
             withAnimation { isSelecting.toggle() }
         } label: {
-            Label(isSelecting ? "Done" : "Select", systemImage: "checkmark.circle")
+            Label(
+                isSelecting ? "Done" : "Select",
+                systemImage: isSelecting ? "checkmark.circle.fill" : "checkmark.circle"
+            )
         }
+        .labelStyle(.titleOnly)
         .disabled(store.entries.isEmpty)
     }
 
@@ -270,9 +303,24 @@ struct InfoSheet<Content: View>: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
+                        Button("Done", systemImage: "checkmark") { dismiss() }
                     }
                 }
+        }
+    }
+}
+
+extension View {
+    /// The system's prominent button treatment for the "Open from Files"
+    /// toolbar action: Liquid Glass prominent on iOS 26+, bordered prominent
+    /// before. Kept as a toolbar `Button` so it still migrates to the Duo
+    /// vertical bar.
+    @ViewBuilder
+    func prominentOpenStyle() -> some View {
+        if #available(iOS 26.0, *) {
+            self.buttonStyle(.glassProminent)
+        } else {
+            self.buttonStyle(.borderedProminent)
         }
     }
 }

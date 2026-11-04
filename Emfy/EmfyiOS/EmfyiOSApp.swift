@@ -11,19 +11,21 @@ import SwiftUI
 /// EMFKit the Mac app and Quick Look extensions use.
 @main
 struct EmfyiOSApp: App {
-    @State private var store = RecentsStore()
-
     var body: some Scene {
         WindowGroup {
             RecentsView()
-                .environment(store)
+                // One shared store across every window (iPad multiple windows /
+                // Stage Manager); per-window state lives in `@SceneStorage`.
+                .environment(RecentsStore.shared)
         }
     }
 }
 
 /// A push onto the viewer. Carries only the recents entry id; the viewer
 /// resolves the file and renders it, so navigation state stays light and
-/// restorable (Axiom nav.md: routes carry ids, not models).
-struct ViewerRoute: Hashable {
+/// restorable (Axiom nav.md: routes carry ids, not models). `Codable` so the
+/// navigation path survives scene restoration (iPad multiple windows / Stage
+/// Manager); a stale id falls to the viewer's existing failed/pruned path.
+struct ViewerRoute: Hashable, Codable {
     let entryID: UUID
 }

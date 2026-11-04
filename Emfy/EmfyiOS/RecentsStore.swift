@@ -14,6 +14,13 @@ import UIKit
 @MainActor
 @Observable
 final class RecentsStore {
+    /// One store for the whole app, shared by every window. iPad multiple
+    /// windows / Stage Manager open several scenes against the same recents;
+    /// a per-scene store would let each window's `persist()` clobber the
+    /// others. The navigation path and search text stay per-scene
+    /// (`@SceneStorage`); the recents data is app-wide.
+    static let shared = RecentsStore()
+
     /// Remembered files, newest first.
     private(set) var entries: [RecentEntry] = []
     /// A plain-English message for the most recent open failure, shown as an
