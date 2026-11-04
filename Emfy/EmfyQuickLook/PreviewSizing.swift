@@ -1,20 +1,18 @@
 import CoreGraphics
-import EMFParse
 import Foundation
 
-/// Context-size math for the preview extension: aspect-fit the header's
-/// device-pixel bounds into a long-edge cap. Kept in Int64 so a full-range
-/// `rclBounds` cannot overflow the +1 (inclusive-inclusive) arithmetic
-/// (primer §8: no unchecked arithmetic on parse-derived values).
+/// Context-size math for the preview extension: aspect-fit a metafile's natural
+/// device-pixel size into a long-edge cap. The natural size comes from EMFKit
+/// (`MetafileRenderer.Prepared.naturalSize`: the EMF header bounds or the WMF
+/// program canvas), already clamped to at least 1×1.
 enum PreviewSizing {
-    /// The preview context size in points: the header bounds' aspect ratio
+    /// The preview context size in points: the natural size's aspect ratio
     /// scaled so the longer edge is at most `maxLongEdge`, never upscaled past
     /// the native pixel size, and never smaller than 1×1.
-    static func contextSize(for header: EMFHeader, maxLongEdge: Int) -> CGSize {
-        let bounds = header.bounds
-        let width = Int64(bounds.right) - Int64(bounds.left) + 1
-        let height = Int64(bounds.bottom) - Int64(bounds.top) + 1
-        guard width > 0, height > 0 else {
+    static func contextSize(for naturalSize: CGSize, maxLongEdge: Int) -> CGSize {
+        let width = naturalSize.width
+        let height = naturalSize.height
+        guard width >= 1, height >= 1 else {
             return CGSize(width: 1, height: 1)
         }
 

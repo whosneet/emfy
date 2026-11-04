@@ -61,8 +61,8 @@ struct EMFDocumentView: View {
             // renderer fills the EMF bitmap with white paper).
             .background(Color(nsColor: .underPageBackgroundColor))
             .overlay(alignment: .top) {
-                if hasUnsupportedEMFPlusContent {
-                    plusNotice
+                if let message = partialSupportMessage {
+                    partialNotice(message)
                 }
             }
             .onAppear {
@@ -128,7 +128,7 @@ struct EMFDocumentView: View {
     @ViewBuilder
     private var content: some View {
         if let image = document.image {
-            Image(image, scale: 1, label: Text("EMF image"))
+            Image(image, scale: 1, label: Text("Metafile image"))
                 .resizable()
                 .interpolation(.high)
                 .frame(width: naturalSize.width * zoom, height: naturalSize.height * zoom)
@@ -139,7 +139,28 @@ struct EMFDocumentView: View {
         }
     }
 
-    // MARK: - EMF+ notice
+    // MARK: - Partial-support notice
+
+    /// The partial-support banner text, or `nil` when nothing needs flagging.
+    /// The signal depends on how the file was rendered:
+    /// - A decoded EMF (a standalone `.emf`, or a WMF's played-back embedded
+    ///   EMF) flags only unsupported EMF+ content — EMF GDI records, when
+    ///   skipped, are not nagged about, exactly as before.
+    /// - WMF record playback flags any render-log note at all (a skipped or
+    ///   approximated record), because the WMF path is newer and the detail is
+    ///   in Render Details.
+    private var partialSupportMessage: String? {
+        switch document.prepared.kind {
+        case .emf:
+            return hasUnsupportedEMFPlusContent
+                ? "Some EMF+ content in this file isn't supported or couldn't be read — see Render Details."
+                : nil
+        case .wmfRecords:
+            return document.renderLog.isEmpty
+                ? nil
+                : "Some content in this file isn't fully supported — see Render Details."
+        }
+    }
 
     /// True when the render log shows EMF+ content that was NOT rendered: an
     /// unsupported record type, a stream that couldn't be fully read, a drawing
@@ -159,8 +180,8 @@ struct EMFDocumentView: View {
         }
     }
 
-    private var plusNotice: some View {
-        Text("Some EMF+ content in this file isn't supported or couldn't be read — see Render Details.")
+    private func partialNotice(_ message: String) -> some View {
+        Text(message)
             .font(.callout)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -264,7 +285,7 @@ struct EMFDocumentView: View {
     }
 
     private func exportPDF() {
-        guard let data = EMFExport.pdfData(from: document.file) else {
+        guard let data = MetafileRenderer.pdfData(document.prepared) else {
             exportError = "Emfy could not generate a PDF for this document."
             return
         }
@@ -281,8 +302,22 @@ private struct DocumentDiagnosticsView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    private var parserDiagnostics: [EMFDiagnostic] { document.file.diagnostics }
+    private var parserDiagnostics: [EMFDiagnostic] { document.prepared.emfDiagnostics }
     private var renderLog: [EMFRenderLog.Entry] { document.renderLog }
+
+    /// Plain-English notes from the front door: the gzip unwrap, the signature
+    /// sniff, and an embedded EMF that was rejected so the WMF records played.
+    private var frontDoorNotes: [String] {
+        var notes: [String] = []
+        if document.wasDecompressed {
+            notes.append("This file was gzip-compressed (.emz / .wmz) and was expanded before viewing.")
+        }
+        notes.append(contentsOf: document.frontDoorDiagnostics.map(\.userMessage))
+        if document.prepared.embeddedEMF == .rejected {
+            notes.append("This file embedded an Enhanced Metafile that couldn't be read, so Emfy drew from the Windows Metafile records instead.")
+        }
+        return notes
+    }
 
     var body: some View {
         NavigationStack {
@@ -292,7 +327,7 @@ private struct DocumentDiagnosticsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if parserDiagnostics.isEmpty && renderLog.isEmpty {
+                    if frontDoorNotes.isEmpty && parserDiagnostics.isEmpty && renderLog.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("No diagnostics", systemImage: "checkmark.circle")
                                 .font(.headline)
@@ -301,6 +336,14 @@ private struct DocumentDiagnosticsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else {
+                        if !frontDoorNotes.isEmpty {
+                            diagnosticsSection(
+                                title: "File notes (\(frontDoorNotes.count))",
+                                systemImage: "shippingbox",
+                                messages: frontDoorNotes
+                            )
+                        }
+
                         if !parserDiagnostics.isEmpty {
                             diagnosticsSection(
                                 title: "Parser diagnostics (\(parserDiagnostics.count))",
@@ -350,6 +393,19 @@ private struct DocumentDiagnosticsView: View {
     }
 }
 
+private extension MetafileDiagnostic {
+    var userMessage: String {
+        switch self {
+        case .sniff(.placeableChecksumMismatch):
+            return "The placeable Windows Metafile header checksum didn't match; it's advisory, so the file was opened anyway."
+        case .gzip(.isizeMismatch):
+            return "The compressed wrapper's recorded size didn't match the expanded data; the expanded data was used."
+        case .gzip(.trailingBytesAfterMember(let count)):
+            return "The compressed file had \(count) extra byte\(count == 1 ? "" : "s") after its first member; they were ignored."
+        }
+    }
+}
+
 private extension EMFDiagnostic {
     var userMessage: String {
         switch self {
@@ -379,9 +435,9 @@ private extension EMFRenderLog.Entry {
     var userMessage: String {
         switch self {
         case .unimplementedRecord(let type, let count):
-            return "Skipped unsupported EMF record type \(type) (\(count) occurrence\(count == 1 ? "" : "s"))."
+            return "Skipped unsupported record type \(type) (\(count) occurrence\(count == 1 ? "" : "s"))."
         case .malformedRecord(let type):
-            return "Skipped malformed EMF record type \(type)."
+            return "Skipped malformed record type \(type)."
         case .unsupportedROP2(let rawMode, let count):
             return "Used normal copy drawing for unsupported ROP2 mode \(rawMode) (\(count) occurrence\(count == 1 ? "" : "s"))."
         case .unsupportedBrushStyle(let rawStyle):

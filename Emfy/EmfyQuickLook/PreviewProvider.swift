@@ -4,14 +4,16 @@ import EMFRender
 import Foundation
 import QuickLookUI
 
-/// The data-based Quick Look preview extension for EMF files.
+/// The data-based Quick Look preview extension for the metafile family.
 ///
 /// `QLPreviewProvider` (macOS 12+) + `QLPreviewingController`: the system hands
-/// us the file URL, we parse and render through EMFKit — the same clean-room
-/// engine the app uses — into a bitmap `QLPreviewReply`. Log-and-skip runs
-/// end to end (primer §8): a file with diagnostics still previews from its best
-/// partial render; only a file EMFKit cannot even give a header for throws, and
-/// Quick Look then falls back to the generic icon.
+/// us the file URL, we open and render it through EMFKit's one front door — the
+/// same clean-room engine the app uses — into a bitmap `QLPreviewReply`. A gzip
+/// .emz / .wmz wrapper is unwrapped by `OpenedMetafile.open`; the EMF or WMF is
+/// parsed once by `MetafileRenderer.prepare`. Log-and-skip runs end to end
+/// (primer §8): a file with diagnostics still previews from its best partial
+/// render; only a file EMFKit cannot open at all throws, and Quick Look then
+/// falls back to the generic icon.
 final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
     /// Aspect-fit long-edge cap for the preview context, in points. Held at
     /// 2048 so a near-square large-bounds file stays within a Quick Look
@@ -22,11 +24,15 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
 
     func providePreview(for request: QLFilePreviewRequest) async throws -> QLPreviewReply {
         let data = try Data(contentsOf: request.fileURL, options: .mappedIfSafe)
-        // Throws EMFParseError on a headerless/invalid file — Quick Look then
-        // shows the generic icon. Anything past a valid header renders.
-        let file = try EMFFile.parse(data)
+        // Throws on a broken gzip wrapper; returns nil for an unrecognised or
+        // header-less input — Quick Look then shows the generic icon. Anything
+        // past a valid header renders.
+        let opened = try OpenedMetafile.open(data)
+        guard let prepared = MetafileRenderer.prepare(opened) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
         let size = PreviewSizing.contextSize(
-            for: file.header,
+            for: prepared.naturalSize,
             maxLongEdge: Self.maxLongEdge
         )
 
@@ -37,7 +43,7 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
                 let target = CGRect(origin: .zero, size: size)
                 context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
                 context.fill(target)
-                _ = EMFRenderer.render(file, into: context, target: target)
+                _ = MetafileRenderer.render(prepared, into: context, target: target)
             }
         )
     }
