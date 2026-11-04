@@ -47,6 +47,10 @@
 		B0110000000000000000007F /* emfy.icon in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* emfy.icon */; };
 		B01100000000000000000080 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000007 /* EMFParse */; };
 		B01100000000000000000081 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000008 /* EMFRender */; };
+		B01100000000000000000082 /* ZoomableMetafileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007B /* ZoomableMetafileView.swift */; };
+		B01100000000000000000083 /* FileInfoInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007C /* FileInfoInspector.swift */; };
+		B01100000000000000000084 /* MetafileDiagnosticText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007D /* MetafileDiagnosticText.swift */; };
+		B01100000000000000000085 /* DuoRegions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007E /* DuoRegions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -113,6 +117,10 @@
 		B00100000000000000000078 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		B00100000000000000000079 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B0010000000000000000007A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B0010000000000000000007B /* ZoomableMetafileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomableMetafileView.swift; sourceTree = "<group>"; };
+		B0010000000000000000007C /* FileInfoInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileInfoInspector.swift; sourceTree = "<group>"; };
+		B0010000000000000000007D /* MetafileDiagnosticText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileDiagnosticText.swift; sourceTree = "<group>"; };
+		B0010000000000000000007E /* DuoRegions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoRegions.swift; sourceTree = "<group>"; };
 		B00200000000000000000001 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00200000000000000000004 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00200000000000000000002 /* EmfyQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -240,6 +248,10 @@
 				B00100000000000000000074 /* RecentTileView.swift */,
 				B00100000000000000000075 /* EmptyRecentsView.swift */,
 				B00100000000000000000076 /* MetafileViewerScreen.swift */,
+				B0010000000000000000007B /* ZoomableMetafileView.swift */,
+				B0010000000000000000007C /* FileInfoInspector.swift */,
+				B0010000000000000000007D /* MetafileDiagnosticText.swift */,
+				B0010000000000000000007E /* DuoRegions.swift */,
 				B00100000000000000000078 /* AboutView.swift */,
 				B00100000000000000000071 /* RecentsStore.swift */,
 				B00100000000000000000072 /* RecentEntry.swift */,
@@ -452,6 +464,10 @@
 				B01100000000000000000074 /* RecentTileView.swift in Sources */,
 				B01100000000000000000075 /* EmptyRecentsView.swift in Sources */,
 				B01100000000000000000076 /* MetafileViewerScreen.swift in Sources */,
+				B01100000000000000000082 /* ZoomableMetafileView.swift in Sources */,
+				B01100000000000000000083 /* FileInfoInspector.swift in Sources */,
+				B01100000000000000000084 /* MetafileDiagnosticText.swift in Sources */,
+				B01100000000000000000085 /* DuoRegions.swift in Sources */,
 				B01100000000000000000077 /* MetafileLoader.swift in Sources */,
 				B01100000000000000000078 /* AboutView.swift in Sources */,
 				B01100000000000000000079 /* EMFDocument.swift in Sources */,
