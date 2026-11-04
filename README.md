@@ -101,7 +101,7 @@ extended attributes onto `.build/` that `codesign` rejects. Keep the build
 directory outside the synced folder instead:
 
 ```sh
-swift test --scratch-path ~/Library/Caches/emfy-build
+swift test --no-parallel --scratch-path ~/Library/Caches/emfy-build
 ```
 
 The app and both Quick Look extensions:
