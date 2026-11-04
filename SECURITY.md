@@ -21,7 +21,7 @@ issue for anything exploitable.
 
 - **Preferred:** GitHub private vulnerability reporting — the *Report a
   vulnerability* button under this repository's **Security** tab.
-- **Or email:** hello@neetsingh.com with the subject `Emfy - Security`.
+- **Or email:** hello@arrley.com with the subject `Emfy - Security`.
 
 Please include the affected version, a description of the problem, and — if you
 can — a sample `.emf` file that reproduces it. A crashing or hanging sample is

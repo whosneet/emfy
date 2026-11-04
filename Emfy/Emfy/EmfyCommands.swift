@@ -17,7 +17,7 @@ struct EmfyCommands: Commands {
     private static var feedbackURL: URL? {
         var components = URLComponents()
         components.scheme = "mailto"
-        components.path = "hello@neetsingh.com"
+        components.path = "hello@arrley.com"
         components.queryItems = [URLQueryItem(name: "subject", value: "Emfy - Feedback/Support")]
         return components.url
     }

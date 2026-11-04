@@ -190,7 +190,7 @@ the clean-room policy, and code expectations.
 
 ## Licence & references
 
-MIT © 2026 Avneet Singh
+MIT © 2026 Arrley Pty Ltd
 
 - [MS-EMF] Enhanced Metafile Format — https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-emf/
 - [MS-WMF] shared structures — https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wmf/
