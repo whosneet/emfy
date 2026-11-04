@@ -1,5 +1,6 @@
 import EMFParse
 import Foundation
+import WMFParse
 
 // emfy-dump — record-inventory CLI for EMF files. Permanent debugging tool:
 // prints the header dimensions and a per-type record inventory for one file.
@@ -253,6 +254,57 @@ func describe(_ error: GzipError) -> String {
     }
 }
 
+// MARK: - WMF formatting (W3: META_HEADER + 16-bit record walker)
+
+func describe(_ error: WMFParseError) -> String {
+    switch error {
+    case .tooShort(let count):
+        return "not a WMF file: \(count) bytes is below the minimum "
+            + "(an 18-byte META_HEADER, or a 22-byte placeable header plus the META_HEADER)"
+    case .implausibleHeader(let type, let headerSize, let version):
+        return String(
+            format: "not a WMF file: implausible META_HEADER (Type 0x%04X, HeaderSize 0x%04X, "
+                + "Version 0x%04X; expected Type 1 or 2, HeaderSize 9, Version 0x0100 or 0x0300)",
+            type, headerSize, version
+        )
+    }
+}
+
+func describe(_ diagnostic: WMFDiagnostic) -> String {
+    switch diagnostic {
+    case .recordSizeTooSmall(let offset, let sizeWords):
+        return "record at offset \(offset): RecordSize \(sizeWords) WORDs is below the 3-WORD minimum; walk stopped"
+    case .recordSizeExceedsRemaining(let offset, let byteSize, let remaining):
+        return "record at offset \(offset): RecordSize spans \(byteSize) bytes, exceeding the \(remaining) bytes remaining; walk stopped"
+    case .truncatedRecordHeader(let offset, let remaining):
+        return "record at offset \(offset): only \(remaining) bytes remain, too few for a 6-byte record header; walk stopped"
+    case .missingEOF:
+        return "no META_EOF record before the end of the data"
+    case .trailingBytesAfterEOF(let count):
+        return "\(count) trailing bytes after META_EOF"
+    case .recordCountCapped(let limit):
+        return "record-count cap of \(limit) reached; walk stopped, keeping every record parsed so far"
+    case .metafileSizeMismatch(let headerSays, let walked):
+        return "header SizeLow/SizeHigh claims \(headerSays) metafile bytes, walk covered \(walked) (advisory field; the walk is authoritative)"
+    case .maxRecordMismatch(let headerSays, let walked):
+        return "header MaxRecord claims \(headerSays) WORDs, largest walked record is \(walked) (advisory field; the walk is authoritative)"
+    case .placeableChecksumMismatch(let stored, let computed):
+        return String(
+            format: "placeable header checksum 0x%04X does not match computed 0x%04X "
+                + "(advisory; still parsed as placeable WMF)",
+            stored, computed
+        )
+    }
+}
+
+func wmfTypeName(_ type: UInt16) -> String {
+    switch type {
+    case 0x0001: return "MEMORYMETAFILE"
+    case 0x0002: return "DISKMETAFILE"
+    default: return "unknown"
+    }
+}
+
 func leftPad(_ string: String, _ width: Int) -> String {
     string.count >= width
         ? string
@@ -311,9 +363,117 @@ if !isPlainEMF {
     print("")
 }
 
-// WMF record decode arrives in W3 (plan §3). Report and stop for now.
+// MARK: - Parse and dump the WMF (possibly the inflated payload of a .wmz)
+
 if opened.format == .placeableWMF || opened.format == .wmf {
-    print("WMF detected — record dump arrives in W3")
+    let wmfData = opened.data
+    let wmf: WMFFile
+    do {
+        wmf = try WMFFile.parse(wmfData)
+    } catch {
+        printErr("emfy-dump: '\(path)': \(describe(error))")
+        exit(1)
+    }
+
+    // Header block.
+    print("file: \(URL(fileURLWithPath: path).lastPathComponent) (\(data.count) bytes)")
+    if let placeable = wmf.placeable {
+        print("placeable:")
+        let bb = placeable.boundingBox
+        print("  bounding box: (\(bb.left), \(bb.top)) - (\(bb.right), \(bb.bottom))")
+        print("  inch:         \(placeable.inch) logical units/inch")
+        let csumHex = String(format: "0x%04X", placeable.checksumStored)
+        print("  checksum:     \(csumHex) (\(placeable.checksumOK ? "OK" : "MISMATCH"))")
+    }
+    let wmfHeader = wmf.header
+    print("header:")
+    print("  type:        \(String(format: "0x%04X", wmfHeader.type)) (\(wmfTypeName(wmfHeader.type)))")
+    print("  version:     \(String(format: "0x%04X", wmfHeader.version))")
+    let metafileWords = wmfHeader.metafileSizeWords
+    print("  size:        \(metafileWords) WORDs (\(Int(metafileWords) * 2) bytes)")
+    print("  objects:     \(wmfHeader.numberOfObjects)")
+    print("  max record:  \(wmfHeader.maxRecord) WORDs")
+
+    let wmfRecordsPart = "records walked: \(wmf.records.count)"
+    print("\(wmfRecordsPart), bytes walked: \(wmf.bytesWalked) of \(wmfData.count)")
+    print("")
+
+    // Per-record table: offset / bytes / function / name. Proves the byte
+    // offsets tile the whole file (the W3 gate), using the same column padding
+    // as the EMF inventory table.
+    let perRecordRows: [(offset: String, bytes: String, function: String, name: String)] =
+        wmf.records.map { record in
+            (
+                offset: String(record.offset),
+                bytes: String(record.byteSize),
+                function: String(format: "0x%04X", record.function),
+                name: WMFRecordType.name(for: record.function) ?? "(unknown)"
+            )
+        }
+    let prOffsetWidth = max("offset".count, perRecordRows.map { $0.offset.count }.max() ?? 0)
+    let prBytesWidth = max("bytes".count, perRecordRows.map { $0.bytes.count }.max() ?? 0)
+    let prFuncWidth = max("function".count, perRecordRows.map { $0.function.count }.max() ?? 0)
+    let prNameWidth = max("name".count, perRecordRows.map { $0.name.count }.max() ?? 0)
+    print("records:")
+    print(
+        "  \(leftPad("offset", prOffsetWidth))  \(leftPad("bytes", prBytesWidth))  "
+        + "\(leftPad("function", prFuncWidth))  \(rightPad("name", prNameWidth))"
+    )
+    for row in perRecordRows {
+        print(
+            "  \(leftPad(row.offset, prOffsetWidth))  \(leftPad(row.bytes, prBytesWidth))  "
+            + "\(leftPad(row.function, prFuncWidth))  \(rightPad(row.name, prNameWidth))"
+        )
+    }
+    print("")
+
+    // Inventory table — same padding discipline as the EMF table.
+    let wmfInvRows: [(function: String, name: String, count: String, bytes: String)] =
+        wmf.recordInventory().map { entry in
+            (
+                function: String(format: "0x%04X", entry.function),
+                name: WMFRecordType.name(for: entry.function) ?? "(unknown)",
+                count: String(entry.count),
+                bytes: String(entry.totalBytes)
+            )
+        }
+    let wiFuncWidth = max("function".count, wmfInvRows.map { $0.function.count }.max() ?? 0)
+    let wiNameWidth = max("name".count, wmfInvRows.map { $0.name.count }.max() ?? 0)
+    let wiCountWidth = max("count".count, wmfInvRows.map { $0.count.count }.max() ?? 0)
+    let wiBytesWidth = max("total bytes".count, wmfInvRows.map { $0.bytes.count }.max() ?? 0)
+    print(
+        "\(leftPad("function", wiFuncWidth))  \(rightPad("name", wiNameWidth))  "
+        + "\(leftPad("count", wiCountWidth))  \(leftPad("total bytes", wiBytesWidth))"
+    )
+    for row in wmfInvRows {
+        print(
+            "\(leftPad(row.function, wiFuncWidth))  \(rightPad(row.name, wiNameWidth))  "
+            + "\(leftPad(row.count, wiCountWidth))  \(leftPad(row.bytes, wiBytesWidth))"
+        )
+    }
+    print("")
+
+    // Diagnostics.
+    if wmf.diagnostics.isEmpty {
+        print("diagnostics: none")
+    } else {
+        print("diagnostics:")
+        for diagnostic in wmf.diagnostics {
+            print("  - \(describe(diagnostic))")
+        }
+    }
+
+    // Byte accounting: header bytes + Σ record bytes + trailing bytes == size.
+    let wmfHeaderBytes = wmf.headerByteCount
+    let wmfRecordBytes = wmf.bytesWalked - wmf.headerByteCount
+    let wmfTrailingBytes = wmfData.count - wmf.bytesWalked
+    let wmfAccountTotal = wmfHeaderBytes + wmfRecordBytes + wmfTrailingBytes
+    print("")
+    print(
+        "byte accounting: \(wmfHeaderBytes) header + \(wmfRecordBytes) records + "
+        + "\(wmfTrailingBytes) trailing = \(wmfAccountTotal) of \(wmfData.count)"
+    )
+
     exit(0)
 }
 
