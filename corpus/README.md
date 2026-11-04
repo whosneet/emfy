@@ -87,6 +87,25 @@ every export shows no username, path, or hostname (checked for `avneet`,
 | gate-wmf-p4-image-standard.wmf | standard (non-placeable) WMF | `tail -c +23 gate-wmf-p4-image.wmf` | the image export with its 22-byte META_PLACEABLE header stripped, so the file begins at its META_HEADER (offset 0) — a real non-placeable walk case. Type stays MEMORYMETAFILE (advisory); `SizeLow/SizeHigh` still account for the whole 1646-byte file. |
 | gate-wmf-p2-star.wmz | gzip → placeable WMF | `gzip -9 -n -c gate-wmf-p2-star.wmf` | `.wmz` wrapper; `-n` omits the name/mtime. Opens through the front door (one-level gzip unwrap) and parses byte-identical to `gate-wmf-p2-star.wmf`. |
 
+### WMF-only variants (W4)
+
+Each LibreOffice export above carries a complete embedded EMF, which Emfy plays
+in preference to the WMF records. To make the oracle gate exercise the WMF
+record-playback path itself, these variants have the
+META_ESCAPE_ENHANCED_METAFILE records removed and the META_HEADER
+`SizeLow/SizeHigh` and `MaxRecord` re-accounted (the placeable header is copied
+unchanged). Generated with the permanent tool, reproducibly:
+`emfy-dump --strip-emf corpus/gate-wmf-<stem>.wmf corpus/gate-wmf-gdi-<stem>.wmf`.
+emfy-dump's byte accounting equals the file size for each, with zero escapes left.
+
+| File | Kind | Provenance | Notes |
+|---|---|---|---|
+| gate-wmf-gdi-p2-house.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p2-house.wmf` | 2 escapes stripped; 4128 bytes. |
+| gate-wmf-gdi-p2-star.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p2-star.wmf` | 1 escape stripped; 1612 bytes. |
+| gate-wmf-gdi-p2-triangles.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p2-triangles.wmf` | 1 escape stripped; 1936 bytes. |
+| gate-wmf-gdi-p3-curves.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p3-curves.wmf` | 2 escapes stripped; 4508 bytes. |
+| gate-wmf-gdi-p3-shapes.wmf | placeable WMF, no embedded EMF | `--strip-emf gate-wmf-p3-shapes.wmf` | 2 escapes stripped; 4374 bytes. |
+
 Hand-built walker-abuse fixtures (RecordSize 0/1/2, RecordSize past the end,
 overflow-sized RecordSize, missing EOF, trailing bytes, unknown functions, huge
 record counts) are built at runtime in `WMFParseTests`, not committed.
