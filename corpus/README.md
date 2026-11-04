@@ -55,3 +55,38 @@ inflate). All are self-generated.
 The WMF corpus grows in W3/W4 with LibreOffice-exported drawings once the WMF
 record walker and renderer land; these two hand-built headers cover W2's
 detection path only.
+
+## W3 — WMF record walker corpus (LibreOffice exports)
+
+These exercise the W3 WMFParse header + 16-bit record walker. All are
+self-generated: each is a LibreOffice headless export of the matching
+self-authored `gate-*.svg` already in this corpus, so no new artwork was
+sourced. Exported with LibreOffice 26.8.2.2 on macOS:
+`soffice --headless --convert-to wmf gate-<stem>.svg --outdir <scratch>`, then
+copied in and renamed `gate-wmf-<stem>.wmf` (the `gate-wmf-` prefix replaces the
+original `gate-` prefix, keeping the shared `p2-star`/`p4-text`/… suffix so each
+WMF is easy to pair with its EMF/SVG siblings). LibreOffice writes **placeable**
+WMFs (Aldus key 0x9AC6CDD7, Inch 2540, MEMORYMETAFILE/METAVERSION300) and
+embeds a complete EMF in the first record (META_ESCAPE "WMFC") — that embedded
+EMF is played in preference to the GDI records in W4; W3 only walks and accounts
+for the records. Every header's `SizeLow/SizeHigh` and `MaxRecord` match the
+walk exactly; `NumberOfObjects` is a constant 16 (the exporter's object-table
+size, not a creation count). All files are well under 1 MB, and `strings` across
+every export shows no username, path, or hostname (checked for `avneet`,
+`Users`, `Neet`, `singh`, `/home/`).
+
+| File | Kind | Provenance | Notes |
+|---|---|---|---|
+| gate-wmf-p2-house.wmf | placeable WMF | `soffice --convert-to wmf gate-p2-house.svg` | house scene; 240 records, MaxRecord 4118 WORDs. |
+| gate-wmf-p2-star.wmf | placeable WMF | `soffice --convert-to wmf gate-p2-star.svg` | ten-point star + zigzag; 88 records. |
+| gate-wmf-p2-triangles.wmf | placeable WMF | `soffice --convert-to wmf gate-p2-triangles.svg` | overlapping triangles + polyline; 130 records. |
+| gate-wmf-p3-curves.wmf | placeable WMF | `soffice --convert-to wmf gate-p3-curves.svg` | cubic béziers + rounded rect; 101 records. |
+| gate-wmf-p3-shapes.wmf | placeable WMF | `soffice --convert-to wmf gate-p3-shapes.svg` | rects/ellipse/line; 138 records. |
+| gate-wmf-p4-image.wmf | placeable WMF | `soffice --convert-to wmf gate-p4-image.svg` | embeds a META_STRETCHDIB bitmap + green square; 32 records. |
+| gate-wmf-p4-text.wmf | placeable WMF | `soffice --convert-to wmf gate-p4-text.svg` | three text runs via META_TEXTOUT; 55 records. |
+| gate-wmf-p4-image-standard.wmf | standard (non-placeable) WMF | `tail -c +23 gate-wmf-p4-image.wmf` | the image export with its 22-byte META_PLACEABLE header stripped, so the file begins at its META_HEADER (offset 0) — a real non-placeable walk case. Type stays MEMORYMETAFILE (advisory); `SizeLow/SizeHigh` still account for the whole 1646-byte file. |
+| gate-wmf-p2-star.wmz | gzip → placeable WMF | `gzip -9 -n -c gate-wmf-p2-star.wmf` | `.wmz` wrapper; `-n` omits the name/mtime. Opens through the front door (one-level gzip unwrap) and parses byte-identical to `gate-wmf-p2-star.wmf`. |
+
+Hand-built walker-abuse fixtures (RecordSize 0/1/2, RecordSize past the end,
+overflow-sized RecordSize, missing EOF, trailing bytes, unknown functions, huge
+record counts) are built at runtime in `WMFParseTests`, not committed.
