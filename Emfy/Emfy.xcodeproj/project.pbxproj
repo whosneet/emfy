@@ -29,6 +29,24 @@
 		B01100000000000000000051 /* WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000051 /* WhatsNewView.swift */; };
 		B01100000000000000000052 /* ChangelogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000052 /* ChangelogView.swift */; };
 		B01100000000000000000053 /* EmfyCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000053 /* EmfyCommands.swift */; };
+		B01100000000000000000070 /* EmfyiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000070 /* EmfyiOSApp.swift */; };
+		B01100000000000000000071 /* RecentsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000071 /* RecentsStore.swift */; };
+		B01100000000000000000072 /* RecentEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000072 /* RecentEntry.swift */; };
+		B01100000000000000000073 /* RecentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000073 /* RecentsView.swift */; };
+		B01100000000000000000074 /* RecentTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000074 /* RecentTileView.swift */; };
+		B01100000000000000000075 /* EmptyRecentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000075 /* EmptyRecentsView.swift */; };
+		B01100000000000000000076 /* MetafileViewerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000076 /* MetafileViewerScreen.swift */; };
+		B01100000000000000000077 /* MetafileLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000077 /* MetafileLoader.swift */; };
+		B01100000000000000000078 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000078 /* AboutView.swift */; };
+		B01100000000000000000079 /* EMFDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000002 /* EMFDocument.swift */; };
+		B0110000000000000000007A /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
+		B0110000000000000000007B /* Changelog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000050 /* Changelog.swift */; };
+		B0110000000000000000007C /* WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000051 /* WhatsNewView.swift */; };
+		B0110000000000000000007D /* ChangelogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000052 /* ChangelogView.swift */; };
+		B0110000000000000000007E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007A /* Assets.xcassets */; };
+		B0110000000000000000007F /* emfy.icon in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* emfy.icon */; };
+		B01100000000000000000080 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000007 /* EMFParse */; };
+		B01100000000000000000081 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000008 /* EMFRender */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -84,7 +102,19 @@
 		B00100000000000000000051 /* WhatsNewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsNewView.swift; sourceTree = "<group>"; };
 		B00100000000000000000052 /* ChangelogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangelogView.swift; sourceTree = "<group>"; };
 		B00100000000000000000053 /* EmfyCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyCommands.swift; sourceTree = "<group>"; };
+		B00100000000000000000070 /* EmfyiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyiOSApp.swift; sourceTree = "<group>"; };
+		B00100000000000000000071 /* RecentsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsStore.swift; sourceTree = "<group>"; };
+		B00100000000000000000072 /* RecentEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentEntry.swift; sourceTree = "<group>"; };
+		B00100000000000000000073 /* RecentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsView.swift; sourceTree = "<group>"; };
+		B00100000000000000000074 /* RecentTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentTileView.swift; sourceTree = "<group>"; };
+		B00100000000000000000075 /* EmptyRecentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyRecentsView.swift; sourceTree = "<group>"; };
+		B00100000000000000000076 /* MetafileViewerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileViewerScreen.swift; sourceTree = "<group>"; };
+		B00100000000000000000077 /* MetafileLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileLoader.swift; sourceTree = "<group>"; };
+		B00100000000000000000078 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		B00100000000000000000079 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B0010000000000000000007A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B00200000000000000000001 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00200000000000000000004 /* Emfy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Emfy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00200000000000000000002 /* EmfyQuickLook.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyQuickLook.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00200000000000000000003 /* EmfyThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmfyThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00500000000000000000001 /* EMFKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = EMFKit; path = ../EMFKit; sourceTree = "<group>"; };
@@ -118,6 +148,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B07000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000080 /* EMFParse in Frameworks */,
+				B01100000000000000000081 /* EMFRender in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -127,6 +166,7 @@
 				B06000000000000000000002 /* Emfy */,
 				B06000000000000000000003 /* EmfyQuickLook */,
 				B06000000000000000000004 /* EmfyThumbnail */,
+				B06000000000000000000007 /* EmfyiOS */,
 				B06000000000000000000006 /* Packages */,
 				B06000000000000000000005 /* Products */,
 			);
@@ -179,6 +219,7 @@
 				B00200000000000000000001 /* Emfy.app */,
 				B00200000000000000000002 /* EmfyQuickLook.appex */,
 				B00200000000000000000003 /* EmfyThumbnail.appex */,
+				B00200000000000000000004 /* Emfy.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -189,6 +230,24 @@
 				B00500000000000000000001 /* EMFKit */,
 			);
 			name = Packages;
+			sourceTree = "<group>";
+		};
+		B06000000000000000000007 /* EmfyiOS */ = {
+			isa = PBXGroup;
+			children = (
+				B00100000000000000000070 /* EmfyiOSApp.swift */,
+				B00100000000000000000073 /* RecentsView.swift */,
+				B00100000000000000000074 /* RecentTileView.swift */,
+				B00100000000000000000075 /* EmptyRecentsView.swift */,
+				B00100000000000000000076 /* MetafileViewerScreen.swift */,
+				B00100000000000000000078 /* AboutView.swift */,
+				B00100000000000000000071 /* RecentsStore.swift */,
+				B00100000000000000000072 /* RecentEntry.swift */,
+				B00100000000000000000077 /* MetafileLoader.swift */,
+				B0010000000000000000007A /* Assets.xcassets */,
+				B00100000000000000000079 /* Info.plist */,
+			);
+			path = EmfyiOS;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -258,6 +317,27 @@
 			productReference = B00200000000000000000003 /* EmfyThumbnail.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		B00400000000000000000004 /* Emfy iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B05000000000000000000005 /* Build configuration list for PBXNativeTarget "Emfy iOS" */;
+			buildPhases = (
+				B06600000000000000000004 /* Sources */,
+				B07000000000000000000004 /* Frameworks */,
+				B06700000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Emfy iOS";
+			packageProductDependencies = (
+				B03000000000000000000007 /* EMFParse */,
+				B03000000000000000000008 /* EMFRender */,
+			);
+			productName = "Emfy iOS";
+			productReference = B00200000000000000000004 /* Emfy.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -276,6 +356,9 @@
 					};
 					B00400000000000000000003 = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					B00400000000000000000004 = {
+						CreatedOnToolsVersion = 27.2;
 					};
 				};
 			};
@@ -298,6 +381,7 @@
 				B00400000000000000000001 /* Emfy */,
 				B00400000000000000000002 /* EmfyQuickLook */,
 				B00400000000000000000003 /* EmfyThumbnail */,
+				B00400000000000000000004 /* Emfy iOS */,
 			);
 		};
 /* End PBXProject section */
@@ -309,6 +393,15 @@
 			files = (
 				B01100000000000000000005 /* Assets.xcassets in Resources */,
 				B01100000000000000000006 /* emfy.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B06700000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0110000000000000000007E /* Assets.xcassets in Resources */,
+				B0110000000000000000007F /* emfy.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,6 +438,27 @@
 			files = (
 				B01100000000000000000020 /* ThumbnailProvider.swift in Sources */,
 				B01100000000000000000021 /* ThumbnailSizing.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B06600000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B01100000000000000000070 /* EmfyiOSApp.swift in Sources */,
+				B01100000000000000000071 /* RecentsStore.swift in Sources */,
+				B01100000000000000000072 /* RecentEntry.swift in Sources */,
+				B01100000000000000000073 /* RecentsView.swift in Sources */,
+				B01100000000000000000074 /* RecentTileView.swift in Sources */,
+				B01100000000000000000075 /* EmptyRecentsView.swift in Sources */,
+				B01100000000000000000076 /* MetafileViewerScreen.swift in Sources */,
+				B01100000000000000000077 /* MetafileLoader.swift in Sources */,
+				B01100000000000000000078 /* AboutView.swift in Sources */,
+				B01100000000000000000079 /* EMFDocument.swift in Sources */,
+				B0110000000000000000007A /* EMFExport.swift in Sources */,
+				B0110000000000000000007B /* Changelog.swift in Sources */,
+				B0110000000000000000007C /* WhatsNewView.swift in Sources */,
+				B0110000000000000000007D /* ChangelogView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -639,6 +753,60 @@
 			};
 			name = Release;
 		};
+		B05500000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = emfy;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 6Y294JNMJ2;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyiOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy;
+				PRODUCT_NAME = Emfy;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B05500000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = emfy;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 6Y294JNMJ2;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = EmfyiOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avneetsingh.emfy;
+				PRODUCT_NAME = Emfy;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -674,6 +842,15 @@
 			buildConfigurations = (
 				B05100000000000000000001 /* Debug */,
 				B05100000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B05000000000000000000005 /* Build configuration list for PBXNativeTarget "Emfy iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B05500000000000000000001 /* Debug */,
+				B05500000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -714,6 +891,16 @@
 			productName = EMFParse;
 		};
 		B03000000000000000000006 /* EMFRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFRender;
+		};
+		B03000000000000000000007 /* EMFParse */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFParse;
+		};
+		B03000000000000000000008 /* EMFRender */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
 			productName = EMFRender;
