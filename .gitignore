@@ -4,6 +4,8 @@ corpus-local/
 xcuserdata/
 .DS_Store
 dist/
+# Workbench's local project-icon working directory — this machine only
+.bench/
 
 # Private to this machine — internal process docs, never published
 emfy-session-primer.md
