@@ -195,6 +195,11 @@ private func translateWorld(_ dx: Float, _ dy: Float) -> [UInt8] {
     plusRecord(0x402D, 0x0000, le { $0.f32(dx); $0.f32(dy) })
 }
 
+/// ScaleWorldTransform (§2.3.9.6): sx, sy floats, prepended (flags 0).
+private func scaleWorld(_ sx: Float, _ sy: Float) -> [UInt8] {
+    plusRecord(0x402E, 0x0000, le { $0.f32(sx); $0.f32(sy) })
+}
+
 /// SetWorldTransform (§2.3.9.4): a raw 3x2 affine matrix (m11,m12,m21,m22,dx,dy).
 private func setWorldMatrix(_ m11: Float, _ m12: Float, _ m21: Float, _ m22: Float, _ dx: Float, _ dy: Float) -> [UInt8] {
     plusRecord(0x402A, 0x0000, le { writer in
@@ -786,6 +791,50 @@ struct EMFPlusPlaybackTests {
         #expect(Self.isRed(image[55, 20]), "the NaN translate was ignored, +40 survives, got \(image[55, 20])")
         #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x402D, count: 1)),
                 "a non-finite TranslateWorldTransform should note undecodable(0x402D): \(log.entries)")
+    }
+
+    @Test("a finite but singular ScaleWorldTransform (Scale(0,0)) is ignored, the previous transform survives, and it notes undecodable (L2)")
+    func scaleWorldTransformSingularIgnored() throws {
+        let file = try plusFile([
+            translateWorld(40, 0),                                    // world = +40 in x
+            scaleWorld(0, 0),                                         // finite but singular → ignored
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)),  // drawn under the surviving +40
+        ])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isRed(image[55, 20]), "the surviving +40 translate still places the fill, got \(image[55, 20])")
+        #expect(Self.isWhite(image[20, 20]), "nothing at the un-translated origin, got \(image[20, 20])")
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x402E, count: 1)),
+                "a singular ScaleWorldTransform should note undecodable(0x402E): \(log.entries)")
+    }
+
+    @Test("a finite one-axis-zero ScaleWorldTransform is also ignored and noted (L2)")
+    func scaleWorldTransformOneAxisZeroIgnored() throws {
+        let file = try plusFile([
+            translateWorld(40, 0),
+            scaleWorld(0, 1),                                         // det 0 → singular → ignored
+            fillRectsDirect(argb(255, 255, 0, 0), (10, 10, 20, 20)),
+        ])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isRed(image[55, 20]), "the surviving translate still places the fill, got \(image[55, 20])")
+        #expect(log.entries.contains(.emfPlusRecordUndecodable(type: 0x402E, count: 1)),
+                "a one-axis-zero ScaleWorldTransform should note undecodable(0x402E): \(log.entries)")
+    }
+
+    @Test("a non-singular ScaleWorldTransform is honoured (control for the singular rejection)")
+    func scaleWorldTransformNonSingularApplied() throws {
+        // Scale ×2 in x, prepended, then a 10×10 rect at the origin: the fill
+        // spans x 0…20 — wider than the un-scaled 0…10 — proving the scale applied.
+        let file = try plusFile([
+            scaleWorld(2, 1),
+            fillRectsDirect(argb(255, 255, 0, 0), (0, 10, 10, 10)),
+        ])
+        let (image, log) = try renderPlus(file)
+
+        #expect(Self.isRed(image[15, 15]), "a valid ×2 x-scale must widen the fill past x=10, got \(image[15, 15])")
+        #expect(!log.entries.contains(.emfPlusRecordUndecodable(type: 0x402E, count: 1)),
+                "a valid ScaleWorldTransform must NOT be noted undecodable: \(log.entries)")
     }
 
     @Test("an infinite pen width falls back to 1 and still strokes, no crash (L1)")

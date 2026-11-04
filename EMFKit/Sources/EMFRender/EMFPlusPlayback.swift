@@ -1206,10 +1206,18 @@ struct EMFPlusPlayback {
 
     private mutating func scaleWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
         var reader = PlusReader(record.data)
-        guard let sx = reader.f32(), let sy = reader.f32(), sx.isFinite, sy.isFinite else {
+        guard let sx = reader.f32(), let sy = reader.f32() else {
             log.noteEMFPlusRecordUndecodable(type: record.type); return
         }
-        applyWorld(CGAffineTransform(scaleX: CGFloat(sx), y: CGFloat(sy)), postMultiply: (flags & 0x2000) != 0)
+        // A finite but SINGULAR scale (e.g. Scale(0,0) or a single zero factor)
+        // collapses the world→device pipeline. Validate-and-ignore through the
+        // same usability check Set/Multiply use — which already rejects both
+        // non-finite and singular (det 0) matrices — and note it (§2.3.9).
+        let m = CGAffineTransform(scaleX: CGFloat(sx), y: CGFloat(sy))
+        guard Self.isUsableTransform(m) else {
+            log.noteEMFPlusRecordUndecodable(type: record.type); return
+        }
+        applyWorld(m, postMultiply: (flags & 0x2000) != 0)
     }
 
     private mutating func rotateWorldTransform(_ record: EMFPlusRecord, flags: UInt16, log: inout EMFRenderLog) {
