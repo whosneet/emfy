@@ -5,9 +5,13 @@
 #
 # The Release configuration already carries the signing settings (Manual code
 # signing with "Developer ID Application", team 6Y294JNMJ2, hardened runtime on
-# the app and both Quick Look appexes). This script drives the clean build, the
-# signature/Gatekeeper checks, notarization, stapling, and DMG packaging around
-# that, and prints a final verification block with artifact paths and hashes.
+# the app and both Quick Look appexes). The Developer ID identity used to sign
+# the DMG is discovered at runtime from the keychain by team id, so the
+# certificate's common name is never hardcoded (it changes when the Apple
+# Developer account type changes, e.g. individual -> company). This script
+# drives the clean build, the signature/Gatekeeper checks, notarization,
+# stapling, and DMG packaging around that, and prints a final verification
+# block with artifact paths and hashes.
 #
 # Usage:
 #   scripts/release.sh [--skip-notarize] [--profile <keychain-profile>]
@@ -46,9 +50,15 @@ DERIVED_DATA="${WORK_DIR}/DerivedData"
 cleanup() { rm -rf "${WORK_DIR}"; }
 trap cleanup EXIT
 
-# Developer ID identity used to sign the app (via the project settings) and the
-# DMG (explicitly, below). Must be present in the keychain.
-DEVELOPER_ID_APP="Developer ID Application: Avneet Singh (6Y294JNMJ2)"
+# Developer ID identity used to sign the DMG (explicitly, below); the app
+# itself is signed by xcodebuild via the project's Developer ID settings. The
+# certificate is discovered at runtime from the keychain by TEAM_ID (see
+# resolve_signing_identity) rather than by a hardcoded common name, which
+# changes when the account type changes. DEVELOPER_ID_HASH is the SHA-1 the DMG
+# is signed with; DEVELOPER_ID_APP is its human-readable name, for messages.
+TEAM_ID="6Y294JNMJ2"
+DEVELOPER_ID_HASH=""
+DEVELOPER_ID_APP=""
 
 APP_NAME="Emfy.app"
 VOLUME_NAME="Emfy"
@@ -130,11 +140,50 @@ notarize_and_verify() {
     info "notarization Accepted (submission id: ${submission_id:-unknown})"
 }
 
+# Resolve the Developer ID Application signing identity for TEAM_ID from the
+# keychain and set DEVELOPER_ID_HASH / DEVELOPER_ID_APP. Matching by team id
+# (not a hardcoded common name) keeps the script working across a certificate
+# reissue that changes the name — e.g. when the account converts from
+# individual to company. The DMG is signed by the SHA-1 hash, so the pick stays
+# unambiguous even if an old and a renewed certificate for the same team
+# coexist during a renewal; when several match, the last one listed is used and
+# reported so the operator can confirm it. Dies if none is present.
+resolve_signing_identity() {
+    # find-identity lines read: '  N) <40-hex SHA-1> "<name>"'. Keep only
+    # "Developer ID Application: … (TEAM_ID)" rows; emit "<sha1>\t<name>".
+    local matches
+    matches="$(security find-identity -v -p codesigning | awk -v team="(${TEAM_ID})" '
+        /Developer ID Application:/ && index($0, team) {
+            q1 = index($0, "\"")
+            name = substr($0, q1 + 1); sub(/"$/, "", name)
+            print $2 "\t" name
+        }')"
+    [[ -n "${matches}" ]] || die "no \"Developer ID Application: … (${TEAM_ID})\" identity found in the keychain.
+    list identities with: security find-identity -v -p codesigning
+    import the Developer ID Application certificate for team ${TEAM_ID} and retry."
+
+    local n chosen
+    n="$(printf '%s\n' "${matches}" | grep -c .)"
+    chosen="$(printf '%s\n' "${matches}" | tail -1)"
+    DEVELOPER_ID_HASH="${chosen%%$'\t'*}"
+    DEVELOPER_ID_APP="${chosen#*$'\t'}"
+
+    if [[ "${n}" -gt 1 ]]; then
+        warn "${n} Developer ID Application certificates match team ${TEAM_ID} (renewal overlap?); using the last listed"
+    fi
+    info "signing identity: ${DEVELOPER_ID_APP} [${DEVELOPER_ID_HASH}]"
+}
+
 if [[ "${SKIP_NOTARIZE}" -eq 1 ]]; then
     printf '\033[1mEmfy release — DRY RUN (--skip-notarize): notarization and stapling are skipped\033[0m\n'
 else
     printf '\033[1mEmfy release — FULL RUN: notary profile "%s"\033[0m\n' "${NOTARY_PROFILE}"
 fi
+
+# --- Resolve the Developer ID signing identity -------------------------------
+
+step "Resolve the Developer ID signing identity (team ${TEAM_ID})"
+resolve_signing_identity
 
 # --- 1. Clean Release build --------------------------------------------------
 
@@ -225,8 +274,8 @@ rm -f "${DMG_PATH}"
 info "assembling styled DMG via scripts/make-dmg.sh"
 "${REPO_ROOT}/scripts/make-dmg.sh" "${STAGED_APP}" "${DMG_PATH}"
 
-step "Sign the DMG with Developer ID"
-codesign --force --timestamp --sign "${DEVELOPER_ID_APP}" "${DMG_PATH}" \
+step "Sign the DMG with Developer ID (${DEVELOPER_ID_APP})"
+codesign --force --timestamp --sign "${DEVELOPER_ID_HASH}" "${DMG_PATH}" \
     || die "codesign of the DMG failed"
 codesign --verify --verbose=2 "${DMG_PATH}" \
     || die "codesign --verify failed on the DMG"
