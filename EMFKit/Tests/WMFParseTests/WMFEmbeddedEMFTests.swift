@@ -148,6 +148,34 @@ struct WMFEmbeddedEMFTests {
         #expect(WMFEmbeddedEMF.reassemble(file) == .rejected(.currentRecordSizeTooLarge))
     }
 
+    @Test("an EnhancedMetafileDataSize past the 64 MiB cap is rejected without allocating toward it")
+    func totalOutOfRange() throws {
+        let overCap = UInt32(64 * 1024 * 1024 + 1)
+        let file = try Self.parse([
+            Self.escapeRecord(chunk: [1, 2, 3, 4], recordCount: 1, remainingBytes: overCap - 4, totalSize: overCap),
+        ])
+        #expect(WMFEmbeddedEMF.reassemble(file) == .rejected(.totalOutOfRange))
+    }
+
+    @Test("a non-escape record interleaved mid-sequence ends the run early and is rejected")
+    func interleavedNonEscape() throws {
+        let emf: [UInt8] = (0 ..< 60).map { UInt8($0) }
+        let c0 = Self.escapeRecord(chunk: Array(emf[0 ..< 30]), recordCount: 2, remainingBytes: 30, totalSize: 60)
+        let c1 = Self.escapeRecord(chunk: Array(emf[30 ..< 60]), recordCount: 2, remainingBytes: 0, totalSize: 60)
+        let interloper = WMFFixtureBuilder.record(function: 0x0214, sizeWords: 5)   // META_MOVETO
+        let file = try Self.parse([c0, interloper, c1])
+        #expect(WMFEmbeddedEMF.reassemble(file) == .rejected(.incompleteSequence))
+    }
+
+    @Test("a sequence that never reaches its declared total is rejected as incomplete")
+    func incompleteSequence() throws {
+        // One chunk declares a 1000-byte total but supplies 10 bytes and ends.
+        let file = try Self.parse([
+            Self.escapeRecord(chunk: Array(0 ..< 10), recordCount: 1, remainingBytes: 990, totalSize: 1000),
+        ])
+        #expect(WMFEmbeddedEMF.reassemble(file) == .rejected(.incompleteSequence))
+    }
+
     @Test("every committed gate WMF carries a reassembling embedded EMF that parses")
     func corpusEmbeddedEMFsReassemble() throws {
         // The p2/p3 LibreOffice exports each embed a complete EMF; it must

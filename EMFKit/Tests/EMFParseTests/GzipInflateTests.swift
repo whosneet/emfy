@@ -168,6 +168,36 @@ struct GzipInflateTests {
         let ceiling = 1 * 1024 * 1024
         #expect(inflateError(bomb, ceiling: ceiling) == .outputTooLarge(ceiling: ceiling))
     }
+
+    // (The real 64 MiB default ceiling is tripped END TO END through the front
+    // door in MetafileFrontDoorTests.gzipBombPastDefaultCeilingThroughDoor, which
+    // exercises this same ceiling plus the open path — not duplicated here.)
+
+    // MARK: - Performance (worst-case inflate near the cap)
+
+    /// A near-cap (~48 MiB) successful inflate, REPORTED with a generous guard —
+    /// the perf worst-case for the .emz/.wmz path (plan §3 W6). The payload is a
+    /// repeating block so it deflates small (no big wire fixture) yet drives real
+    /// match-copy work inflating back to ~48 MiB.
+    @Test("a ~48 MiB inflate finishes well under a generous bound (reported)")
+    func largeInflateTiming() throws {
+        let blockSize = 4096
+        let blocks = (48 * 1024 * 1024) / blockSize
+        var block = [UInt8](repeating: 0, count: blockSize)
+        for i in 0 ..< blockSize { block[i] = UInt8(truncatingIfNeeded: i &* 131 &+ 17) }
+        var payload = [UInt8](); payload.reserveCapacity(blocks * blockSize)
+        for _ in 0 ..< blocks { payload.append(contentsOf: block) }
+        let member = GzipFixture.make(payload: payload)
+
+        let clock = ContinuousClock()
+        var result: GzipInflate.Result?
+        let elapsed = clock.measure { result = try? GzipInflate.inflate(member) }
+        let r = try #require(result, "the near-cap member should inflate")
+        #expect(r.data.count == payload.count)
+        let milli = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) * 1e-15
+        print("[gzip-perf] ~48 MiB inflate (\(member.count)-byte member) in " + String(format: "%.1f ms", milli))
+        #expect(elapsed < .seconds(5), "a ~48 MiB inflate took \(milli) ms")
+    }
 }
 
 private extension GzipError {

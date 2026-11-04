@@ -49,6 +49,10 @@ struct WMFFuzzTests {
         var prng = WMFPRNG(seed: 0x7A3C_1F08_55B2_90E1)
         let perFile = 200
         var runs = 0
+        // Traversal floor (plan §3 W6): mutants whose translation produced at least
+        // one record payload BEYOND the 5-payload page-setup preamble (i.e. that
+        // actually reached WMF record translation, not merely a header parse).
+        var reachedRecordTranslation = 0
         for name in WMFCorpus.wmfFiles {
             let original = Array(try WMFCorpus.data(name))
             for _ in 0 ..< perFile {
@@ -56,13 +60,18 @@ struct WMFFuzzTests {
                 if let file = try? WMFFile.parse(mutated) {
                     // The translation and reassembly paths must never trap or
                     // hang on a hostile WMF (§8) — bounded work, any result.
-                    _ = WMFTranslator.translate(file)
+                    let program = WMFTranslator.translate(file)
+                    if program.payloads.count > 5 { reachedRecordTranslation += 1 }
                     _ = WMFEmbeddedEMF.reassemble(file)
                 }
                 runs += 1
             }
         }
         #expect(runs == WMFCorpus.wmfFiles.count * perFile)
+        // A zero here means every mutant stopped at the header — the record
+        // translation surface went dark (well below the observed count).
+        #expect(reachedRecordTranslation >= 100,
+                "too few mutants reached WMF record translation: \(reachedRecordTranslation)")
     }
 
     @Test("mutated GDI-variant WMFs survive translation of the W4b decoders")
@@ -70,6 +79,7 @@ struct WMFFuzzTests {
         var prng = WMFPRNG(seed: 0x2C9F_18A7_44E1_6B0D)
         let perFile = 200
         var runs = 0
+        var reachedRecordTranslation = 0
         for name in WMFCorpus.gdiVariantFiles {
             // The p4 pair is uncommitted until the gate is accepted; skip if absent.
             guard let original = try? WMFCorpus.data(name) else { continue }
@@ -79,12 +89,17 @@ struct WMFFuzzTests {
                 if let file = try? WMFFile.parse(mutated) {
                     // Text, bitmap, region and pattern-brush decoders must never
                     // trap or hang on a hostile WMF (§8) — bounded work, any result.
-                    _ = WMFTranslator.translate(file)
+                    let program = WMFTranslator.translate(file)
+                    if program.payloads.count > 5 { reachedRecordTranslation += 1 }
                 }
                 runs += 1
             }
         }
-        #expect(runs >= 0)
+        // Traversal floor (plan §3 W6): the GDI variants carry only records (no
+        // embedded EMF), so a healthy share of mutants must reach record
+        // translation — a zero would mean the W4b decoder surface went dark.
+        #expect(reachedRecordTranslation >= 100,
+                "too few GDI-variant mutants reached record translation: \(reachedRecordTranslation)")
     }
 
     @Test("mutated hand-built content records survive the new decoders")

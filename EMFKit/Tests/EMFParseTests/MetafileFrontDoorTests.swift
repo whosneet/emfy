@@ -63,6 +63,47 @@ struct MetafileFrontDoorTests {
         #expect(openError(outer) == .nestedGzip)
     }
 
+    // MARK: - Hostile gzip through the front door (§8, plan §3 W6)
+
+    /// A decompression bomb whose output passes the REAL 64 MiB front-door ceiling
+    /// is refused with a typed failure, having streamed (never materialised) the
+    /// whole output. The bomb stays tiny on the wire (zeros deflate to a few KB),
+    /// so no big file is committed; the 64 MiB payload is built at test time.
+    @Test("a bomb past the 64 MiB front-door ceiling is refused, typed, having streamed")
+    func gzipBombPastDefaultCeilingThroughDoor() throws {
+        let zeros = [UInt8](repeating: 0, count: GzipInflate.defaultOutputCeiling + 256 * 1024)
+        let bomb = GzipFixture.make(payload: zeros)
+        #expect(bomb.count < 256 * 1024, "the bomb fixture itself must stay small on the wire")
+        #expect(openError(bomb) == .gzip(.outputTooLarge(ceiling: GzipInflate.defaultOutputCeiling)))
+    }
+
+    /// A lying ISIZE trailer is advisory: the member still opens to its inner
+    /// metafile, carrying the `.gzip(.isizeMismatch)` diagnostic (§8).
+    @Test("a lying ISIZE trailer opens the inner metafile with an advisory diagnostic")
+    func gzipLyingISIZEThroughDoor() throws {
+        let wmf = Array(try MetafileCorpus.data("handmade-wmf-placeable.wmf"))
+        let member = GzipFixture.make(payload: wmf, isizeOverride: UInt32(wmf.count) ^ 0x00AB_0000)
+        let opened = try OpenedMetafile.open(member)
+        #expect(opened.format == .placeableWMF)
+        #expect(opened.wasDecompressed)
+        #expect(opened.data == Data(wmf))
+        #expect(opened.diagnostics.contains {
+            if case .gzip(.isizeMismatch) = $0 { return true }
+            return false
+        }, "expected an advisory ISIZE diagnostic, got \(opened.diagnostics)")
+    }
+
+    /// A DEFLATE stream truncated mid-member fails typed as `.gzip(.inflateFailed)`
+    /// — never a crash.
+    @Test("a truncated gzip stream fails as .gzip(.inflateFailed) through the door")
+    func gzipTruncatedStreamThroughDoor() {
+        let payload = (0 ..< 512).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) }
+        let deflated = GzipFixture.deflate(payload)
+        let member = GzipFixture.make(payload: payload, deflateOverride: deflated)
+        let truncated = Data(member.prefix(max(18, 10 + deflated.count / 2)))
+        #expect(openError(truncated) == .gzip(.inflateFailed))
+    }
+
     @Test("a gzip inflate failure propagates as .gzip(...)")
     func gzipFailurePropagates() {
         var bytes = Array(GzipFixture.make(payload: Array("payload".utf8)))
