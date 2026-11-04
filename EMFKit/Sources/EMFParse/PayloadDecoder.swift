@@ -1101,3 +1101,87 @@ extension EMFFile {
         ))
     }
 }
+
+// MARK: - Packed-DIB decode (WMF bitmap records)
+
+extension EMFFile {
+    /// The outcome of decoding a packed DIB: a decoded `DIB` (whose `content`
+    /// may be `.unsupported`, a valid verdict) or a typed `.malformed` reason.
+    public enum PackedDIBResult: Sendable, Equatable {
+        case decoded(DIB)
+        case malformed(EMFPayloadIssue)
+    }
+
+    /// Decodes a packed DeviceIndependentBitmap ([MS-WMF] §2.2.2.9) — a
+    /// contiguous DIBHeaderInfo + Colors + aData blob, as carried whole by the
+    /// WMF bitmap records (unlike EMF's split offBmi/offBits ranges). The color
+    /// table byte count is derived from the BitmapInfoHeader to locate the pixel
+    /// data, then the SAME core DIB decoder (and its §8 dimension/area/pixel
+    /// caps) runs, so WMF and EMF share one DIB path. All reads are bounds-
+    /// checked against the blob; nothing allocates before the counts validate.
+    public static func decodePackedDIB(_ data: Data) -> PackedDIBResult {
+        let reader = ByteReader(data)
+        let size = reader.count
+        // A record builds a slice whose offsets are relative to the blob start.
+        let record = EMFRawRecord(type: 0, size: UInt32(clamping: size), offset: 0)
+        let slice = RecordSlice(reader: reader, record: record)
+
+        guard let headerSize = slice.u32(0) else {
+            return .malformed(.tooSmall(minimumSize: 4, actualSize: size))
+        }
+        // BitmapCoreHeader (0x0C) is below the 40-byte floor the shared decoder
+        // requires; report it the same way the EMF path would (§2.2.2.2/.3).
+        guard headerSize >= 40 else {
+            return .malformed(.badBitmapHeader(headerSize: headerSize))
+        }
+        guard let bitCount = slice.u16(14),
+              let rawCompression = slice.u32(16),
+              let clrUsed = slice.u32(32)
+        else {
+            return .malformed(.tooSmall(minimumSize: 40, actualSize: size))
+        }
+
+        // Pixel data starts after the fixed header and the color table. The core
+        // decoder then sizes the palette from the header-to-pixels span (cbBmi),
+        // exactly as it does for an EMF DIB.
+        let colorTableBytes = packedDIBColorTableBytes(
+            bitCount: bitCount, compression: rawCompression, clrUsed: clrUsed
+        )
+        // Int arithmetic throughout; headerSize ≤ UInt32.max and colorTableBytes
+        // is bounded by 2^16 entries × 4, so this cannot overflow a 64-bit Int.
+        let pixelOffset = min(Int(headerSize) &+ colorTableBytes, size)
+        let bitsSize = size - pixelOffset
+
+        switch decodeDIB(
+            slice: slice, type: 0,
+            offBmi: 0, cbBmi: UInt32(clamping: pixelOffset),
+            offBits: UInt32(clamping: pixelOffset), cbBits: UInt32(clamping: bitsSize)
+        ) {
+        case .success(let dib): return .decoded(dib)
+        case .failure(let reason): return .malformed(reason)
+        }
+    }
+
+    /// The color-table byte count of a packed DIB under DIB_RGB_COLORS packing
+    /// ([MS-WMF] §2.2.2.9): for BitCount ≤ 8, 2^BitCount (or ClrUsed, when it is
+    /// non-zero) 4-byte RGBQuads; BI_BITFIELDS prepends three 4-byte channel
+    /// masks; truecolor BI_RGB carries only an optional ClrUsed-length table
+    /// (normally 0). DIB_PAL_COLORS DIBs (2-byte entries) are skipped by the
+    /// renderer on `usageSrc`, so the 4-byte assumption is harmless there.
+    private static func packedDIBColorTableBytes(
+        bitCount: UInt16, compression: UInt32, clrUsed: UInt32
+    ) -> Int {
+        var bytes = 0
+        if bitCount <= 8 {
+            // 1 << bitCount is at most 256; the clrUsed branch is bounded below.
+            let entries = clrUsed != 0 ? min(Int(clrUsed), 1 << 16) : (1 << Int(bitCount))
+            bytes = entries * 4
+        } else {
+            bytes = min(Int(clrUsed), 1 << 16) * 4
+        }
+        if compression == 3 {   // BI_BITFIELDS: three DWORD channel masks
+            bytes += 12
+        }
+        return bytes
+    }
+}
