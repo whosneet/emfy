@@ -164,56 +164,117 @@ enum PathBuilder {
         to path: CGMutablePath,
         transform: CGAffineTransform
     ) {
-        let rect = cgRect(box)
-        let rx = rect.width / 2
-        let ry = rect.height / 2
-        // Degenerate ellipse: nothing visible, and rx/ry are divisors below.
-        guard rx > 0, ry > 0 else { return }
-        let cx = rect.midX
-        let cy = rect.midY
+        guard let geometry = ArcGeometry(box: box, start: start, end: end) else { return }
+        path.move(to: geometry.pointAt(geometry.thetaStart), transform: transform)
+        geometry.appendSegments(to: path, transform: transform)
+    }
 
-        func parameterAngle(_ p: PointL) -> Double {
-            // atan2(0, 0) is defined (0), so a radial point at the exact
-            // centre degrades gracefully.
-            atan2((Double(p.y) - cy) / ry, (Double(p.x) - cx) / rx)
+    // MARK: - Pie and chord (EMR_PIE §2.3.5.16-analogue / [MS-WMF] §2.3.3.13,
+    // EMR_CHORD-analogue / [MS-WMF] §2.3.3.2)
+
+    /// Appends a closed pie wedge: the ellipse-arc of `box` from the `start`
+    /// radial to the `end` radial, plus the two radii to the ellipse centre.
+    /// Filled/stroked as a single closed figure (brush + pen) by the caller.
+    static func appendPie(
+        box: RectL,
+        start: PointL,
+        end: PointL,
+        to path: CGMutablePath,
+        transform: CGAffineTransform
+    ) {
+        guard let geometry = ArcGeometry(box: box, start: start, end: end) else { return }
+        path.move(to: geometry.center, transform: transform)
+        path.addLine(to: geometry.pointAt(geometry.thetaStart), transform: transform)
+        geometry.appendSegments(to: path, transform: transform)
+        path.addLine(to: geometry.center, transform: transform)
+        path.closeSubpath()
+    }
+
+    /// Appends a closed chord: the ellipse-arc of `box` from the `start` radial
+    /// to the `end` radial, closed by the straight chord between the two arc
+    /// endpoints.
+    static func appendChord(
+        box: RectL,
+        start: PointL,
+        end: PointL,
+        to path: CGMutablePath,
+        transform: CGAffineTransform
+    ) {
+        guard let geometry = ArcGeometry(box: box, start: start, end: end) else { return }
+        path.move(to: geometry.pointAt(geometry.thetaStart), transform: transform)
+        geometry.appendSegments(to: path, transform: transform)
+        path.closeSubpath()
+    }
+
+    /// The shared elliptical-arc construction for EMR_ARC, META_PIE, and
+    /// META_CHORD: an ellipse inscribed in `box`, swept from the `start` radial
+    /// to the `end` radial counterclockwise-on-screen (decreasing parameter θ,
+    /// [MS-EMF] §2.3.5.2). `nil` for a degenerate (zero-area) ellipse.
+    private struct ArcGeometry {
+        let center: CGPoint
+        let rx: Double
+        let ry: Double
+        let thetaStart: Double
+        let sweep: Double
+
+        init?(box: RectL, start: PointL, end: PointL) {
+            let rect = cgRect(box)
+            let rx = rect.width / 2
+            let ry = rect.height / 2
+            guard rx > 0, ry > 0 else { return nil }
+            let cx = rect.midX
+            let cy = rect.midY
+            self.center = CGPoint(x: cx, y: cy)
+            self.rx = rx
+            self.ry = ry
+
+            func parameterAngle(_ p: PointL) -> Double {
+                // atan2(0, 0) is defined (0), so a radial point at the exact
+                // centre degrades gracefully.
+                atan2((Double(p.y) - cy) / ry, (Double(p.x) - cx) / rx)
+            }
+            let thetaStart = parameterAngle(start)
+            let thetaEnd = parameterAngle(end)
+            self.thetaStart = thetaStart
+            // Sweep magnitude in the decreasing-θ direction; coincident radials
+            // mean a full ellipse.
+            var sweep = thetaStart - thetaEnd
+            if sweep <= 0 { sweep += 2 * Double.pi }
+            self.sweep = sweep
         }
-
-        let thetaStart = parameterAngle(start)
-        let thetaEnd = parameterAngle(end)
-        // Sweep magnitude in the decreasing-θ direction; coincident radials
-        // mean a full ellipse.
-        var sweep = thetaStart - thetaEnd
-        if sweep <= 0 { sweep += 2 * Double.pi }
 
         func pointAt(_ theta: Double) -> CGPoint {
-            CGPoint(x: cx + rx * cos(theta), y: cy + ry * sin(theta))
+            CGPoint(x: center.x + rx * cos(theta), y: center.y + ry * sin(theta))
         }
-        func derivativeAt(_ theta: Double) -> CGVector {
+
+        private func derivativeAt(_ theta: Double) -> CGVector {
             CGVector(dx: -rx * sin(theta), dy: ry * cos(theta))
         }
 
-        let segmentCount = max(1, Int((sweep / (Double.pi / 2)).rounded(.up)))
-        let step = -sweep / Double(segmentCount)   // negative: θ decreases
-
-        path.move(to: pointAt(thetaStart), transform: transform)
-        var theta = thetaStart
-        for _ in 0 ..< segmentCount {
-            let next = theta + step
-            // Standard cubic approximation of an elliptical arc segment:
-            // C1 = P(θ1) + α·P′(θ1), C2 = P(θ2) − α·P′(θ2),
-            // α = 4/3 · tan((θ2 − θ1)/4). Correct for either sweep direction.
-            let alpha = 4.0 / 3.0 * tan((next - theta) / 4)
-            let p1 = pointAt(theta)
-            let p2 = pointAt(next)
-            let d1 = derivativeAt(theta)
-            let d2 = derivativeAt(next)
-            path.addCurve(
-                to: p2,
-                control1: CGPoint(x: p1.x + alpha * d1.dx, y: p1.y + alpha * d1.dy),
-                control2: CGPoint(x: p2.x - alpha * d2.dx, y: p2.y - alpha * d2.dy),
-                transform: transform
-            )
-            theta = next
+        /// Appends the cubic arc segments continuing from the current point
+        /// (the caller has already moved/lined to `pointAt(thetaStart)`).
+        func appendSegments(to path: CGMutablePath, transform: CGAffineTransform) {
+            let segmentCount = max(1, Int((sweep / (Double.pi / 2)).rounded(.up)))
+            let step = -sweep / Double(segmentCount)   // negative: θ decreases
+            var theta = thetaStart
+            for _ in 0 ..< segmentCount {
+                let next = theta + step
+                // Standard cubic approximation of an elliptical arc segment:
+                // C1 = P(θ1) + α·P′(θ1), C2 = P(θ2) − α·P′(θ2),
+                // α = 4/3 · tan((θ2 − θ1)/4). Correct for either sweep direction.
+                let alpha = 4.0 / 3.0 * tan((next - theta) / 4)
+                let p1 = pointAt(theta)
+                let p2 = pointAt(next)
+                let d1 = derivativeAt(theta)
+                let d2 = derivativeAt(next)
+                path.addCurve(
+                    to: p2,
+                    control1: CGPoint(x: p1.x + alpha * d1.dx, y: p1.y + alpha * d1.dy),
+                    control2: CGPoint(x: p2.x - alpha * d2.dx, y: p2.y - alpha * d2.dy),
+                    transform: transform
+                )
+                theta = next
+            }
         }
     }
 }

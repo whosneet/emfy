@@ -236,8 +236,8 @@ public enum EMFRenderer {
     /// (inclusive-inclusive, y down) onto `target` (CG space, y up) — the one
     /// place the y-flip happens. Degenerate header bounds fall back to a unit
     /// scale with a `zeroExtentMapping` log entry so the division below is
-    /// always sound.
-    private static func deviceToTarget(
+    /// always sound. Shared with the WMF playback path in `MetafileRenderer`.
+    static func deviceToTarget(
         header: EMFHeader,
         target: CGRect,
         log: inout EMFRenderLog
@@ -308,6 +308,15 @@ public enum EMFRenderer {
             return
         case .setDIBitsToDevice(let payload):
             BitmapDrawer.drawSetDIBitsToDevice(payload, into: context, dc: dc, base: base, log: &log)
+            return
+
+        // WMF-sourced direct draws ([MS-WMF] §2.3.3.12/.19). Like text and
+        // bitmaps they are never captured into a path bracket.
+        case .setPixel(let point, let color):
+            drawSetPixel(point: point, color: color, into: context, dc: dc, base: base)
+            return
+        case .patBlt(let bounds, let rasterOperation):
+            drawPatBlt(bounds: bounds, rasterOperation: rasterOperation, into: context, dc: dc, base: base, log: &log)
             return
 
         default:
@@ -387,6 +396,15 @@ public enum EMFRenderer {
             // EMR_ARCTO, outside the phase-2 set).
             PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full)
             stroke(path, context: context, dc: dc, base: base, full: full)
+
+        // MARK: Filled arc figures ([MS-WMF] §2.3.3.13/.2) — brush then pen.
+        case .pie(let arc):
+            PathBuilder.appendPie(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full)
+            fillAndStroke(path, context: context, dc: dc, base: base, full: full)
+
+        case .chord(let arc):
+            PathBuilder.appendChord(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full)
+            fillAndStroke(path, context: context, dc: dc, base: base, full: full)
 
         // MARK: Current-position consumers.
         case .lineTo(let point):
@@ -647,6 +665,71 @@ public enum EMFRenderer {
         PathBuilder.appendBezierTriples(points.prefix(shape.usableCount), to: path, transform: full)
         stroke(path, context: context, dc: dc, base: base, full: full)
         dc.state.currentPosition = logicalPoints[shape.usableCount - 1]
+    }
+
+    // MARK: - WMF-sourced direct draws
+
+    /// META_SETPIXEL ([MS-WMF] §2.3.3.19): paint a single device pixel at
+    /// `point` (logical units) in `color`, under the current clip.
+    private static func drawSetPixel(
+        point: PointL,
+        color: ColorRef,
+        into context: CGContext,
+        dc: DeviceContext,
+        base: CGAffineTransform
+    ) {
+        let full = dc.resolvedTransform.concatenating(base)
+        let p = PathBuilder.cgPoint(point).applying(full)
+        context.saveGState()
+        dc.state.clip.apply(to: context, deviceToTarget: base)
+        context.setFillColor(cgColor(color))
+        context.fill(CGRect(x: p.x, y: p.y, width: 1, height: 1))
+        context.restoreGState()
+    }
+
+    /// META_PATBLT ([MS-WMF] §2.3.3.12): fill `bounds` with the current brush
+    /// under a ternary raster op — no outline. PATCOPY copies the brush;
+    /// BLACKNESS/WHITENESS force black/white; any other rop falls back to a
+    /// brush copy with a log entry (best partial output, §8). A NULL brush under
+    /// a brush-copy rop paints nothing.
+    private static func drawPatBlt(
+        bounds: RectL,
+        rasterOperation: UInt32,
+        into context: CGContext,
+        dc: DeviceContext,
+        base: CGAffineTransform,
+        log: inout EMFRenderLog
+    ) {
+        let fillColor: ColorRef?
+        switch rasterOperation {
+        case 0x00F0_0021:                       // PATCOPY
+            fillColor = patBltBrushColor(dc)
+        case 0x0000_0042:                       // BLACKNESS
+            fillColor = ColorRef(red: 0, green: 0, blue: 0)
+        case 0x00FF_0062:                       // WHITENESS
+            fillColor = ColorRef(red: 255, green: 255, blue: 255)
+        default:
+            log.noteUnsupportedRasterOp(rasterOperation: rasterOperation)
+            fillColor = patBltBrushColor(dc)
+        }
+        guard let fillColor else { return }
+        let full = dc.resolvedTransform.concatenating(base)
+        let path = CGMutablePath()
+        path.addRect(PathBuilder.cgRect(bounds), transform: full)
+        guard !path.isEmpty else { return }
+        context.saveGState()
+        dc.state.clip.apply(to: context, deviceToTarget: base)
+        context.setFillColor(cgColor(fillColor))
+        context.addPath(path)
+        context.fillPath()
+        context.restoreGState()
+    }
+
+    /// The current brush's solid colour for a PATBLT copy, or `nil` for a NULL
+    /// brush (nothing to paint).
+    private static func patBltBrushColor(_ dc: DeviceContext) -> ColorRef? {
+        if case .solid(let color) = dc.state.brush { return color }
+        return nil
     }
 
     // MARK: - Paint

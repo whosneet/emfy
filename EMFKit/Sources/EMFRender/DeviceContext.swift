@@ -222,6 +222,13 @@ struct DeviceContext {
             state.clip.intersect(.rects([deviceRect]))
             return true
 
+        case .excludeClipRect(let clip):
+            // [MS-WMF] §2.3.5.2 META_EXCLUDECLIPRECT: subtract the rectangle
+            // (logical units, transformed to device) from the current clip.
+            let deviceRect = PathBuilder.cgRect(clip).applying(resolvedTransform)
+            state.clip.exclude(deviceRect)
+            return true
+
         // MARK: Path brackets ([MS-EMF] §2.3.10) — construction state only.
         // The FILL/STROKE closers and SELECTCLIPPATH need a CGContext, so the
         // renderer drives them; they are NOT consumed here (return false). The
@@ -319,7 +326,8 @@ struct DeviceContext {
         case .polyBezier, .polygon, .polyline, .polyBezierTo, .polylineTo,
              .ellipse, .rectangle, .roundRect, .arc, .lineTo,
              .polyBezier16, .polygon16, .polyline16, .polyBezierTo16,
-             .polylineTo16, .polyPolyline16, .polyPolygon16:
+             .polylineTo16, .polyPolyline16, .polyPolygon16,
+             .pie, .chord, .setPixel, .patBlt:
             return false
         }
     }

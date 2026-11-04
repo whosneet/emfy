@@ -601,6 +601,34 @@ public enum EMFRecordPayload: Sendable, Equatable {
     /// EMR_EXTTEXTOUTW (84), §2.3.5.8.
     case extTextOutW(ExtTextPayload)
 
+    // MARK: WMF-sourced primitives ([MS-WMF] §2.3.3, §2.3.5)
+    //
+    // These payloads have EMF record analogues (EMR_PIE 47, EMR_CHORD 46,
+    // EMR_SETPIXELV 15, EMR_EXCLUDECLIPRECT 29) that the EMF decoder does not
+    // yet produce, so in v3 they are only ever emitted by the WMFParse
+    // translator ([MS-WMF] §2.3.3.13/.2/.19, §2.3.5.2). They play through the
+    // same `DeviceContext`/`draw` path as every other geometry/clip record.
+
+    /// A filled pie wedge ([MS-WMF] §2.3.3.13 META_PIE): the arc of `box`'s
+    /// ellipse from the `start` radial to the `end` radial, closed through the
+    /// ellipse centre. Filled with the brush, outlined with the pen.
+    case pie(ArcPayload)
+    /// A filled chord ([MS-WMF] §2.3.3.2 META_CHORD): the arc of `box`'s
+    /// ellipse from the `start` radial to the `end` radial, closed by the chord
+    /// line between the two arc endpoints. Filled with the brush, outlined with
+    /// the pen.
+    case chord(ArcPayload)
+    /// A single coloured pixel ([MS-WMF] §2.3.3.19 META_SETPIXEL) at `point`
+    /// (logical units).
+    case setPixel(point: PointL, color: ColorRef)
+    /// A brush-fill of `bounds` under a ternary raster operation ([MS-WMF]
+    /// §2.3.3.12 META_PATBLT). No outline. `rasterOperation` is a
+    /// TernaryRasterOperation ([MS-WMF] §2.1.1.31).
+    case patBlt(bounds: RectL, rasterOperation: UInt32)
+    /// EMR_EXCLUDECLIPRECT analogue ([MS-WMF] §2.3.5.2 META_EXCLUDECLIPRECT):
+    /// subtract `clip` (logical units) from the current clipping region.
+    case excludeClipRect(clip: RectL)
+
     // MARK: Bitmaps ([MS-EMF] §2.3.1)
 
     /// EMR_STRETCHDIBITS (81), §2.3.1.7.

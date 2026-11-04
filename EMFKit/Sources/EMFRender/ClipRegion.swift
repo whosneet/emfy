@@ -28,6 +28,12 @@ struct ClipRegion: Equatable {
         /// A device-space path (a path bracket selected as clip). Applied with
         /// the nonzero winding rule.
         case path(CGPath)
+        /// The EXCLUSION of a device-space rectangle from the running clip
+        /// (META_EXCLUDECLIPRECT, [MS-WMF] §2.3.5.2). CoreGraphics' gstate clip
+        /// is intersection-only, so at apply time this is realised as an
+        /// even-odd clip of (current clip bounding box − rect): a best-effort
+        /// subtraction bounded by the already-clipped area.
+        case excludeRect(CGRect)
     }
 
     /// The primitives to intersect, in order. Empty means no clip.
@@ -75,6 +81,14 @@ struct ClipRegion: Equatable {
         primitives.append(primitive)
     }
 
+    /// Subtracts a device-space rectangle from the region (META_EXCLUDECLIPRECT,
+    /// [MS-WMF] §2.3.5.2). Appended, not folded — exclusion does not reduce to a
+    /// single intersection rect — and capped like any other primitive.
+    mutating func exclude(_ rect: CGRect) {
+        guard primitives.count < Self.maxPrimitives else { return }
+        primitives.append(.excludeRect(rect))
+    }
+
     /// Replaces the region with `primitive` (RGN_COPY).
     mutating func replace(with primitive: Primitive) {
         primitives = [primitive]
@@ -98,6 +112,17 @@ struct ClipRegion: Equatable {
                 let path = CGMutablePath()
                 path.addPath(devicePath, transform: deviceToTarget)
                 clipTo(path, in: context)
+            case .excludeRect(let rect):
+                // Subtract `rect` from the running clip: an even-odd path of the
+                // current clip's bounding box (user space == target space, as the
+                // renderer sets no CTM) with the excluded rect as a hole. Nothing
+                // outside the already-clipped area is ever un-clipped.
+                let outer = context.boundingBoxOfClipPath
+                let path = CGMutablePath()
+                path.addRect(outer)
+                path.addRect(rect, transform: deviceToTarget)
+                context.addPath(path)
+                context.clip(using: .evenOdd)
             }
         }
     }
