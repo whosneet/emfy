@@ -62,6 +62,15 @@ struct EMFDocument: FileDocument {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
+        try self.init(data: data)
+    }
+
+    /// Opens, prepares, and renders raw metafile bytes — the same path the
+    /// `FileDocument` initialiser takes, split out so the iOS app (which is not
+    /// `DocumentGroup`-based) can build the model straight from `Data`. Mac
+    /// behaviour is unchanged: `init(configuration:)` reads the file's bytes and
+    /// delegates here.
+    init(data: Data) throws {
         // A broken gzip wrapper, an unrecognised format, or a header-less
         // EMF/WMF are the only unreadable cases; map them to the Cocoa
         // "corrupt file" error so DocumentGroup shows the standard alert.

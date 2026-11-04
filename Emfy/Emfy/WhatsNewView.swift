@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
 /// An About-panel-styled window showing what changed in the installed version
@@ -9,10 +11,19 @@ struct WhatsNewView: View {
 
     var body: some View {
         VStack(spacing: 16) {
+            // macOS reads the live app icon; iOS has no NSApplication, so it
+            // uses the bundled icon image asset instead.
+            #if os(macOS)
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .frame(width: 72, height: 72)
                 .accessibilityHidden(true)
+            #else
+            Image("EmfyIcon")
+                .resizable()
+                .frame(width: 72, height: 72)
+                .accessibilityHidden(true)
+            #endif
 
             Text("What's New in Emfy \(entry.version)")
                 .font(.title2.weight(.semibold))
