@@ -72,6 +72,10 @@ struct DeviceContext {
     private(set) var saveStack: [State] = []
     /// Header metrics feed the fixed metric map modes' scale.
     let header: EMFHeader
+    /// User-defined font substitutions consulted — before the built-in table —
+    /// when a requested family is missing (S1b RenderOptions). Empty by default,
+    /// so font resolution stays byte-identical to before the option.
+    let fontSubstitutions: [FontSubstitution]
 
     /// Path-bracket construction state ([MS-EMF] §2.3.10). This is DC-level,
     /// NOT part of the saveable `State`: a bracket is a transient
@@ -94,8 +98,9 @@ struct DeviceContext {
     /// drawn).
     var isRecordingPath: Bool { pathAccumulator != nil }
 
-    init(header: EMFHeader) {
+    init(header: EMFHeader, fontSubstitutions: [FontSubstitution] = []) {
         self.header = header
+        self.fontSubstitutions = fontSubstitutions
     }
 
     /// The current logical → device transform.
@@ -305,7 +310,7 @@ struct DeviceContext {
             // Resolve the LOGFONT to a base CTFont + attributes now; the text
             // drawer sizes it to the device at draw time (the transform can
             // change before the run — same reasoning as geometric pen widths).
-            let font = FontMapper.resolve(payload.logFont, log: &log)
+            let font = FontMapper.resolve(payload.logFont, substitutions: fontSubstitutions, log: &log)
             store(.font(font), at: payload.ihFonts, log: &log)
             return true
 

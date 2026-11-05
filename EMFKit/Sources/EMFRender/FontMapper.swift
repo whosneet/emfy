@@ -43,6 +43,13 @@ enum FontMapper {
     /// directly nor has a table entry.
     static let defaultFamily = "Helvetica Neue"
 
+    /// The cap on how many user font substitutions are consulted, and on each
+    /// family name's length (S1b RenderOptions). The table comes from app
+    /// settings, not from the hostile file, but it is bounded defensively so a
+    /// pathological settings value cannot slow resolution.
+    static let userSubstitutionLimit = 64
+    static let familyNameLengthLimit = 128
+
     /// A system font created ONCE and cached — the emergency fallback a queued
     /// lookup returns if it times out. The lookup machinery is what stalled, so
     /// the fallback must already exist and perform no new lookup; it is built on
@@ -68,11 +75,12 @@ enum FontMapper {
     /// Resolves a LogFont ([MS-EMF] §2.2.13) to a `ResolvedFont`, appending one
     /// coalesced `fontSubstituted` entry per requested family that had to be
     /// remapped.
-    static func resolve(_ logFont: LogFont, log: inout EMFRenderLog) -> ResolvedFont {
+    static func resolve(_ logFont: LogFont, substitutions: [FontSubstitution] = [], log: inout EMFRenderLog) -> ResolvedFont {
         let styled = resolveFamily(
             logFont.faceName,
             bold: logFont.weight >= 600,
             italic: logFont.italic != 0,
+            substitutions: substitutions,
             log: &log
         )
 
@@ -92,11 +100,11 @@ enum FontMapper {
     /// rather than a LOGFONT, but must resolve identically (primer §6: no parallel
     /// font stack). Substitutions are logged (coalesced) exactly as the GDI path.
     /// The caller sizes the returned base to the device point size at draw time.
-    static func resolveFamily(_ family: String, bold: Bool, italic: Bool, log: inout EMFRenderLog) -> CTFont {
+    static func resolveFamily(_ family: String, bold: Bool, italic: Bool, substitutions: [FontSubstitution] = [], log: inout EMFRenderLog) -> CTFont {
         let requested = family.trimmingCharacters(in: .whitespaces)
         let fallback: (font: CTFont, substitute: String?) = (emergencyFallbackFont, nil)
         let lookup = FontLookupQueue.run(fallback: fallback) { () -> (font: CTFont, substitute: String?) in
-            let base = baseFont(forFamily: requested)
+            let base = baseFont(forFamily: requested, substitutions: substitutions)
             return (applyTraits(to: base.font, bold: bold, italic: italic), base.substitute)
         }
         if let substitute = lookup.substitute {
@@ -123,7 +131,7 @@ enum FontMapper {
     /// the substitution table on a CoreText miss. Returns the family used when
     /// it had to substitute, so the caller can log it (the log is caller-owned
     /// and never crosses to the lookup queue). Runs on `FontLookupQueue`.
-    private static func baseFont(forFamily requested: String) -> (font: CTFont, substitute: String?) {
+    private static func baseFont(forFamily requested: String, substitutions: [FontSubstitution]) -> (font: CTFont, substitute: String?) {
         // An empty face name goes straight to the default (font mapper choice).
         guard !requested.isEmpty else {
             return (font(named: defaultFamily), defaultFamily)
@@ -131,15 +139,43 @@ enum FontMapper {
 
         // Direct try. If CoreText returns a font whose family matches the
         // request, use it as-is (Arial, Times New Roman, Tahoma, … resolve
-        // directly on macOS; Calibri resolves too when Office is installed).
+        // directly on macOS; Calibri resolves too when Office is installed). An
+        // installed family is therefore never substituted.
         let direct = font(named: requested)
         if familyMatches(direct, requested) {
             return (direct, nil)
         }
 
-        // Miss: CoreText silently substituted. Consult the table.
+        // Miss: CoreText silently substituted. Consult the user table FIRST
+        // (S1b RenderOptions). A matching entry whose replacement itself resolves
+        // wins; a missing replacement falls through to the built-in table below.
+        if let userReplacement = userSubstitution(for: requested, in: substitutions) {
+            let candidate = font(named: userReplacement)
+            if familyMatches(candidate, userReplacement) {
+                return (candidate, userReplacement)
+            }
+        }
+
+        // Built-in table.
         let replacement = substitution(for: requested)
         return (font(named: replacement), replacement)
+    }
+
+    /// The first user substitution whose requested family matches `requested`
+    /// (case- and space-insensitively), or nil. Bounded over the caller-supplied
+    /// list: at most `userSubstitutionLimit` entries are read, and an entry whose
+    /// requested or replacement name exceeds `familyNameLengthLimit` characters,
+    /// or whose replacement is blank, is skipped.
+    private static func userSubstitution(for requested: String, in substitutions: [FontSubstitution]) -> String? {
+        let key = normalise(requested)
+        for entry in substitutions.prefix(userSubstitutionLimit) {
+            guard entry.requestedFamily.count <= familyNameLengthLimit,
+                  entry.replacementFamily.count <= familyNameLengthLimit else { continue }
+            guard normalise(entry.requestedFamily) == key else { continue }
+            let replacement = entry.replacementFamily.trimmingCharacters(in: .whitespaces)
+            if !replacement.isEmpty { return replacement }
+        }
+        return nil
     }
 
     /// The substitution-table target for a Windows family CoreText could not

@@ -47,14 +47,24 @@ public enum EMFRenderer {
     public static func render(
         _ file: EMFFile,
         into context: CGContext,
-        target: CGRect
+        target: CGRect,
+        options: RenderOptions = .default
     ) -> EMFRenderLog {
         var log = EMFRenderLog()
         let base = deviceToTarget(header: file.header, target: target, log: &log)
-        var dc = DeviceContext(header: file.header)
+        var dc = DeviceContext(header: file.header, fontSubstitutions: options.fontSubstitutions)
 
         context.saveGState()
         defer { context.restoreGState() }
+
+        // Crisp antialiasing (option 1): turn it off once at canvas level, inside
+        // the outer save. The GDI draw helpers each save/restore their own gstate,
+        // so they inherit and preserve this; EMF+ draws re-assert it per draw
+        // (overriding any file SetAntiAliasMode). Set only for `.crisp`, so
+        // `.smooth` output stays byte-identical.
+        if options.antialiasing == .crisp {
+            context.setShouldAntialias(false)
+        }
 
         // EMF+ arbitration ([MS-EMFPLUS] §1.3.1): when the EMF+ stream carries
         // at least one DRAWING record, the file plays in EMF+ mode regardless of
@@ -70,8 +80,14 @@ public enum EMFRenderer {
         for diagnostic in plus.diagnostics {
             log.noteEMFPlusStreamIssue(EMFPlusStreamIssueKind(diagnostic))
         }
-        if plus.records.contains(where: \.isDrawing) {
-            EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, log: &log)
+        // Option 3 `.gdi`: on an EMF+ DUAL file (EmfPlusHeader Flags Dual bit
+        // 0x0001, [MS-EMFPLUS] §2.3.3.3) play the GDI records and ignore EMF+
+        // drawing. For an EMF+-only (non-dual) file it has no effect — there is
+        // no complete GDI copy — so the EMF+ path still runs. `.emfPlus` (default)
+        // leaves `forceGDI` false, so existing output is byte-identical.
+        let forceGDI = options.emfPlusArbitration == .gdi && (plus.header?.isDual ?? false)
+        if !forceGDI, plus.records.contains(where: \.isDrawing) {
+            EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, options: options, log: &log)
             return log
         }
 
@@ -110,7 +126,8 @@ public enum EMFRenderer {
     public static func makeImage(
         _ file: EMFFile,
         scale: CGFloat = 1,
-        background: RenderBackground = .white
+        background: RenderBackground = .white,
+        options: RenderOptions = .default
     ) -> (CGImage, EMFRenderLog)? {
         var log = EMFRenderLog()
 
@@ -164,7 +181,8 @@ public enum EMFRenderer {
         let renderLog = render(
             file,
             into: context,
-            target: CGRect(x: 0, y: 0, width: width, height: height)
+            target: CGRect(x: 0, y: 0, width: width, height: height),
+            options: options
         )
         // The clamp entry (if any) precedes playback entries. Re-feed the
         // coalesced families through their coalescing helpers so a preceding

@@ -54,6 +54,12 @@ struct EMFPlusPlayback {
     /// conversion (audit M10/L4). A zero/absent header DPI falls back to 96.
     let dpiX: CGFloat
     let dpiY: CGFloat
+    /// Option 1 (antialiasing): when true, antialiasing is forced OFF for every
+    /// EMF+ draw, overriding the file's SetAntiAliasMode state (`state.antialias`).
+    let crisp: Bool
+    /// Option 2 (font substitutions): the user table consulted — before the
+    /// built-in one — for DrawString/DrawDriverString family resolution.
+    let substitutions: [FontSubstitution]
     private var state = State()
     /// Index-keyed saved states for EmfPlusSave (§2.3.7.5) / EmfPlusRestore (§2.3.7.4).
     private var savedStates: [UInt32: State] = [:]
@@ -85,6 +91,11 @@ struct EMFPlusPlayback {
         state.world.concatenating(state.page)
     }
 
+    /// The effective antialias flag for an EMF+ draw: forced off under `crisp`
+    /// (option 1), otherwise the file's current SetAntiAliasMode state. In
+    /// `.smooth` this equals `state.antialias`, so output stays byte-identical.
+    private var shouldAntialias: Bool { crisp ? false : state.antialias }
+
     // MARK: - Entry point
 
     static func run(
@@ -93,6 +104,7 @@ struct EMFPlusPlayback {
         into context: CGContext,
         dc: inout DeviceContext,
         base: CGAffineTransform,
+        options: RenderOptions = .default,
         log: inout EMFRenderLog
     ) {
         // Header LogicalDpi drives physical-unit conversion; 0/absent → 96 (§8).
@@ -101,7 +113,9 @@ struct EMFPlusPlayback {
         var player = EMFPlusPlayback(
             context: context, base: base,
             dpiX: rawX.isFinite && rawX > 0 ? rawX : 96,
-            dpiY: rawY.isFinite && rawY > 0 ? rawY : 96)
+            dpiY: rawY.isFinite && rawY > 0 ? rawY : 96,
+            crisp: options.antialiasing == .crisp,
+            substitutions: options.fontSubstitutions)
         player.walk(file: file, stream: stream, dc: &dc, log: &log)
     }
 
@@ -529,7 +543,7 @@ struct EMFPlusPlayback {
         context.saveGState()
         defer { context.restoreGState() }
         state.clip.apply(to: context, deviceToTarget: base)
-        context.setShouldAntialias(state.antialias)
+        context.setShouldAntialias(shouldAntialias)
         // Enter text space: base carries the canvas fit + single y-flip; the world
         // branch also concatenates worldToDevice so glyphs rotate with it.
         context.concatenate(base)
@@ -674,7 +688,7 @@ struct EMFPlusPlayback {
         context.saveGState()
         defer { context.restoreGState() }
         state.clip.apply(to: context, deviceToTarget: base)
-        context.setShouldAntialias(state.antialias)
+        context.setShouldAntialias(shouldAntialias)
         context.setFillColor(color)
         context.concatenate(base)
         context.scaleBy(x: 1, y: -1)
@@ -717,7 +731,7 @@ struct EMFPlusPlayback {
         context.saveGState()
         defer { context.restoreGState() }
         state.clip.apply(to: context, deviceToTarget: base)
-        context.setShouldAntialias(state.antialias)
+        context.setShouldAntialias(shouldAntialias)
         context.setFillColor(color)
         context.concatenate(base)
         context.concatenate(worldToDevice)
@@ -807,7 +821,7 @@ struct EMFPlusPlayback {
     /// (family + bold/italic traits) and sized to DEVICE units — for the
     /// axis-aligned draw path, where the glyph outlines are placed in device space.
     private func sizedFont(_ font: EMFPlusFont, log: inout EMFRenderLog) -> CTFont {
-        let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, log: &log)
+        let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, substitutions: substitutions, log: &log)
         let size = deviceFontSize(font)
         // On the serial font queue (§8 / macOS 27.2); base on timeout.
         return FontLookupQueue.run(fallback: base) {
@@ -830,7 +844,7 @@ struct EMFPlusPlayback {
         var size = worldScale.isFinite && worldScale > 0 ? deviceSize / worldScale : deviceSize
         if !size.isFinite || size < 1 { size = deviceSize }
         size = min(size, FontMapper.maxDevicePointSize)
-        let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, log: &log)
+        let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, substitutions: substitutions, log: &log)
         let sizedForQueue = size
         // On the serial font queue (§8 / macOS 27.2); base on timeout.
         return FontLookupQueue.run(fallback: base) {
@@ -1007,7 +1021,7 @@ struct EMFPlusPlayback {
         context.saveGState()
         defer { context.restoreGState() }
         state.clip.apply(to: context, deviceToTarget: base)
-        context.setShouldAntialias(state.antialias)
+        context.setShouldAntialias(shouldAntialias)
         // InterpolationMode is not tracked; nearest-neighbor keeps the decode
         // deterministic and matches the GDI bitmap path's chunky-pixel policy.
         context.interpolationQuality = .none
@@ -1121,7 +1135,7 @@ struct EMFPlusPlayback {
         context.saveGState()
         defer { context.restoreGState() }
         state.clip.apply(to: context, deviceToTarget: base)
-        context.setShouldAntialias(state.antialias)
+        context.setShouldAntialias(shouldAntialias)
 
         switch fill {
         case .color(let color):
@@ -1179,7 +1193,7 @@ struct EMFPlusPlayback {
         context.saveGState()
         defer { context.restoreGState() }
         state.clip.apply(to: context, deviceToTarget: base)
-        context.setShouldAntialias(state.antialias)
+        context.setShouldAntialias(shouldAntialias)
         context.setStrokeColor(style.color)
         context.setLineWidth(style.width)
         context.setLineCap(style.cap)

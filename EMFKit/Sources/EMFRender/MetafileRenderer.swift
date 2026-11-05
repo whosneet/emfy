@@ -68,6 +68,11 @@ public enum MetafileRenderer {
             /// inconsistent sequence, or an EMF that failed to parse), so the WMF
             /// records were played instead.
             case rejected
+            /// A WMF whose embedded EMF reassembled and parsed, but the user chose
+            /// to play the WMF records instead (`RenderOptions.useEmbeddedEMF ==
+            /// false`). The "Drawn from" row can then say the records were used
+            /// despite a usable EMF being present.
+            case declined
         }
 
         /// The metafile's natural size in device pixels: the EMF header bounds
@@ -78,6 +83,13 @@ public enum MetafileRenderer {
         public let kind: Kind
         /// The fate of a WMF's embedded EMF.
         public let embeddedEMF: EmbeddedEMF
+        /// Whether the metafile that will be rendered is an EMF+ **dual** file —
+        /// it carries a complete GDI (EMF) description alongside the EMF+ one
+        /// (EmfPlusHeader Dual flag, [MS-EMFPLUS] §2.3.3.3). Only then does
+        /// `RenderOptions.emfPlusArbitration == .gdi` have any effect, so the app
+        /// uses this to offer or explain that choice. Always false for WMF record
+        /// playback and for a non-dual or pure-GDI EMF.
+        public let hasGDICopy: Bool
         /// Record counts grouped by type, for the diagnostic report. The EMF
         /// record inventory for an EMF (or a WMF's played-back embedded EMF); the
         /// WMF record inventory for WMF record playback. Sorted by type id
@@ -95,10 +107,11 @@ public enum MetafileRenderer {
             return []
         }
 
-        init(content: Content, kind: Kind, embeddedEMF: EmbeddedEMF, recordKinds: [RecordKindCount]) {
+        init(content: Content, kind: Kind, embeddedEMF: EmbeddedEMF, hasGDICopy: Bool, recordKinds: [RecordKindCount]) {
             self.content = content
             self.kind = kind
             self.embeddedEMF = embeddedEMF
+            self.hasGDICopy = hasGDICopy
             self.recordKinds = recordKinds
             self.naturalSize = Prepared.naturalSize(of: content)
         }
@@ -127,20 +140,28 @@ public enum MetafileRenderer {
     /// format or a header-less EMF/WMF — the "unreadable" case the consumers map
     /// to the corrupt-file alert / the generic Quick Look icon. Never a silently
     /// blank canvas for a parseable file.
-    public static func prepare(_ opened: OpenedMetafile) -> Prepared? {
+    public static func prepare(_ opened: OpenedMetafile, options: RenderOptions = .default) -> Prepared? {
         switch opened.format {
         case .emf:
             guard let file = try? EMFFile.parse(opened.data) else { return nil }
-            return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .notApplicable, recordKinds: emfRecordKinds(file))
+            return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .notApplicable,
+                            hasGDICopy: isDualEMFPlus(file), recordKinds: emfRecordKinds(file))
 
         case .wmf, .placeableWMF:
             guard let wmf = try? WMFFile.parse(opened.data) else { return nil }
             let embedded = WMFEmbeddedEMF.reassemble(wmf)
-            // A complete, consistent, parseable embedded EMF supersedes the WMF
-            // records (owner decision); anything else falls back to the records.
+            // A complete, consistent, parseable embedded EMF normally supersedes
+            // the WMF records (owner decision) — unless the user declined it
+            // (option 4, RenderOptions.useEmbeddedEMF == false), in which case the
+            // records play but `Prepared` still records that a usable EMF existed.
             if case .reassembled(let bytes) = embedded,
                let file = try? EMFFile.parse(bytes) {
-                return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .played, recordKinds: emfRecordKinds(file))
+                if options.useEmbeddedEMF {
+                    return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .played,
+                                    hasGDICopy: isDualEMFPlus(file), recordKinds: emfRecordKinds(file))
+                }
+                return Prepared(content: .wmfProgram(WMFTranslator.translate(wmf)), kind: .wmfRecords,
+                                embeddedEMF: .declined, hasGDICopy: false, recordKinds: wmfRecordKinds(wmf))
             }
             let fate: Prepared.EmbeddedEMF
             switch embedded {
@@ -149,11 +170,21 @@ public enum MetafileRenderer {
             // escapes were present but unusable, so the WMF records played.
             case .rejected, .reassembled: fate = .rejected
             }
-            return Prepared(content: .wmfProgram(WMFTranslator.translate(wmf)), kind: .wmfRecords, embeddedEMF: fate, recordKinds: wmfRecordKinds(wmf))
+            return Prepared(content: .wmfProgram(WMFTranslator.translate(wmf)), kind: .wmfRecords,
+                            embeddedEMF: fate, hasGDICopy: false, recordKinds: wmfRecordKinds(wmf))
 
         case .gzip, .unknown:
             return nil
         }
+    }
+
+    /// Whether `file` is an EMF+ **dual** file (EmfPlusHeader Dual flag 0x0001,
+    /// [MS-EMFPLUS] §2.3.3.3): it carries a complete GDI copy, so option 3's
+    /// `.gdi` arbitration applies. Drives `Prepared.hasGDICopy`. Uses the
+    /// bounded, header-only `emfPlusIsDual()` — it never reassembles the EMF+
+    /// stream, so preparing a large EMF+ file does no extra full-stream work.
+    private static func isDualEMFPlus(_ file: EMFFile) -> Bool {
+        file.emfPlusIsDual()
     }
 
     // MARK: - Record inventory (diagnostic report)
@@ -190,13 +221,14 @@ public enum MetafileRenderer {
     public static func makeImage(
         _ prepared: Prepared,
         scale: CGFloat = 1,
-        background: RenderBackground = .white
+        background: RenderBackground = .white,
+        options: RenderOptions = .default
     ) -> (CGImage, EMFRenderLog)? {
         switch prepared.content {
         case .emf(let file):
-            return EMFRenderer.makeImage(file, scale: scale, background: background)
+            return EMFRenderer.makeImage(file, scale: scale, background: background, options: options)
         case .wmfProgram(let program):
-            return renderProgramToImage(program, scale: scale, background: background)
+            return renderProgramToImage(program, scale: scale, background: background, options: options)
         }
     }
 
@@ -205,13 +237,14 @@ public enum MetafileRenderer {
     public static func render(
         _ prepared: Prepared,
         into context: CGContext,
-        target: CGRect
+        target: CGRect,
+        options: RenderOptions = .default
     ) -> EMFRenderLog {
         switch prepared.content {
         case .emf(let file):
-            return EMFRenderer.render(file, into: context, target: target)
+            return EMFRenderer.render(file, into: context, target: target, options: options)
         case .wmfProgram(let program):
-            return renderProgram(program, into: context, target: target)
+            return renderProgram(program, into: context, target: target, options: options)
         }
     }
 
@@ -222,7 +255,13 @@ public enum MetafileRenderer {
     /// (byte-identical). A WMF has no physical frame, so its page is its device
     /// canvas at one point per pixel — the same fallback EMF uses for a
     /// degenerate frame.
-    public static func pdfData(_ prepared: Prepared) -> Data? {
+    ///
+    /// Honours options 2 (font substitutions), 3 (EMF+ arbitration, via the
+    /// render call), and 4 (already baked into `prepared`). Option 1
+    /// (antialiasing) is MEANINGLESS for vector PDF output — there is no raster
+    /// coverage to smooth — so it is neutralised here, keeping default PDF output
+    /// byte-identical.
+    public static func pdfData(_ prepared: Prepared, options: RenderOptions = .default) -> Data? {
         let pageSize: CGSize
         switch prepared.content {
         case .emf(let file):
@@ -244,7 +283,11 @@ public enum MetafileRenderer {
         // White the page first — a metafile has no page background of its own.
         context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
         context.fill(mediaBox)
-        _ = render(prepared, into: context, target: mediaBox)
+        // Antialiasing has no raster meaning for vector PDF output; neutralise it
+        // so option 1 never embeds a smoothing hint into the PDF (2/3/4 still honoured).
+        var pdfOptions = options
+        pdfOptions.antialiasing = .smooth
+        _ = render(prepared, into: context, target: mediaBox, options: pdfOptions)
         context.endPDFPage()
         context.closePDF()
         return data as Data
@@ -257,10 +300,11 @@ public enum MetafileRenderer {
     public static func makeImage(
         _ opened: OpenedMetafile,
         scale: CGFloat = 1,
-        background: RenderBackground = .white
+        background: RenderBackground = .white,
+        options: RenderOptions = .default
     ) -> (CGImage, EMFRenderLog)? {
-        guard let prepared = prepare(opened) else { return nil }
-        return makeImage(prepared, scale: scale, background: background)
+        guard let prepared = prepare(opened, options: options) else { return nil }
+        return makeImage(prepared, scale: scale, background: background, options: options)
     }
 
     /// Convenience over `prepare` + `render`. For an unrecognised or header-less
@@ -268,10 +312,11 @@ public enum MetafileRenderer {
     public static func render(
         _ opened: OpenedMetafile,
         into context: CGContext,
-        target: CGRect
+        target: CGRect,
+        options: RenderOptions = .default
     ) -> EMFRenderLog {
-        guard let prepared = prepare(opened) else { return EMFRenderLog() }
-        return render(prepared, into: context, target: target)
+        guard let prepared = prepare(opened, options: options) else { return EMFRenderLog() }
+        return render(prepared, into: context, target: target, options: options)
     }
 
     // MARK: - WMF program playback
@@ -281,7 +326,8 @@ public enum MetafileRenderer {
     private static func renderProgramToImage(
         _ program: WMFRenderProgram,
         scale: CGFloat,
-        background: RenderBackground = .white
+        background: RenderBackground = .white,
+        options: RenderOptions = .default
     ) -> (CGImage, EMFRenderLog)? {
         // The caller-supplied scale is sanitised (not hostile file data); the
         // program canvas is already clamped by the translator.
@@ -309,7 +355,7 @@ public enum MetafileRenderer {
             context.fill(CGRect(x: 0, y: 0, width: w, height: h))
         }
 
-        let log = renderProgram(program, into: context, target: CGRect(x: 0, y: 0, width: w, height: h))
+        let log = renderProgram(program, into: context, target: CGRect(x: 0, y: 0, width: w, height: h), options: options)
         guard let image = context.makeImage() else { return nil }
         return (image, log)
     }
@@ -320,15 +366,23 @@ public enum MetafileRenderer {
     private static func renderProgram(
         _ program: WMFRenderProgram,
         into context: CGContext,
-        target: CGRect
+        target: CGRect,
+        options: RenderOptions = .default
     ) -> EMFRenderLog {
         var log = EMFRenderLog()
         let header = syntheticHeader(width: program.canvasWidth, height: program.canvasHeight)
         let base = EMFRenderer.deviceToTarget(header: header, target: target, log: &log)
-        var dc = DeviceContext(header: header)
+        var dc = DeviceContext(header: header, fontSubstitutions: options.fontSubstitutions)
 
         context.saveGState()
         defer { context.restoreGState() }
+
+        // Crisp antialiasing (option 1): off at canvas level for the pure-GDI WMF
+        // loop. WMF carries no EMF+, so options 3 is inapplicable here. Set only
+        // for `.crisp`, keeping `.smooth` output byte-identical.
+        if options.antialiasing == .crisp {
+            context.setShouldAntialias(false)
+        }
 
         for payload in program.payloads {
             EMFRenderer.playGDIRecord(payload, into: context, dc: &dc, base: base, log: &log)
