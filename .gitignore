@@ -21,3 +21,6 @@ DESIGN.md
 
 # Never commit App Store Connect / notarization keys
 *.p8
+
+# Gate-evidence scratch — never commit
+scratchpad/
