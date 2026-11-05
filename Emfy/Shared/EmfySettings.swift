@@ -21,8 +21,16 @@ import Observation
 @MainActor
 @Observable
 final class EmfySettings {
-    /// The shared app instance (standard defaults). Tests construct their own.
-    static let shared = EmfySettings()
+    /// The shared app instance. The main store is `.standard`; the Rendering and
+    /// Quick Look keys go through the **App Group** suite so the Quick Look
+    /// extensions read the same choices (S1b-2b). If the group can't be resolved
+    /// the shared store falls back to `.standard`, exactly as before. Tests
+    /// construct their own with explicit suites.
+    static let shared: EmfySettings = {
+        guard let group = AppGroup.defaults() else { return EmfySettings() }
+        migrateSharedKeysIfNeeded(from: .standard, to: group)
+        return EmfySettings(sharedDefaults: group)
+    }()
 
     @ObservationIgnored private let defaults: UserDefaults
     /// The defaults the four Rendering keys (S1b) persist through — a clean seam
@@ -154,6 +162,19 @@ final class EmfySettings {
         }
     }
 
+    // MARK: Quick Look options (S1b-2b — persisted through `sharedDefaults`)
+
+    /// The background a Finder/Files thumbnail is drawn on. Default `.white`,
+    /// matching today's extensions (dark ink stays legible on a white page).
+    var thumbnailBackground: SharedRenderSettings.ThumbnailBackground {
+        didSet { sharedDefaults.set(thumbnailBackground.rawValue, forKey: Keys.thumbnailBackground) }
+    }
+    /// The Quick Look preview long-edge cap. Default `.standard` — today's caps
+    /// exactly, so a preview is byte-identical until the user raises it.
+    var previewSharpness: SharedRenderSettings.PreviewSharpness {
+        didSet { sharedDefaults.set(previewSharpness.rawValue, forKey: Keys.previewSharpness) }
+    }
+
     /// The four Rendering settings mapped to EMFKit's `RenderOptions`, ready to pass
     /// to every render/export call (S1b). Incomplete substitution rows (a blank
     /// requested or replacement family) are dropped so a half-entered row never
@@ -202,6 +223,31 @@ final class EmfySettings {
         emfPlusSource = Self.string(sharedDefaults, Keys.emfPlusSource, default: .emfPlus)
         useEmbeddedEMF = Self.bool(sharedDefaults, Keys.useEmbeddedEMF, default: true)
         fontSubstitutions = Self.decodeSubstitutions(sharedDefaults, Keys.fontSubstitutions)
+        thumbnailBackground = Self.string(sharedDefaults, Keys.thumbnailBackground, default: .white)
+        previewSharpness = Self.string(sharedDefaults, Keys.previewSharpness, default: .standard)
+    }
+
+    // MARK: - App Group migration (one-time)
+
+    /// A one-time flag in the destination suite so the migration runs exactly once
+    /// per App Group container.
+    private nonisolated static let migratedFlagKey = "settings.sharedKeys.migratedToAppGroup"
+
+    /// Copies any shared-suite key that lives in `source` but not yet in
+    /// `destination` across once — so a user who set Rendering options before the
+    /// App Group existed (when `sharedDefaults` was `.standard`) keeps them. A
+    /// per-container flag makes it idempotent; it never overwrites a value already
+    /// in the group. `nonisolated` so `shared` can run it before construction and
+    /// tests can drive it with throwaway suites.
+    nonisolated static func migrateSharedKeysIfNeeded(from source: UserDefaults, to destination: UserDefaults) {
+        guard !destination.bool(forKey: migratedFlagKey) else { return }
+        for key in SharedRenderSettings.Keys.all
+        where destination.object(forKey: key) == nil {
+            if let value = source.object(forKey: key) {
+                destination.set(value, forKey: key)
+            }
+        }
+        destination.set(true, forKey: migratedFlagKey)
     }
 
     // MARK: - Backing reads (behaviour-preserving fallbacks)
@@ -275,12 +321,16 @@ final class EmfySettings {
         static let defaultPNGScale = "settings.export.defaultPNGScale"
         static let pngBackground = "settings.export.pngBackground"
         static let defaultExportFormat = "settings.export.defaultExportFormat"
-        // Rendering (S1b) — persisted through `sharedDefaults`. Kept stable so the
-        // next slice can repoint `sharedDefaults` at the App Group suite unchanged.
-        static let renderEdges = "settings.rendering.edges"
-        static let emfPlusSource = "settings.rendering.emfPlusSource"
-        static let useEmbeddedEMF = "settings.rendering.useEmbeddedEMF"
-        static let fontSubstitutions = "settings.rendering.fontSubstitutions"
+        // Rendering (S1b) and Quick Look options (S1b-2b) persist through
+        // `sharedDefaults` (the App Group suite). The key STRINGS live in
+        // `SharedRenderSettings.Keys` — the single source of truth the Quick Look
+        // extensions also read — so the writer here and that reader never drift.
+        static let renderEdges = SharedRenderSettings.Keys.renderEdges
+        static let emfPlusSource = SharedRenderSettings.Keys.emfPlusSource
+        static let useEmbeddedEMF = SharedRenderSettings.Keys.useEmbeddedEMF
+        static let fontSubstitutions = SharedRenderSettings.Keys.fontSubstitutions
+        static let thumbnailBackground = SharedRenderSettings.Keys.thumbnailBackground
+        static let previewSharpness = SharedRenderSettings.Keys.previewSharpness
     }
 }
 

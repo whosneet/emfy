@@ -12,14 +12,18 @@
 	<array>
 		<dict>
 			<!-- @SceneStorage("recents.search"/"recents.navPath") in
-			     RecentsView.swift persists per-scene UI state through the
-			     UserDefaults-backed required-reason API. The data never leaves
-			     the app, so CA92.1 (access info only from the app itself). -->
+			     RecentsView.swift and EmfySettings persist UI state and options
+			     through the UserDefaults-backed required-reason API: the app's own
+			     domain (CA92.1, info accessed only from the app itself) and the App
+			     Group suite it shares with the Quick Look extensions for the
+			     Rendering and Quick Look settings (1C8F.1). Nothing leaves the
+			     device. -->
 			<key>NSPrivacyAccessedAPIType</key>
 			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>CA92.1</string>
+				<string>1C8F.1</string>
 			</array>
 		</dict>
 	</array>

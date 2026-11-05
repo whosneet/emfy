@@ -37,6 +37,10 @@ final class ThumbnailProvider: QLThumbnailProvider {
             return
         }
 
+        // The user's Rendering + Quick Look choices from the App Group, read once
+        // per request (S1b-2b).
+        let shared = SharedRenderSettings.load(from: AppGroup.defaults())
+
         // Aspect-fit into the requested maximum. `contextSize` is in points;
         // iOS creates the backing `CGBitmapContext` at `contextSize × request.scale`
         // pixels with no CTM pre-scale (QLThumbnailReply.h: "the size of the
@@ -48,6 +52,7 @@ final class ThumbnailProvider: QLThumbnailProvider {
             maximumSize: request.maximumSize,
             minimumSize: request.minimumSize
         )
+        let whitePage = shared.thumbnailBackground == .white
 
         let reply = QLThumbnailReply(contextSize: size) { (context: CGContext) -> Bool in
             let target = CGRect(
@@ -55,11 +60,15 @@ final class ThumbnailProvider: QLThumbnailProvider {
                 width: CGFloat(context.width),
                 height: CGFloat(context.height)
             )
-            // White the page first (as the Mac extension does) so dark ink stays
-            // legible on the Files tile in dark mode.
-            context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-            context.fill(target)
-            _ = MetafileRenderer.render(prepared, into: context, target: target)
+            // White the page for `.white` (as before) so dark ink stays legible on
+            // the Files tile in dark mode; `.transparent` leaves the context's
+            // alpha clear, the in-context equivalent of `RenderBackground.transparent`
+            // (S1b-2b, thumbnails only).
+            if whitePage {
+                context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+                context.fill(target)
+            }
+            _ = MetafileRenderer.render(prepared, into: context, target: target, options: shared.renderOptions)
             return true
         }
         handler(reply, nil)

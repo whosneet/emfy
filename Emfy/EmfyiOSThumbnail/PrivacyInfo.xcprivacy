@@ -9,6 +9,20 @@
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array/>
 	<key>NSPrivacyAccessedAPITypes</key>
-	<array/>
+	<array>
+		<dict>
+			<!-- SharedRenderSettings.load reads the App Group suite the app
+			     shares with this extension, to render the preview/thumbnail with
+			     the user's Rendering and Quick Look choices. Read-only, from the
+			     shared container, nothing leaves the device: 1C8F.1 (access from
+			     the same App Group). -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>1C8F.1</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -37,7 +37,19 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
     /// long edge too, so the bitmap never tracks the file's declared bounds.
     /// Simulator figures are indicative only; real-device peak is an I5
     /// release-blocker check.
-    private static let maxLongEdge: CGFloat = 2048
+    private static let maxLongEdgeStandard: CGFloat = 2048
+    /// The **High** sharpness cap (S1b-2b, Settings › Rendering › Quick Look).
+    /// Unlike the Mac, the iOS preview renders the bitmap at exactly `contextSize`
+    /// pixels (no scale multiply) and scales a small drawing UP to the cap, so the
+    /// bitmap tracks the cap directly — making this budget the binding one.
+    /// Measured on a near-square 3000×3000 worst case: 2048 → 16 MB bitmap / 20.5 MB
+    /// peak; this extension recorded ~25 MB real peak at 2048 (comment above), so
+    /// ~4.5 MB of framework baseline sits over the harness. 2240 → 19.1 MB bitmap /
+    /// 24.1 MB peak (~28.6 MB real), kept under the ~30 MB budget this extension
+    /// records; 2304 (25.3 MB peak, ~29.8 MB real) sits on the line and 2560
+    /// (30.8 MB) breaches it. So iOS High stops at 2240 even though the roomier
+    /// Mac preview goes to 3072.
+    private static let maxLongEdgeHigh: CGFloat = 2240
 
     func providePreview(for request: QLFilePreviewRequest) async throws -> QLPreviewReply {
         // Anything past a valid header renders best-effort. A broken gzip
@@ -49,13 +61,17 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
             return Self.unreadableReply()
         }
 
-        let size = Self.previewPixelSize(for: prepared.naturalSize)
+        // The user's Rendering + Quick Look choices from the App Group, read once
+        // per request (S1b-2b). Previews stay white; High sharpness raises the cap.
+        let shared = SharedRenderSettings.load(from: AppGroup.defaults())
+        let cap = shared.previewSharpness == .high ? Self.maxLongEdgeHigh : Self.maxLongEdgeStandard
+        let size = Self.previewPixelSize(for: prepared.naturalSize, maxLongEdge: cap)
 
         return QLPreviewReply(contextSize: size, isBitmap: true) { (context: CGContext, _: QLPreviewReply) in
             let target = CGRect(origin: .zero, size: size)
             context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
             context.fill(target)
-            _ = MetafileRenderer.render(prepared, into: context, target: target)
+            _ = MetafileRenderer.render(prepared, into: context, target: target, options: shared.renderOptions)
         }
     }
 
@@ -64,7 +80,7 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
     /// Small drawings are scaled up and large or hostile ones down, so the
     /// preview is rendered crisply at the cap on any Quick Look surface while the
     /// bitmap stays bounded.
-    static func previewPixelSize(for naturalSize: CGSize) -> CGSize {
+    static func previewPixelSize(for naturalSize: CGSize, maxLongEdge: CGFloat) -> CGSize {
         let width = naturalSize.width.isFinite && naturalSize.width > 0 ? naturalSize.width : 1
         let height = naturalSize.height.isFinite && naturalSize.height > 0 ? naturalSize.height : 1
         let longEdge = max(width, height)

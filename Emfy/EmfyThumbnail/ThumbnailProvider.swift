@@ -32,6 +32,10 @@ final class ThumbnailProvider: QLThumbnailProvider {
             return
         }
 
+        // The user's Rendering + Quick Look choices from the App Group, read once
+        // per request (S1b-2b).
+        let shared = SharedRenderSettings.load(from: AppGroup.defaults())
+
         // Aspect-fit into the requested maximum. The context size is in points;
         // Quick Look scales it by `request.scale` for the backing bitmap.
         let size = ThumbnailSizing.contextSize(
@@ -40,11 +44,17 @@ final class ThumbnailProvider: QLThumbnailProvider {
             minimumSize: request.minimumSize
         )
         let target = CGRect(origin: .zero, size: size)
+        let whitePage = shared.thumbnailBackground == .white
 
         let reply = QLThumbnailReply(contextSize: size) { (context: CGContext) -> Bool in
-            context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-            context.fill(target)
-            _ = MetafileRenderer.render(prepared, into: context, target: target)
+            // White the page for `.white`; `.transparent` leaves the context's
+            // alpha channel clear, the in-context equivalent of
+            // `RenderBackground.transparent` (S1b-2b, thumbnails only).
+            if whitePage {
+                context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+                context.fill(target)
+            }
+            _ = MetafileRenderer.render(prepared, into: context, target: target, options: shared.renderOptions)
             return true
         }
         handler(reply, nil)

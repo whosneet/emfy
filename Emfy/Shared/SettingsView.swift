@@ -107,6 +107,12 @@ extension EmfySettings.RenderEdges: SettingsOption {
 extension EmfySettings.EMFPlusSource: SettingsOption {
     var label: String { self == .emfPlus ? "Show EMF+" : "Show GDI" }
 }
+extension SharedRenderSettings.ThumbnailBackground: SettingsOption {
+    var label: String { self == .white ? "White" : "Transparent" }
+}
+extension SharedRenderSettings.PreviewSharpness: SettingsOption {
+    var label: String { self == .standard ? "Standard" : "High" }
+}
 
 // MARK: - Thumbnail-size metrics (S1a-5)
 //
@@ -163,6 +169,12 @@ private enum RenderingFooter {
     static let fonts = "Used only when a drawing asks for a font this device doesn’t have."
     static let fontCap = "You can keep up to \(EmfySettings.fontSubstitutionRowLimit) substitutions."
     static let emptyFonts = "No font substitutions yet."
+    /// Quick Look options footer (S1b-2b). Platform-specific surface name.
+    #if os(macOS)
+    static let quickLook = "Applies to previews and icons in Finder. Existing icons may update only when the file changes."
+    #else
+    static let quickLook = "Applies to previews and icons in Files. Existing icons may update only when the file changes."
+    #endif
 }
 
 /// The installed font families to choose a replacement from (S1b). Enumerated on
@@ -549,6 +561,14 @@ private struct MacRenderingTab: View {
             } footer: {
                 Text(atCap ? RenderingFooter.fontCap : RenderingFooter.fonts)
             }
+            Section {
+                MacOptionRow(title: "Thumbnail background", value: $settings.thumbnailBackground, segmented: true)
+                MacOptionRow(title: "Preview sharpness", value: $settings.previewSharpness, segmented: true)
+            } header: {
+                Text("Quick Look")
+            } footer: {
+                Text(RenderingFooter.quickLook)
+            }
         }
         .formStyle(.grouped)
         .frame(width: macSettingsWidth)
@@ -857,6 +877,14 @@ private struct IOSRenderingScreen: View {
                 Text("Font substitutions")
             } footer: {
                 Text(atCap ? RenderingFooter.fontCap : RenderingFooter.fonts)
+            }
+            Section {
+                IOSOptionRow(title: "Thumbnail background", value: $settings.thumbnailBackground)
+                IOSOptionRow(title: "Preview sharpness", value: $settings.previewSharpness)
+            } header: {
+                Text("Quick Look")
+            } footer: {
+                Text(RenderingFooter.quickLook)
             }
         }
         .navigationTitle("Rendering")

@@ -9,6 +9,21 @@
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array/>
 	<key>NSPrivacyAccessedAPITypes</key>
-	<array/>
+	<array>
+		<dict>
+			<!-- EmfySettings persists its options through UserDefaults: the app's
+			     own standard domain (CA92.1, info accessed only from the app
+			     itself) and the App Group suite it shares with the Quick Look
+			     extensions for the Rendering and Quick Look settings (1C8F.1).
+			     Nothing leaves the device. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+				<string>1C8F.1</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
