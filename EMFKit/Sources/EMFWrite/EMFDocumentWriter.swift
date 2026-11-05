@@ -6,11 +6,12 @@ import EMFParse
 /// `EMFRecordEncoder.isFaithfullyEncodable` says the decoder round-trips it, and
 /// otherwise re-emitted from its original source bytes (unknown records,
 /// `.unsupported` DIBs, extended fonts, pattern-DIB pens). The EMR_HEADER's
-/// Bytes, Records and Handles are recomputed from what was actually written and
-/// never trusted from the input (header advisory fields, primer §8 / delta D4);
-/// every other header byte — bounds, frame, device, millimetres, description,
-/// pixel-format fields — is preserved verbatim by patching only those three
-/// fields in the original header record.
+/// Bytes and Records are recomputed from what was actually written and never
+/// trusted from the input, and Handles is raised to the computed table size but
+/// never lowered below the declared value (header advisory fields, primer §8 /
+/// delta D4); every other header byte — bounds, frame, device, millimetres,
+/// description, pixel-format fields — is preserved verbatim by patching only
+/// those three fields in the original header record.
 public enum EMFDocumentWriter {
 
     /// Re-emits `file` as a fresh EMF byte stream. `source` MUST be the bytes
@@ -63,8 +64,14 @@ public enum EMFDocumentWriter {
         // payloads): object-creation records the EMF decoder does not decode —
         // EMR_CREATEPALETTE, EMR_CREATEMONOBRUSH, … — still consume table slots,
         // and all creation/reference records carry their handle index as the
-        // first body field at offset 8 ([MS-EMF] §2.3.7/§2.3.8).
-        let handleCount = try computeHandleCountRaw(src, file.records)
+        // first body field at offset 8 ([MS-EMF] §2.3.7/§2.3.8). Re-emit only
+        // RAISES an under-declared table — it never lowers one: shrinking an
+        // over-declaration gains nothing, and were the simulation ever to miss an
+        // object-creating record it would under-declare and another reader could
+        // fail on an out-of-range handle. The header `Handles` value is the table
+        // SIZE (not an exact count), so taking the larger is always safe.
+        let computedHandles = try computeHandleCountRaw(src, file.records)
+        let handleCount = max(file.header.handles, computedHandles)
 
         patchUInt32(&headerBytes, at: 48, UInt32(totalBytes))  // Bytes
         patchUInt32(&headerBytes, at: 52, recordCount)         // Records
