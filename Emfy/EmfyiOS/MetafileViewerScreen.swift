@@ -16,6 +16,7 @@ struct MetafileViewerScreen: View {
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.dismiss) private var dismiss
     let entryID: UUID
 
     @State private var phase: Phase = .loading
@@ -93,7 +94,10 @@ struct MetafileViewerScreen: View {
                 }
             }
         }
-        .task(id: entryID) { await load() }
+        // Keyed on the entry's reload token (not just its id), so reopening the
+        // same file with changed content re-runs the load and re-renders instead
+        // of keeping the stale render (§c).
+        .task(id: entry?.reloadKey) { await load() }
         .onChange(of: controller.isZooming) { _, zooming in
             updatePill(zooming: zooming)
         }
@@ -194,7 +198,7 @@ struct MetafileViewerScreen: View {
             message("This drawing couldn’t be rendered.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed:
-            message("Emfy couldn’t open this file. It may have been moved, deleted, or changed.")
+            failedView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -204,6 +208,25 @@ struct MetafileViewerScreen: View {
             Label("Can’t show this file", systemImage: "exclamationmark.triangle")
         } description: {
             Text(text)
+        }
+    }
+
+    /// The failed state (§a): "Couldn't read this file right now" with Try Again
+    /// and Remove from Recents. A transient failure is kept in recents (Try Again
+    /// may succeed once it's downloaded or back online); a definitively-gone file
+    /// has already been pruned, and Remove from Recents dismisses the dead viewer.
+    private var failedView: some View {
+        ContentUnavailableView {
+            Label("Can’t show this file", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text("Emfy couldn’t read this file right now. It may have been moved or deleted, or it may be offline.")
+        } actions: {
+            Button("Try Again") { Task { await load() } }
+                .buttonStyle(.borderedProminent)
+            Button("Remove from Recents", role: .destructive) {
+                store.remove(entryID)
+                dismiss()
+            }
         }
     }
 
@@ -291,6 +314,8 @@ struct MetafileViewerScreen: View {
         } label: {
             Label("Info", systemImage: "info.circle")
         }
+        // Nothing to inspect until a file has loaded (§a).
+        .disabled(loaded == nil)
         .accessibilityAddTraits(showInspector ? [.isSelected] : [])
         .accessibilityFocused($a11yFocus, equals: .infoButton)
     }
@@ -537,8 +562,10 @@ struct MetafileViewerScreen: View {
             phase = .failed
             return
         }
-        // A bookmark that no longer resolves is a moved/deleted file (.failed);
-        // bytes that resolve but won't parse are unrenderable.
+        // The store prunes a definitively-gone file and keeps a transient one
+        // (§a); either way the viewer shows the same failed state with Try Again
+        // and Remove from Recents. Bytes that resolve but won't parse are
+        // `.unrenderable`.
         let data: Data
         do {
             data = try await store.resolveData(for: entry)

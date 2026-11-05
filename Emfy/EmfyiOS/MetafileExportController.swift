@@ -27,6 +27,9 @@ final class MetafileExportController {
     @ObservationIgnored private let runner = ExportTaskRunner()
     /// The temp directory of the file currently being shared, removed on dismiss.
     @ObservationIgnored private var tempCleanupURL: URL?
+    /// The in-flight "Share File" resolve/stage task, tracked so a repeat tap
+    /// cancels it rather than letting two runs double-fire the share sheet (§j).
+    @ObservationIgnored private var shareOriginalTask: Task<Void, Never>?
 
     // MARK: - Actions
 
@@ -34,8 +37,9 @@ final class MetafileExportController {
     /// so the sheet shows the correct name and extension-derived type.
     func shareOriginal(entry: RecentEntry, store: RecentsStore) {
         runner.cancel()
+        shareOriginalTask?.cancel()
         isRendering = false
-        Task { @MainActor in
+        shareOriginalTask = Task { @MainActor in
             let spinner = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(0.3))
                 if !Task.isCancelled { self.isRendering = true }
@@ -46,9 +50,10 @@ final class MetafileExportController {
             }
             do {
                 let data = try await store.resolveData(for: entry)
+                if Task.isCancelled { return }
                 presentShare(data: data, fileName: entry.displayName, failure: MetafileExport.shareFileFailure)
             } catch {
-                shareError = MetafileExport.shareFileFailure
+                if !Task.isCancelled { shareError = MetafileExport.shareFileFailure }
             }
         }
     }
@@ -129,12 +134,16 @@ final class MetafileExportController {
     /// Cancels any in-flight render when the viewer disappears.
     func cancelOngoing() {
         runner.cancel()
+        shareOriginalTask?.cancel()
         isRendering = false
     }
 
     // MARK: - Helpers
 
     private func presentShare(data: Data, fileName: String, failure: String) {
+        // Reclaim a prior share's temp directory before staging a new one, so a
+        // second share without a dismiss in between can't leak the first (§j).
+        cleanupTemp()
         do {
             let url = try MetafileExport.writeTemporary(data, fileName: fileName)
             tempCleanupURL = url.deletingLastPathComponent()

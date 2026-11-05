@@ -96,6 +96,19 @@ struct EMFDocument: FileDocument {
         }
     }
 
+    /// The shared plain-language diagnostics for this document (C2), used by the
+    /// Mac's Render Details — the same model the iOS viewer uses.
+    var viewerDiagnostics: ViewerDiagnostics {
+        ViewerDiagnostics(
+            kind: prepared.kind,
+            embeddedEMF: prepared.embeddedEMF,
+            renderLog: renderLog,
+            parserDiagnostics: prepared.emfDiagnostics,
+            frontDoorDiagnostics: frontDoorDiagnostics,
+            wasDecompressed: wasDecompressed
+        )
+    }
+
     /// Emfy never writes metafiles. Any save attempt is refused.
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         throw CocoaError(.featureUnsupported)

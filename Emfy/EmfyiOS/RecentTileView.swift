@@ -6,13 +6,20 @@ import SwiftUI
 struct RecentTileView: View {
     @Environment(RecentsStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.displayScale) private var displayScale
     let entry: RecentEntry
     let isSelecting: Bool
     let onRemove: () -> Void
 
+    /// The tile's thumbnail as a platform-neutral `CGImage` (the model deals in
+    /// CGImage; the view converts). Loaded via `.task`, which also regenerates it
+    /// off-main when the Caches PNG was purged (§f/§g), and reloads when the file
+    /// is reopened with changed content (its thumbnail name changes, §c).
+    @State private var thumbnail: CGImage?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            thumbnail
+            thumbnailTile
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.displayName)
                     .font(.subheadline.weight(.semibold))
@@ -35,9 +42,13 @@ struct RecentTileView: View {
                 Button("Remove from Recents", action: onRemove)
             }
         }
+        .task(id: entry.thumbnailFileName) {
+            thumbnail = store.cachedThumbnail(for: entry)
+            thumbnail = await store.loadThumbnail(for: entry)
+        }
     }
 
-    private var thumbnail: some View {
+    private var thumbnailTile: some View {
         ZStack(alignment: .topTrailing) {
             // One white paper surface (white in both appearances); the drawing
             // is drawn directly onto it with inner padding. The thumbnail has a
@@ -46,8 +57,8 @@ struct RecentTileView: View {
                 .fill(.white)
                 .aspectRatio(372.0 / 272.0, contentMode: .fit)
                 .overlay {
-                    if let image = store.thumbnailImage(for: entry) {
-                        Image(uiImage: image)
+                    if let thumbnail {
+                        Image(decorative: thumbnail, scale: displayScale)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .padding(10)

@@ -81,7 +81,7 @@ struct RecentsView: View {
             Text(message)
         }
         .task {
-            store.loadIfNeeded()
+            await store.loadIfNeeded()
             restorePath()
         }
         .onChange(of: path) { _, newValue in
@@ -113,7 +113,11 @@ struct RecentsView: View {
     // showed). Branching lives inside the ZStack, which keeps the root stable.
     private var content: some View {
         ZStack {
-            if store.entries.isEmpty {
+            if !store.didLoad {
+                // Show nothing until the persisted list has loaded, so the empty
+                // state never flashes before real recents appear (§h).
+                Color.clear
+            } else if store.entries.isEmpty {
                 EmptyRecentsView(openAction: { isImporting = true })
             } else if filteredEntries.isEmpty {
                 ContentUnavailableView.search(text: searchText)

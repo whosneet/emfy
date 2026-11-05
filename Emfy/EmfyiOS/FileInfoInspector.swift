@@ -74,13 +74,27 @@ struct FileInfoInspector: View {
             let notes = diagnostics.couldNotShowNotes
             if !notes.isEmpty {
                 Section("What Emfy couldn't show") {
-                    ForEach(Array(notes.enumerated()), id: \.offset) { item in
-                        Label {
-                            Text(item.element)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } icon: {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundStyle(.orange)
+                    ForEach(notes) { note in
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Technical details")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(note.technicalDetail)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                            }
+                            .padding(.top, 2)
+                        } label: {
+                            Label {
+                                Text(note.summary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } icon: {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange)
+                            }
                         }
                     }
                 }
