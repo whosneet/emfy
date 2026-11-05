@@ -71,6 +71,9 @@ enum OpenRouting {
     /// - An **empty** front window is always filled, never left beside a new one:
     ///   a cold-launch open is delivered to a freshly-spawned empty window, so
     ///   spawning a second window there would strand the first.
+    /// - The front window **already showing the opened file** keeps it, even in
+    ///   new-window mode: reopening the file the front window already displays must
+    ///   not spawn a duplicate window beside it (S1a-5 carry-over).
     /// - Otherwise the setting decides. The "a file already open just brings its
     ///   window forward" dedup is the caller's: in new-window mode a value-based
     ///   `openWindow` brings an existing window for that file forward instead of
@@ -80,6 +83,7 @@ enum OpenRouting {
         openInNewWindow: Bool,
         hasOpenWindow: Bool,
         frontWindowIsEmpty: Bool,
+        frontWindowShowsFile: Bool = false,
         supportsMultipleWindows: Bool
     ) -> Destination {
         guard supportsMultipleWindows, hasOpenWindow else {
@@ -87,6 +91,7 @@ enum OpenRouting {
             return hasOpenWindow ? .frontWindow : .newWindow
         }
         if frontWindowIsEmpty { return .frontWindow }
+        if frontWindowShowsFile { return .frontWindow }
         return openInNewWindow ? .newWindow : .frontWindow
     }
 }

@@ -254,6 +254,9 @@ struct LibraryWindow: View {
             openInNewWindow: settings.openFilesIn == .newWindow,
             hasOpenWindow: true,
             frontWindowIsEmpty: frontWindowIsEmpty,
+            // The front window already showing this file keeps it — no duplicate
+            // window when the same file is reopened (S1a-5 carry-over).
+            frontWindowShowsFile: model.selection == id,
             supportsMultipleWindows: supportsMultipleWindows
         )
         switch destination {

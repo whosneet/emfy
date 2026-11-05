@@ -59,6 +59,14 @@ import Testing
         #expect(OpenRouting.externalDestination(openInNewWindow: false, hasOpenWindow: true, frontWindowIsEmpty: true, supportsMultipleWindows: true) == .frontWindow)
     }
 
+    @Test func externalOpenKeepsFrontWindowThatAlreadyShowsTheFile() {
+        // New-window mode, but the front window already shows this very file: keep it,
+        // so reopening doesn't spawn a duplicate window (S1a-5 carry-over b).
+        #expect(OpenRouting.externalDestination(openInNewWindow: true, hasOpenWindow: true, frontWindowIsEmpty: false, frontWindowShowsFile: true, supportsMultipleWindows: true) == .frontWindow)
+        // Without that, new-window mode still spawns a window.
+        #expect(OpenRouting.externalDestination(openInNewWindow: true, hasOpenWindow: true, frontWindowIsEmpty: false, frontWindowShowsFile: false, supportsMultipleWindows: true) == .newWindow)
+    }
+
     @Test func externalOpenIgnoresNewWindowSettingWithoutMultiWindow() {
         // iPhone / Duo outer display: the setting is hidden and never spawns a window.
         #expect(OpenRouting.externalDestination(openInNewWindow: true, hasOpenWindow: true, frontWindowIsEmpty: false, supportsMultipleWindows: false) == .frontWindow)
