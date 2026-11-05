@@ -90,6 +90,11 @@ struct MetafileViewerScreen: View {
         .navigationTitle(entry?.baseName ?? "Metafile")
         .navigationBarTitleDisplayMode(.inline)
         .metafileNavigationSubtitle(subtitle)
+        // At regular width (iPad) a long inline title clips at the LEADING edge behind
+        // the sidebar boundary; a principal title view truncates at the tail with an
+        // ellipsis, like the iPhone title (S1a-5 carry-over c). iPhone keeps the
+        // default inline title, which already tail-truncates.
+        .toolbar { regularWidthTitle }
         .toolbar { bottomBar }
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .navigationBar)
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .bottomBar)
@@ -256,6 +261,21 @@ struct MetafileViewerScreen: View {
     }
 
     // MARK: - Bottom toolbar (system-managed; one glass capsule)
+
+    /// A tail-truncating principal title, only at regular width (iPad), so a long
+    /// file name no longer clips at the leading edge behind the sidebar (carry-over c).
+    @ToolbarContentBuilder
+    private var regularWidthTitle: some ToolbarContent {
+        if isRegularWidth {
+            ToolbarItem(placement: .principal) {
+                Text(entry?.baseName ?? "Metafile")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 460)
+            }
+        }
+    }
 
     @ToolbarContentBuilder
     private var bottomBar: some ToolbarContent {
