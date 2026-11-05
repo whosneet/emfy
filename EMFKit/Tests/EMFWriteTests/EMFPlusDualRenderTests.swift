@@ -54,6 +54,19 @@ struct EMFPlusDualRenderTests {
         return n
     }
 
+    /// Non-white pixels inside the buffer rectangle [x0,x1) × [y0,y1) — lets a
+    /// test assert ink lands at a known destination rect (and nowhere else).
+    static func countNonWhite(in buffer: [UInt8], _ x0: Int, _ y0: Int, _ x1: Int, _ y1: Int) -> Int {
+        var n = 0
+        for y in y0 ..< y1 {
+            for x in x0 ..< x1 {
+                let o = (y * side + x) * 4
+                if buffer[o] < 240 || buffer[o + 1] < 240 || buffer[o + 2] < 240 { n += 1 }
+            }
+        }
+        return n
+    }
+
     /// A 100×100 dual builder: bounds (0,0)-(99,99), device 100×100.
     static func builder() -> EMFPlusDualDocumentBuilder {
         EMFPlusDualDocumentBuilder(
@@ -173,7 +186,11 @@ struct EMFPlusDualRenderTests {
     }
 
     /// A real EMF+ image object (lifted from the committed handmade file, decoded,
-    /// then rebuilt through the object encoder) draws non-blank in a dual file.
+    /// then rebuilt through the object encoder) draws into its DESTINATION RECT and
+    /// nowhere else. `imageAttributesID` is `nil` (no attributes) — it encodes the
+    /// `noImageAttributes` sentinel ([MS-EMFPLUS] §2.3.4.8 / §3.1.2 object ids
+    /// 0…63), not a 0 that would collide with slot 0 and make type-unchecked readers
+    /// drop the image.
     @Test func image() throws {
         let corpus = try EMFFile.parse(try corpusData("handmade-emfplus-image.emf"))
         let (definitions, _) = corpus.emfPlusStream().objectDefinitions()
@@ -184,15 +201,23 @@ struct EMFPlusDualRenderTests {
 
         let b = Self.builder()
         let imageID = try b.addObject(imageValue)
+        // Destination rect (25,25)-(75,75): a 50×50 box centred in the 100×100 canvas.
         b.appendPlus(.drawImage(
-            imageID: imageID, imageAttributesID: 0, srcUnit: 2 /* Pixel */,
-            srcRect: EMFPlusRectF(x: 0, y: 0, width: 16, height: 16),
-            destRect: EMFPlusRectF(x: 10, y: 10, width: 80, height: 80)))
+            imageID: imageID, imageAttributesID: nil, srcUnit: 2 /* Pixel */,
+            srcRect: EMFPlusRectF(x: 0, y: 0, width: 8, height: 8),
+            destRect: EMFPlusRectF(x: 25, y: 25, width: 50, height: 50)))
         try appendBlueGDIFill(b)
         let file = try EMFFile.parse(try b.finish())
 
         let image = try #require(Self.renderRGBA(file, options: .default))
-        #expect(Self.countNonWhite(image) > 200, "EMF+ image drew \(Self.countNonWhite(image)) non-white pixels")
+        // Image pixels land INSIDE the destination rect (buffer y matches device y
+        // here because the rect is vertically symmetric about the canvas centre)…
+        let insideInk = Self.countNonWhite(in: image, 28, 28, 72, 72)
+        #expect(insideInk > 100, "expected image pixels inside the destination rect, got \(insideInk)")
+        // …and the page OUTSIDE it stays white — the GDI fallback must not draw in
+        // EMF+ mode, so the corners are the untouched white page.
+        let cornerInk = Self.countNonWhite(in: image, 0, 0, 18, 18)
+        #expect(cornerInk == 0, "expected white page outside the destination rect, got \(cornerInk)")
     }
 
     // MARK: - Shared GDI fallback

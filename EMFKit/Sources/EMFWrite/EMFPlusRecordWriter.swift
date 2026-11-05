@@ -44,8 +44,24 @@ public enum EMFPlusRecordPayload: Sendable, Equatable {
     case drawClosedCurve(penID: UInt8, tension: Float, points: [EMFPlusPointF])
     case drawCurve(penID: UInt8, tension: Float, offset: UInt32, numSegments: UInt32, points: [EMFPlusPointF])
     case drawString(fontID: UInt8, brush: EMFPlusBrushSource, formatID: UInt32, layoutRect: EMFPlusRectF, text: String)
-    case drawImage(imageID: UInt8, imageAttributesID: UInt32, srcUnit: Int32, srcRect: EMFPlusRectF, destRect: EMFPlusRectF)
-    case drawImagePoints(imageID: UInt8, imageAttributesID: UInt32, srcUnit: Int32, srcRect: EMFPlusRectF, points: [EMFPlusPointF])
+    /// EmfPlusDrawImage ([MS-EMFPLUS] §2.3.4.8). `imageAttributesID` is the
+    /// object-table index of an OPTIONAL EmfPlusImageAttributes object; pass `nil`
+    /// for no attributes (the common case) — it encodes as `noImageAttributes`.
+    /// A non-nil value MUST name a slot that actually holds an EmfPlusImageAttributes
+    /// object: pointing it at a brush/pen/etc. makes conformant readers that do not
+    /// type-check the slot (e.g. LibreOffice) drop the image.
+    case drawImage(imageID: UInt8, imageAttributesID: UInt32?, srcUnit: Int32, srcRect: EMFPlusRectF, destRect: EMFPlusRectF)
+    /// EmfPlusDrawImagePoints ([MS-EMFPLUS] §2.3.4.9). `imageAttributesID` as in
+    /// `drawImage` — `nil` for no attributes.
+    case drawImagePoints(imageID: UInt8, imageAttributesID: UInt32?, srcUnit: Int32, srcRect: EMFPlusRectF, points: [EMFPlusPointF])
+
+    /// The ImageAttributesID value that means "no image attributes". EMF+ object
+    /// ids are 6-bit (0…63, [MS-EMFPLUS] §3.1.2 Object Table), so 0xFFFFFFFF is
+    /// outside the valid range and every conformant reader resolves it as "no
+    /// object" — unlike a 0 that happens to collide with an unrelated object in
+    /// slot 0. `drawImage`/`drawImagePoints` emit this when `imageAttributesID`
+    /// is `nil`.
+    public static let noImageAttributes: UInt32 = 0xFFFF_FFFF
 
     // State — save / container ([MS-EMFPLUS] §2.3.7)
     case save(stackIndex: UInt32)
@@ -208,7 +224,7 @@ public enum EMFPlusRecordPayload: Sendable, Equatable {
 
         case let .drawImage(imageID, attributesID, srcUnit, srcRect, destRect):  // §2.3.4.8
             var w = ByteWriter()
-            w.appendUInt32(attributesID)
+            w.appendUInt32(attributesID ?? Self.noImageAttributes)
             w.appendInt32(srcUnit)
             w.appendRectF(srcRect)
             w.appendRectF(destRect)
@@ -216,7 +232,7 @@ public enum EMFPlusRecordPayload: Sendable, Equatable {
 
         case let .drawImagePoints(imageID, attributesID, srcUnit, srcRect, points):  // §2.3.4.9
             var w = ByteWriter()
-            w.appendUInt32(attributesID)
+            w.appendUInt32(attributesID ?? Self.noImageAttributes)
             w.appendInt32(srcUnit)
             w.appendRectF(srcRect)
             w.appendUInt32(UInt32(clamping: points.count))
