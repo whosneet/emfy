@@ -573,12 +573,22 @@ struct EMFPlusPlayback {
             kCTParagraphStyleAttributeName: paragraphStyle,
         ]
         guard let attributed = CFAttributedStringCreate(nil, string as CFString, attributes as CFDictionary) else { return }
-        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
-        let fullRange = CFRange(location: 0, length: 0)
-        let used = CTFramesetterSuggestFrameSizeWithConstraints(
-            framesetter, fullRange, nil, CGSize(width: rect.width, height: .greatestFiniteMagnitude), nil)
-        guard used.height.isFinite, used.height > 0 else { return }
-        let usedHeight = used.height
+        // Framesetter creation and typesetting (which runs CoreText's glyph
+        // cascade for missing glyphs) go through the serial font queue — the
+        // macOS 27.2 deadlock-prone lookups (§8). The already-typeset frame is
+        // then drawn on this thread. Skipped (nil) on a lookup timeout.
+        let rectWidth = rect.width
+        let built = FontLookupQueue.run(fallback: nil) { () -> (frame: CTFrame, usedHeight: CGFloat)? in
+            let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+            let fullRange = CFRange(location: 0, length: 0)
+            let used = CTFramesetterSuggestFrameSizeWithConstraints(
+                framesetter, fullRange, nil, CGSize(width: rectWidth, height: .greatestFiniteMagnitude), nil)
+            guard used.height.isFinite, used.height > 0 else { return nil }
+            let framePath = CGPath(rect: CGRect(x: 0, y: 0, width: rectWidth, height: used.height), transform: nil)
+            return (CTFramesetterCreateFrame(framesetter, fullRange, framePath, nil), used.height)
+        }
+        guard let built else { return }
+        let usedHeight = built.usedHeight
         // Vertical block placement against the rect (Near top / Center / Far
         // bottom), never above the top; overflow is clipped by the caller.
         let vOffset: CGFloat
@@ -587,15 +597,13 @@ struct EMFPlusPlayback {
         case 2: vOffset = max(0, rect.height - usedHeight)
         default: vOffset = 0
         }
-        let framePath = CGPath(rect: CGRect(x: 0, y: 0, width: rect.width, height: usedHeight), transform: nil)
-        let frame = CTFramesetterCreateFrame(framesetter, fullRange, framePath, nil)
 
         // Place the block's top-left at (rect.minX, rect.minY + vOffset) in text
         // space (y-down), then flip to CoreText's y-up so lines fill downward.
         context.textMatrix = .identity
         context.translateBy(x: rect.minX, y: rect.minY + vOffset + usedHeight)
         context.scaleBy(x: 1, y: -1)
-        CTFrameDraw(frame, context)
+        CTFrameDraw(built.frame, context)
     }
 
     /// EmfPlusDrawDriverString ([MS-EMFPLUS] §2.3.4.6): per-glyph positioned text.
@@ -800,7 +808,11 @@ struct EMFPlusPlayback {
     /// axis-aligned draw path, where the glyph outlines are placed in device space.
     private func sizedFont(_ font: EMFPlusFont, log: inout EMFRenderLog) -> CTFont {
         let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, log: &log)
-        return CTFontCreateCopyWithAttributes(base, deviceFontSize(font), nil, nil)
+        let size = deviceFontSize(font)
+        // On the serial font queue (§8 / macOS 27.2); base on timeout.
+        return FontLookupQueue.run(fallback: base) {
+            CTFontCreateCopyWithAttributes(base, size, nil, nil)
+        }
     }
 
     /// The DC font sized in WORLD units for the rotated/sheared draw branch
@@ -819,7 +831,11 @@ struct EMFPlusPlayback {
         if !size.isFinite || size < 1 { size = deviceSize }
         size = min(size, FontMapper.maxDevicePointSize)
         let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, log: &log)
-        return CTFontCreateCopyWithAttributes(base, size, nil, nil)
+        let sizedForQueue = size
+        // On the serial font queue (§8 / macOS 27.2); base on timeout.
+        return FontLookupQueue.run(fallback: base) {
+            CTFontCreateCopyWithAttributes(base, sizedForQueue, nil, nil)
+        }
     }
 
     /// A CTLine carrying the font and foreground colour, or nil if the attributed
@@ -830,7 +846,12 @@ struct EMFPlusPlayback {
             kCTForegroundColorAttributeName: color,
         ]
         guard let attributed = CFAttributedStringCreate(nil, string as CFString, attributes as CFDictionary) else { return nil }
-        return CTLineCreateWithAttributedString(attributed)
+        // On the serial font queue: typesetting runs CoreText's glyph cascade
+        // (CJK in a Latin face), the macOS 27.2 deadlock-prone lookup. Skipped on
+        // timeout (nil).
+        return FontLookupQueue.run(fallback: nil) { () -> CTLine? in
+            CTLineCreateWithAttributedString(attributed)
+        }
     }
 
     /// The foreground colour for a text run: a direct ARGB colour (S flag set) or

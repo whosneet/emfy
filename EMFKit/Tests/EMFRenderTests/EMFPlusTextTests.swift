@@ -811,17 +811,40 @@ struct EMFPlusTextWrapClipTests {
 /// task count below reached the pool width.
 @Suite("EMF+ text — concurrent font resolution")
 struct EMFPlusTextConcurrencyTests {
-    @Test("rendering text from more tasks than cooperative threads completes")
+
+    /// A GDI EMR_EXTTEXTOUTW file (one selected LOGFONT run) — the non-EMF+ text
+    /// path. A CJK `string` in a Latin-resolving `face` forces CTLine's glyph
+    /// cascade (the macOS 27.2 deadlock-prone lookup) through TextDrawer.
+    private func gdiTextFile(face: String, string: String) throws -> EMFFile {
+        var fixture = RenderFixture()
+        fixture.setTextColor(r: 0, g: 0, b: 0)
+        fixture.extCreateFontIndirectW(index: 1, height: -24, faceName: face)
+        fixture.selectObject(1)
+        fixture.extTextOutW(reference: (8, 48), string: string)
+        return try fixture.parsed()
+    }
+
+    @Test("rendering text from more tasks than cooperative threads completes (EMF+, GDI, CJK)")
     func saturatedPoolStillResolvesFonts() async throws {
         let families = ["Arial", "Times New Roman", "Courier New", "Georgia",
                         "Verdana", "Nonexistent Family QZX", "Tahoma", "Calibri"]
-        let files = try families.map { family in
+        // EMF+ DrawString files (the original coverage).
+        var files = try families.map { family in
             try textFile([
                 tPlusObject(id: 1, type: 6, payload: tFont(emSize: 24, style: 1, family: family)),   // bold
                 tDrawString(fontID: 1, sBit: true, brushID: tArgb(255, 0, 0, 0), formatID: 0xFFFF_FFFF,
                             rect: (5, 5, 90, 40), string: "Pool"),
             ])
         }
+        // GDI EMR_EXTTEXTOUTW path, including CJK runs whose glyph cascade is the
+        // lookup that deadlocked a saturated pool before the font-queue routing.
+        files.append(try gdiTextFile(face: "Arial", string: "GDI"))
+        files.append(try gdiTextFile(face: "SimSun", string: "中文测试"))
+        files.append(try gdiTextFile(face: "MS Mincho", string: "日本語テスト"))
+        // The committed CJK corpus file (GDI EMR_EXTTEXTOUTW, several scripts plus
+        // a surrogate pair), parsed once and rendered across the pool.
+        files.append(try EMFFile.parse(CJKTextCorpus.data))
+
         let tasks = max(ProcessInfo.processInfo.activeProcessorCount * 2, 16)
         let rendered = await withTaskGroup(of: Bool.self) { group in
             for index in 0..<tasks {

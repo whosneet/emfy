@@ -193,7 +193,11 @@ enum TextDrawer {
             logicalHeight: resolved?.logicalHeight ?? 0,
             logicalToTarget: logicalToDevice
         )
-        return CTFontCreateCopyWithAttributes(base, size, nil, nil)
+        // Through the serial font queue (§8 / macOS 27.2): the copy can resolve a
+        // sized variant via the font provider. Falls back to the base on timeout.
+        return FontLookupQueue.run(fallback: base) {
+            CTFontCreateCopyWithAttributes(base, size, nil, nil)
+        }
     }
 
     /// A CTLine carrying the font, foreground colour, and (if the DC font asks
@@ -211,7 +215,12 @@ enum TextDrawer {
         guard let attributed = CFAttributedStringCreate(
             nil, string as CFString, attributes as CFDictionary
         ) else { return nil }
-        return CTLineCreateWithAttributedString(attributed)
+        // Through the serial font queue: typesetting runs CoreText's glyph
+        // cascade for missing glyphs (e.g. CJK in a Latin face), the macOS 27.2
+        // deadlock-prone lookup. On timeout the run is skipped (nil).
+        return FontLookupQueue.run(fallback: nil) { () -> CTLine? in
+            CTLineCreateWithAttributedString(attributed)
+        }
     }
 
     // MARK: - Dx positioning
