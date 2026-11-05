@@ -161,4 +161,58 @@ struct QuickLookSettingsTests {
         EmfySettings.migrateSharedKeysIfNeeded(from: standard, to: group)
         #expect(group.string(forKey: SharedRenderSettings.Keys.renderEdges) == "crisp")
     }
+
+    // MARK: - Extension reader bounds (S-M4)
+
+    @Test
+    func readerRejectsOversizedFontBlobWholeBeforeDecoding() throws {
+        // Thousands of otherwise-valid rows push the blob well past the 64 KB cap.
+        let rows = (0..<6000).map { ["requested": "Req\($0)", "replacement": "Rep\($0)"] }
+        let data = try JSONSerialization.data(withJSONObject: rows)
+        #expect(data.count > SharedRenderSettings.maxBlobBytes)
+        // Rejected whole, never partially decoded.
+        #expect(SharedRenderSettings.decodeSubstitutions(data).isEmpty)
+    }
+
+    @Test
+    func readerDropsRowsWithOverLongNames() throws {
+        let longName = String(repeating: "A", count: SharedRenderSettings.maxNameCharacters + 10)
+        let rows = [
+            ["requested": longName, "replacement": "Helvetica"],   // dropped: name too long
+            ["requested": "Arial", "replacement": longName],       // dropped: name too long
+            ["requested": "Tahoma", "replacement": "Helvetica"],   // kept
+        ]
+        let data = try JSONSerialization.data(withJSONObject: rows)
+        let subs = SharedRenderSettings.decodeSubstitutions(data)
+        #expect(subs.count == 1)
+        #expect(subs.first?.requestedFamily == "Tahoma")
+        #expect(subs.first?.replacementFamily == "Helvetica")
+    }
+
+    @Test
+    func readerCapsRowCountAt64() throws {
+        let rows = (0..<200).map { ["requested": "Req\($0)", "replacement": "Rep\($0)"] }
+        let data = try JSONSerialization.data(withJSONObject: rows)
+        // Small enough to decode (well under 64 KB), but capped at the row limit.
+        #expect(data.count <= SharedRenderSettings.maxBlobBytes)
+        #expect(SharedRenderSettings.decodeSubstitutions(data).count == SharedRenderSettings.substitutionRowLimit)
+    }
+
+    // MARK: - App Group identifier shape (S-L1)
+
+    @Test
+    func appGroupIdentifierMatchesEntitlementPattern() {
+        #if os(macOS)
+        // <TeamID>.com.avneetsingh.emfy — the entitlement's resolved form; the team
+        // prefix is 10 alphanumerics, from $(AppIdentifierPrefix) or the literal.
+        #expect(AppGroup.identifier.hasSuffix(".com.avneetsingh.emfy"))
+        let prefix = String(AppGroup.identifier.dropLast("com.avneetsingh.emfy".count))
+        #expect(prefix.hasSuffix("."))
+        let team = String(prefix.dropLast())
+        #expect(team.count == 10)
+        #expect(team.allSatisfy { $0.isLetter || $0.isNumber })
+        #else
+        #expect(AppGroup.identifier == "group.com.avneetsingh.emfy")
+        #endif
+    }
 }

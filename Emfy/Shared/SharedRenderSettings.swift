@@ -102,18 +102,38 @@ struct SharedRenderSettings: Sendable, Equatable {
     /// can't make the extension map an unbounded table.
     static let substitutionRowLimit = 64
 
+    /// The largest persisted font blob this reader will decode, before capping. A
+    /// hostile or corrupt App Group value must never make a sandboxed extension
+    /// allocate an unbounded JSON array (S-M4). 64 well-formed rows of two ≤128-char
+    /// names fit comfortably; anything larger is rejected whole.
+    static let maxBlobBytes = 64 * 1024
+    /// The longest replacement/requested family name a row may carry. A LOGFONT face
+    /// is at most 32 UTF-16 units and an EMF+ family is short too, so 128 is generous;
+    /// a longer name is a sign of a bad blob and the row is dropped (S-M4).
+    static let maxNameCharacters = 128
+
     /// Decodes the persisted table into render-time substitutions, matching the
-    /// app's `renderOptions` mapping: trim each name, drop any row with a blank
-    /// requested or replacement family, and bound the count. Absent or corrupt
-    /// data yields an empty table.
+    /// app's `renderOptions` mapping: reject an oversized blob before decoding, trim
+    /// each name, drop any row with a blank or over-long requested or replacement
+    /// family, and bound the count. Absent, oversized, or corrupt data yields an
+    /// empty table.
     static func decodeSubstitutions(_ data: Data?) -> [FontSubstitution] {
-        guard let data,
+        guard let data, data.count <= maxBlobBytes,
               let rows = try? JSONDecoder().decode([Row].self, from: data)
         else { return [] }
         return rows.prefix(substitutionRowLimit).compactMap { row in
+            // Bound each name before any grapheme-cluster work: the cheap UTF-8 byte
+            // count rejects an over-long name (≤ 4 bytes per character) without
+            // walking it, so a hostile row can't make the extension hold a huge string
+            // (S-M4).
+            guard row.requested.utf8.count <= maxNameCharacters * 4,
+                  row.replacement.utf8.count <= maxNameCharacters * 4
+            else { return nil }
             let requested = row.requested.trimmingCharacters(in: .whitespacesAndNewlines)
             let replacement = row.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !requested.isEmpty, !replacement.isEmpty else { return nil }
+            guard !requested.isEmpty, !replacement.isEmpty,
+                  requested.count <= maxNameCharacters, replacement.count <= maxNameCharacters
+            else { return nil }
             return FontSubstitution(requestedFamily: requested, replacementFamily: replacement)
         }
     }
