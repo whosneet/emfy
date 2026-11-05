@@ -1,0 +1,445 @@
+import CoreGraphics
+import EMFParse
+import EMFRender
+import Foundation
+import Testing
+
+// The shared library sources (RecentsStore, RecentEntry, MetafileLoader,
+// MetafileDiagnostics, ExportTaskRunner, ExportTemp, EMFExport) are compiled
+// directly into this logic-test bundle — see the report for why a hosted bundle
+// couldn't be used on the sandboxed macOS app. The types are therefore in this
+// module, so no `import Emfy` is needed.
+
+/// C2 unit tests for the shared library model and the plain-language
+/// diagnostics. Multiplatform: builds and runs on macOS and the iOS simulator.
+/// The suite is serialised — several tests touch the shared temporary directory
+/// (the export-temp sweep), and serialising keeps them from racing each other.
+/// Every test uses a throwaway directory, never the real container.
+@Suite(.serialized)
+struct EmfyTests {
+
+    // MARK: - Helpers
+
+    /// A fresh, isolated temp directory for one test.
+    private func makeTempDir() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyTests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func cleanup(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    @MainActor
+    private func makeStore(in dir: URL) -> RecentsStore {
+        RecentsStore(locations: .init(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        ))
+    }
+
+    /// Writes a minimal but valid EMF (EMR_HEADER + EMR_EOF) so EMFKit opens and
+    /// prepares it — enough to exercise the add/thumbnail flow.
+    @discardableResult
+    private func writeEMF(to dir: URL, name: String) -> URL {
+        let url = dir.appendingPathComponent(name)
+        try? EmfyTests.minimalEMF().write(to: url)
+        return url
+    }
+
+    static func minimalEMF(width: Int32 = 100, height: Int32 = 100) -> Data {
+        var d = Data()
+        func u32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        func i32(_ v: Int32) { u32(UInt32(bitPattern: v)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        // EMR_HEADER (88-byte base variant)
+        u32(1); u32(88)
+        i32(0); i32(0); i32(width - 1); i32(height - 1)     // rclBounds (inclusive-inclusive)
+        i32(0); i32(0); i32(2117); i32(2117)                // rclFrame (.01 mm)
+        u32(0x464D4520)                                     // dSignature " EMF"
+        u32(0x0001_0000)                                    // nVersion
+        u32(108)                                            // nBytes (total)
+        u32(2)                                              // nRecords
+        u16(1); u16(0)                                      // nHandles, sReserved
+        u32(0); u32(0)                                      // nDescription, offDescription
+        u32(0)                                              // nPalEntries
+        i32(1920); i32(1080)                                // szlDevice
+        i32(508); i32(286)                                  // szlMillimeters
+        // EMR_EOF (20 bytes)
+        u32(14); u32(20); u32(0); u32(16); u32(20)
+        return d
+    }
+
+    private func isNotFound(_ outcome: RecentsStore.ResolveOutcome) -> Bool {
+        if case .notFound = outcome { return true }; return false
+    }
+
+    private func isUnavailable(_ outcome: RecentsStore.ResolveOutcome) -> Bool {
+        if case .unavailable = outcome { return true }; return false
+    }
+
+    // MARK: - §a Typed resolve classification
+
+    @Test func classifyReadFailureSeparatesGoneFromTransient() {
+        #expect(isNotFound(RecentsStore.classifyReadFailure(CocoaError(.fileReadNoSuchFile))))
+        #expect(isNotFound(RecentsStore.classifyReadFailure(CocoaError(.fileNoSuchFile))))
+        #expect(isNotFound(RecentsStore.classifyReadFailure(NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT)))))
+        #expect(isUnavailable(RecentsStore.classifyReadFailure(CocoaError(.fileReadNoPermission))))
+        #expect(isUnavailable(RecentsStore.classifyReadFailure(CocoaError(.fileReadUnknown))))
+    }
+
+    @Test func resolveBookmarkGarbageOrEmptyIsNotFound() {
+        #expect(isNotFound(RecentsStore.resolveBookmark(Data())))
+        #expect(isNotFound(RecentsStore.resolveBookmark(Data([9, 9, 9, 9]))))
+    }
+
+    @Test func resolveBookmarkDeletedFileIsNotFound() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let fileURL = dir.appendingPathComponent("gone.emf")
+        try Data([1, 2, 3]).write(to: fileURL)
+        let bookmark = try #require(RecentsStore.makeBookmark(for: fileURL))
+        try FileManager.default.removeItem(at: fileURL)
+        #expect(isNotFound(RecentsStore.resolveBookmark(bookmark)))
+    }
+
+    @Test func resolveBookmarkUnreadableFileIsUnavailable() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let fileURL = dir.appendingPathComponent("locked.emf")
+        try Data([1, 2, 3]).write(to: fileURL)
+        let bookmark = try #require(RecentsStore.makeBookmark(for: fileURL))
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: fileURL.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path) }
+        #expect(isUnavailable(RecentsStore.resolveBookmark(bookmark)))
+    }
+
+    // MARK: - §a Prune only on not-found
+
+    @MainActor
+    @Test func pruneOnNotFoundButKeepOnUnavailable() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        let src = writeEMF(to: dir, name: "doc.emf")
+        let id = try #require(await store.handleOpenedURL(src))
+        #expect(store.entries.count == 1)
+        let entry = try #require(store.entry(id: id))
+        // A plain temp file can't take a security scope, so it's imported (§b).
+        let importedName = try #require(entry.importedFileName)
+        let importedURL = store.locations.importedDirectory.appendingPathComponent(importedName)
+
+        // Transient failure keeps the entry.
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: importedURL.path)
+        await #expect(throws: RecentsStore.ResolveFailure.unavailable) {
+            _ = try await store.resolveData(for: entry)
+        }
+        #expect(store.entries.count == 1)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: importedURL.path)
+
+        // Definitive not-found prunes the entry.
+        try FileManager.default.removeItem(at: importedURL)
+        await #expect(throws: RecentsStore.ResolveFailure.notFound) {
+            _ = try await store.resolveData(for: entry)
+        }
+        #expect(store.entries.isEmpty)
+    }
+
+    // MARK: - §b Import a copy of ephemeral files, remove it with the entry
+
+    @MainActor
+    @Test func ephemeralFileIsImportedAndCleanedUp() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        let src = writeEMF(to: dir, name: "inbox.emf")
+        let id = try #require(await store.handleOpenedURL(src))
+        let entry = try #require(store.entry(id: id))
+        let importedName = try #require(entry.importedFileName)
+        let importedURL = store.locations.importedDirectory.appendingPathComponent(importedName)
+        #expect(FileManager.default.fileExists(atPath: importedURL.path))
+
+        store.remove(id)
+        #expect(!FileManager.default.fileExists(atPath: importedURL.path))
+    }
+
+    @Test func ephemeralLocationDetection() {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("x.emf")
+        #expect(RecentsStore.isEphemeralLocation(tmp))
+        let inbox = URL(fileURLWithPath: "/private/var/mobile/Containers/Data/Application/AB/Documents/Inbox/x.emf")
+        #expect(RecentsStore.isEphemeralLocation(inbox))
+    }
+
+    // MARK: - §c Identity de-dupe + reload token
+
+    @MainActor
+    @Test func reopeningSameFileDeduplicatesAndRefreshesToken() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        let src = writeEMF(to: dir, name: "same.emf")
+
+        let id1 = try #require(await store.handleOpenedURL(src))
+        let token1 = try #require(store.entry(id: id1)?.reloadToken)
+        let id2 = try #require(await store.handleOpenedURL(src))
+        let token2 = try #require(store.entry(id: id1)?.reloadToken)
+
+        #expect(id1 == id2)                 // promoted, not duplicated
+        #expect(store.entries.count == 1)
+        #expect(token1 != token2)           // content reload token changes on reopen
+
+        let other = writeEMF(to: dir, name: "other.emf")
+        let id3 = try #require(await store.handleOpenedURL(other))
+        #expect(id3 != id1)
+        #expect(store.entries.count == 2)
+    }
+
+    // MARK: - §d Tolerant decode + corrupt rename
+
+    @Test func decodeSkipsBadEntriesAndKeepsGood() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let locations = RecentsStore.Locations(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        )
+        try FileManager.default.createDirectory(at: locations.supportDirectory, withIntermediateDirectories: true)
+
+        let good = RecentEntry(
+            id: UUID(), displayName: "a.emf", formatLabel: "EMF", fullFormatName: "Enhanced Metafile",
+            byteCount: 10, openedAt: Date(), bookmark: Data([1, 2, 3]), thumbnailFileName: nil,
+            fileIdentity: "/x/a.emf", importedFileName: nil, reloadToken: UUID()
+        )
+        let goodObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(good))
+        let array: [Any] = [goodObject, ["nonsense": true]]
+        try JSONSerialization.data(withJSONObject: array).write(to: locations.storeURL)
+
+        let loaded = RecentsStore.loadEntries(from: locations)
+        #expect(loaded.count == 1)
+        #expect(loaded.first?.displayName == "a.emf")
+        #expect(!FileManager.default.fileExists(atPath: locations.corruptStoreURL.path))
+    }
+
+    @Test func undecodableStoreIsRenamedAside() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let locations = RecentsStore.Locations(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        )
+        try FileManager.default.createDirectory(at: locations.supportDirectory, withIntermediateDirectories: true)
+        try Data("this is not json {".utf8).write(to: locations.storeURL)
+
+        let loaded = RecentsStore.loadEntries(from: locations)
+        #expect(loaded.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: locations.corruptStoreURL.path))
+        #expect(!FileManager.default.fileExists(atPath: locations.storeURL.path))
+    }
+
+    @Test func missingStoreStartsEmptyWithoutCorruptFile() {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let locations = RecentsStore.Locations(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        )
+        #expect(RecentsStore.loadEntries(from: locations).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: locations.corruptStoreURL.path))
+    }
+
+    // MARK: - §e Launch sweep of orphans + export temp
+
+    @Test func launchSweepRemovesOrphansButKeepsReferenced() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let locations = RecentsStore.Locations(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        )
+        try FileManager.default.createDirectory(at: locations.thumbnailsDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: locations.importedDirectory, withIntermediateDirectories: true)
+        try Data([0]).write(to: locations.thumbnailsDirectory.appendingPathComponent("keep.png"))
+        try Data([0]).write(to: locations.thumbnailsDirectory.appendingPathComponent("orphan.png"))
+        try Data([0]).write(to: locations.importedDirectory.appendingPathComponent("keep.emf"))
+        try Data([0]).write(to: locations.importedDirectory.appendingPathComponent("orphan.emf"))
+        let exportDir = ExportTemp.makeDirectory()
+        try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
+
+        RecentsStore.sweep(locations: locations, keepThumbnails: ["keep.png"], keepImported: ["keep.emf"])
+
+        #expect(FileManager.default.fileExists(atPath: locations.thumbnailsDirectory.appendingPathComponent("keep.png").path))
+        #expect(!FileManager.default.fileExists(atPath: locations.thumbnailsDirectory.appendingPathComponent("orphan.png").path))
+        #expect(FileManager.default.fileExists(atPath: locations.importedDirectory.appendingPathComponent("keep.emf").path))
+        #expect(!FileManager.default.fileExists(atPath: locations.importedDirectory.appendingPathComponent("orphan.emf").path))
+        #expect(!FileManager.default.fileExists(atPath: exportDir.path))
+    }
+
+    // MARK: - §j Export temp cleanup
+
+    @Test func exportTempSweepRemovesOnlyEmfyExportDirectories() throws {
+        let tmp = FileManager.default.temporaryDirectory
+        let export = ExportTemp.makeDirectory()
+        try FileManager.default.createDirectory(at: export, withIntermediateDirectories: true)
+        let other = tmp.appendingPathComponent("KeepMe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: other) }
+
+        ExportTemp.sweep()
+
+        #expect(!FileManager.default.fileExists(atPath: export.path))
+        #expect(FileManager.default.fileExists(atPath: other.path))
+    }
+
+    // MARK: - §f/§g Thumbnail cache eviction
+
+    @MainActor
+    @Test func thumbnailCacheEvictsOnRemoveAndClear() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        let id = try #require(await store.handleOpenedURL(writeEMF(to: dir, name: "thumb.emf")))
+        let entry = try #require(store.entry(id: id))
+
+        #expect(await store.loadThumbnail(for: entry) != nil)   // renders + caches
+        #expect(store.cachedThumbnail(for: entry) != nil)
+
+        store.remove(id)
+        #expect(store.cachedThumbnail(for: entry) == nil)       // evicted with the entry
+
+        let id2 = try #require(await store.handleOpenedURL(writeEMF(to: dir, name: "thumb2.emf")))
+        let entry2 = try #require(store.entry(id: id2))
+        _ = await store.loadThumbnail(for: entry2)
+        #expect(store.cachedThumbnail(for: entry2) != nil)
+        store.clear()
+        #expect(store.cachedThumbnail(for: entry2) == nil)      // cleared
+    }
+
+    @MainActor
+    @Test func thumbnailRegeneratesWhenCachePurged() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        let id = try #require(await store.handleOpenedURL(writeEMF(to: dir, name: "regen.emf")))
+        let entry = try #require(store.entry(id: id))
+        // Simulate Caches being purged: delete the cached PNG and drop the memory cache.
+        try FileManager.default.removeItem(at: store.locations.thumbnailsDirectory)
+        store.clear()   // wipes memory cache (entry stays via re-add below)
+
+        let readd = try #require(await store.handleOpenedURL(writeEMF(to: dir, name: "regen.emf")))
+        let entry2 = try #require(store.entry(id: readd))
+        try? FileManager.default.removeItem(at: store.locations.thumbnailsDirectory)   // purge again
+        // loadThumbnail must regenerate from the file even with no cached PNG.
+        #expect(await store.loadThumbnail(for: entry2) != nil)
+    }
+
+    // MARK: - §k Export runner cancellation / single-in-flight
+
+    @MainActor
+    @Test func runnerSupersedesFirstRunWithSecond() async {
+        let runner = ExportTaskRunner()
+        var firstDelivered = false
+        var secondValue = 0
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            runner.run(
+                setBusy: { _ in },
+                render: { () -> Int in
+                    for _ in 0..<60 where !Task.isCancelled { Thread.sleep(forTimeInterval: 0.01) }
+                    return 1
+                },
+                done: { _ in firstDelivered = true }
+            )
+            runner.run(
+                setBusy: { _ in },
+                render: { 2 },
+                done: { value in secondValue = value; cont.resume() }
+            )
+        }
+        #expect(secondValue == 2)
+        #expect(!firstDelivered)   // the superseded (cancelled) first render never delivers
+    }
+
+    @MainActor
+    @Test func runnerKeepsAtMostOneRenderInFlight() async {
+        let runner = ExportTaskRunner()
+        let probe = ConcurrencyProbe()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            runner.run(
+                setBusy: { _ in },
+                render: { () -> Int in
+                    probe.enter(); defer { probe.leave() }
+                    for _ in 0..<30 where !Task.isCancelled { Thread.sleep(forTimeInterval: 0.005) }
+                    return 1
+                },
+                done: { _ in }
+            )
+            runner.run(
+                setBusy: { _ in },
+                render: { () -> Int in
+                    probe.enter(); defer { probe.leave() }
+                    Thread.sleep(forTimeInterval: 0.02)
+                    return 2
+                },
+                done: { _ in cont.resume() }
+            )
+        }
+        #expect(probe.maxConcurrent <= 1)   // the two renders never overlap
+        #expect(probe.everRan)
+    }
+
+    // MARK: - Diagnostics text (§3)
+
+    @Test func unimplementedRecordNoteMatchesBriefExample() {
+        let note = EMFRenderLog.Entry.unimplementedRecord(type: 70, count: 3).note
+        #expect(note.summary == "3 drawing instructions of a kind Emfy doesn't support yet were skipped.")
+        #expect(note.technicalDetail == "Skipped unsupported record type 70 (3 occurrences).")
+    }
+
+    @Test func emptyFontNameReadsNaturally() {
+        let note = EMFRenderLog.Entry.fontSubstituted(requested: "", used: "Helvetica", count: 1).note
+        #expect(note.technicalDetail == "Used Helvetica instead of an unnamed unavailable font (1 occurrence).")
+        #expect(!note.technicalDetail.contains("font  "))   // no stranded double space
+        #expect(note.summary.contains("Helvetica"))
+    }
+
+    @Test func namedFontSubstitutionWording() {
+        let note = EMFRenderLog.Entry.fontSubstituted(requested: "Arial", used: "Helvetica", count: 2).note
+        #expect(note.technicalDetail == "Used Helvetica instead of unavailable font Arial (2 occurrences).")
+    }
+
+    @Test func couldNotShowFiltersAdvisoryNotes() {
+        let diagnostics = ViewerDiagnostics(
+            kind: .emf,
+            embeddedEMF: .notApplicable,
+            renderLog: [.stockFontUsed(rawValue: 1, count: 1), .unimplementedRecord(type: 70, count: 1)],
+            parserDiagnostics: [.recordCountMismatch(headerSays: 5, walked: 4)],
+            frontDoorDiagnostics: [],
+            wasDecompressed: false
+        )
+        let summaries = diagnostics.couldNotShowNotes.map(\.summary)
+        #expect(summaries.contains { $0.contains("doesn't support yet") })   // kept
+        #expect(!summaries.contains { $0.contains("built-in font") })        // stock-font fallback filtered
+        #expect(!summaries.contains { $0.contains("record count") })         // count mismatch filtered
+        // Render Details is unfiltered.
+        #expect(diagnostics.allParserNotes.count == 1)
+        #expect(diagnostics.allRenderNotes.count == 2)
+    }
+
+    @Test func eachNoteCarriesSummaryAndTechnicalDetail() {
+        let note = EMFRenderLog.Entry.unsupportedBrushStyle(rawStyle: 9).note
+        #expect(!note.summary.isEmpty)
+        #expect(!note.technicalDetail.isEmpty)
+        #expect(note.summary != note.technicalDetail)
+    }
+}
+
+/// A lock-guarded concurrency counter for the runner test. Synchronous so it can
+/// be called from the runner's non-async render closure.
+private final class ConcurrencyProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = 0
+    private(set) var maxConcurrent = 0
+    private(set) var everRan = false
+
+    func enter() {
+        lock.lock(); defer { lock.unlock() }
+        active += 1
+        everRan = true
+        maxConcurrent = max(maxConcurrent, active)
+    }
+
+    func leave() {
+        lock.lock(); defer { lock.unlock() }
+        active -= 1
+    }
+}
