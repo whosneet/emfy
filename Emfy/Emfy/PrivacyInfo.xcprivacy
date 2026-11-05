@@ -24,6 +24,19 @@
 				<string>1C8F.1</string>
 			</array>
 		</dict>
+		<dict>
+			<!-- ExportTemp.swift reads contentModificationDate/creationDate of its
+			     own EmfyExport-* / EmfyPrivate-* staging directories under the
+			     temporary directory, so a launch sweep never reclaims a directory a
+			     concurrent share is still writing (C617.1: timestamps of files
+			     inside the app's own container). Nothing leaves the device. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
