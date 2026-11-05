@@ -43,10 +43,23 @@ enum FontMapper {
     /// directly nor has a table entry.
     static let defaultFamily = "Helvetica Neue"
 
+    /// A system font created ONCE and cached — the emergency fallback a queued
+    /// lookup returns if it times out. The lookup machinery is what stalled, so
+    /// the fallback must already exist and perform no new lookup; it is built on
+    /// the lookup queue (never a cooperative thread) to keep even this bootstrap
+    /// clear of the macOS 27.2 deadlock. Accessed eagerly as every `run` call's
+    /// `fallback`, so it is created on the first healthy lookup and cached for any
+    /// later timeout. `nonisolated(unsafe)`: CTFont carries no Sendable
+    /// annotation in the SDK, but it is immutable and thread-safe once created.
+    nonisolated(unsafe) static let emergencyFallbackFont: CTFont = FontLookupQueue.preCreateFont {
+        CTFontCreateUIFontForLanguage(.system, nominalSize, nil)
+            ?? CTFontCreateWithNameAndOptions(defaultFamily as CFString, nominalSize, nil, .preventAutoActivation)
+    }
+
     /// The system font, used for stock FONT selections. Created once per call;
     /// CoreText caches descriptors internally, so this is cheap.
     static func systemBaseFont() -> CTFont {
-        FontLookupQueue.run {
+        FontLookupQueue.run(fallback: emergencyFallbackFont) {
             CTFontCreateUIFontForLanguage(.system, nominalSize, nil)
                 ?? font(named: defaultFamily)
         }
@@ -81,7 +94,8 @@ enum FontMapper {
     /// The caller sizes the returned base to the device point size at draw time.
     static func resolveFamily(_ family: String, bold: Bool, italic: Bool, log: inout EMFRenderLog) -> CTFont {
         let requested = family.trimmingCharacters(in: .whitespaces)
-        let lookup = FontLookupQueue.run { () -> (font: CTFont, substitute: String?) in
+        let fallback: (font: CTFont, substitute: String?) = (emergencyFallbackFont, nil)
+        let lookup = FontLookupQueue.run(fallback: fallback) { () -> (font: CTFont, substitute: String?) in
             let base = baseFont(forFamily: requested)
             return (applyTraits(to: base.font, bold: bold, italic: italic), base.substitute)
         }
@@ -209,42 +223,95 @@ enum FontMapper {
     }
 }
 
-/// Runs FontMapper's CoreText font-registry lookups on one private serial
+/// Runs FontMapper's CoreText font-registry lookups (and the CTLine/CTFramesetter
+/// typesetting that can trigger cascade/fallback lookups) on one private serial
 /// queue instead of the caller's thread.
 ///
 /// On macOS 27.2, when every Swift-concurrency cooperative thread is blocked
 /// in a synchronous CoreText font lookup (`CTFontCreateWithName*`, trait
-/// variants), none of those lookups ever receives its font-service reply and
-/// the process deadlocks. The same lookups made from a non-cooperative thread
-/// complete normally, even while the whole cooperative pool is blocked.
-/// Quick Look's async `providePreview` and the Swift Testing runner both render
-/// on that pool, so a saturating burst of text renders could wedge them.
+/// variants, and the glyph-cascade a `CTLineCreateWithAttributedString` /
+/// `CTFramesetter*` runs for missing glyphs), none of those lookups ever
+/// receives its font-service reply and the process deadlocks. The same lookups
+/// made from a non-cooperative thread complete normally, even while the whole
+/// cooperative pool is blocked. Quick Look's async `providePreview` and the
+/// Swift Testing runner both render on that pool, so a saturating burst of text
+/// renders could wedge them.
 ///
 /// Dispatch queues run on the workqueue, not the cooperative pool, so the
 /// caller blocks on a semaphore while the lookup runs here. Lookups are short
-/// and CoreText caches them, so serialising costs microseconds per text
-/// object. The body never re-enters FontMapper, so it cannot wait on itself.
+/// and CoreText caches them, so serialising costs microseconds per text object.
+/// The body never re-enters FontMapper, so it cannot wait on itself.
+///
+/// The wait is BOUNDED (`timeout`): if a font-service reply never arrives (a
+/// wedged provider, not just a saturated pool) the call returns a pre-created
+/// `fallback` and logs it, rather than hanging a sandboxed Quick Look extension
+/// forever (§8). The heap `Box` outlives the call, so a late `body` completion
+/// writes into it harmlessly.
 enum FontLookupQueue {
     private static let queue = DispatchQueue(label: "com.avneetsingh.emfkit.font-lookup", qos: .userInitiated)
 
-    /// Holds a value across the queue hop. CTFont is immutable and CoreText
-    /// fonts are safe to use from any thread once created.
+    /// The bounded wait for one queued lookup. Healthy CoreText lookups are
+    /// microseconds; this only bites when a provider is wedged, where one
+    /// substituted font beats an unbounded hang (§8). Overridable per call.
+    static let timeout: DispatchTimeInterval = .seconds(5)
+
+    /// Holds a value across the queue hop. CTFont/CTLine are immutable and safe
+    /// to use from any thread once created, so `@unchecked` is sound; the heap
+    /// box also lets a LATE `body` completion write its result harmlessly after
+    /// `run` already returned a fallback.
     private final class Box<Value>: @unchecked Sendable {
         var value: Value?
     }
 
-    static func run<Value>(_ body: @escaping @Sendable () -> Value) -> Value {
+    /// Launders a non-`Sendable` `body` across the `queue.async` hop. Sound
+    /// because `run` blocks on the semaphore until `body` has run (or timed out):
+    /// the closure and any CoreText objects it captures (CTFont/CTLine, which are
+    /// thread-safe once created) are only ever touched by one thread at a time.
+    private final class Work: @unchecked Sendable {
+        let run: () -> Void
+        init(_ run: @escaping () -> Void) { self.run = run }
+    }
+
+    /// Runs `body` on the private lookup queue (off the cooperative pool),
+    /// waiting at most `timeout`. On timeout it returns the pre-created
+    /// `fallback` and calls `onTimeout` (which logs to stderr by default), while
+    /// the still-running `body` writes into the heap `Box` harmlessly.
+    static func run<Value>(
+        timeout: DispatchTimeInterval = Self.timeout,
+        fallback: Value,
+        onTimeout: () -> Void = { Self.noteTimeout() },
+        _ body: @escaping () -> Value
+    ) -> Value {
         let box = Box<Value>()
         let done = DispatchSemaphore(value: 0)
-        queue.async {
+        let work = Work {
             box.value = body()
             done.signal()
         }
-        done.wait()
-        // `queue.async` always runs the block, and the semaphore orders its
-        // write before this read, so the value is present. The inline
-        // fallback only keeps this free of a force-unwrap.
-        guard let value = box.value else { return body() }
-        return value
+        queue.async { work.run() }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            onTimeout()
+            return fallback
+        }
+        // The semaphore orders the queue's write before this read, so the value
+        // is present; the fallback only keeps this free of a force-unwrap.
+        return box.value ?? fallback
+    }
+
+    /// Creates a font on the lookup queue with NO timeout — used ONCE to
+    /// pre-create the emergency fallback font itself (`FontMapper
+    /// .emergencyFallbackFont`), so even that bootstrap never runs a CoreText
+    /// lookup on a cooperative thread. `queue.sync` needs no `Sendable` body
+    /// (it runs synchronously); it is called only from caller threads, never
+    /// from within a queue block, so it cannot deadlock on reentrancy.
+    static func preCreateFont(_ body: () -> CTFont) -> CTFont {
+        queue.sync(execute: body)
+    }
+
+    /// Reports a lookup timeout to stderr (an operational log, not the render
+    /// honesty channel, which this low-level helper cannot reach).
+    private static func noteTimeout() {
+        FileHandle.standardError.write(Data(
+            "EMFKit: a CoreText font lookup exceeded the font-queue timeout; using the pre-created system fallback font (§8 anti-hang).\n".utf8))
     }
 }
