@@ -80,6 +80,15 @@ struct MacMetafileScrollView: NSViewRepresentable {
     let drawingLabel: String
     let controller: MacMetafileZoomController
 
+    /// The viewer backdrop: ~0.90 grey in light mode so the white page and its edge
+    /// read clearly (macOS 27's underPageBackgroundColor is near-white there), and
+    /// dark in dark mode. Painted on both the scroll view and its clip view.
+    static let backdropColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 0.14, alpha: 1)
+            : NSColor(white: 0.90, alpha: 1)
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -90,14 +99,7 @@ struct MacMetafileScrollView: NSViewRepresentable {
         scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
-        // A backdrop that clearly contrasts with the white paper in both modes —
-        // macOS 27's underPageBackgroundColor is near-white in light mode, so the
-        // page edge would vanish. Light ≈ 0.90 grey; dark stays dark.
-        scrollView.backgroundColor = NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                ? NSColor(white: 0.14, alpha: 1)
-                : NSColor(white: 0.90, alpha: 1)
-        }
+        scrollView.backgroundColor = Self.backdropColor
         scrollView.allowsMagnification = true
         // Placeholder range until the first layout computes the fit scale; both are
         // valid (min ≤ max, both > 0) so an early magnify never asserts.
@@ -105,8 +107,15 @@ struct MacMetafileScrollView: NSViewRepresentable {
         scrollView.maxMagnification = ZoomMath.maxZoom
 
         // A centring clip view holds a small picture in the middle of the viewport.
+        // The clip view IS the viewport, so the backdrop is painted here too, not
+        // only on the scroll view: a non-drawing clip view is layer-backed by the
+        // SwiftUI host, and in light mode its near-white backing shows through and
+        // hides the scroll view's own backdrop (the page then floats on pure white
+        // 255,255,255 rather than ~0.90 grey — dark mode happened to match). Painting
+        // the viewport grey fixes it in both modes (C3b scope 8).
         let clipView = CenteringClipView()
-        clipView.drawsBackground = false
+        clipView.drawsBackground = true
+        clipView.backgroundColor = Self.backdropColor
         scrollView.contentView = clipView
 
         // The tiled view draws into a CATiledLayer, which overwrites any shadow set on
