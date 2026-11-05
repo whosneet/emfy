@@ -119,6 +119,8 @@
 		B01100000000000000000315 /* SettingsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000305 /* SettingsModelTests.swift */; };
 		B01100000000000000000306 /* ViewerZoomPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000306 /* ViewerZoomPolicy.swift */; };
 		B01100000000000000000316 /* ViewerZoomPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000306 /* ViewerZoomPolicy.swift */; };
+		B01100000000000000000307 /* ViewerTilePaint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000307 /* ViewerTilePaint.swift */; };
+		B01100000000000000000317 /* ViewerTilePaint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000307 /* ViewerTilePaint.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -247,6 +249,7 @@
 		B00100000000000000000304 /* RecentsCapPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsCapPolicy.swift; sourceTree = "<group>"; };
 		B00100000000000000000305 /* SettingsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModelTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000306 /* ViewerZoomPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerZoomPolicy.swift; sourceTree = "<group>"; };
+		B00100000000000000000307 /* ViewerTilePaint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerTilePaint.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -342,6 +345,7 @@
 				B00100000000000000000303 /* DiagnosticReport.swift */,
 				B00100000000000000000304 /* RecentsCapPolicy.swift */,
 				B00100000000000000000306 /* ViewerZoomPolicy.swift */,
+				B00100000000000000000307 /* ViewerTilePaint.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -701,6 +705,7 @@
 				B01100000000000000000303 /* DiagnosticReport.swift in Sources */,
 				B01100000000000000000304 /* RecentsCapPolicy.swift in Sources */,
 				B01100000000000000000306 /* ViewerZoomPolicy.swift in Sources */,
+				B01100000000000000000307 /* ViewerTilePaint.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -757,6 +762,7 @@
 				B01100000000000000000314 /* RecentsCapPolicy.swift in Sources */,
 				B01100000000000000000315 /* SettingsModelTests.swift in Sources */,
 				B01100000000000000000316 /* ViewerZoomPolicy.swift in Sources */,
+				B01100000000000000000317 /* ViewerTilePaint.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

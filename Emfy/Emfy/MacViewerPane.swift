@@ -20,6 +20,7 @@ struct MacViewerPane: View {
     @Environment(RecentsStore.self) private var store
     @Environment(ToastCenter.self) private var toast
     @Environment(EmfySettings.self) private var settings
+    @Environment(\.colorScheme) private var colorScheme
     let session: DocumentSession
     /// Clears the window's selection when the file is removed from Recents.
     let onRemove: () -> Void
@@ -94,7 +95,13 @@ struct MacViewerPane: View {
                 drawingLabel: "Drawing: \(entry?.baseName ?? "Metafile")",
                 controller: controller,
                 defaultZoom: settings.defaultZoomOnOpen,
-                pageShadow: settings.pageShadow
+                pageShadow: settings.pageShadow,
+                tilePaint: ViewerTilePaint.make(
+                    background: settings.pageBackground,
+                    darkMode: settings.darkPageMode,
+                    isDark: colorScheme == .dark
+                ),
+                scrollAction: settings.macScrollAction
             )
             .ignoresSafeArea()
             // Rebuild the tiled view only when the content actually changes, so a

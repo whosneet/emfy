@@ -20,7 +20,10 @@ struct FileMenuCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("Open…") {
-                coordinator.presentOpenPanel(store: store, openWindow: openWindow)
+                coordinator.presentOpenPanel(
+                    store: store, openWindow: openWindow,
+                    inNewWindow: EmfySettings.shared.openFilesIn == .newWindow
+                )
             }
             .keyboardShortcut("o", modifiers: .command)
 
@@ -87,8 +90,12 @@ struct OpenRecentMenu: View {
         Menu("Open Recent") {
             ForEach(OpenRecentList.items(from: store.entries)) { entry in
                 Button(entry.displayName) {
-                    // Route to the front window, or open one when none exists (M5).
-                    coordinator.route(entry.id, openWindow: openWindow)
+                    // Route to the front window, or open one when none exists (M5);
+                    // the "Open files in → New window" setting forces a new one (S1a-4b).
+                    coordinator.route(
+                        entry.id, openWindow: openWindow,
+                        inNewWindow: EmfySettings.shared.openFilesIn == .newWindow
+                    )
                 }
             }
             Divider()

@@ -286,6 +286,51 @@ struct SettingsModelTests {
         #expect(ViewerZoomPolicy.initialScale(for: .fit, fit: 0.05, minScale: 0.1, maxScale: 8) == 0.1)
     }
 
+    // MARK: - Tile paint (page background + dark-mode treatment)
+
+    @Test
+    func tilePaintResolvesBackgroundAndTreatment() {
+        // Page background.
+        #expect(ViewerTilePaint.page(for: .whitePage, isDark: true) == .white)
+        #expect(ViewerTilePaint.page(for: .checkerboard, isDark: false) == .checkerboard)
+        #expect(ViewerTilePaint.page(for: .matchAppearance, isDark: false) == .white)
+        #expect(ViewerTilePaint.page(for: .matchAppearance, isDark: true) == .dark)
+        // Treatment is viewer-only AND dark-only: Light is always none.
+        #expect(ViewerTilePaint.treatment(for: .invert, isDark: false) == TilePaint.Treatment.none)
+        #expect(ViewerTilePaint.treatment(for: .dim, isDark: false) == TilePaint.Treatment.none)
+        #expect(ViewerTilePaint.treatment(for: .off, isDark: true) == TilePaint.Treatment.none)
+        #expect(ViewerTilePaint.treatment(for: .dim, isDark: true) == .dim)
+        #expect(ViewerTilePaint.treatment(for: .invert, isDark: true) == .invert)
+    }
+
+    /// Renders a solid colour, applies the invert sequence, and samples: white→black,
+    /// black→white, red stays red-ish (hue preserved, lightness flipped).
+    @Test
+    func huePreservingInvertFlipsLightnessKeepsHue() throws {
+        func invertedCentre(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) throws -> (r: Double, g: Double, b: Double) {
+            let w = 8, h = 8
+            let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+            let ctx = try #require(CGContext(
+                data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            let rect = CGRect(x: 0, y: 0, width: w, height: h)
+            let colour = CGColor(srgbRed: r, green: g, blue: b, alpha: 1)
+            let replay: (CGContext) -> Void = { c in c.setFillColor(colour); c.fill(rect) }
+            replay(ctx)                                             // ink first
+            TilePainter.applyInvert(into: ctx, rect: rect, replayInk: replay)
+            let data = try #require(ctx.data).assumingMemoryBound(to: UInt8.self)
+            let i = 4 * ctx.bytesPerRow + 4 * 4                     // pixel (4,4)
+            return (Double(data[i]) / 255, Double(data[i + 1]) / 255, Double(data[i + 2]) / 255)
+        }
+        let white = try invertedCentre(1, 1, 1)
+        #expect(white.r < 0.2 && white.g < 0.2 && white.b < 0.2)   // white → black
+        let black = try invertedCentre(0, 0, 0)
+        #expect(black.r > 0.8 && black.g > 0.8 && black.b > 0.8)    // black → white
+        let red = try invertedCentre(1, 0, 0)
+        #expect(red.r > red.g && red.r > red.b)                    // red stays red-ish
+    }
+
     // MARK: - Diagnostic report privacy
 
     @Test

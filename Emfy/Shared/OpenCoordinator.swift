@@ -69,8 +69,15 @@ final class OpenCoordinator {
     /// Routes an opened entry from the menu bar: into the front window when one
     /// exists, else opens a new library window showing it — so ⌘O and Open Recent
     /// work with every window closed rather than queuing invisibly (C4a M5).
-    func route(_ entryID: UUID, openWindow: OpenWindowAction) {
-        if let id = frontWindowID, let select = selectors[id] {
+    /// Routes an opened entry from the menu bar: into the front window when one
+    /// exists, else opens a new library window showing it — so ⌘O and Open Recent
+    /// work with every window closed rather than queuing invisibly (C4a M5). When
+    /// `inNewWindow` is set (the "Open files in → New window" setting, S1a-4b),
+    /// it always spawns a new window instead of reusing the front one.
+    func route(_ entryID: UUID, openWindow: OpenWindowAction, inNewWindow: Bool = false) {
+        if inNewWindow {
+            openWindow(id: "library", value: LibraryWindowValue(entryID: entryID))
+        } else if let id = frontWindowID, let select = selectors[id] {
             select(entryID)
         } else {
             openWindow(id: "library", value: LibraryWindowValue(entryID: entryID))
@@ -78,13 +85,13 @@ final class OpenCoordinator {
     }
 
     /// Imports each URL into Recents (off-main) and routes it (front window, or a new
-    /// window when none is open). Used by the macOS File ▸ Open panel; Finder opens
-    /// arrive via `onOpenURL`.
-    func open(urls: [URL], store: RecentsStore, openWindow: OpenWindowAction) {
+    /// window when none is open or the setting asks for one). Used by the macOS
+    /// File ▸ Open panel; Finder opens arrive via `onOpenURL`.
+    func open(urls: [URL], store: RecentsStore, openWindow: OpenWindowAction, inNewWindow: Bool = false) {
         Task { @MainActor in
             for url in urls {
                 guard let entryID = await store.handleOpenedURL(url) else { continue }
-                route(entryID, openWindow: openWindow)
+                route(entryID, openWindow: openWindow, inNewWindow: inNewWindow)
             }
         }
     }
@@ -104,14 +111,14 @@ import UniformTypeIdentifiers
 extension OpenCoordinator {
     /// File ▸ Open (⌘O): an `NSOpenPanel` limited to the metafile types, routed to
     /// the front window, or a new window when none is open (C4a M5).
-    func presentOpenPanel(store: RecentsStore, openWindow: OpenWindowAction) {
+    func presentOpenPanel(store: RecentsStore, openWindow: OpenWindowAction, inNewWindow: Bool = false) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = MetafileTypes.readableContentTypes
         guard panel.runModal() == .OK else { return }
-        open(urls: panel.urls, store: store, openWindow: openWindow)
+        open(urls: panel.urls, store: store, openWindow: openWindow, inNewWindow: inNewWindow)
     }
 }
 

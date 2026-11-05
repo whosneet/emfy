@@ -17,6 +17,7 @@ import UIKit
 struct MetafileViewerScreen: View {
     @Environment(RecentsStore.self) private var store
     @Environment(EmfySettings.self) private var settings
+    @Environment(\.colorScheme) private var colorScheme
     // Non-optional: verified at runtime that the window's ToastCenter reaches the
     // compact pushed viewer (the "Image copied" toast appears there).
     @Environment(ToastCenter.self) private var toast
@@ -207,6 +208,11 @@ struct MetafileViewerScreen: View {
                 chromeHidden: effectiveChromeHidden,
                 defaultZoom: settings.defaultZoomOnOpen,
                 pageShadow: settings.pageShadow,
+                tilePaint: ViewerTilePaint.make(
+                    background: settings.pageBackground,
+                    darkMode: settings.darkPageMode,
+                    isDark: colorScheme == .dark
+                ),
                 onSingleTap: { toggleChrome() }
             )
             .ignoresSafeArea()

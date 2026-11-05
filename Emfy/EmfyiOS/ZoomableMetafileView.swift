@@ -1,5 +1,6 @@
 import CoreGraphics
 import EMFRender
+import os
 import SwiftUI
 import UIKit
 
@@ -107,6 +108,8 @@ struct ZoomableMetafileView: UIViewRepresentable {
     var defaultZoom: EmfySettings.DefaultZoom = .fit
     /// Whether the page carries its drop shadow (S1a-4). Toggles live.
     var pageShadow: Bool = true
+    /// How the tiles are painted — page background + dark-mode treatment (S1a-4b).
+    var tilePaint: TilePaint = .plain
     /// Toggles the chrome; reused as the drawing's "Show/Hide controls" action.
     let onSingleTap: () -> Void
 
@@ -152,6 +155,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
         tiled.onToggleChrome = onSingleTap
         tiled.applyAccessibility(chromeHidden: chromeHidden)
         tiled.setShadow(enabled: pageShadow)
+        tiled.setPaint(tilePaint)
         context.coordinator.tiledView = tiled
         scrollView.addSubview(tiled)
         scrollView.contentSize = naturalSize
@@ -185,6 +189,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
             tiled.onToggleChrome = onSingleTap
             tiled.applyAccessibility(chromeHidden: chromeHidden)
             tiled.setShadow(enabled: pageShadow)
+            tiled.setPaint(tilePaint)       // live page background + dark-mode treatment
             // Follow the display across a scale change (e.g. moving between
             // displays) — re-render the tiles at the new resolution.
             tiled.updateContentsScale(displayScale)
@@ -376,9 +381,27 @@ struct ZoomableMetafileView: UIViewRepresentable {
 private final class TiledMetafileView: UIView {
     private let prepared: MetafileRenderer.Prepared
     private let naturalSize: CGSize
+    /// The tile paint (page + dark-mode treatment), read on the tiled-layer's
+    /// background thread, set on the main thread — behind a lock (S1a-4b).
+    private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
 
     /// Zoom commands for the adjustable trait and the Zoom custom actions.
     weak var controller: MetafileZoomController?
+
+    /// Updates how tiles are painted and redraws them when it changes.
+    func setPaint(_ paint: TilePaint) {
+        let changed = paintLock.withLock { current -> Bool in
+            guard current != paint else { return false }
+            current = paint
+            return true
+        }
+        // CATiledLayer caches rasterised tiles; invalidate the layer directly so
+        // the visible tiles re-rasterise with the new paint (S1a-4b live update).
+        if changed {
+            setNeedsDisplay()
+            tiledLayer.setNeedsDisplay()
+        }
+    }
     /// Toggles the viewer chrome, for the "Show/Hide controls" custom action.
     var onToggleChrome: (() -> Void)?
     private var chromeHidden = false
@@ -478,19 +501,17 @@ private final class TiledMetafileView: UIView {
     // geometry off the main thread.
     nonisolated override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        // White only this tile — the metafile assumes a white page.
-        context.setFillColor(UIColor.white.cgColor)
-        context.fill(rect)
-        // UIKit's draw context is y-down; the renderer maps device space onto a
-        // y-up target (as its CGImage/PDF paths do), so flip around the full
-        // height before playing the records. The tile clip (set by CATiledLayer)
-        // limits what is actually rasterised.
-        context.translateBy(x: 0, y: naturalSize.height)
-        context.scaleBy(x: 1, y: -1)
-        _ = MetafileRenderer.render(
-            prepared,
-            into: context,
-            target: CGRect(origin: .zero, size: naturalSize)
-        )
+        let paint = paintLock.withLock { $0 }
+        let natural = naturalSize
+        let prepared = self.prepared
+        // Page, then the drawing, then the dark-mode treatment (S1a-4b). UIKit's
+        // draw context is y-down; the renderer targets a y-up space, so the ink
+        // replay flips around the full height first (scoped by TilePainter's
+        // save/restore, so the page fill and treatment stay in tile space).
+        TilePainter.paint(paint, into: context, rect: rect) { ctx in
+            ctx.translateBy(x: 0, y: natural.height)
+            ctx.scaleBy(x: 1, y: -1)
+            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural))
+        }
     }
 }

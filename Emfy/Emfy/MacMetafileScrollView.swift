@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import EMFRender
+import os
 import SwiftUI
 
 /// Drives the Mac viewer's live zoom state across the AppKit bridge and exposes the
@@ -84,6 +85,11 @@ struct MacMetafileScrollView: NSViewRepresentable {
     var defaultZoom: EmfySettings.DefaultZoom = .fit
     /// Whether the paper carries its drop shadow (S1a-4). Toggles live.
     var pageShadow: Bool = true
+    /// How the tiles are painted — page background + dark-mode treatment (S1a-4b).
+    /// Live: a change redraws the tiles.
+    var tilePaint: TilePaint = .plain
+    /// Plain scroll pans (default) or zooms about the cursor (S1a-4b). Mac only.
+    var scrollAction: EmfySettings.MacScrollAction = .pan
 
     /// The paper's drop shadow, built fresh each time it's applied (an `NSShadow`
     /// shouldn't be shared across views). `nil` when the setting is off.
@@ -146,6 +152,7 @@ struct MacMetafileScrollView: NSViewRepresentable {
         tiled.autoresizingMask = [.width, .height]
         tiled.setAccessibilityLabelText(drawingLabel)
         tiled.controller = controller
+        tiled.setPaint(tilePaint)
         paper.addSubview(tiled)
         scrollView.documentView = paper
 
@@ -158,7 +165,9 @@ struct MacMetafileScrollView: NSViewRepresentable {
         scrollView.onLayout = { [weak coordinator = context.coordinator] viewport in
             coordinator?.configureZoomScales(for: viewport)
         }
-        // ⌘-scroll magnifies, anchored at the cursor (plain scroll still scrolls).
+        // ⌘-scroll magnifies, anchored at the cursor (plain scroll still scrolls);
+        // with scroll-to-zoom the roles swap (S1a-4b).
+        scrollView.scrollAction = scrollAction
         scrollView.onCommandScroll = { [weak coordinator = context.coordinator] event in
             coordinator?.handleCommandScroll(event) ?? false
         }
@@ -171,9 +180,11 @@ struct MacMetafileScrollView: NSViewRepresentable {
         if let tiled = context.coordinator.tiledView {
             tiled.controller = controller
             tiled.setAccessibilityLabelText(drawingLabel)
+            tiled.setPaint(tilePaint)       // live page background + dark-mode treatment
         }
         // Live-toggle the paper shadow (the document view is the paper).
         scrollView.documentView?.shadow = pageShadow ? Self.makePaperShadow() : nil
+        (scrollView as? ZoomMetafileScrollView)?.scrollAction = scrollAction
     }
 
     /// Stop the `CATiledLayer` drawing into a view about to be freed, and break the
@@ -351,6 +362,8 @@ struct MacMetafileScrollView: NSViewRepresentable {
 private final class ZoomMetafileScrollView: NSScrollView {
     var onLayout: ((CGSize) -> Void)?
     var onCommandScroll: ((NSEvent) -> Bool)?
+    /// Plain scroll pans (default) or zooms about the cursor (S1a-4b).
+    var scrollAction: EmfySettings.MacScrollAction = .pan
 
     // Take keyboard focus, with a focus ring, so arrow/Page/Home/End scroll (A4).
     override var acceptsFirstResponder: Bool { true }
@@ -381,9 +394,12 @@ private final class ZoomMetafileScrollView: NSScrollView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        if allowsMagnification,
-           event.modifierFlags.contains(.command),
-           onCommandScroll?(event) == true {
+        // In scroll-to-pan (default) ⌘-scroll zooms; in scroll-to-zoom plain scroll
+        // zooms and ⌘-scroll pans. Either way the zoom path is `onCommandScroll`,
+        // anchored at the cursor; the other is AppKit's normal pan (S1a-4b).
+        let command = event.modifierFlags.contains(.command)
+        let shouldZoom = scrollAction == .zoom ? !command : command
+        if allowsMagnification, shouldZoom, onCommandScroll?(event) == true {
             return
         }
         super.scrollWheel(with: event)
@@ -463,9 +479,29 @@ private final class CenteringClipView: NSClipView {
 private final class TiledMetafileView: NSView {
     private let prepared: MetafileRenderer.Prepared
     private let naturalSize: CGSize
+    /// The tile paint (page + dark-mode treatment), read on the tiled-layer's
+    /// background thread, set on the main thread — behind a lock (S1a-4b).
+    private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
 
     /// Zoom commands for the accessibility value and the Zoom custom actions.
     weak var controller: MacMetafileZoomController?
+
+    /// Updates how tiles are painted and redraws them when it changes (page
+    /// background, or a dark-mode treatment switching with the appearance).
+    func setPaint(_ paint: TilePaint) {
+        let changed = paintLock.withLock { current -> Bool in
+            guard current != paint else { return false }
+            current = paint
+            return true
+        }
+        // CATiledLayer caches rasterised tiles; the view's setNeedsDisplay alone
+        // doesn't flush them, so invalidate the layer directly to re-rasterise the
+        // visible tiles with the new paint (S1a-4b live update).
+        if changed {
+            setNeedsDisplay(bounds)
+            layer?.setNeedsDisplay()
+        }
+    }
 
     init(prepared: MetafileRenderer.Prepared, naturalSize: CGSize) {
         self.prepared = prepared
@@ -516,16 +552,14 @@ private final class TiledMetafileView: NSView {
     // target is always the constant `naturalSize`.
     nonisolated override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        // White only this tile — the metafile assumes a white page.
-        context.setFillColor(CGColor(gray: 1, alpha: 1))
-        context.fill(dirtyRect)
-        // The tile clip (set by CATiledLayer) limits what is actually rasterised;
-        // the render call plays the whole picture into the view's y-up space.
-        _ = MetafileRenderer.render(
-            prepared,
-            into: context,
-            target: CGRect(origin: .zero, size: naturalSize)
-        )
+        let paint = paintLock.withLock { $0 }
+        let natural = naturalSize
+        let prepared = self.prepared
+        // Page, then the drawing (y-up here, so no flip), then the dark-mode
+        // treatment — all inside the tile's clip, set by CATiledLayer (S1a-4b).
+        TilePainter.paint(paint, into: context, rect: dirtyRect) { ctx in
+            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural))
+        }
     }
 
     // MARK: - Accessibility (image element + adjustable zoom + custom actions)
