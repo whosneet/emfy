@@ -69,9 +69,14 @@ enum ResolvedPen: Equatable, Sendable {
 /// a device point size at draw time — the transform in effect can change
 /// between SELECTOBJECT and EXTTEXTOUTW, exactly like a geometric pen's width.
 ///
-/// `Equatable`/`Sendable` are synthesised over CTFont: `CTFont` is a
-/// toll-free-bridged CoreFoundation type that conforms to both. Two resolved
-/// fonts are equal when their base CTFont and attributes match.
+/// `Equatable` is synthesised over the stored properties: CTFont is a
+/// toll-free-bridged CoreFoundation type that already conforms to Equatable
+/// (CFEqual), so two resolved fonts are equal when their base CTFont and
+/// attributes match. `Sendable` is `@unchecked`, NOT synthesised: as of the
+/// macOS 27.2 SDK CoreText still does not annotate CTFont as `Sendable`
+/// (verified by compile), so the conformance is asserted by hand — sound
+/// because a CTFont is an immutable, thread-safe CoreFoundation object once
+/// created, safe to read from any thread.
 struct ResolvedFont: Equatable, @unchecked Sendable {
     /// The substituted base font at a nominal size (`FontMapper.nominalSize`);
     /// the drawer copies it to the device size at draw time.
