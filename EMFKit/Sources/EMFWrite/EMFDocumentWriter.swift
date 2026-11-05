@@ -230,7 +230,9 @@ public enum EMFDocumentWriter {
     /// font, palette, mono/DIB-pattern brush, colour space) and the
     /// select/delete references (§2.3.8). The EMF decoder decodes only some of
     /// these, so the handle recompute reads the field straight from the bytes.
-    private static let handleFieldTypes: Set<UInt32> = [
+    /// Internal (not private) so `EMFDocumentBuilder.appendRaw` can fold a
+    /// passthrough record's handle index into its table-size recompute.
+    static let handleFieldTypes: Set<UInt32> = [
         37,  // EMR_SELECTOBJECT
         38,  // EMR_CREATEPEN
         39,  // EMR_CREATEBRUSHINDIRECT
