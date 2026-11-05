@@ -99,6 +99,11 @@ public enum EMFPlusObjectDiagnostic: Sendable, Equatable {
     /// A continued sequence never reached its TotalObjectSize before it was
     /// interrupted or the stream ended; it is dropped without a definition.
     case danglingContinuation(objectID: UInt8, totalObjectSize: Int, accumulatedBytes: Int)
+    /// A continued sequence declared a TotalObjectSize larger than the whole
+    /// assembled EMF+ stream, so it can never complete; the opening chunk is
+    /// dropped without starting an accumulation (§8 — a 4 GiB declaration must not
+    /// churn every continuation). `streamBytes` is the assembled stream size.
+    case continuationExceedsStream(objectID: UInt8, totalObjectSize: Int, streamBytes: Int)
     /// A continuation-flagged EmfPlusObject chunk held fewer than the 4 bytes
     /// needed for its TotalObjectSize prefix; the chunk is dropped.
     case chunkTooShort(dataSize: Int)
@@ -170,8 +175,12 @@ extension EMFPlusStream {
             }
 
             // Resolve any pending continued sequence before treating this record
-            // as a fresh object.
-            if let p = pending {
+            // as a fresh object. Take ownership of the accumulator up front (clear
+            // `pending`): leaving `pending` as a second owner makes every `append`
+            // copy-on-write the whole accumulation — O(n²) over a long sequence
+            // (fix 1).
+            if var p = pending {
+                pending = nil
                 let matchesPending = continues && objectID == p.objectID && rawType == p.rawType
                 if matchesPending {
                     let chunk = ByteReader(record.data)
@@ -183,8 +192,7 @@ extension EMFPlusStream {
                         diagnostics.append(.danglingContinuation(
                             objectID: p.objectID, totalObjectSize: p.totalObjectSize,
                             accumulatedBytes: p.accumulated.count))
-                        pending = nil
-                        continue
+                        continue   // pending already cleared above
                     }
                     // L10: the opening chunk's TotalObjectSize is authoritative; a
                     // continuation whose repeated prefix disagrees is still consumed
@@ -193,31 +201,29 @@ extension EMFPlusStream {
                         diagnostics.append(.continuationSizeDisagreement(
                             objectID: p.objectID, expected: p.totalObjectSize, got: Int(chunkTotal32)))
                     }
-                    var accumulated = p.accumulated
-                    accumulated.append(objectBytes)
-                    if accumulated.count >= p.totalObjectSize {
-                        if accumulated.count > p.totalObjectSize {
+                    // `p` is now the sole owner, so this append is amortised O(1)
+                    // (no copy of the whole accumulation per chunk) — fix 1.
+                    p.accumulated.append(objectBytes)
+                    if p.accumulated.count >= p.totalObjectSize {
+                        if p.accumulated.count > p.totalObjectSize {
                             diagnostics.append(.continuationOverflow(
                                 objectID: p.objectID, totalObjectSize: p.totalObjectSize,
-                                accumulatedBytes: accumulated.count))
+                                accumulatedBytes: p.accumulated.count))
                         }
                         definitions.append(EMFPlusObjectDefinition(
                             objectID: p.objectID, objectType: p.objectType,
-                            data: Data(accumulated.prefix(p.totalObjectSize))))
-                        pending = nil
+                            data: Data(p.accumulated.prefix(p.totalObjectSize))))
                     } else {
-                        pending = Pending(
-                            objectID: p.objectID, objectType: p.objectType, rawType: p.rawType,
-                            totalObjectSize: p.totalObjectSize, accumulated: accumulated)
+                        pending = p
                     }
                     continue
                 } else {
-                    // The pending sequence can no longer complete: drop it and
-                    // reprocess this record as a fresh object below.
+                    // The pending sequence can no longer complete: it stays dropped
+                    // (pending is already nil) and this record is reprocessed as a
+                    // fresh object below.
                     diagnostics.append(.continuationMismatch(
                         pendingID: p.objectID, pendingType: p.objectType,
                         arrivingID: objectID, arrivingType: objectType))
-                    pending = nil
                 }
             }
 
@@ -229,6 +235,14 @@ extension EMFPlusStream {
                     continue
                 }
                 let total = Int(total32)
+                // A TotalObjectSize larger than the whole assembled stream can never
+                // complete — drop the opening chunk instead of starting an
+                // accumulation that only grows and never binds (fix 1, §8).
+                if total > assembledByteCount {
+                    diagnostics.append(.continuationExceedsStream(
+                        objectID: objectID, totalObjectSize: total, streamBytes: assembledByteCount))
+                    continue
+                }
                 if objectBytes.count >= total {
                     // Completes within this single chunk.
                     if objectBytes.count > total {

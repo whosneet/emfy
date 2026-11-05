@@ -484,4 +484,45 @@ struct EMFPlusAbuseTests {
 
     @Test("a DrawDriverString glyph-count bomb is rejected, not allocated")
     func drawDriverStringCountBombSurvives() throws { try expectCountBomb(drawDriverStringCountBomb(), type: 0x4036, "DrawDriverString glyph-count bomb") }
+
+    // MARK: - (l) Continued-object chunk storm (fix 1: O(n²)→O(n) + oversized drop)
+
+    /// Hundreds of thousands of tiny C-flagged EmfPlusObject chunks for ONE id,
+    /// each declaring TotalObjectSize = 0xFFFFFFFF (4 GiB — far beyond the whole
+    /// stream). Two defects made this pathological before the fix:
+    ///   1. the object table accumulated with `if var p = pending { … p.data.append }`
+    ///      while `pending` still owned the buffer, so every chunk COW-copied the
+    ///      whole accumulation — O(n²), seconds-to-minutes on a hostile file;
+    ///   2. nothing capped a TotalObjectSize that can never be reached, so a 4 GiB
+    ///      declaration churned every chunk.
+    /// After the fix the table takes ownership before appending (O(n)) AND drops a
+    /// sequence whose TotalObjectSize exceeds the stream's own assembled byte count,
+    /// so this file parses and renders in milliseconds. The §8 contract (no hang,
+    /// best-effort output) holds — the trailing well-formed fill still draws.
+    @Test("a continued-object chunk storm parses and renders within a strict time budget")
+    func continuedObjectChunkStorm() throws {
+        let chunkCount = 200_000
+        let chunk = le { $0.u32(0xFFFF_FFFF); $0.u32(0xDEAD_BEEF) }   // TotalObjectSize + 4 payload bytes
+        var stream = plusHeader()
+        stream.reserveCapacity(stream.count + chunkCount * 20 + 64)
+        for _ in 0 ..< chunkCount { stream += plusObject(id: 5, type: 1, cont: true, payload: chunk) }
+        stream += fillRectsDirect(argb(255, 0, 128, 0), (10, 10, 40, 40))   // engages EMF+ mode
+        stream += plusEndOfFile()
+
+        var fixture = RenderFixture()
+        fixture.plusComment(stream)
+        let file = try fixture.parsed()
+
+        let clock = ContinuousClock()
+        var raster: RasterizedImage?
+        let elapsed = clock.measure {
+            if let (image, _) = EMFRenderer.makeImage(file) { raster = RasterizedImage(image) }
+        }
+        let milli = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) * 1e-15
+        print("[perf] continued-object chunk storm (\(chunkCount) chunks) rendered in " + String(format: "%.1f ms", milli))
+        let r = try #require(raster, "chunk storm: makeImage returned nil")
+        // Positive signal: the trailing well-formed green fill still drew.
+        #expect(Self.isColorGreen(r[25, 25]), "the green fill should render after the chunk storm, got \(r[25, 25])")
+        #expect(elapsed < .seconds(2), "the chunk storm took \(milli) ms, over the 2 s budget (O(n²) regression?)")
+    }
 }

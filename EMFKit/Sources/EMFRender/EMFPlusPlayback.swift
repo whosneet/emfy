@@ -113,6 +113,11 @@ struct EMFPlusPlayback {
         dc: inout DeviceContext,
         log: inout EMFRenderLog
     ) {
+        // The object table can never accumulate more than the whole assembled
+        // stream (every continuation chunk draws from it), so cap continued
+        // objects there (fix 1).
+        table.streamByteCeiling = stream.assembledByteCount
+
         // Group the reassembled EMF+ records by the file record (comment) their
         // header starts in. Records are already in stream order.
         var byComment: [Int: [EMFPlusRecord]] = [:]
@@ -1472,6 +1477,13 @@ private struct ObjectTable {
     }
     private var pending: Pending?
 
+    /// The total assembled EMF+ stream byte count — the hard upper bound on what
+    /// any continued object can ever accumulate (every continuation chunk's object
+    /// bytes come out of that one stream). A declared TotalObjectSize above it can
+    /// never be reached, so such a sequence is dropped at its opening chunk rather
+    /// than churned (fix 1, §8). `Int.max` until the playback sets the real size.
+    var streamByteCeiling = Int.max
+
     /// Applies an EmfPlusObject record, returning the slot id it BOUND (wrote),
     /// or `nil` when the record only accumulated a continuation chunk or named
     /// an out-of-range slot. The caller uses the returned id to invalidate any
@@ -1483,28 +1495,38 @@ private struct ObjectTable {
         let rawType = UInt8((flags >> 8) & 0x7F)
         let id = UInt8(flags & 0x00FF)
 
-        // Resolve any in-progress continued sequence first.
+        // Resolve any in-progress continued sequence first. Take ownership of the
+        // accumulator BEFORE appending (clear `pending` up front): leaving
+        // `pending` as a second owner of the buffer makes every `append`
+        // copy-on-write the whole accumulation — O(n²) over a long continued
+        // sequence (fix 1).
         if var p = pending {
+            pending = nil
             if continues, id == p.id, rawType == p.rawType {
                 let chunk = [UInt8](record.data)
-                guard chunk.count >= 4 else { pending = nil; return nil }
+                guard chunk.count >= 4 else { return nil }
                 p.data.append(contentsOf: chunk[4...])
                 if p.data.count >= p.total {
-                    let bound = bind(id: p.id, rawType: p.rawType, data: Data(p.data.prefix(p.total)), log: &log)
-                    pending = nil
-                    return bound
-                } else {
-                    pending = p
-                    return nil
+                    return bind(id: p.id, rawType: p.rawType, data: Data(p.data.prefix(p.total)), log: &log)
                 }
+                pending = p
+                return nil
             }
-            pending = nil   // sequence can no longer complete; reprocess fresh
+            // The sequence can no longer complete; it stays dropped (pending is
+            // already nil) and this record is reprocessed as a fresh object below.
         }
 
         if continues {
             let chunk = [UInt8](record.data)
             guard chunk.count >= 4 else { return nil }
             let total = Int(UInt32(chunk[0]) | (UInt32(chunk[1]) << 8) | (UInt32(chunk[2]) << 16) | (UInt32(chunk[3]) << 24))
+            // A TotalObjectSize larger than the whole assembled stream can never be
+            // reached — drop it at the opening chunk instead of accumulating every
+            // continuation (fix 1, §8). Noted on the honesty channel (coalesced).
+            if total > streamByteCeiling {
+                log.noteEMFPlusObjectIssue(.undecodable)
+                return nil
+            }
             let objectBytes = Data(chunk[4...])
             if objectBytes.count >= total {
                 return bind(id: id, rawType: rawType, data: Data(objectBytes.prefix(total)), log: &log)

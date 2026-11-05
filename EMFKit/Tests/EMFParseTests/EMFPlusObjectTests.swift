@@ -170,9 +170,11 @@ struct EMFPlusObjectEnvelopeTests {
 
     @Test("continuation with a mismatched ObjectID → diagnostic, pending dropped, chunk starts fresh")
     func mismatchedContinuation() throws {
+        // Totals stay within the assembled stream (132 bytes) so the oversized-drop
+        // guard (fix 1) does not fire — this exercises the mismatch path.
         let (defs, diags) = try parseObjects([
-            // Opens an incomplete sequence for id 7 (40 of 200 bytes).
-            objectRecord(continues: true, objectType: 1, objectID: 7, totalObjectSize: 200,
+            // Opens an incomplete sequence for id 7 (40 of 120 bytes).
+            objectRecord(continues: true, objectType: 1, objectID: 7, totalObjectSize: 120,
                          objectBytes: (0 ..< 40).map { UInt8($0) }),
             // A continuation for a different id: drops the pending, starts fresh,
             // and completes in one chunk (60 of 60 bytes).
@@ -187,14 +189,36 @@ struct EMFPlusObjectEnvelopeTests {
 
     @Test("pending continuation dangling at stream end → diagnostic, dropped")
     func danglingContinuation() throws {
+        // total 50 ≤ the 56-byte assembled stream, so the oversized-drop guard
+        // (fix 1) does not fire; the 40 accumulated bytes fall short of 50 and the
+        // sequence dangles at stream end.
         let (defs, diags) = try parseObjects([
-            objectRecord(continues: true, objectType: 1, objectID: 3, totalObjectSize: 200,
-                         objectBytes: (0 ..< 100).map { UInt8($0) })
+            objectRecord(continues: true, objectType: 1, objectID: 3, totalObjectSize: 50,
+                         objectBytes: (0 ..< 40).map { UInt8($0) })
         ])
         #expect(defs.isEmpty)
         #expect(diags == [
-            .danglingContinuation(objectID: 3, totalObjectSize: 200, accumulatedBytes: 100)
+            .danglingContinuation(objectID: 3, totalObjectSize: 50, accumulatedBytes: 40)
         ])
+    }
+
+    @Test("a continuation declaring more than the whole stream is dropped, not accumulated")
+    func continuationExceedsStreamDropped() throws {
+        // TotalObjectSize 0xFFFFFFFF (4 GiB) dwarfs the tiny assembled stream, so
+        // the sequence can never complete — the opening chunk is dropped and no
+        // accumulation begins (fix 1, §8). No dangling diagnostic follows because
+        // nothing was left pending.
+        let (defs, diags) = try parseObjects([
+            objectRecord(continues: true, objectType: 1, objectID: 7, totalObjectSize: 0xFFFF_FFFF,
+                         objectBytes: [0, 0, 0, 0])
+        ])
+        #expect(defs.isEmpty)
+        #expect(diags.contains {
+            if case .continuationExceedsStream(let id, let total, _) = $0 {
+                return id == 7 && total == 0xFFFF_FFFF
+            }
+            return false
+        }, "expected a continuationExceedsStream diagnostic, got \(diags)")
     }
 
     @Test("ObjectID > 63 → diagnostic, object still produced")
@@ -220,15 +244,18 @@ struct EMFPlusObjectEnvelopeTests {
 
     @Test("too-short continuation mid-sequence → chunkTooShort + dangling, pending dropped")
     func chunkTooShortMidSequence() throws {
+        // total 60 ≤ the 68-byte assembled stream, so the oversized-drop guard
+        // (fix 1) does not fire and the opening chunk stays pending; the empty
+        // follow-up chunk is then too short to hold its TotalObjectSize prefix.
         let (defs, diags) = try parseObjects([
-            objectRecord(continues: true, objectType: 1, objectID: 5, totalObjectSize: 100,
+            objectRecord(continues: true, objectType: 1, objectID: 5, totalObjectSize: 60,
                          objectBytes: (0 ..< 40).map { UInt8($0) }),
             objectRecord(continues: true, objectType: 1, objectID: 5, objectBytes: []),
         ])
         #expect(defs.isEmpty)
         #expect(diags == [
             .chunkTooShort(dataSize: 0),
-            .danglingContinuation(objectID: 5, totalObjectSize: 100, accumulatedBytes: 40),
+            .danglingContinuation(objectID: 5, totalObjectSize: 60, accumulatedBytes: 40),
         ])
     }
 

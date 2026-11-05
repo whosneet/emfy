@@ -111,6 +111,9 @@ func describe(_ diagnostic: EMFPlusObjectDiagnostic) -> String {
     case .danglingContinuation(let objectID, let totalObjectSize, let accumulatedBytes):
         return "EMF+ continued object \(objectID): only \(accumulatedBytes) of \(totalObjectSize) bytes "
             + "before the stream ended; dropped"
+    case .continuationExceedsStream(let objectID, let totalObjectSize, let streamBytes):
+        return "EMF+ continued object \(objectID): TotalObjectSize \(totalObjectSize) exceeds the "
+            + "\(streamBytes)-byte stream; can never complete, dropped"
     case .chunkTooShort(let dataSize):
         return "EMF+ object chunk with \(dataSize) data bytes cannot hold its TotalObjectSize prefix; dropped"
     case .continuationSizeDisagreement(let objectID, let expected, let got):
@@ -200,11 +203,11 @@ func describe(_ error: MetafileOpenError) -> String {
         return describe(gzipError)
     case .nestedGzip:
         return "nested gzip refused: the gzip payload is itself gzip-compressed"
+    case .inputTooLarge(let limit):
+        return "input exceeds the \(limit)-byte front-door size cap; refused before parsing"
     }
 }
 
-    case .inputTooLarge(let limit):
-        return "input exceeds the \(limit)-byte front-door size cap; refused before parsing"
 func describe(_ diagnostic: MetafileDiagnostic) -> String {
     switch diagnostic {
     case .sniff(let sniff): return describe(sniff)
