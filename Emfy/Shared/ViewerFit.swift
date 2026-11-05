@@ -59,6 +59,36 @@ enum ViewerFit {
         return min(max(fit, minScale), maxScale)
     }
 
+    /// The clip-bounds origin that centres a `content` document within the
+    /// *unobscured* region of a `bounds`-sized viewport (both in the clip view's
+    /// bounds coordinates), given the `insets` the sidebar/toolbar occlude (same
+    /// coordinates). Only an axis where the content is smaller than the viewport is
+    /// re-centred; a larger axis keeps `proposed`, so a zoomed page scrolls freely.
+    ///
+    /// For the Mac's non-flipped clip view the `top` inset (toolbar) occludes the
+    /// HIGH-y (visual top) edge, and the `leading` inset (floating sidebar) occludes
+    /// the LOW-x (left) edge. The document centre must appear at the centre of the
+    /// unobscured region `[leading, bounds − trailing]` × `[bottom, bounds − top]`,
+    /// which gives the signs below. (C4b review #1: the former inline x formula
+    /// added `leading` and subtracted `trailing`, centring in a rect anchored at the
+    /// window's left edge, so a small page sat one sidebar-width left of the pane
+    /// centre. The y formula was already correct for the non-flipped axis.)
+    static func centeredClipOrigin(
+        proposed: CGPoint,
+        content: CGSize,
+        bounds: CGSize,
+        insets: Insets
+    ) -> CGPoint {
+        var origin = proposed
+        if bounds.width > content.width {
+            origin.x = (content.width - bounds.width + insets.trailing - insets.leading) / 2
+        }
+        if bounds.height > content.height {
+            origin.y = (content.height - bounds.height + insets.top - insets.bottom) / 2
+        }
+        return origin
+    }
+
     /// The inset that centres `content * scale` within the safe-area-reduced
     /// viewport (a scroll view's `contentInset`): the safe-area inset on each edge
     /// plus half the slack on each axis. Zero extra on an axis where the scaled

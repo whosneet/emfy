@@ -109,6 +109,46 @@ import Testing
         #expect(large.leading == 20)
         #expect(large.top == 20)
     }
+
+    // MARK: - Mac clip-view centring (C4b review #1)
+
+    @Test func centeredClipOriginCentresSmallPageInUnobscuredRegion() {
+        let content = CGSize(width: 400, height: 300)
+        let bounds = CGSize(width: 1000, height: 800)
+        // No insets: the page centre lands at the viewport centre.
+        let o0 = ViewerFit.centeredClipOrigin(proposed: .zero, content: content, bounds: bounds, insets: .zero)
+        #expect(abs((content.width / 2 - o0.x) - bounds.width / 2) < 1e-9)
+
+        // A 260 pt leading inset (the macOS-26 floating sidebar): the page centres in
+        // [260, 1000] — i.e. the detail pane — so its centre appears at 630, and it
+        // moves RIGHT (origin more negative), not left (the review #1 sign bug).
+        let sidebar = ViewerFit.Insets(leading: 260)
+        let o1 = ViewerFit.centeredClipOrigin(proposed: .zero, content: content, bounds: bounds, insets: sidebar)
+        let docCentreOnScreen = content.width / 2 - o1.x
+        #expect(abs(docCentreOnScreen - (260 + bounds.width) / 2) < 1e-9)   // 630
+        #expect(o1.x < o0.x)                                                // shifted right, clear of the sidebar
+    }
+
+    @Test func centeredClipOriginHonoursTopInsetOnNonFlippedAxis() {
+        let content = CGSize(width: 400, height: 300)
+        let bounds = CGSize(width: 1000, height: 800)
+        // A 52 pt top (toolbar) inset occludes the high-y edge; the page centres in
+        // the lower [0, 748] of the visual height.
+        let o = ViewerFit.centeredClipOrigin(proposed: .zero, content: content, bounds: bounds, insets: ViewerFit.Insets(top: 52))
+        let docCentreFromBottom = content.height / 2 - o.y
+        #expect(abs(docCentreFromBottom - (bounds.height - 52) / 2) < 1e-9)   // 374
+    }
+
+    @Test func centeredClipOriginKeepsProposedForLargerPage() {
+        let content = CGSize(width: 2000, height: 1600)   // larger than the viewport on both axes
+        let bounds = CGSize(width: 1000, height: 800)
+        let proposed = CGPoint(x: 123, y: 456)
+        let o = ViewerFit.centeredClipOrigin(
+            proposed: proposed, content: content, bounds: bounds,
+            insets: ViewerFit.Insets(top: 52, leading: 260)
+        )
+        #expect(o == proposed)   // a zoomed page scrolls freely; the origin is untouched
+    }
 }
 
 // MARK: - DocumentSession

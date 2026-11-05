@@ -412,22 +412,24 @@ private final class CenteringClipView: NSClipView {
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var rect = super.constrainBoundsRect(proposedBounds)
         guard let documentView else { return rect }
-        let docFrame = documentView.frame
-        // Safe-area (toolbar) insets are in points; convert to this clip view's
-        // bounds coordinate system, which the magnification scales (bounds = frame /
-        // magnification). The clip is non-flipped (y up), so the toolbar's `top`
-        // inset reserves the high-y edge.
+        // Safe-area insets are in points; convert to this clip view's bounds
+        // coordinates, which the magnification scales (bounds = frame / magnification).
+        // The scroll view ignores the safe area and extends under the toolbar and the
+        // macOS-26 floating sidebar, so those insets mark the unobscured detail rect.
         let insets = enclosingScrollView?.safeAreaInsets ?? safeAreaInsets
         let sx = frame.width > 0 ? bounds.width / frame.width : 1
         let sy = frame.height > 0 ? bounds.height / frame.height : 1
-        let topB = insets.top * sy, bottomB = insets.bottom * sy
-        let leftB = insets.left * sx, rightB = insets.right * sx
-        if rect.width > docFrame.width {
-            rect.origin.x = (docFrame.width - rect.width - rightB + leftB) / 2
-        }
-        if rect.height > docFrame.height {
-            rect.origin.y = (docFrame.height - rect.height - bottomB + topB) / 2
-        }
+        rect.origin = ViewerFit.centeredClipOrigin(
+            proposed: rect.origin,
+            content: documentView.frame.size,
+            bounds: rect.size,
+            insets: ViewerFit.Insets(
+                top: insets.top * sy,
+                leading: insets.left * sx,
+                bottom: insets.bottom * sy,
+                trailing: insets.right * sx
+            )
+        )
         return rect
     }
 }
