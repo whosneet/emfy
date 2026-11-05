@@ -222,8 +222,13 @@ final class RecentsStore {
         for path in paths where !path.isEmpty {
             let source = URL(fileURLWithPath: path)
             guard let data = try? Data(contentsOf: source) else { continue }
-            let dest = FileManager.default.temporaryDirectory
-                .appendingPathComponent("UISeed-\(UUID().uuidString)-\(source.lastPathComponent)")
+            // Copy into a unique temporary subdirectory under the file's REAL name, so
+            // the seeded entry (and every screenshot) shows the original file name
+            // rather than a "UISeed-<UUID>-" prefix.
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("UISeed-\(UUID().uuidString)", isDirectory: true)
+            guard (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil else { continue }
+            let dest = dir.appendingPathComponent(source.lastPathComponent)
             guard (try? data.write(to: dest)) != nil else { continue }
             _ = await handleOpenedURL(dest)
         }
