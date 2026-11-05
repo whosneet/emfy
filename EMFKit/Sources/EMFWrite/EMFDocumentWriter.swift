@@ -1,0 +1,250 @@
+import Foundation
+import EMFParse
+
+/// Builds a complete EMF document from a parsed `EMFFile` — the re-emit entry
+/// point (v3 plan §11.2, E0a entry (a)). Each body record is typed-encoded when
+/// `EMFRecordEncoder.isFaithfullyEncodable` says the decoder round-trips it, and
+/// otherwise re-emitted from its original source bytes (unknown records,
+/// `.unsupported` DIBs, extended fonts, pattern-DIB pens). The EMR_HEADER's
+/// Bytes, Records and Handles are recomputed from what was actually written and
+/// never trusted from the input (header advisory fields, primer §8 / delta D4);
+/// every other header byte — bounds, frame, device, millimetres, description,
+/// pixel-format fields — is preserved verbatim by patching only those three
+/// fields in the original header record.
+public enum EMFDocumentWriter {
+
+    /// Re-emits `file` as a fresh EMF byte stream. `source` MUST be the bytes
+    /// `file` was parsed from: records the writer does not typed-encode are
+    /// sliced from it (every slice is bounds-checked, so a mismatched or
+    /// truncated `source` yields a typed error, never a trap).
+    ///
+    /// The result re-parses to a record stream equal to `file`'s (same count and
+    /// order; typed payloads equal; passthrough bytes identical) with a header
+    /// whose Bytes/Records/Handles are now correct for the bytes written.
+    public static func reEmit(_ file: EMFFile, source: Data) throws(EMFWriteError) -> Data {
+        let src = [UInt8](source)
+
+        // The header record is always records[0] after a successful parse.
+        let headerRecord = file.records[0]
+        var headerBytes = try rawRecordBytes(src, headerRecord)
+
+        // Encode (or pass through) every body record.
+        var bodyChunks: [[UInt8]] = []
+        bodyChunks.reserveCapacity(file.records.count - 1)
+
+        if file.records.count > 1 {
+            for index in 1 ..< file.records.count {
+                let record = file.records[index]
+                let payload = file.payload(of: record)
+                if EMFRecordEncoder.isFaithfullyEncodable(payload) {
+                    let encoded = try EMFRecordEncoder.encode(payload)
+                    bodyChunks.append([UInt8](encoded))
+                } else {
+                    bodyChunks.append(try rawRecordBytes(src, record))
+                }
+            }
+        }
+
+        let bodyTotal = bodyChunks.reduce(0) { $0 + $1.count }
+        let totalBytes = headerBytes.count + bodyTotal
+        guard totalBytes <= Int(UInt32.max) else {
+            throw .fileTooLarge(byteLength: totalBytes)
+        }
+        // Record count is bounded by the walker's 1,000,000 cap, so it always
+        // fits a UInt32; computed defensively all the same.
+        let recordCount = UInt32(clamping: file.records.count)
+        // Handles is recomputed from the raw record stream (not the decoded
+        // payloads): object-creation records the EMF decoder does not decode —
+        // EMR_CREATEPALETTE, EMR_CREATEMONOBRUSH, … — still consume table slots,
+        // and all creation/reference records carry their handle index as the
+        // first body field at offset 8 ([MS-EMF] §2.3.7/§2.3.8).
+        let handleCount = try computeHandleCountRaw(src, file.records)
+
+        patchUInt32(&headerBytes, at: 48, UInt32(totalBytes))  // Bytes
+        patchUInt32(&headerBytes, at: 52, recordCount)         // Records
+        patchUInt16(&headerBytes, at: 56, handleCount)         // Handles
+
+        var out: [UInt8] = []
+        out.reserveCapacity(totalBytes)
+        out.append(contentsOf: headerBytes)
+        for chunk in bodyChunks {
+            out.append(contentsOf: chunk)
+        }
+        return Data(out)
+    }
+
+    // MARK: - Shared internals (used by EMFDocumentBuilder too)
+
+    /// The exact source bytes of one walked record (§8 bounds-checked). A record
+    /// the `EMFFile` claims exists but whose range falls outside `src` is a
+    /// mismatch between `file` and `source` — a typed error, never a trap.
+    static func rawRecordBytes(
+        _ src: [UInt8],
+        _ record: EMFRawRecord
+    ) throws(EMFWriteError) -> [UInt8] {
+        let start = record.offset
+        let size = Int(record.size)
+        guard start >= 0, size >= 0, size <= src.count, start <= src.count - size else {
+            throw .sourceRecordOutOfBounds(recordOffset: start, recordSize: record.size)
+        }
+        return Array(src[start ..< start + size])
+    }
+
+    /// The handle-table size (header `Handles`): one past the largest object
+    /// table index any record creates, selects, or deletes, with a floor of 1
+    /// (index 0 is reserved). Stock objects (high bit set) are built-in and
+    /// never table entries. Overflows the UInt16 field → typed error.
+    static func computeHandleCount(
+        _ payloads: [EMFRecordPayload]
+    ) throws(EMFWriteError) -> UInt16 {
+        var maxIndex: UInt32 = 0
+        var sawAny = false
+        for payload in payloads {
+            for raw in tableIndices(of: payload) {
+                sawAny = true
+                if raw > maxIndex { maxIndex = raw }
+            }
+        }
+        guard sawAny else { return 1 }
+        // tableIndices only yields values with the stock bit clear, so
+        // maxIndex <= 0x7FFF_FFFF and the increment cannot overflow.
+        let count = maxIndex + 1
+        guard count <= UInt32(UInt16.max) else {
+            throw .objectTableOverflow(index: maxIndex)
+        }
+        return UInt16(count)
+    }
+
+    /// Record types that put an object-table handle in their first body field
+    /// (record offset 8): the creation records ([MS-EMF] §2.3.7 — pen, brush,
+    /// font, palette, mono/DIB-pattern brush, colour space) and the
+    /// select/delete references (§2.3.8). The EMF decoder decodes only some of
+    /// these, so the handle recompute reads the field straight from the bytes.
+    private static let handleFieldTypes: Set<UInt32> = [
+        37,  // EMR_SELECTOBJECT
+        38,  // EMR_CREATEPEN
+        39,  // EMR_CREATEBRUSHINDIRECT
+        40,  // EMR_DELETEOBJECT
+        49,  // EMR_CREATEPALETTE
+        82,  // EMR_EXTCREATEFONTINDIRECTW
+        93,  // EMR_CREATEMONOBRUSH
+        94,  // EMR_CREATEDIBPATTERNBRUSHPT
+        95,  // EMR_EXTCREATEPEN
+        99,  // EMR_CREATECOLORSPACE
+        122, // EMR_CREATECOLORSPACEW
+    ]
+
+    /// The handle-table size recomputed from the raw record stream: one past the
+    /// largest object-table index any creation/reference record names, floor 1.
+    /// Stock handles (high bit set) are filtered out. A record too short to hold
+    /// the field is skipped. Overflows the UInt16 field → typed error.
+    static func computeHandleCountRaw(
+        _ src: [UInt8],
+        _ records: [EMFRawRecord]
+    ) throws(EMFWriteError) -> UInt16 {
+        var maxIndex: UInt32 = 0
+        var sawAny = false
+        for record in records where handleFieldTypes.contains(record.type) {
+            let fieldOffset = record.offset + 8
+            guard record.size >= 12, fieldOffset >= 0, fieldOffset <= src.count - 4 else { continue }
+            let raw = UInt32(src[fieldOffset])
+                | (UInt32(src[fieldOffset + 1]) << 8)
+                | (UInt32(src[fieldOffset + 2]) << 16)
+                | (UInt32(src[fieldOffset + 3]) << 24)
+            guard raw & 0x8000_0000 == 0 else { continue }   // stock object
+            sawAny = true
+            if raw > maxIndex { maxIndex = raw }
+        }
+        guard sawAny else { return 1 }
+        let count = maxIndex + 1                              // maxIndex <= 0x7FFF_FFFF
+        guard count <= UInt32(UInt16.max) else {
+            throw .objectTableOverflow(index: maxIndex)
+        }
+        return UInt16(count)
+    }
+
+    /// The object-table indices a payload references (empty for non-object
+    /// records). Stock-object references are filtered out — they are not table
+    /// entries ([MS-EMF] §2.1.31).
+    private static func tableIndices(of payload: EMFRecordPayload) -> [UInt32] {
+        func tableOnly(_ raw: UInt32) -> [UInt32] {
+            raw & 0x8000_0000 == 0 ? [raw] : []
+        }
+        switch payload {
+        case .createPen(let p): return tableOnly(p.ihPen)
+        case .extCreatePen(let p): return tableOnly(p.ihPen)
+        case .createBrushIndirect(let p): return tableOnly(p.ihBrush)
+        case .extCreateFontIndirectW(let p): return tableOnly(p.ihFonts)
+        case .selectObject(let handle), .deleteObject(let handle):
+            if case .table(let index) = handle { return tableOnly(index) }
+            return []
+        default:
+            return []
+        }
+    }
+
+    /// A canonical EMR_HEADER ([MS-EMF] §2.3.4.2) with the HeaderExtension2
+    /// variant (108-byte fixed part, §2.2.9–2.2.11) and an optional UTF-16LE
+    /// description right after it. Used by the from-scratch builder; re-emit
+    /// preserves the original header instead. `bytes`/`records`/`handles` are
+    /// the recomputed accounting fields.
+    static func encodeCanonicalHeader(
+        bounds: RectL,
+        frame: RectL,
+        device: SizeL,
+        millimeters: SizeL,
+        description: String?,
+        bytes: UInt32,
+        records: UInt32,
+        handles: UInt16
+    ) -> [UInt8] {
+        let descUnits: [UInt16] = description.map { Array($0.utf16) } ?? []
+        let nDescription = UInt32(clamping: descUnits.count)
+        let fixedSize = 108
+        let offDescription: UInt32 = descUnits.isEmpty ? 0 : UInt32(fixedSize)
+
+        var b = ByteWriter()
+        b.appendUInt32(1)                                  // @0  iType = EMR_HEADER
+        // nSize patched below once the description padding is known.
+        b.appendUInt32(0)                                  // @4  nSize placeholder
+        b.appendRectL(bounds)                              // @8  rclBounds
+        b.appendRectL(frame)                               // @24 rclFrame
+        b.appendUInt32(0x464D_4520)                        // @40 RecordSignature " EMF"
+        b.appendUInt32(0x0001_0000)                        // @44 Version
+        b.appendUInt32(bytes)                              // @48 Bytes
+        b.appendUInt32(records)                            // @52 Records
+        b.appendUInt16(handles)                            // @56 Handles
+        b.appendUInt16(0)                                  // @58 Reserved
+        b.appendUInt32(nDescription)                       // @60 nDescription
+        b.appendUInt32(offDescription)                     // @64 offDescription
+        b.appendUInt32(0)                                  // @68 nPalEntries
+        b.appendSizeL(device)                              // @72 Device
+        b.appendSizeL(millimeters)                         // @80 Millimeters
+        b.appendUInt32(0)                                  // @88 cbPixelFormat
+        b.appendUInt32(0)                                  // @92 offPixelFormat
+        b.appendUInt32(0)                                  // @96 bOpenGL
+        b.appendUInt32(0)                                  // @100 MicrometersX
+        b.appendUInt32(0)                                  // @104 MicrometersY
+        for unit in descUnits {                            // @108 description
+            b.appendUInt16(unit)
+        }
+        b.padTo4()
+
+        var headerBytes = b.bytes
+        patchUInt32(&headerBytes, at: 4, UInt32(clamping: headerBytes.count))  // nSize
+        return headerBytes
+    }
+
+    /// A canonical EMR_EOF record ([MS-EMF] §2.3.4.1) with no palette: 20 bytes,
+    /// nPalEntries 0, offPalEntries 0x10, SizeLast 20. Matches the form GDI
+    /// writes (and every committed corpus file's trailer).
+    static func encodeEOF() -> [UInt8] {
+        var b = ByteWriter()
+        b.appendUInt32(14)       // Type = EMR_EOF
+        b.appendUInt32(20)       // Size
+        b.appendUInt32(0)        // nPalEntries
+        b.appendUInt32(0x10)     // offPalEntries
+        b.appendUInt32(20)       // SizeLast
+        return b.bytes
+    }
+}
