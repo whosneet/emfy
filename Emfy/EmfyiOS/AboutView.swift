@@ -32,10 +32,14 @@ struct AboutContent: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
+                // The mark is black ink on a transparent ground; template rendering
+                // tints it with the label colour so it reads in both appearances
+                // (it was invisible on the dark About background otherwise).
                 Image("EmfyIcon")
+                    .renderingMode(.template)
                     .resizable()
                     .frame(width: 96, height: 96)
-                    .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
+                    .foregroundStyle(.primary)
                     .accessibilityHidden(true)
 
                 Text("Emfy")

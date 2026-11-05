@@ -19,9 +19,12 @@ struct WhatsNewView: View {
                 .frame(width: 72, height: 72)
                 .accessibilityHidden(true)
             #else
+            // Template-rendered so the black-ink mark reads in Dark Mode too.
             Image("EmfyIcon")
+                .renderingMode(.template)
                 .resizable()
                 .frame(width: 72, height: 72)
+                .foregroundStyle(.primary)
                 .accessibilityHidden(true)
             #endif
 
