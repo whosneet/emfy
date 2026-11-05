@@ -42,10 +42,11 @@ struct EmfyCommands: Commands {
     }
 }
 
-/// Replaces the default "About Emfy" item so the standard About panel shows Emfy's
-/// credits — Arrley Pty Ltd and the MIT licence — beneath the app name and the
-/// bundle version (S1a-6). `orderFrontStandardAboutPanel` reads the version from
-/// the bundle itself; only the credits need supplying.
+/// Replaces the default "About Emfy" item so the standard About panel shows a single
+/// clickable link to the public repo beneath the app name and bundle version (S1a-6).
+/// `orderFrontStandardAboutPanel` reads the version from the bundle, and the
+/// Info.plist copyright line is the one place Arrley and the MIT licence appear — so
+/// the credits don't repeat them.
 struct AboutCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
@@ -54,14 +55,12 @@ struct AboutCommands: Commands {
                 // `Sendable`; the action runs on the main actor.
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.alignment = .center
-                let credits = NSAttributedString(
-                    string: "Made by Arrley Pty Ltd\nMIT licensed. Source at github.com/whosneet/emfy",
-                    attributes: [
-                        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                        .foregroundColor: NSColor.secondaryLabelColor,
-                        .paragraphStyle: paragraph,
-                    ]
-                )
+                var attributes: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                    .paragraphStyle: paragraph,
+                ]
+                if let url = EmfyLinks.gitHub { attributes[.link] = url }
+                let credits = NSAttributedString(string: "github.com/whosneet/emfy", attributes: attributes)
                 NSApplication.shared.orderFrontStandardAboutPanel(options: [.credits: credits])
                 NSApplication.shared.activate(ignoringOtherApps: true)
             }
