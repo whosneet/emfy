@@ -10,7 +10,11 @@ import Foundation
 /// bit-reversed form of 0x04C11DB7), input and output reflected, initial and
 /// final XOR with 0xFFFFFFFF. Every operation is a shift or XOR, so nothing
 /// here can overflow or force-unwrap — safe on the hostile parse path (§8).
-enum CRC32 {
+///
+/// Public so the gzip writer in EMFWrite can compute the RFC 1952 member-trailer
+/// checksum from the same implementation the inflater verifies against, rather
+/// than duplicating the algorithm (v3 plan §11.2, E0a).
+public enum CRC32 {
     /// 256-entry lookup table, built once from the reflected polynomial.
     private static let table: [UInt32] = {
         let polynomial: UInt32 = 0xEDB8_8320
@@ -31,7 +35,7 @@ enum CRC32 {
 
     /// The CRC-32 of a byte sequence. `index` is always masked to 0...255, so
     /// the table subscript can never go out of range.
-    static func checksum<S: Sequence>(_ bytes: S) -> UInt32 where S.Element == UInt8 {
+    public static func checksum<S: Sequence>(_ bytes: S) -> UInt32 where S.Element == UInt8 {
         var crc: UInt32 = 0xFFFF_FFFF
         for byte in bytes {
             let index = Int((crc ^ UInt32(byte)) & 0xFF)
