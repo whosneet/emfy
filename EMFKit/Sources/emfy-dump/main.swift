@@ -203,6 +203,8 @@ func describe(_ error: MetafileOpenError) -> String {
     }
 }
 
+    case .inputTooLarge(let limit):
+        return "input exceeds the \(limit)-byte front-door size cap; refused before parsing"
 func describe(_ diagnostic: MetafileDiagnostic) -> String {
     switch diagnostic {
     case .sniff(let sniff): return describe(sniff)

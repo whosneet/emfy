@@ -7,15 +7,17 @@ public enum MetafileDiagnostic: Sendable, Equatable {
     case gzip(GzipDiagnostic)
 }
 
-/// The one error opening a metafile throws, and only for a gzip wrapper that
-/// cannot be unwrapped. A non-gzip input never throws — an unrecognised file is
-/// reported as `.unknown`, not an error.
+/// The errors opening a metafile throws. A non-gzip input within the size cap
+/// never throws — an unrecognised file is reported as `.unknown`, not an error.
 public enum MetafileOpenError: Error, Sendable, Equatable {
     /// The gzip wrapper was malformed; carries the underlying gzip failure.
     case gzip(GzipError)
     /// The gzip payload is itself gzip. One level of unwrapping only; nested
     /// gzip is refused (§8, primer §8 v1.5).
     case nestedGzip
+    /// The raw input exceeded the front-door size cap and was refused before any
+    /// parse or inflate (§8). `limit` is the ceiling that was applied.
+    case inputTooLarge(limit: Int)
 }
 
 /// The front door: raw file bytes in, a detected format and the bytes to parse
@@ -37,6 +39,30 @@ public struct OpenedMetafile: Sendable, Equatable {
     /// Advisory observations from the sniff and any gzip unwrap, in order.
     public let diagnostics: [MetafileDiagnostic]
 
+    // MARK: - Ceilings (§8)
+
+    /// Front-door cap on the raw bytes handed to `open` (§8). It bounds both a
+    /// plain (uncompressed) metafile and a gzip wrapper before either is parsed or
+    /// inflated. The cap must clear any plausible real input: the largest real
+    /// metafile seen across the corpora is ~14.1 MiB, and a plain file equivalent
+    /// to the largest allowed `.emz`/`.wmz` can be as large as the inflate output
+    /// ceiling (64 MiB on macOS). macOS sets 128 MiB — 2× that output ceiling and
+    /// ~9× the largest real file — so legitimate inputs have wide headroom while a
+    /// multi-hundred-MB/GB blob is refused before `EMFFile.parse` copies it into
+    /// its normalised buffer (the real memory cost §8 bounds). iOS, whose Quick
+    /// Look extension runs under a ~30 MB budget (I4), sets 48 MiB — 2× the iOS
+    /// 24 MiB inflate ceiling, still far above any real metafile.
+    #if os(iOS)
+    public static let defaultInputByteCeiling = 48 * 1024 * 1024
+    #else
+    public static let defaultInputByteCeiling = 128 * 1024 * 1024
+    #endif
+
+    /// The inflate output ceiling `open` applies to a gzip wrapper, mirroring
+    /// GzipInflate's platform default so this public entry point can name it as a
+    /// default argument. Override per call via `gzipOutputCeiling`.
+    public static let defaultGzipOutputCeiling = GzipInflate.defaultOutputCeiling
+
     init(
         format: MetafileFormat,
         data: Data,
@@ -52,10 +78,21 @@ public struct OpenedMetafile: Sendable, Equatable {
     /// Sniffs `data`, unwraps a gzip wrapper once if present, and reports the
     /// resulting format plus the bytes to parse.
     ///
-    /// Throws only `MetafileOpenError`, and only for a gzip input that fails to
-    /// inflate or that wraps another gzip. Any non-gzip input — including
-    /// unrecognised bytes — returns without throwing.
-    public static func open(_ data: Data) throws(MetafileOpenError) -> OpenedMetafile {
+    /// Refuses an input larger than `inputByteCeiling` with `.inputTooLarge`
+    /// before any work (§8). Otherwise throws only for a gzip input that fails to
+    /// inflate (past `gzipOutputCeiling`) or that wraps another gzip. Any non-gzip
+    /// input within the cap — including unrecognised bytes — returns without
+    /// throwing. The two ceilings default to the platform values and can be
+    /// overridden (e.g. to the tighter iOS budget from a macOS test).
+    public static func open(
+        _ data: Data,
+        inputByteCeiling: Int = defaultInputByteCeiling,
+        gzipOutputCeiling: Int = defaultGzipOutputCeiling
+    ) throws(MetafileOpenError) -> OpenedMetafile {
+        guard data.count <= inputByteCeiling else {
+            throw .inputTooLarge(limit: inputByteCeiling)
+        }
+
         let signature = MetafileSignature.detect(data)
         var diagnostics = signature.diagnostics.map(MetafileDiagnostic.sniff)
 
@@ -70,7 +107,7 @@ public struct OpenedMetafile: Sendable, Equatable {
 
         let inflated: GzipInflate.Result
         do {
-            inflated = try GzipInflate.inflate(data)
+            inflated = try GzipInflate.inflate(data, ceiling: gzipOutputCeiling)
         } catch {
             throw .gzip(error)
         }

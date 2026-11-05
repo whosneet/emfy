@@ -191,7 +191,10 @@ struct GzipInflateTests {
 
         let clock = ContinuousClock()
         var result: GzipInflate.Result?
-        let elapsed = clock.measure { result = try? GzipInflate.inflate(member) }
+        // Use the macOS ceiling explicitly so the 48 MiB payload inflates on every
+        // platform (the iOS default ceiling is 24 MiB) — this test measures inflate
+        // throughput, not the platform cap.
+        let elapsed = clock.measure { result = try? GzipInflate.inflate(member, ceiling: GzipInflate.macOSOutputCeiling) }
         let r = try #require(result, "the near-cap member should inflate")
         #expect(r.data.count == payload.count)
         let milli = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) * 1e-15

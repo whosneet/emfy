@@ -134,6 +134,55 @@ struct MetafileFrontDoorTests {
         })
     }
 
+    // MARK: - Size and output ceilings (§8, fix 3)
+
+    @Test("input past the size cap is refused with .inputTooLarge before any work")
+    func oversizedInputRefused() {
+        // A tiny explicit ceiling keeps the fixture small; the real platform caps
+        // (128 MiB macOS / 48 MiB iOS) are never allocated here.
+        let data = Data(repeating: 0, count: 101)
+        do {
+            _ = try OpenedMetafile.open(data, inputByteCeiling: 100)
+            Issue.record("expected .inputTooLarge")
+        } catch {
+            #expect(error == .inputTooLarge(limit: 100))
+        }
+    }
+
+    @Test("a plain corpus file opens under the default ceilings, unaffected")
+    func corpusUnaffectedByCeilings() throws {
+        let emf = try MetafileCorpus.data("gate-p4-text.emf")
+        let opened = try OpenedMetafile.open(emf)   // default platform ceilings
+        #expect(opened.format == .emf)
+        #expect(!opened.wasDecompressed)
+        #expect(opened.data == emf)
+    }
+
+    /// A ~24.5 MiB zero bomb (a few KB on the wire) inflates past the 24 MiB iOS
+    /// ceiling but clears the 64 MiB macOS ceiling — the platform-specific gzip
+    /// cap, exercised on macOS by passing each ceiling explicitly.
+    @Test("a bomb past the iOS gzip ceiling is refused; the same bomb clears the macOS ceiling")
+    func bombPastIOSCeiling() throws {
+        let zeros = [UInt8](repeating: 0, count: GzipInflate.iOSOutputCeiling + 512 * 1024)
+        let bomb = GzipFixture.make(payload: zeros)
+        #expect(bomb.count < 256 * 1024, "the bomb fixture must stay small on the wire")
+
+        // Refused under the iOS ceiling…
+        do {
+            _ = try OpenedMetafile.open(bomb, gzipOutputCeiling: GzipInflate.iOSOutputCeiling)
+            Issue.record("expected .gzip(.outputTooLarge) under the iOS ceiling")
+        } catch {
+            #expect(error == .gzip(.outputTooLarge(ceiling: GzipInflate.iOSOutputCeiling)))
+        }
+
+        // …but the SAME bomb clears the larger macOS ceiling (25 MiB of zeros is
+        // unrecognised content, so it opens as .unknown without throwing).
+        let opened = try OpenedMetafile.open(bomb, gzipOutputCeiling: GzipInflate.macOSOutputCeiling)
+        #expect(opened.format == .unknown)
+        #expect(opened.wasDecompressed)
+        #expect(opened.data.count == zeros.count)
+    }
+
     // MARK: - Fuzz floor (survival)
 
     /// Mutated .emz bytes fed through the front door must never trap or hang.

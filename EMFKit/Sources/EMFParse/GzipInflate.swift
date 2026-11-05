@@ -55,15 +55,31 @@ enum GzipInflate {
         let diagnostics: [GzipDiagnostic]
     }
 
-    /// Hard ceiling on inflated output (§8). Justification (census, 4 Nov 2026):
-    /// the largest real EMF seen across `corpus/` + `corpus-local/` (246 files)
-    /// is ~14.1 MiB; only one file exceeds 10 MiB and none exceed 15 MiB. 64 MiB
-    /// is ~4.5× that largest real metafile and clears the ~50 MB input the record
-    /// walker already contemplates (EMFFile.recordCountLimit note), while staying
-    /// far below any level that would jetsam a sandboxed macOS Quick Look
-    /// extension. iOS extensions have far tighter memory and get their own,
-    /// measured ceiling later (plan §4 I4); this constant is the macOS value.
-    static let defaultOutputCeiling = 64 * 1024 * 1024
+    /// Hard macOS ceiling on inflated output (§8). Justification (census,
+    /// 4 Nov 2026): the largest real EMF seen across `corpus/` + `corpus-local/`
+    /// (246 files) is ~14.1 MiB; only one file exceeds 10 MiB and none exceed
+    /// 15 MiB. 64 MiB is ~4.5× that largest real metafile and clears the ~50 MB
+    /// input the record walker already contemplates (EMFFile.recordCountLimit
+    /// note), while staying far below any level that would jetsam a sandboxed
+    /// macOS Quick Look extension.
+    static let macOSOutputCeiling = 64 * 1024 * 1024
+
+    /// Hard iOS ceiling on inflated output (§8). iOS Quick Look preview/thumbnail
+    /// extensions run under a far tighter footprint than macOS — I4 measured a
+    /// peak phys_footprint of 27–38 MiB per corpus pass against a ~30 MB iOS
+    /// extension budget — so the inflated payload (which the parser then copies
+    /// into its own working buffer) is capped well under that budget. 24 MiB is
+    /// still ~1.7× the largest real metafile and clears every corpus .emz/.wmz,
+    /// while leaving headroom for the parse buffer and object array on iOS.
+    static let iOSOutputCeiling = 24 * 1024 * 1024
+
+    /// The platform's inflate output ceiling: iOS gets the tighter budget, macOS
+    /// (and anything else) the 64 MiB value. Overridable per call via `ceiling`.
+    #if os(iOS)
+    static let defaultOutputCeiling = iOSOutputCeiling
+    #else
+    static let defaultOutputCeiling = macOSOutputCeiling
+    #endif
 
     /// Output drained from the decoder per `compression_stream_process` call.
     /// On a bomb, at most this much is allocated beyond the ceiling before the
