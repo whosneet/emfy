@@ -58,4 +58,35 @@ enum OpenRouting {
     static func offersNewWindow(supportsMultipleWindows: Bool) -> Bool {
         supportsMultipleWindows
     }
+
+    /// Where a file opened from outside (Finder double-click, Files, Mail,
+    /// Messages, a share) lands, honouring the user's "Open files in" setting
+    /// (S1a-4c). The file is added to Recents either way; this only chooses the
+    /// window. `openInNewWindow` is the setting; the receiving window is the front
+    /// window the system delivered the open to.
+    ///
+    /// - The setting only takes effect where the platform can host more than one
+    ///   window (Mac, iPad). On the iPhone — where the setting is hidden — an
+    ///   external open always fills the front window.
+    /// - An **empty** front window is always filled, never left beside a new one:
+    ///   a cold-launch open is delivered to a freshly-spawned empty window, so
+    ///   spawning a second window there would strand the first.
+    /// - Otherwise the setting decides. The "a file already open just brings its
+    ///   window forward" dedup is the caller's: in new-window mode a value-based
+    ///   `openWindow` brings an existing window for that file forward instead of
+    ///   making another; in front-window mode selecting the file in place leaves a
+    ///   window already showing it unchanged.
+    static func externalDestination(
+        openInNewWindow: Bool,
+        hasOpenWindow: Bool,
+        frontWindowIsEmpty: Bool,
+        supportsMultipleWindows: Bool
+    ) -> Destination {
+        guard supportsMultipleWindows, hasOpenWindow else {
+            // iPhone / Duo outer display, or a cold launch with no window yet.
+            return hasOpenWindow ? .frontWindow : .newWindow
+        }
+        if frontWindowIsEmpty { return .frontWindow }
+        return openInNewWindow ? .newWindow : .frontWindow
+    }
 }

@@ -13,7 +13,10 @@ import SwiftUI
 struct LibraryWindow: View {
     @Environment(RecentsStore.self) private var store
     @Environment(OpenCoordinator.self) private var coordinator
+    @Environment(EmfySettings.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
@@ -232,14 +235,33 @@ struct LibraryWindow: View {
         }
     }
 
-    /// Imports a file arriving from Finder / Files / Mail / Messages and shows it in
-    /// the front window (v3-plan §9.1). `handlesExternalEvents(preferring:allowing:)`
-    /// delivers the open to an existing window (macOS) or the active scene (iOS), so
-    /// this simply sets the selection — no spawned-window cleanup needed.
+    /// Imports a file arriving from Finder / Files / Mail / Messages and shows it per
+    /// the "Open files in" setting (S1a-4c). `handlesExternalEvents(preferring:allowing:)`
+    /// delivers the open to the front window (macOS) or the active scene (iOS); in
+    /// front-window mode this selects it here, and in new-window mode it opens a
+    /// value-keyed library window, which SwiftUI brings forward if one already shows
+    /// the file (the dedup). The setting is honoured only where a second window can
+    /// exist (Mac, iPad); on the iPhone it's hidden and an external open fills the
+    /// front window. An empty front window is always filled, so a cold-launch open
+    /// never strands the window SwiftUI spawned for it.
     private func openExternal(_ url: URL) async {
         await store.loadIfNeeded()
+        // Capture this (front) window's emptiness before the import, so a
+        // cold-launch open fills the spawned empty window instead of spawning beside it.
+        let frontWindowIsEmpty = model.selection == nil
         guard let id = await store.handleOpenedURL(url) else { return }
-        if model.selection != id { model.selection = id }
+        let destination = OpenRouting.externalDestination(
+            openInNewWindow: settings.openFilesIn == .newWindow,
+            hasOpenWindow: true,
+            frontWindowIsEmpty: frontWindowIsEmpty,
+            supportsMultipleWindows: supportsMultipleWindows
+        )
+        switch destination {
+        case .frontWindow:
+            if model.selection != id { model.selection = id }
+        case .newWindow:
+            openWindow(id: "library", value: LibraryWindowValue(entryID: id))
+        }
     }
 }
 

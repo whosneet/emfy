@@ -42,6 +42,32 @@ import Testing
         #expect(OpenRouting.offersNewWindow(supportsMultipleWindows: true))
         #expect(!OpenRouting.offersNewWindow(supportsMultipleWindows: false))
     }
+
+    // MARK: - External open honours "Open files in" (S1a-4c)
+
+    @Test func externalOpenHonoursTheOpenFilesInSetting() {
+        // Front window already shows a file, multi-window platform (Mac / iPad):
+        // new-window mode spawns a window, front-window mode selects in place.
+        #expect(OpenRouting.externalDestination(openInNewWindow: true, hasOpenWindow: true, frontWindowIsEmpty: false, supportsMultipleWindows: true) == .newWindow)
+        #expect(OpenRouting.externalDestination(openInNewWindow: false, hasOpenWindow: true, frontWindowIsEmpty: false, supportsMultipleWindows: true) == .frontWindow)
+    }
+
+    @Test func externalOpenFillsAnEmptyFrontWindowEvenInNewWindowMode() {
+        // A cold-launch open is delivered to a freshly-spawned empty window; filling
+        // it (not spawning beside it) keeps one window, both modes.
+        #expect(OpenRouting.externalDestination(openInNewWindow: true, hasOpenWindow: true, frontWindowIsEmpty: true, supportsMultipleWindows: true) == .frontWindow)
+        #expect(OpenRouting.externalDestination(openInNewWindow: false, hasOpenWindow: true, frontWindowIsEmpty: true, supportsMultipleWindows: true) == .frontWindow)
+    }
+
+    @Test func externalOpenIgnoresNewWindowSettingWithoutMultiWindow() {
+        // iPhone / Duo outer display: the setting is hidden and never spawns a window.
+        #expect(OpenRouting.externalDestination(openInNewWindow: true, hasOpenWindow: true, frontWindowIsEmpty: false, supportsMultipleWindows: false) == .frontWindow)
+    }
+
+    @Test func externalOpenMakesAWindowOnColdLaunchRegardlessOfSetting() {
+        #expect(OpenRouting.externalDestination(openInNewWindow: false, hasOpenWindow: false, frontWindowIsEmpty: true, supportsMultipleWindows: true) == .newWindow)
+        #expect(OpenRouting.externalDestination(openInNewWindow: true, hasOpenWindow: false, frontWindowIsEmpty: true, supportsMultipleWindows: true) == .newWindow)
+    }
 }
 
 // MARK: - ViewerFit
