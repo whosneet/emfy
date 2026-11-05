@@ -347,7 +347,7 @@ struct EmfyTests {
         let dir = makeTempDir(); defer { cleanup(dir) }
         let store = makeStore(in: dir)
         let id = try #require(await store.handleOpenedURL(writeEMF(to: dir, name: "regen.emf")))
-        let entry = try #require(store.entry(id: id))
+        _ = try #require(store.entry(id: id))
         // Simulate Caches being purged: delete the cached PNG and drop the memory cache.
         try FileManager.default.removeItem(at: store.locations.thumbnailsDirectory)
         store.clear()   // wipes memory cache (entry stays via re-add below)

@@ -79,6 +79,10 @@
 		B01100000000000000000121 /* OpenRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000111 /* OpenRouting.swift */; };
 		B01100000000000000000122 /* ViewerFit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000112 /* ViewerFit.swift */; };
 		B01100000000000000000123 /* DocumentHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000F1 /* DocumentHostTests.swift */; };
+		B01100000000000000000140 /* ZoomMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000140 /* ZoomMath.swift */; platformFilters = (macos, ); };
+		B01100000000000000000141 /* MacMetafileScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000141 /* MacMetafileScrollView.swift */; platformFilters = (macos, ); };
+		B01100000000000000000142 /* ZoomMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000140 /* ZoomMath.swift */; };
+		B01100000000000000000143 /* ZoomMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000F4 /* ZoomMathTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -180,6 +184,9 @@
 		B001000000000000000000D3 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B001000000000000000000D4 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B001000000000000000000D5 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B00100000000000000000140 /* ZoomMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomMath.swift; sourceTree = "<group>"; };
+		B00100000000000000000141 /* MacMetafileScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMetafileScrollView.swift; sourceTree = "<group>"; };
+		B001000000000000000000F4 /* ZoomMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomMathTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -250,6 +257,7 @@
 				B00100000000000000000110 /* DocumentSession.swift */,
 				B00100000000000000000111 /* OpenRouting.swift */,
 				B00100000000000000000112 /* ViewerFit.swift */,
+				B00100000000000000000140 /* ZoomMath.swift */,
 				B00100000000000000000130 /* EmfyApp.swift */,
 				B00100000000000000000131 /* LibraryWindow.swift */,
 				B00100000000000000000132 /* LibraryWindowValue.swift */,
@@ -266,6 +274,7 @@
 			children = (
 				B001000000000000000000F0 /* EmfyTests.swift */,
 				B001000000000000000000F1 /* DocumentHostTests.swift */,
+				B001000000000000000000F4 /* ZoomMathTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -274,6 +283,7 @@
 			isa = PBXGroup;
 			children = (
 				B00100000000000000000137 /* MacViewerPane.swift */,
+				B00100000000000000000141 /* MacMetafileScrollView.swift */,
 				B00100000000000000000004 /* EMFExport.swift */,
 				B00100000000000000000050 /* Changelog.swift */,
 				B00100000000000000000051 /* WhatsNewView.swift */,
@@ -557,6 +567,8 @@
 				B01100000000000000000135 /* MetafileTypes.swift in Sources */,
 				B01100000000000000000136 /* OpenCoordinator.swift in Sources */,
 				B01100000000000000000137 /* MacViewerPane.swift in Sources */,
+				B01100000000000000000141 /* MacMetafileScrollView.swift in Sources */,
+				B01100000000000000000140 /* ZoomMath.swift in Sources */,
 				B01100000000000000000053 /* EmfyCommands.swift in Sources */,
 				B01100000000000000000004 /* EMFExport.swift in Sources */,
 				B01100000000000000000050 /* Changelog.swift in Sources */,
@@ -623,6 +635,8 @@
 				B01100000000000000000121 /* OpenRouting.swift in Sources */,
 				B01100000000000000000122 /* ViewerFit.swift in Sources */,
 				B01100000000000000000123 /* DocumentHostTests.swift in Sources */,
+				B01100000000000000000142 /* ZoomMath.swift in Sources */,
+				B01100000000000000000143 /* ZoomMathTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
