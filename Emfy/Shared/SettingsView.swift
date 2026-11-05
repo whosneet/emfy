@@ -102,7 +102,7 @@ extension EmfySettings.RecentsCap: SettingsOption {
 
 // Footer sentences, shared verbatim by both platforms.
 private enum SettingsFooter {
-    static let recentsCap = "Lowering this may remove files Emfy received and is keeping; it’ll ask before removing any."
+    static let recentsCap = "Lowering Recents to keep may remove files Emfy received and is keeping; it’ll ask before removing any."
     static let privateMode = "Private mode keeps no history — files you open aren’t added to Recents and leave no thumbnails."
     static let darkPage = "Dim lowers the page brightness in Dark Mode; Invert flips a dark drawing to light while keeping its colours."
     static let exportLimit = "Very large drawings export at a lower scale to stay within size limits."
@@ -209,7 +209,7 @@ private struct MacViewerTab: View {
                 Toggle("Show partial support banner", isOn: $settings.showPartialSupportBanner)
             }
             Section {
-                MacOptionRow(title: "Dark Mode Page", value: $settings.darkPageMode, segmented: true)
+                MacOptionRow(title: "Page in Dark Mode", value: $settings.darkPageMode, segmented: true)
                 Toggle("Page shadow", isOn: $settings.pageShadow)
                 MacOptionRow(title: "Open files in", value: $settings.openFilesIn, segmented: true)
                 MacOptionRow(title: "Trackpad and mouse scroll", value: $settings.macScrollAction)
@@ -377,7 +377,7 @@ private struct IOSMoreViewerOptions: View {
         @Bindable var settings = settings
         Form {
             Section {
-                IOSOptionRow(title: "Dark Mode Page", value: $settings.darkPageMode)
+                IOSOptionRow(title: "Page in Dark Mode", value: $settings.darkPageMode)
             } footer: {
                 Text(SettingsFooter.darkPage)
             }
