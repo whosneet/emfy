@@ -267,6 +267,42 @@ struct EmfyTests {
         #expect(!FileManager.default.fileExists(atPath: exportDir.path))
     }
 
+    /// The C2 cold-launch race, made deterministic: a file written *after* the
+    /// sweep started (like an imported copy or thumbnail from a cold-launch open
+    /// that races the still-running sweep) must survive, while an older orphan is
+    /// still reclaimed. Driven by explicit file dates and an explicit cutoff, so
+    /// it never depends on timing.
+    @Test func launchSweepKeepsFilesWrittenAfterItStarted() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let locations = RecentsStore.Locations(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        )
+        try FileManager.default.createDirectory(at: locations.thumbnailsDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: locations.importedDirectory, withIntermediateDirectories: true)
+
+        let orphan = locations.importedDirectory.appendingPathComponent("orphan.emf")
+        let freshImport = locations.importedDirectory.appendingPathComponent("fresh.emf")
+        let freshThumb = locations.thumbnailsDirectory.appendingPathComponent("fresh.png")
+        try Data([0]).write(to: orphan)
+        try Data([0]).write(to: freshImport)
+        try Data([0]).write(to: freshThumb)
+
+        // Capture the cutoff after the files exist (so their real creation dates
+        // are older than it), then stamp the two "fresh" files as written after.
+        let cutoff = Date()
+        try FileManager.default.setAttributes([.modificationDate: cutoff.addingTimeInterval(-3600)], ofItemAtPath: orphan.path)
+        try FileManager.default.setAttributes([.modificationDate: cutoff.addingTimeInterval(3600)], ofItemAtPath: freshImport.path)
+        try FileManager.default.setAttributes([.modificationDate: cutoff.addingTimeInterval(3600)], ofItemAtPath: freshThumb.path)
+
+        // Nothing is in the keep-set: survival is decided purely by write time.
+        RecentsStore.sweep(locations: locations, keepThumbnails: [], keepImported: [], startedAt: cutoff)
+
+        #expect(!FileManager.default.fileExists(atPath: orphan.path))        // old orphan reclaimed
+        #expect(FileManager.default.fileExists(atPath: freshImport.path))   // written after start: kept
+        #expect(FileManager.default.fileExists(atPath: freshThumb.path))    // written after start: kept
+    }
+
     // MARK: - §j Export temp cleanup
 
     @Test func exportTempSweepRemovesOnlyEmfyExportDirectories() throws {

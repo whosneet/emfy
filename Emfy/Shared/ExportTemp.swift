@@ -15,12 +15,31 @@ enum ExportTemp {
     }
 
     /// Deletes every `EmfyExport-*` directory left in the temporary directory
-    /// (a share that was interrupted before its own cleanup ran).
-    static func sweep() {
+    /// (a share that was interrupted before its own cleanup ran) — but never one
+    /// written at/after `startedAt`, so a share sheet staged during a reload isn't
+    /// reclaimed out from under it (the C2 sweep race).
+    static func sweep(startedAt: Date = Date()) {
         let tmp = FileManager.default.temporaryDirectory
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: tmp.path) else { return }
         for name in names where name.hasPrefix(prefix) {
-            try? FileManager.default.removeItem(at: tmp.appendingPathComponent(name))
+            let url = tmp.appendingPathComponent(name)
+            if wasWritten(after: startedAt, url) { continue }
+            try? FileManager.default.removeItem(at: url)
         }
+    }
+
+    /// Whether `url` was created or last modified at/after `cutoff` — i.e. written
+    /// after a sweep began, so the sweep must not reclaim it. Shared by the
+    /// recents launch sweep and the export-temp sweep. An item whose dates can't
+    /// be read is treated as fresh and kept (a sweep never deletes what it can't
+    /// date).
+    static func wasWritten(after cutoff: Date, _ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey]) else {
+            return true
+        }
+        guard let newest = [values.contentModificationDate, values.creationDate].compactMap({ $0 }).max() else {
+            return true
+        }
+        return newest >= cutoff
     }
 }

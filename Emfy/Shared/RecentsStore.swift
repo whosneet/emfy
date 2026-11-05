@@ -71,8 +71,12 @@ final class RecentsStore {
             Self.loadEntries(from: locations)
         }.value
         entries = loaded.sorted { $0.openedAt > $1.openedAt }
+        // Complete the launch sweep before signalling the store is loaded, so a
+        // cold-launch open (which awaits `loadIfNeeded` before importing its
+        // copy) can't have that freshly written copy or thumbnail deleted by a
+        // still-running sweep (the C2 race).
+        await runLaunchSweep()
         didLoad = true
-        scheduleLaunchSweep()
     }
 
     // MARK: - Opening a file
@@ -295,27 +299,38 @@ final class RecentsStore {
 
     // MARK: - Launch sweep (§e)
 
-    /// Deletes thumbnails and imported copies no entry references, and any
-    /// EmfyExport-* temp folders, off the main actor.
-    private func scheduleLaunchSweep() {
+    /// Reclaims orphaned thumbnails, imported copies, and export temp folders off
+    /// the main actor, and returns only once the sweep has completed — so a
+    /// caller that awaits it (`performLoad`, and therefore `loadIfNeeded`) is
+    /// guaranteed the sweep is done before any later write. The cutoff is captured
+    /// before the sweep starts, so even a file written by a *concurrent* writer
+    /// after that moment is never reclaimed.
+    private func runLaunchSweep() async {
         let locations = self.locations
-        let thumbnails = Set(entries.compactMap(\.thumbnailFileName))
-        let imported = Set(entries.compactMap(\.importedFileName))
-        Task.detached(priority: .background) {
-            Self.sweep(locations: locations, keepThumbnails: thumbnails, keepImported: imported)
-        }
+        let keepThumbnails = Set(entries.compactMap(\.thumbnailFileName))
+        let keepImported = Set(entries.compactMap(\.importedFileName))
+        let startedAt = Date()
+        await Task.detached(priority: .utility) {
+            Self.sweep(locations: locations, keepThumbnails: keepThumbnails, keepImported: keepImported, startedAt: startedAt)
+        }.value
     }
 
-    nonisolated static func sweep(locations: Locations, keepThumbnails: Set<String>, keepImported: Set<String>) {
-        sweepDirectory(locations.thumbnailsDirectory, keeping: keepThumbnails)
-        sweepDirectory(locations.importedDirectory, keeping: keepImported)
-        ExportTemp.sweep()
+    /// Deletes thumbnails and imported copies no entry references, and any
+    /// EmfyExport-* temp folders — but only files last written *before*
+    /// `startedAt`, so a file written after the sweep began survives (C2 race).
+    nonisolated static func sweep(locations: Locations, keepThumbnails: Set<String>, keepImported: Set<String>, startedAt: Date = Date()) {
+        sweepDirectory(locations.thumbnailsDirectory, keeping: keepThumbnails, cutoff: startedAt)
+        sweepDirectory(locations.importedDirectory, keeping: keepImported, cutoff: startedAt)
+        ExportTemp.sweep(startedAt: startedAt)
     }
 
-    private nonisolated static func sweepDirectory(_ directory: URL, keeping: Set<String>) {
+    private nonisolated static func sweepDirectory(_ directory: URL, keeping: Set<String>, cutoff: Date) {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return }
         for name in names where !keeping.contains(name) {
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+            let url = directory.appendingPathComponent(name)
+            // Never reclaim a file written after the sweep began (C2 race).
+            if ExportTemp.wasWritten(after: cutoff, url) { continue }
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
