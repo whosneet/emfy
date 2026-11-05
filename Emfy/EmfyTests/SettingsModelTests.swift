@@ -303,6 +303,28 @@ struct SettingsModelTests {
         #expect(ViewerTilePaint.treatment(for: .invert, isDark: true) == .invert)
     }
 
+    /// Invert needs a white page beneath it, so "match appearance" + Invert in Dark
+    /// resolves to a WHITE page (which inverts to dark), not the dark match page
+    /// (which would invert to light) — the S1a-4c fix. Dim keeps the dark page.
+    @Test
+    func invertForcesAWhitePageSoMatchAppearanceStaysDark() {
+        // The bug: match appearance in Dark + Invert must not leave a dark page that
+        // inverts to light.
+        let invert = ViewerTilePaint.make(background: .matchAppearance, darkMode: .invert, isDark: true)
+        #expect(invert.treatment == .invert)
+        #expect(invert.page == .white)
+        // Dim over the dark match page is unchanged.
+        let dim = ViewerTilePaint.make(background: .matchAppearance, darkMode: .dim, isDark: true)
+        #expect(dim.treatment == .dim)
+        #expect(dim.page == .dark)
+        // A plain white page under Invert is already white.
+        #expect(ViewerTilePaint.make(background: .whitePage, darkMode: .invert, isDark: true).page == .white)
+        // In Light mode Invert is inactive, so match appearance stays its white page.
+        let light = ViewerTilePaint.make(background: .matchAppearance, darkMode: .invert, isDark: false)
+        #expect(light.treatment == TilePaint.Treatment.none)
+        #expect(light.page == .white)
+    }
+
     /// Renders a solid colour, applies the invert sequence, and samples: white→black,
     /// black→white, red stays red-ish (hue preserved, lightness flipped).
     @Test

@@ -43,10 +43,17 @@ enum ViewerTilePaint {
         darkMode: EmfySettings.DarkPageMode,
         isDark: Bool
     ) -> TilePaint {
-        TilePaint(
-            page: page(for: background, isDark: isDark),
-            treatment: treatment(for: darkMode, isDark: isDark)
-        )
+        let treatment = treatment(for: darkMode, isDark: isDark)
+        var page = page(for: background, isDark: isDark)
+        // Invert fills the tile with white under `.difference`, so the page is
+        // inverted along with the ink: a dark "match appearance" page would come
+        // out LIGHT, defeating the dark page the user asked for (S1a-4c fix). Under
+        // invert the page must be white, so it inverts to dark. Dim darkens whatever
+        // page is drawn, so a dark page under Dim is correct and left alone.
+        if treatment == .invert, page == .dark {
+            page = .white
+        }
+        return TilePaint(page: page, treatment: treatment)
     }
 }
 
