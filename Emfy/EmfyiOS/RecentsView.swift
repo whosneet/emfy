@@ -1,121 +1,79 @@
 import SwiftUI
 import UIKit
 
-/// The recents home: a large-title screen with search, an adaptive thumbnail
-/// grid sectioned into Today / Earlier, and a first-launch empty state. Files
-/// open through the Files picker, a share, or an incoming document, and each
-/// opened file lands here.
+/// The compact-width library sidebar (iPhone, Split-View halves, the Duo outer
+/// display): the approved recents home — a large-title screen with search, an
+/// adaptive thumbnail grid sectioned into Today / Earlier, a first-launch empty
+/// state, and Select mode. It lives inside the library window's `NavigationSplitView`
+/// sidebar, which on compact width is a navigation stack, so selecting a tile sets
+/// the shared `selection` and pushes the viewer (v3-plan §9.1). The regular-width
+/// list is `RegularSidebarList`; the viewer detail is driven by a `DocumentSession`.
 ///
-/// All bars are system-managed `.toolbar` items inside the `NavigationStack`, so
-/// they move to the side vertical bar on iPhone Duo (v3-plan §6, Duo rules); no
-/// hand-built capsules.
-struct RecentsView: View {
+/// All bars are system-managed `.toolbar` items, so they move to the side vertical
+/// bar on iPhone Duo (v3-plan §6); no hand-built capsules.
+struct RecentsGrid: View {
     @Environment(RecentsStore.self) private var store
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var path: [ViewerRoute] = []
+    @Binding var selection: UUID?
+
     @State private var isSelecting = false
     @State private var isImporting = false
     @State private var activeSheet: RecentsSheet?
     /// The fold-aware column count (27.1+), or `nil` to use the adaptive grid.
     @State private var columnCount: Int?
 
-    // Scene-scoped persistence of the search text and navigation stack.
     @SceneStorage("recents.search") private var searchText = ""
-    @SceneStorage("recents.navPath") private var persistedPath: Data?
 
-    /// Minimum tile width, scaled with Dynamic Type so big text doesn't clip —
-    /// at accessibility sizes this grows enough to collapse the grid to one
-    /// column on a phone (A7).
+    /// Minimum tile width, scaled with Dynamic Type so big text doesn't clip — at
+    /// accessibility sizes this grows enough to collapse the grid to one column on
+    /// a phone (A7).
     @ScaledMetric private var minTileWidth: CGFloat = 158
 
-    // Pre-27.1 column layout: the adaptive grid picks its own count (the I1
-    // behaviour). On 27.1+ the grid prefers an even column count when a fold
-    // region exists (see `grid`).
     private var adaptiveColumns: [GridItem] {
         [GridItem(.adaptive(minimum: minTileWidth, maximum: 240), spacing: 16)]
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            content
-                .navigationTitle("Recents")
-                .searchable(text: $searchText, prompt: "Search recent files")
-                .toolbar { toolbarContent }
-                .navigationDestination(for: ViewerRoute.self) { route in
-                    // Distinct identity per file, so opening another file while
-                    // one is shown (which replaces the route) resets the viewer's
-                    // state — chrome, zoom, inspector — instead of reusing it.
-                    MetafileViewerScreen(entryID: route.entryID)
-                        .id(route.entryID)
-                }
-                .fileImporter(
-                    isPresented: $isImporting,
-                    allowedContentTypes: EMFDocument.readableContentTypes,
-                    allowsMultipleSelection: false
-                ) { result in
-                    handleImport(result)
-                }
-        }
-        .onOpenURL { url in
-            Task { await open(url) }
-        }
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .about: AboutView()
-            case .whatsNew: InfoSheet(title: "What's New") { WhatsNewView() }
-            case .changelog: InfoSheet(title: "Changelog") { ChangelogView() }
+        content
+            .navigationTitle("Recents")
+            .searchable(text: $searchText, prompt: "Search recent files")
+            .toolbar { toolbarContent }
+            .fileImporter(
+                isPresented: $isImporting,
+                allowedContentTypes: MetafileTypes.readableContentTypes,
+                allowsMultipleSelection: false
+            ) { result in
+                handleImport(result)
             }
-        }
-        .alert(
-            "Couldn’t open file",
-            isPresented: Binding(
-                get: { store.lastErrorMessage != nil },
-                set: { if !$0 { store.lastErrorMessage = nil } }
-            ),
-            presenting: store.lastErrorMessage
-        ) { _ in
-            Button("OK", role: .cancel) { store.lastErrorMessage = nil }
-        } message: { message in
-            Text(message)
-        }
-        .task {
-            await store.loadIfNeeded()
-            restorePath()
-        }
-        .onChange(of: path) { _, newValue in
-            savePath(newValue)
-        }
-    }
-
-    // MARK: - Navigation restoration (scene-scoped)
-
-    private func restorePath() {
-        guard path.isEmpty, let data = persistedPath,
-              let routes = try? JSONDecoder().decode([ViewerRoute].self, from: data) else { return }
-        // Drop restored routes whose entry no longer exists, so restoration never
-        // lands on a viewer for a file that was removed since.
-        let valid = routes.filter { store.entry(id: $0.entryID) != nil }
-        if valid != path { path = valid }
-    }
-
-    private func savePath(_ routes: [ViewerRoute]) {
-        persistedPath = try? JSONEncoder().encode(routes)
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .about: AboutView()
+                case .whatsNew: InfoSheet(title: "What's New") { WhatsNewView() }
+                case .changelog: InfoSheet(title: "Changelog") { ChangelogView() }
+                }
+            }
+            .alert(
+                "Couldn’t open file",
+                isPresented: Binding(
+                    get: { store.lastErrorMessage != nil },
+                    set: { if !$0 { store.lastErrorMessage = nil } }
+                ),
+                presenting: store.lastErrorMessage
+            ) { _ in
+                Button("OK", role: .cancel) { store.lastErrorMessage = nil }
+            } message: { message in
+                Text(message)
+            }
     }
 
     // MARK: - Content
 
-    // A stable container type (always a `ZStack`) so the empty → grid switch on
-    // the first opened file doesn't change the NavigationStack root's identity.
-    // When it did, the `.navigationDestination` re-registered and dropped the
-    // just-pushed viewer (push-then-pop; the path kept the route but nothing
-    // showed). Branching lives inside the ZStack, which keeps the root stable.
     private var content: some View {
         ZStack {
             if !store.didLoad {
-                // Show nothing until the persisted list has loaded, so the empty
-                // state never flashes before real recents appear (§h).
+                // Nothing until the persisted list has loaded (§h: no empty flash).
                 Color.clear
             } else if store.entries.isEmpty {
                 EmptyRecentsView(openAction: { isImporting = true })
@@ -127,12 +85,6 @@ struct RecentsView: View {
         }
     }
 
-    // The grid is scrolling content, so it never displaces for the fold; it only
-    // prefers an even column count when a division region exists, so the middle
-    // gutter can straddle the fold rather than a tile (v3-plan §6 Duo rules;
-    // iphone-duo.md Custom grids). The fold/width read is in a `.background`
-    // GeometryReader so the `ScrollView` stays the navigation content's direct
-    // child — wrapping it in a GeometryReader breaks the NavigationLink push.
     private var grid: some View {
         ScrollView {
             gridBody(columns: resolvedColumns)
@@ -144,19 +96,16 @@ struct RecentsView: View {
         }
     }
 
-    /// The column template built from the resolved count; falls back to the
-    /// adaptive grid until the width is measured (and on pre-27.1, where there is
-    /// no fold to consider).
     private var resolvedColumns: [GridItem] {
         guard let count = columnCount else { return adaptiveColumns }
         return Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
     }
 
     private func resolveColumns(_ proxy: GeometryProxy) {
-        guard #available(iOS 27.1, *) else { return }  // pre-27.1: keep the adaptive grid
+        guard #available(iOS 27.1, *) else { return }
         let count = DuoRegions.gridColumnCount(
-            availableWidth: proxy.size.width - 32,  // the grid's horizontal padding
-            minTileWidth: minTileWidth,             // scales with Dynamic Type (A7)
+            availableWidth: proxy.size.width - 32,
+            minTileWidth: minTileWidth,
             spacing: 16,
             preferEven: DuoRegions.hasDivisionRegion(in: proxy)
         )
@@ -196,17 +145,26 @@ struct RecentsView: View {
                 store.remove(entry.id)
             }
         } else {
-            // A Button that pushes the route, rather than a NavigationLink —
-            // same push, but it works under synthetic taps too (a NavigationLink
-            // can swallow them) and keeps the open path in one place. Assigning
-            // the single-element path (not append) makes a rapid double tap
-            // idempotent — no double push.
-            Button {
-                path = [ViewerRoute(entryID: entry.id)]
-            } label: {
-                RecentTileView(entry: entry, isSelecting: false, onRemove: {})
-            }
-            .buttonStyle(.plain)
+            // A Button that sets the shared selection, pushing the viewer on compact
+            // width. Assigning (not toggling) makes a rapid double tap idempotent.
+            // The grid is the compact sidebar (iPhone, Duo outer, Split-View half).
+            // A tap opens the file; a long press shows a UIKit context menu whose
+            // "Open in New Window" uses UIWindowScene.ActivationAction — it shows the
+            // "Open" alternate where a second window can't be created (iPhone, Duo
+            // outer) and makes one where it can (Duo inner split half). The tile keeps
+            // its button label; VoiceOver activates it to open and has a Remove action.
+            RecentTileView(entry: entry, isSelecting: false, onRemove: {})
+                .overlay(
+                    TileOpenInteraction(
+                        entryID: entry.id,
+                        onOpen: { selection = entry.id },
+                        onRemove: { store.remove(entry.id) }
+                    )
+                )
+                .accessibilityAction(.default) { selection = entry.id }
+                .accessibilityActions {
+                    Button("Remove from Recents", role: .destructive) { store.remove(entry.id) }
+                }
         }
     }
 
@@ -219,9 +177,6 @@ struct RecentsView: View {
         ToolbarItem(placement: .topBarTrailing) { moreMenu }
     }
 
-    // The prominent action, first in the vertical bar (Duo: back → prominent →
-    // rest). `.topBarPinnedTrailing` resists overflow on the outer display;
-    // `.primaryAction` is the pre-27 fallback.
     @ToolbarContentBuilder
     private var openItem: some ToolbarContent {
         if #available(iOS 27.0, *) {
@@ -232,7 +187,6 @@ struct RecentsView: View {
         }
     }
 
-    // A symbol↔text toggle stays on the horizontal axis on Duo (iOS 27.1+).
     @ToolbarContentBuilder
     private var selectItem: some ToolbarContent {
         if #available(iOS 27.1, *) {
@@ -243,8 +197,6 @@ struct RecentsView: View {
         }
     }
 
-    // The mockups' blue "Open from Files" — the system's prominent treatment
-    // (glass on iOS 26+, bordered prominent before), still a system toolbar item.
     private var openButton: some View {
         Button {
             isImporting = true
@@ -254,8 +206,6 @@ struct RecentsView: View {
         .prominentOpenStyle()
     }
 
-    // Distinct symbol per state and the title shown while selecting, so edit
-    // mode is unmistakable (the two states previously shared one icon).
     private var selectButton: some View {
         Button {
             withAnimation(reduceMotion ? nil : .default) { isSelecting.toggle() }
@@ -322,14 +272,9 @@ struct RecentsView: View {
     private func open(_ url: URL) async {
         if let id = await store.handleOpenedURL(url) {
             isSelecting = false
-            // Dismiss any active sheet or the Files importer before navigating,
-            // so the new viewer isn't pushed behind a stale modal.
             activeSheet = nil
             isImporting = false
-            // Opening a file shows just that file's viewer — replace the stack
-            // rather than appending, so repeated opens never pile viewers up (and
-            // their keyboard shortcuts never compete).
-            path = [ViewerRoute(entryID: id)]
+            selection = id
         }
     }
 
@@ -392,10 +337,8 @@ struct InfoSheet<Content: View>: View {
 }
 
 extension View {
-    /// The system's prominent button treatment for the "Open from Files"
-    /// toolbar action: Liquid Glass prominent on iOS 26+, bordered prominent
-    /// before. Kept as a toolbar `Button` so it still migrates to the Duo
-    /// vertical bar.
+    /// The system's prominent button treatment for the "Open from Files" toolbar
+    /// action: Liquid Glass prominent on iOS 26+, bordered prominent before.
     @ViewBuilder
     func prominentOpenStyle() -> some View {
         if #available(iOS 26.0, *) {

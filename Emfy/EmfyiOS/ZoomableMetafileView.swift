@@ -56,9 +56,12 @@ final class MetafileZoomController {
 }
 
 /// A `UIScrollView` that reports its laid-out size, so the zoom range and the
-/// initial fit can be set once real bounds exist (and reset when they change).
+/// initial fit can be set once real bounds exist (and reset when they change), and
+/// reports when its safe-area insets change so the fit can follow the bars
+/// appearing or hiding (v3-plan §9.1: fit inside the bars while shown).
 private final class ZoomScrollView: UIScrollView {
     var onLayoutSize: ((CGSize) -> Void)?
+    var onSafeAreaChange: (() -> Void)?
     private var lastReportedSize: CGSize = .zero
 
     override func layoutSubviews() {
@@ -67,6 +70,11 @@ private final class ZoomScrollView: UIScrollView {
             lastReportedSize = bounds.size
             onLayoutSize?(bounds.size)
         }
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        onSafeAreaChange?()
     }
 }
 
@@ -102,6 +110,13 @@ struct ZoomableMetafileView: UIViewRepresentable {
         // a Duo open/close, an iPad Split View resize).
         scrollView.onLayoutSize = { [weak coordinator = context.coordinator] size in
             coordinator?.configureZoomScales(for: size)
+        }
+        // Re-fit when the bars show or hide: their appearance changes the scroll
+        // view's safe-area insets, and the fit must stay inside the visible region
+        // (§5). `configureZoomScales` reads `chromeHidden` to decide the insets.
+        scrollView.onSafeAreaChange = { [weak scrollView, weak coordinator = context.coordinator] in
+            guard let scrollView else { return }
+            coordinator?.configureZoomScales(for: scrollView.bounds.size)
         }
         scrollView.backgroundColor = .clear
         scrollView.showsVerticalScrollIndicator = false
@@ -160,8 +175,11 @@ struct ZoomableMetafileView: UIViewRepresentable {
             // displays) — re-render the tiles at the new resolution.
             tiled.updateContentsScale(displayScale)
         }
-        // Zoom-scale configuration and re-fit happen from the scroll view's
-        // `layoutSubviews` (see makeUIView), not here — bounds aren't reliable yet.
+        // Re-fit when the chrome toggles (§5): hiding the bars uses `.zero` insets
+        // (full screen), showing them fits inside. `safeAreaInsetsDidChange` covers
+        // most toggles; this makes the refit reliable even when the insets don't
+        // move. Other zoom-scale configuration happens from `layoutSubviews`.
+        context.coordinator.refitIfChromeChanged(scrollView, chromeHidden: chromeHidden)
     }
 
     /// Stop the CATiledLayer drawing into a view about to be freed, and break the
@@ -169,6 +187,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
     static func dismantleUIView(_ scrollView: UIScrollView, coordinator: Coordinator) {
         scrollView.delegate = nil
         (scrollView as? ZoomScrollView)?.onLayoutSize = nil
+        (scrollView as? ZoomScrollView)?.onSafeAreaChange = nil
         if let tiled = coordinator.tiledView {
             tiled.controller = nil
             tiled.onToggleChrome = nil
@@ -185,11 +204,22 @@ struct ZoomableMetafileView: UIViewRepresentable {
 
         private var hasSetInitialZoom = false
         private var lastViewportSize: CGSize = .zero
+        private var lastInsets: ViewerFit.Insets = .zero
+        private var lastChromeHidden: Bool?
         private var appliedFitScale: CGFloat = 1
 
         init(_ parent: ZoomableMetafileView) { self.parent = parent }
 
         // MARK: Zoom configuration
+
+        /// The safe-area insets to fit inside: the scroll view's own insets (which
+        /// track the bars) while the chrome is shown, and `.zero` when it is hidden
+        /// so the drawing fills the screen (§5).
+        private func effectiveInsets(_ scrollView: UIScrollView) -> ViewerFit.Insets {
+            guard !parent.chromeHidden else { return .zero }
+            let i = scrollView.safeAreaInsets
+            return ViewerFit.Insets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right)
+        }
 
         func configureZoomScales(for viewport: CGSize) {
             guard viewport.width > 0, viewport.height > 0,
@@ -198,12 +228,16 @@ struct ZoomableMetafileView: UIViewRepresentable {
             else { return }
 
             let natural = parent.naturalSize
-            let fit = min(viewport.width / natural.width, viewport.height / natural.height)
+            let insets = effectiveInsets(scrollView)
+            // Fit inside the visible (bar-reduced) region, allowing a small drawing
+            // to magnify to fill it (the I2 fit behaviour), so `maxScale` sits well
+            // above any real fit.
+            let fit = ViewerFit.fitScale(content: natural, viewport: viewport, insets: insets, minScale: 0.01, maxScale: 100)
             // Read whether the picture was fitted BEFORE touching min/max —
             // assigning minimumZoomScale clamps the current zoomScale, which would
             // corrupt the comparison.
             let wasFitted = !hasSetInitialZoom || abs(scrollView.zoomScale - appliedFitScale) < 0.01
-            let sizeChanged = viewport != lastViewportSize
+            let geometryChanged = viewport != lastViewportSize || insets != lastInsets
 
             // Zoom range: fit (or 100%, whichever is smaller) up to 800%, always
             // wide enough to include the fit scale itself.
@@ -214,9 +248,9 @@ struct ZoomableMetafileView: UIViewRepresentable {
             if !hasSetInitialZoom {
                 hasSetInitialZoom = true
                 scrollView.zoomScale = fit
-            } else if sizeChanged {
-                // Keep the picture fitted across a resize if it was fitted before;
-                // otherwise just clamp the current zoom into the new range.
+            } else if geometryChanged {
+                // Keep the picture fitted across a resize or a bar toggle if it was
+                // fitted before; otherwise just clamp the current zoom into range.
                 if wasFitted {
                     scrollView.zoomScale = fit
                 } else {
@@ -226,15 +260,31 @@ struct ZoomableMetafileView: UIViewRepresentable {
 
             appliedFitScale = fit
             lastViewportSize = viewport
+            lastInsets = insets
+            lastChromeHidden = parent.chromeHidden
             centreContent(scrollView)
             updateZoomState(scrollView.zoomScale)
         }
 
-        /// Keeps the drawing centred while it is smaller than the viewport.
+        /// Re-fits when the chrome visibility changed, so hiding the bars grows the
+        /// drawing into the former bar area and showing them shrinks it back (§5).
+        func refitIfChromeChanged(_ scrollView: UIScrollView, chromeHidden: Bool) {
+            guard hasSetInitialZoom, lastChromeHidden != chromeHidden else { return }
+            configureZoomScales(for: scrollView.bounds.size)
+        }
+
+        /// Centres the drawing inside the visible region, keeping it clear of the
+        /// bars while they show (ViewerFit computes the safe-area + slack inset).
         private func centreContent(_ scrollView: UIScrollView) {
-            let offsetX = max(0, (scrollView.bounds.width - scrollView.contentSize.width) / 2)
-            let offsetY = max(0, (scrollView.bounds.height - scrollView.contentSize.height) / 2)
-            scrollView.contentInset = UIEdgeInsets(top: offsetY, left: offsetX, bottom: offsetY, right: offsetX)
+            let natural = parent.naturalSize
+            let insets = effectiveInsets(scrollView)
+            let centred = ViewerFit.centringInset(
+                content: natural,
+                viewport: scrollView.bounds.size,
+                scale: scrollView.zoomScale,
+                insets: insets
+            )
+            scrollView.contentInset = UIEdgeInsets(top: centred.top, left: centred.leading, bottom: centred.bottom, right: centred.trailing)
         }
 
         /// Mirrors the live zoom into the controller (pill / inspector) and the

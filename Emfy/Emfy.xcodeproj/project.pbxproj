@@ -7,10 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B01100000000000000000001 /* EmfyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000001 /* EmfyApp.swift */; platformFilters = (macos, ); };
-		B01100000000000000000002 /* EMFDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000002 /* EMFDocument.swift */; };
-		B01100000000000000000003 /* EMFDocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000003 /* EMFDocumentView.swift */; platformFilters = (macos, ); };
 		B01100000000000000000004 /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
+		B01100000000000000000130 /* EmfyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000130 /* EmfyApp.swift */; };
+		B01100000000000000000131 /* LibraryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000131 /* LibraryWindow.swift */; };
+		B01100000000000000000132 /* LibraryWindowValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000132 /* LibraryWindowValue.swift */; };
+		B01100000000000000000133 /* LibrarySidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000133 /* LibrarySidebar.swift */; };
+		B01100000000000000000134 /* MetafileInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000134 /* MetafileInfoView.swift */; };
+		B01100000000000000000135 /* MetafileTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000135 /* MetafileTypes.swift */; };
+		B01100000000000000000136 /* OpenCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000136 /* OpenCoordinator.swift */; };
+		B01100000000000000000137 /* MacViewerPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000137 /* MacViewerPane.swift */; platformFilters = (macos, ); };
+		B01100000000000000000138 /* WindowOpenMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000138 /* WindowOpenMenu.swift */; platformFilters = (ios, ); };
 		B01100000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000005 /* Assets.xcassets */; platformFilters = (macos, ); };
 		B01100000000000000000006 /* emfy.icon in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* emfy.icon */; platformFilters = (macos, ); };
 		B01100000000000000000010 /* PreviewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000010 /* PreviewProvider.swift */; platformFilters = (macos, ); };
@@ -29,7 +35,6 @@
 		B01100000000000000000051 /* WhatsNewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000051 /* WhatsNewView.swift */; };
 		B01100000000000000000052 /* ChangelogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000052 /* ChangelogView.swift */; };
 		B01100000000000000000053 /* EmfyCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000053 /* EmfyCommands.swift */; platformFilters = (macos, ); };
-		B01100000000000000000070 /* EmfyiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000070 /* EmfyiOSApp.swift */; platformFilters = (ios, ); };
 		B01100000000000000000071 /* RecentsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000071 /* RecentsStore.swift */; };
 		B01100000000000000000072 /* RecentEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000072 /* RecentEntry.swift */; };
 		B01100000000000000000073 /* RecentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000073 /* RecentsView.swift */; platformFilters = (ios, ); };
@@ -39,7 +44,6 @@
 		B01100000000000000000077 /* MetafileLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000077 /* MetafileLoader.swift */; };
 		B01100000000000000000078 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000078 /* AboutView.swift */; platformFilters = (ios, ); };
 		B01100000000000000000082 /* ZoomableMetafileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007B /* ZoomableMetafileView.swift */; platformFilters = (ios, ); };
-		B01100000000000000000083 /* FileInfoInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007C /* FileInfoInspector.swift */; platformFilters = (ios, ); };
 		B01100000000000000000084 /* MetafileDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007D /* MetafileDiagnostics.swift */; };
 		B01100000000000000000085 /* DuoRegions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007E /* DuoRegions.swift */; platformFilters = (ios, ); };
 		B011000000000000000000E0 /* ExportTaskRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000E0 /* ExportTaskRunner.swift */; };
@@ -54,7 +58,7 @@
 		B011000000000000000000FE /* ExportTaskRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000E0 /* ExportTaskRunner.swift */; };
 		B011000000000000000000FF /* ExportTemp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000E1 /* ExportTemp.swift */; };
 		B0110000000000000000010A /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
-		B01100000000000000000090 /* MetafileExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000090 /* MetafileExport.swift */; platformFilters = (ios, ); };
+		B01100000000000000000090 /* MetafileExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000090 /* MetafileExport.swift */; };
 		B01100000000000000000091 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000091 /* ShareSheet.swift */; platformFilters = (ios, ); };
 		B01100000000000000000092 /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000092 /* PhotoLibrarySaver.swift */; platformFilters = (ios, ); };
 		B01100000000000000000093 /* MetafileExportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000093 /* MetafileExportController.swift */; platformFilters = (ios, ); };
@@ -110,10 +114,16 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		B00100000000000000000001 /* EmfyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyApp.swift; sourceTree = "<group>"; };
-		B00100000000000000000002 /* EMFDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocument.swift; sourceTree = "<group>"; };
-		B00100000000000000000003 /* EMFDocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFDocumentView.swift; sourceTree = "<group>"; };
 		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
+		B00100000000000000000137 /* MacViewerPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacViewerPane.swift; sourceTree = "<group>"; };
+		B00100000000000000000138 /* WindowOpenMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowOpenMenu.swift; sourceTree = "<group>"; };
+		B00100000000000000000130 /* EmfyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyApp.swift; sourceTree = "<group>"; };
+		B00100000000000000000131 /* LibraryWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryWindow.swift; sourceTree = "<group>"; };
+		B00100000000000000000132 /* LibraryWindowValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryWindowValue.swift; sourceTree = "<group>"; };
+		B00100000000000000000133 /* LibrarySidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySidebar.swift; sourceTree = "<group>"; };
+		B00100000000000000000134 /* MetafileInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileInfoView.swift; sourceTree = "<group>"; };
+		B00100000000000000000135 /* MetafileTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileTypes.swift; sourceTree = "<group>"; };
+		B00100000000000000000136 /* OpenCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCoordinator.swift; sourceTree = "<group>"; };
 		B00100000000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B00100000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B00100000000000000000007 /* Emfy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Emfy.entitlements; sourceTree = "<group>"; };
@@ -130,7 +140,6 @@
 		B00100000000000000000051 /* WhatsNewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsNewView.swift; sourceTree = "<group>"; };
 		B00100000000000000000052 /* ChangelogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangelogView.swift; sourceTree = "<group>"; };
 		B00100000000000000000053 /* EmfyCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyCommands.swift; sourceTree = "<group>"; };
-		B00100000000000000000070 /* EmfyiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyiOSApp.swift; sourceTree = "<group>"; };
 		B00100000000000000000071 /* RecentsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsStore.swift; sourceTree = "<group>"; };
 		B00100000000000000000072 /* RecentEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentEntry.swift; sourceTree = "<group>"; };
 		B00100000000000000000073 /* RecentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsView.swift; sourceTree = "<group>"; };
@@ -142,7 +151,6 @@
 		B00100000000000000000079 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B0010000000000000000007A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B0010000000000000000007B /* ZoomableMetafileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomableMetafileView.swift; sourceTree = "<group>"; };
-		B0010000000000000000007C /* FileInfoInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileInfoInspector.swift; sourceTree = "<group>"; };
 		B0010000000000000000007D /* MetafileDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileDiagnostics.swift; sourceTree = "<group>"; };
 		B0010000000000000000007E /* DuoRegions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoRegions.swift; sourceTree = "<group>"; };
 		B001000000000000000000E0 /* ExportTaskRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTaskRunner.swift; sourceTree = "<group>"; };
@@ -242,6 +250,13 @@
 				B00100000000000000000110 /* DocumentSession.swift */,
 				B00100000000000000000111 /* OpenRouting.swift */,
 				B00100000000000000000112 /* ViewerFit.swift */,
+				B00100000000000000000130 /* EmfyApp.swift */,
+				B00100000000000000000131 /* LibraryWindow.swift */,
+				B00100000000000000000132 /* LibraryWindowValue.swift */,
+				B00100000000000000000133 /* LibrarySidebar.swift */,
+				B00100000000000000000134 /* MetafileInfoView.swift */,
+				B00100000000000000000135 /* MetafileTypes.swift */,
+				B00100000000000000000136 /* OpenCoordinator.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -258,9 +273,7 @@
 		B06000000000000000000002 /* Emfy */ = {
 			isa = PBXGroup;
 			children = (
-				B00100000000000000000001 /* EmfyApp.swift */,
-				B00100000000000000000002 /* EMFDocument.swift */,
-				B00100000000000000000003 /* EMFDocumentView.swift */,
+				B00100000000000000000137 /* MacViewerPane.swift */,
 				B00100000000000000000004 /* EMFExport.swift */,
 				B00100000000000000000050 /* Changelog.swift */,
 				B00100000000000000000051 /* WhatsNewView.swift */,
@@ -321,13 +334,12 @@
 		B06000000000000000000007 /* EmfyiOS */ = {
 			isa = PBXGroup;
 			children = (
-				B00100000000000000000070 /* EmfyiOSApp.swift */,
 				B00100000000000000000073 /* RecentsView.swift */,
+				B00100000000000000000138 /* WindowOpenMenu.swift */,
 				B00100000000000000000074 /* RecentTileView.swift */,
 				B00100000000000000000075 /* EmptyRecentsView.swift */,
 				B00100000000000000000076 /* MetafileViewerScreen.swift */,
 				B0010000000000000000007B /* ZoomableMetafileView.swift */,
-				B0010000000000000000007C /* FileInfoInspector.swift */,
 				B0010000000000000000007E /* DuoRegions.swift */,
 				B00100000000000000000090 /* MetafileExport.swift */,
 				B00100000000000000000091 /* ShareSheet.swift */,
@@ -537,23 +549,27 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B01100000000000000000001 /* EmfyApp.swift in Sources */,
-				B01100000000000000000003 /* EMFDocumentView.swift in Sources */,
+				B01100000000000000000130 /* EmfyApp.swift in Sources */,
+				B01100000000000000000131 /* LibraryWindow.swift in Sources */,
+				B01100000000000000000132 /* LibraryWindowValue.swift in Sources */,
+				B01100000000000000000133 /* LibrarySidebar.swift in Sources */,
+				B01100000000000000000134 /* MetafileInfoView.swift in Sources */,
+				B01100000000000000000135 /* MetafileTypes.swift in Sources */,
+				B01100000000000000000136 /* OpenCoordinator.swift in Sources */,
+				B01100000000000000000137 /* MacViewerPane.swift in Sources */,
 				B01100000000000000000053 /* EmfyCommands.swift in Sources */,
-				B01100000000000000000002 /* EMFDocument.swift in Sources */,
 				B01100000000000000000004 /* EMFExport.swift in Sources */,
 				B01100000000000000000050 /* Changelog.swift in Sources */,
 				B01100000000000000000051 /* WhatsNewView.swift in Sources */,
 				B01100000000000000000052 /* ChangelogView.swift in Sources */,
-				B01100000000000000000070 /* EmfyiOSApp.swift in Sources */,
 				B01100000000000000000071 /* RecentsStore.swift in Sources */,
 				B01100000000000000000072 /* RecentEntry.swift in Sources */,
 				B01100000000000000000073 /* RecentsView.swift in Sources */,
 				B01100000000000000000074 /* RecentTileView.swift in Sources */,
 				B01100000000000000000075 /* EmptyRecentsView.swift in Sources */,
 				B01100000000000000000076 /* MetafileViewerScreen.swift in Sources */,
+				B01100000000000000000138 /* WindowOpenMenu.swift in Sources */,
 				B01100000000000000000082 /* ZoomableMetafileView.swift in Sources */,
-				B01100000000000000000083 /* FileInfoInspector.swift in Sources */,
 				B01100000000000000000084 /* MetafileDiagnostics.swift in Sources */,
 				B01100000000000000000085 /* DuoRegions.swift in Sources */,
 				B011000000000000000000E0 /* ExportTaskRunner.swift in Sources */,

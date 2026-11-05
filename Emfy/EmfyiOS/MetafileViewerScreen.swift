@@ -3,23 +3,28 @@ import EMFRender
 import SwiftUI
 import UIKit
 
-/// The Photos-style viewer: the drawing full-bleed on a white page, pinch/pan
-/// zoom that stays crisp at every level, tap-to-toggle chrome (the background
-/// goes black with the bars hidden), a transient zoom pill, a dismissible
-/// partial-support banner, and a file-details inspector. Built to the approved
-/// iPhone-Viewer / iPhone-Viewer-Immersive / iPhone-Info / iPad-Viewer-Inspector
-/// mockups, and to the iPhone Duo rules (system-managed bars; the pill and
-/// banner displaced clear of the fold and inner camera).
+/// The iOS library window's detail column: the Photos-style viewer, now driven by
+/// a per-window `DocumentSession` (v3-plan §11.2) rather than loading the file
+/// itself. The drawing is full-bleed on a white page, pinch/pan zoom that stays
+/// crisp at every level, tap-to-toggle chrome (the background goes black with the
+/// bars hidden), a transient zoom pill, a dismissible partial-support banner, and
+/// file details. Built to the approved I2 mockups and the iPhone Duo rules.
+///
+/// File details use Apple's `.inspector`, which adapts on its own: a trailing
+/// column at regular width (iPad) and a sheet at compact width (iPhone, screenshot
+/// #6). The viewer is the split view's detail, so at regular width it is a proper
+/// column rather than a NavigationStack-pushed view, and `.inspector` doesn't pop.
 struct MetafileViewerScreen: View {
     @Environment(RecentsStore.self) private var store
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.dismiss) private var dismiss
-    let entryID: UUID
 
-    @State private var phase: Phase = .loading
+    let session: DocumentSession
+    /// Clears the window's selection when the file is removed from Recents.
+    let onRemove: () -> Void
+
     @State private var controller = MetafileZoomController()
     @State private var exporter = MetafileExportController()
 
@@ -28,8 +33,6 @@ struct MetafileViewerScreen: View {
     @State private var bannerDismissed = false
     @State private var pillVisible = false
     @State private var pillHideTask: Task<Void, Never>?
-    @State private var viewerWidth: CGFloat = 0
-    @AccessibilityFocusState private var a11yFocus: ViewerA11yFocus?
 
     private enum Phase {
         case loading
@@ -38,14 +41,41 @@ struct MetafileViewerScreen: View {
         case failed
     }
 
+    /// The viewer phase, derived from the session's load state.
+    private var phase: Phase {
+        switch session.state {
+        case .idle, .loading: return .loading
+        case .loaded(let model): return .loaded(model)
+        case .failed(.unreadable): return .unrenderable
+        case .failed: return .failed
+        }
+    }
+
     private var isRegularWidth: Bool { horizontalSizeClass == .regular }
+
+    /// A fixed inspector column width so the drawing can reserve exactly that much
+    /// trailing space when the inspector is open (iPad). `.inspector` presents as a
+    /// translucent overlay over the detail's trailing edge, not a width-reducing
+    /// column, so without this the drawing bleeds under it (item 2).
+    private let inspectorWidth: CGFloat = 320
+
+    /// Trailing space to keep clear for the inspector overlay — only at regular
+    /// width (iPad), where the inspector is a column; zero for the iPhone sheet.
+    private var reservedInspectorWidth: CGFloat {
+        (showInspector && isRegularWidth) ? inspectorWidth : 0
+    }
 
     var body: some View {
         ZStack {
             backgroundColor
                 .ignoresSafeArea()
-            viewerLayout
+            drawingLayer
         }
+        // Reserve the inspector overlay's width on the trailing edge so the drawing
+        // keeps clear of it; the scroll view then refits to the visible rect when
+        // the inspector opens/closes, the sidebar collapses, or the device rotates
+        // (item 2). Zero on iPhone, where the inspector is a sheet.
+        .padding(.trailing, reservedInspectorWidth)
         .navigationTitle(entry?.baseName ?? "Metafile")
         .navigationBarTitleDisplayMode(.inline)
         .metafileNavigationSubtitle(subtitle)
@@ -54,15 +84,10 @@ struct MetafileViewerScreen: View {
         .toolbar(chromeHidden ? .hidden : .visible, for: .bottomBar)
         .statusBarHidden(chromeHidden)
         .overlay(alignment: .top) { topOverlays }
-        // File details as a sheet at compact width (iPhone, Duo outer, Split View
-        // halves). At regular width (iPad, Duo inner) the details are a trailing
-        // column inside `viewerLayout`. SwiftUI's own `.inspector` is NOT used:
-        // applied to a NavigationStack-pushed view it pops the stack, at both
-        // compact and regular width — so a hand-placed column + sheet gives the
-        // same adaptive UX without breaking navigation.
-        .sheet(isPresented: compactSheetBinding) { inspectorContent }
-        // Share sheet for Share File / Share as PNG / Share as PDF. The temp file
-        // is removed once the sheet dismisses.
+        // Built-in inspector: a column on iPad, a sheet on iPhone (screenshot #6).
+        // A fixed width so the drawing's reserved trailing space matches it exactly.
+        .inspector(isPresented: $showInspector) { inspectorContent }
+        .inspectorColumnWidth(min: inspectorWidth, ideal: inspectorWidth, max: inspectorWidth)
         .sheet(item: shareSheetBinding, onDismiss: { exporter.cleanupTemp() }) { payload in
             ShareSheet(items: payload.items)
         }
@@ -87,24 +112,12 @@ struct MetafileViewerScreen: View {
             }
         }
         .background(keyboardCommands)
-        .background {
-            GeometryReader { proxy in
-                Color.clear.onChange(of: proxy.size.width, initial: true) { _, width in
-                    viewerWidth = width
-                }
-            }
+        .task(id: session.entryID) {
+            // The window drives the load; this covers the rare idle arrival.
+            if case .idle = session.state { await session.load() }
         }
-        // Keyed on the entry's reload token (not just its id), so reopening the
-        // same file with changed content re-runs the load and re-renders instead
-        // of keeping the stale render (§c).
-        .task(id: entry?.reloadKey) { await load() }
         .onChange(of: controller.isZooming) { _, zooming in
             updatePill(zooming: zooming)
-        }
-        .onChange(of: horizontalSizeClass) { _, newValue in
-            // Resizing to compact (Split View, Duo close) must not leave an open
-            // column turning into an auto-popping sheet — close it.
-            if newValue == .compact { showInspector = false }
         }
         .onChange(of: showBanner) { _, shown in
             if shown, let message = partialMessage {
@@ -117,24 +130,17 @@ struct MetafileViewerScreen: View {
         }
     }
 
-    // Computed bindings keep the share/export presentation state on the
-    // `@Observable` controller while using the plain `Binding(get:set:)` form.
+    // Computed bindings keep share/export state on the `@Observable` controller.
     private var shareSheetBinding: Binding<SharePayload?> {
         Binding(get: { exporter.sharePayload }, set: { exporter.sharePayload = $0 })
     }
 
     private var shareErrorBinding: Binding<Bool> {
-        Binding(
-            get: { exporter.shareError != nil },
-            set: { if !$0 { exporter.shareError = nil } }
-        )
+        Binding(get: { exporter.shareError != nil }, set: { if !$0 { exporter.shareError = nil } })
     }
 
     private var photosDeniedBinding: Binding<Bool> {
-        Binding(
-            get: { exporter.showPhotosDeniedAlert },
-            set: { exporter.showPhotosDeniedAlert = $0 }
-        )
+        Binding(get: { exporter.showPhotosDeniedAlert }, set: { exporter.showPhotosDeniedAlert = $0 })
     }
 
     private func openSettings() {
@@ -146,35 +152,7 @@ struct MetafileViewerScreen: View {
         chromeHidden ? .black : Color(.systemGroupedBackground)
     }
 
-    /// Mirrors `showInspector` only at compact width, so the sheet never fights
-    /// the regular-width trailing column.
-    private var compactSheetBinding: Binding<Bool> {
-        Binding(
-            get: { !isRegularWidth && showInspector },
-            set: { showInspector = $0 }
-        )
-    }
-
-    // MARK: - Layout (drawing, plus a trailing details column at regular width)
-
-    /// The trailing column width: ≤ 340 pt and ≤ 40% of the viewer, so it never
-    /// crowds the drawing in a narrow regular-width window (iPad Split View).
-    private var inspectorColumnWidth: CGFloat {
-        viewerWidth > 0 ? min(340, viewerWidth * 0.4) : 340
-    }
-
-    @ViewBuilder
-    private var viewerLayout: some View {
-        HStack(spacing: 0) {
-            drawingLayer
-            if isRegularWidth, showInspector {
-                Divider().ignoresSafeArea()
-                inspectorContent
-                    .frame(width: inspectorColumnWidth)
-                    .transition(.move(edge: .trailing))
-            }
-        }
-    }
+    // MARK: - Drawing
 
     @ViewBuilder
     private var drawingLayer: some View {
@@ -211,33 +189,25 @@ struct MetafileViewerScreen: View {
         }
     }
 
-    /// The failed state (§a): "Couldn't read this file right now" with Try Again
-    /// and Remove from Recents. A transient failure is kept in recents (Try Again
-    /// may succeed once it's downloaded or back online); a definitively-gone file
-    /// has already been pruned, and Remove from Recents dismisses the dead viewer.
+    /// The failed state (v3-plan §9.1): Try Again for a transient failure (offline,
+    /// not-yet-downloaded), Remove from Recents for a definitively-gone file.
     private var failedView: some View {
         ContentUnavailableView {
             Label("Can’t show this file", systemImage: "exclamationmark.triangle")
         } description: {
             Text("Emfy couldn’t read this file right now. It may have been moved or deleted, or it may be offline.")
         } actions: {
-            Button("Try Again") { Task { await load() } }
+            Button("Try Again") { Task { await session.load() } }
                 .buttonStyle(.borderedProminent)
             Button("Remove from Recents", role: .destructive) {
-                store.remove(entryID)
-                dismiss()
+                store.remove(session.entryID)
+                onRemove()
             }
         }
     }
 
     // MARK: - Bottom toolbar (system-managed; one glass capsule)
 
-    // Share, Fit, and Info are grouped so the system renders them as a single
-    // glass capsule (the mockup), and on iPhone Duo they move to the side
-    // vertical bar together, in that order. `.visibilityPriority(.high)` (gated)
-    // keeps the trio in the bar longest when the outer display overflows. Every
-    // item is a Label (title + image), so it reads correctly in the vertical bar
-    // and the overflow menu.
     @ToolbarContentBuilder
     private var bottomBar: some ToolbarContent {
         if #available(iOS 27.0, *) {
@@ -256,9 +226,6 @@ struct MetafileViewerScreen: View {
         }
     }
 
-    // The Share button is a system-managed toolbar Menu (the approved Share
-    // menu). It renders the picture itself — Copy/Save/Share all run through the
-    // same EMFKit export path — so it's disabled until the file has loaded.
     private var shareMenu: some View {
         Menu {
             shareMenuItems
@@ -306,6 +273,7 @@ struct MetafileViewerScreen: View {
         } label: {
             Label("Fit", systemImage: "arrow.up.left.and.arrow.down.right")
         }
+        .disabled(loaded == nil)
     }
 
     private var infoButton: some View {
@@ -314,18 +282,13 @@ struct MetafileViewerScreen: View {
         } label: {
             Label("Info", systemImage: "info.circle")
         }
-        // Nothing to inspect until a file has loaded (§a).
         .disabled(loaded == nil)
         .accessibilityAddTraits(showInspector ? [.isSelected] : [])
-        .accessibilityFocused($a11yFocus, equals: .infoButton)
     }
 
-    // Keyboard shortcuts stay registered regardless of chrome visibility (a
-    // hidden toolbar deregisters its items' shortcuts), so iPad gets
-    // ⌘+/⌘−/⌘0/⌘1/⌘I whether the bars are shown or not. "Zoom In" is registered
-    // exactly once (no duplicate in the shortcut HUD). Each is hidden from
-    // VoiceOver — a shortcut-carrying button stays in the accessibility tree
-    // unless the leaf itself is hidden.
+    // Keyboard shortcuts stay registered regardless of chrome visibility (a hidden
+    // toolbar deregisters its items' shortcuts), so iPad gets ⌘+/⌘−/⌘0/⌘1/⌘I. Each
+    // is hidden from VoiceOver.
     private var keyboardCommands: some View {
         ZStack {
             shortcutButton("Zoom In", "+") { controller.zoomIn() }
@@ -353,8 +316,6 @@ struct MetafileViewerScreen: View {
             let regions = DuoRegions.active(in: proxy)
             let width = proxy.size.width
             let xOffset = DuoRegions.centredOverlayXOffset(viewWidth: width, division: regions.division)
-            // Constrain overlays to the larger side of the fold (minus a margin)
-            // so Details and X never cross the division when offset (D2).
             let sideWidth = DuoRegions.largerSideWidth(viewWidth: width, division: regions.division)
             let topInset = DuoRegions.overlayTopInset(base: 8, occlusion: regions.occlusion, division: regions.division, viewWidth: width)
             VStack(spacing: 8) {
@@ -425,8 +386,6 @@ struct MetafileViewerScreen: View {
     private func banner(_ message: String) -> some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
-                // At accessibility sizes the message stacks above the buttons so
-                // nothing is squeezed off-screen.
                 VStack(alignment: .leading, spacing: 10) {
                     Label { Text(message).fixedSize(horizontal: false, vertical: true) } icon: { bannerWarningIcon }
                         .font(.callout)
@@ -463,15 +422,13 @@ struct MetafileViewerScreen: View {
     @ViewBuilder
     private var inspectorContent: some View {
         if let model = loaded, let entry {
-            FileInfoInspector(
+            MetafileInfoView(
                 entry: entry,
                 prepared: model.prepared,
                 diagnostics: model.diagnostics,
                 naturalSize: model.naturalSize,
-                zoomPercent: zoomPercent,
-                showZoomRow: isRegularWidth,
-                onClose: { closeInspector() },
-                headerFocus: $a11yFocus
+                zoomPercent: isRegularWidth ? zoomPercent : nil,
+                onClose: { closeInspector() }
             )
         } else {
             ContentUnavailableView("No details yet", systemImage: "info.circle")
@@ -492,26 +449,13 @@ struct MetafileViewerScreen: View {
         }
     }
 
-    private func toggleInspector() {
-        setInspector(!showInspector)
-    }
-
-    private func closeInspector() {
-        setInspector(false)
-    }
-
-    private func openInspectorFromBanner() {
-        setInspector(true)
-    }
+    private func toggleInspector() { setInspector(!showInspector) }
+    private func closeInspector() { setInspector(false) }
+    private func openInspectorFromBanner() { setInspector(true) }
 
     private func setInspector(_ open: Bool) {
         withAnimation(reduceMotion ? nil : .default) {
             showInspector = open
-        }
-        // At regular width the inspector is a column: move VoiceOver focus to its
-        // header when it opens, and back to Info when it closes.
-        if isRegularWidth {
-            a11yFocus = open ? .inspectorHeader : .infoButton
         }
     }
 
@@ -520,7 +464,6 @@ struct MetafileViewerScreen: View {
         if zooming {
             withAnimation(reduceMotion ? nil : .easeIn(duration: 0.12)) { pillVisible = true }
         } else {
-            // Linger briefly, then fade — Reduce Motion hides it without animating.
             pillHideTask = Task {
                 try? await Task.sleep(for: .seconds(0.9))
                 guard !Task.isCancelled else { return }
@@ -545,50 +488,13 @@ struct MetafileViewerScreen: View {
     }
 
     private var entry: RecentEntry? {
-        store.entry(id: entryID)
+        store.entry(id: session.entryID)
     }
 
     private var subtitle: String {
         guard let entry else { return "" }
         let size = ByteCountFormatter.string(fromByteCount: entry.byteCount, countStyle: .file)
         return "\(entry.fullFormatName) · \(size)"
-    }
-
-    // MARK: - Loading
-
-    private func load() async {
-        phase = .loading
-        guard let entry else {
-            phase = .failed
-            return
-        }
-        // The store prunes a definitively-gone file and keeps a transient one
-        // (§a); either way the viewer shows the same failed state with Try Again
-        // and Remove from Recents. Bytes that resolve but won't parse are
-        // `.unrenderable`.
-        let data: Data
-        do {
-            data = try await store.resolveData(for: entry)
-        } catch {
-            if !Task.isCancelled { phase = .failed }
-            return
-        }
-        guard !Task.isCancelled else { return }
-
-        // Run the parse/render off the main thread but cancellably: when the
-        // `.task(id:)` is cancelled (the viewer popped or the file changed), the
-        // detached task is cancelled too, so its bounded render is skipped and
-        // its result never reaches this (gone) view.
-        let work = Task.detached(priority: .userInitiated) { () -> LoadedMetafile? in
-            try? MetafileLoader.load(data)
-        }
-        let model = await withTaskCancellationHandler {
-            await work.value
-        } onCancel: {
-            work.cancel()
-        }
-        guard !Task.isCancelled else { return }
-        phase = model.map(Phase.loaded) ?? .unrenderable
     }
 }
 
@@ -602,5 +508,4 @@ extension View {
             self
         }
     }
-
 }

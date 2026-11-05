@@ -24,21 +24,28 @@
 	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.graphics-design</string>
+	<!-- "Open in New Window" (UIWindowScene.ActivationAction) carries the chosen
+	     entry into the new window via this user activity. -->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.avneetsingh.emfy.openInNewWindow</string>
+	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Emfy saves pictures you export to your photo library.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<!-- Single window. Opening a file (onOpenURL) then reuses the one window
-	     instead of spawning a new iPad window per open — the I1 "3 Hidden
-	     Windows" fix — and there is no "open in new window" affordance in v3.1
-	     (the Duo rules forbid one). A viewer needs no second window; this is the
-	     simplest, most robust way to guarantee reuse. -->
+	<!-- Multiple windows (v3-plan §9.1): iPad and iPhone Duo can open more than
+	     one library window via "Open in New Window", each owning its selection.
+	     `openWindow(id:value:)` needs this key; the system's ActivationAction and
+	     `supportsMultipleWindows` hide the affordance where a second window can't
+	     be created (the Duo outer display). An incoming file still lands in the
+	     active scene via onOpenURL. -->
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
+		<true/>
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
