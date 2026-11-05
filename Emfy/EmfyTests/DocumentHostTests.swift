@@ -193,7 +193,7 @@ import Testing
     /// A session wired to succeed, failing only if `parse` is overridden.
     private func makeSession(
         resolve: @escaping @MainActor (UUID) async throws -> Data,
-        parse: @escaping @Sendable (Data) -> LoadedMetafile? = { try? MetafileLoader.load($0) }
+        parse: @escaping @Sendable (Data, RenderOptions) -> LoadedMetafile? = { data, options in try? MetafileLoader.load(data, options: options) }
     ) -> DocumentSession {
         DocumentSession(entryID: UUID(), resolve: resolve, parse: parse)
     }
@@ -233,7 +233,7 @@ import Testing
     }
 
     @Test func resolvedButUnparseableIsUnreadable() async {
-        let session = makeSession(resolve: { _ in Data([1, 2, 3]) }, parse: { _ in nil })
+        let session = makeSession(resolve: { _ in Data([1, 2, 3]) }, parse: { _, _ in nil })
         await session.load()
         #expect(session.state.kind == .failedUnreadable)
     }

@@ -233,9 +233,10 @@ struct MetafileInfoView: View {
     private func exportToFiles(_ format: ExportFormat) {
         let prepared = self.prepared
         let opts = ExportScale.pngOptions(for: prepared.naturalSize, settings: settings)
+        let options = settings.renderOptions
         exportRunner.run(
             setBusy: { busy in isRenderingExport = busy },
-            render: { MetafileExport.data(for: format, prepared: prepared, scale: opts.scale, background: opts.background) },
+            render: { MetafileExport.data(for: format, prepared: prepared, scale: opts.scale, background: opts.background, options: options) },
             done: { data in
                 guard let data else {
                     filesError = format.failureMessage
@@ -259,15 +260,16 @@ struct MetafileInfoView: View {
         "\(Int(naturalSize.width.rounded())) × \(Int(naturalSize.height.rounded()))"
     }
 
-    /// "Built-in EMF copy" for a WMF that played its embedded EMF, "WMF records"
-    /// for WMF record playback, "EMF records" for a plain EMF.
+    /// Where the drawing was played from, reflecting the live Rendering options:
+    /// the built-in EMF copy, the WMF records (noting when a copy was turned off),
+    /// the GDI copy of a dual EMF+ file shown as GDI, or a plain EMF's records.
     private var drawnFrom: String {
-        switch diagnostics.kind {
-        case .emf:
-            return diagnostics.embeddedEMF == .played ? "Built-in EMF copy" : "EMF records"
-        case .wmfRecords:
-            return "WMF records"
-        }
+        DrawnFrom.label(
+            kind: diagnostics.kind,
+            embeddedEMF: diagnostics.embeddedEMF,
+            hasGDICopy: prepared.hasGDICopy,
+            arbitration: settings.renderOptions.emfPlusArbitration
+        )
     }
 
     private var openedLine: String {

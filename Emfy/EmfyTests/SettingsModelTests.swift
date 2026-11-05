@@ -23,6 +23,21 @@ struct SettingsModelTests {
         return (defaults, name)
     }
 
+    /// Two throwaway suites, so a test can prove the Rendering keys (S1b) land in the
+    /// separate `sharedDefaults` and never the main store.
+    @MainActor
+    private func freshSuites() throws -> (main: UserDefaults, mainName: String, shared: UserDefaults, sharedName: String) {
+        let mainName = "EmfyMain-\(UUID().uuidString)"
+        let sharedName = "EmfyShared-\(UUID().uuidString)"
+        let main = try #require(UserDefaults(suiteName: mainName))
+        let shared = try #require(UserDefaults(suiteName: sharedName))
+        return (main, mainName, shared, sharedName)
+    }
+
+    /// The Rendering table's persistence key (private in the model; kept stable).
+    private static let fontSubstitutionsKey = "settings.rendering.fontSubstitutions"
+    private static let renderEdgesKey = "settings.rendering.edges"
+
     private func entry(
         name: String,
         bytes: Int64,
@@ -154,6 +169,126 @@ struct SettingsModelTests {
         #expect(reloaded.defaultPNGScale == .x3)
         #expect(reloaded.pngBackground == .transparent)
         #expect(reloaded.defaultExportFormat == .pdf)
+    }
+
+    // MARK: - Rendering settings (S1b)
+
+    @Test @MainActor
+    func renderingDefaultsEqualRenderOptionsDefault() throws {
+        let (defaults, name) = try freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let s = EmfySettings(defaults: defaults, sharedDefaults: defaults)
+
+        #expect(s.renderEdges == .smooth)
+        #expect(s.emfPlusSource == .emfPlus)
+        #expect(s.useEmbeddedEMF == true)
+        #expect(s.fontSubstitutions.isEmpty)
+        // The computed options reproduce EMFKit's default exactly.
+        #expect(s.renderOptions == RenderOptions.default)
+    }
+
+    @Test @MainActor
+    func renderingSettingsPersistThroughSharedDefaultsOnly() throws {
+        let (defaults, mainName, shared, sharedName) = try freshSuites()
+        defer {
+            defaults.removePersistentDomain(forName: mainName)
+            shared.removePersistentDomain(forName: sharedName)
+        }
+        let s = EmfySettings(defaults: defaults, sharedDefaults: shared)
+        s.renderEdges = .crisp
+        s.emfPlusSource = .gdi
+        s.useEmbeddedEMF = false
+        s.fontSubstitutions = [FontSubstitutionEntry(requested: "Calibri", replacement: "Helvetica")]
+
+        // The four Rendering keys land in sharedDefaults, never the main store.
+        #expect(defaults.object(forKey: Self.renderEdgesKey) == nil)
+        #expect(defaults.object(forKey: Self.fontSubstitutionsKey) == nil)
+        #expect(shared.string(forKey: Self.renderEdgesKey) == "crisp")
+        #expect(shared.data(forKey: Self.fontSubstitutionsKey) != nil)
+
+        // A fresh instance over the same suites observes every written value.
+        let reloaded = EmfySettings(defaults: defaults, sharedDefaults: shared)
+        #expect(reloaded.renderEdges == .crisp)
+        #expect(reloaded.emfPlusSource == .gdi)
+        #expect(reloaded.useEmbeddedEMF == false)
+        #expect(reloaded.fontSubstitutions.map(\.requested) == ["Calibri"])
+        #expect(reloaded.fontSubstitutions.map(\.replacement) == ["Helvetica"])
+    }
+
+    @Test @MainActor
+    func corruptFontSubstitutionJSONFallsBackToEmpty() throws {
+        let (defaults, name) = try freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(Data("definitely not json".utf8), forKey: Self.fontSubstitutionsKey)
+
+        let s = EmfySettings(defaults: defaults, sharedDefaults: defaults)
+        #expect(s.fontSubstitutions.isEmpty)
+        #expect(s.renderOptions.fontSubstitutions.isEmpty)
+    }
+
+    @Test @MainActor
+    func fontSubstitutionsAreBoundedToRowAndNameLimits() throws {
+        let (defaults, name) = try freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let s = EmfySettings(defaults: defaults, sharedDefaults: defaults)
+
+        // More rows than the cap clamp to the row limit on write.
+        s.fontSubstitutions = (0..<70).map { FontSubstitutionEntry(requested: "req\($0)", replacement: "rep\($0)") }
+        #expect(s.fontSubstitutions.count == EmfySettings.fontSubstitutionRowLimit)
+
+        // An over-long name truncates to the character limit on write.
+        let long = String(repeating: "A", count: 200)
+        s.fontSubstitutions = [FontSubstitutionEntry(requested: long, replacement: long)]
+        #expect(s.fontSubstitutions[0].requested.count == EmfySettings.fontSubstitutionNameLimit)
+        #expect(s.fontSubstitutions[0].replacement.count == EmfySettings.fontSubstitutionNameLimit)
+
+        // A hostile raw blob of 100 rows persisted directly still decodes bounded.
+        let rawMany = (0..<100).map { FontSubstitutionEntry(requested: "r\($0)", replacement: "x\($0)") }
+        defaults.set(try JSONEncoder().encode(rawMany), forKey: Self.fontSubstitutionsKey)
+        let reloaded = EmfySettings(defaults: defaults, sharedDefaults: defaults)
+        #expect(reloaded.fontSubstitutions.count == EmfySettings.fontSubstitutionRowLimit)
+    }
+
+    @Test @MainActor
+    func renderOptionsMapSettingsAndDropBlankRows() throws {
+        let (defaults, name) = try freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let s = EmfySettings(defaults: defaults, sharedDefaults: defaults)
+        s.renderEdges = .crisp
+        s.emfPlusSource = .gdi
+        s.useEmbeddedEMF = false
+        s.fontSubstitutions = [
+            FontSubstitutionEntry(requested: "Calibri", replacement: "Helvetica"),
+            FontSubstitutionEntry(requested: "   ", replacement: "Helvetica"),   // blank requested → dropped
+            FontSubstitutionEntry(requested: "Cambria", replacement: "  "),       // blank replacement → dropped
+        ]
+
+        let options = s.renderOptions
+        #expect(options.antialiasing == .crisp)
+        #expect(options.emfPlusArbitration == .gdi)
+        #expect(options.useEmbeddedEMF == false)
+        #expect(options.fontSubstitutions == [FontSubstitution(requestedFamily: "Calibri", replacementFamily: "Helvetica")])
+    }
+
+    // MARK: - "Drawn from" mapping (S1b)
+
+    @Test
+    func drawnFromReflectsEmbeddedChoiceAndEMFPlusArbitration() {
+        // A WMF that played its reassembled embedded EMF.
+        #expect(DrawnFrom.label(kind: .emf, embeddedEMF: .played, hasGDICopy: false, arbitration: .emfPlus) == "Built-in EMF copy")
+        // The built-in EMF turned off (option 4): the records play, labelled so.
+        #expect(DrawnFrom.label(kind: .wmfRecords, embeddedEMF: .declined, hasGDICopy: false, arbitration: .emfPlus)
+                == "WMF records (built-in EMF copy turned off)")
+        // Plain WMF record playback (no embedded EMF at all).
+        #expect(DrawnFrom.label(kind: .wmfRecords, embeddedEMF: .absent, hasGDICopy: false, arbitration: .emfPlus) == "WMF records")
+        // A plain EMF.
+        #expect(DrawnFrom.label(kind: .emf, embeddedEMF: .notApplicable, hasGDICopy: false, arbitration: .emfPlus) == "EMF records")
+        // A dual EMF+ file shown normally still reads as its EMF records.
+        #expect(DrawnFrom.label(kind: .emf, embeddedEMF: .notApplicable, hasGDICopy: true, arbitration: .emfPlus) == "EMF records")
+        // A dual EMF+ file the user chose to show as GDI draws from the GDI copy.
+        #expect(DrawnFrom.label(kind: .emf, embeddedEMF: .notApplicable, hasGDICopy: true, arbitration: .gdi) == "GDI copy")
+        // GDI arbitration on a non-dual EMF has no GDI copy, so it stays EMF records.
+        #expect(DrawnFrom.label(kind: .emf, embeddedEMF: .notApplicable, hasGDICopy: false, arbitration: .gdi) == "EMF records")
     }
 
     // MARK: - RecentEntry.isPinned decoding

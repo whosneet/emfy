@@ -288,6 +288,7 @@ struct LibraryWindow: View {
 /// with exactly one session per shown file (v3-plan §11.2).
 struct ViewerDetail: View {
     @Environment(RecentsStore.self) private var store
+    @Environment(EmfySettings.self) private var settings
     let entryID: UUID
     /// Clears the window's selection when the file is removed from Recents.
     let onRemove: () -> Void
@@ -307,7 +308,9 @@ struct ViewerDetail: View {
             }
         }
         .task(id: entryID) {
-            let newSession = DocumentSession(entryID: entryID, store: store)
+            // Seed the session with the current Rendering options so the opening
+            // render already honours them; live changes flow through the viewer (S1b).
+            let newSession = DocumentSession(entryID: entryID, store: store, options: settings.renderOptions)
             session = newSession
             await newSession.load()
         }

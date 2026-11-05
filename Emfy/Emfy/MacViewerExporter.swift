@@ -47,11 +47,12 @@ final class MacViewerExporter {
         _ format: ExportFormat,
         prepared: MetafileRenderer.Prepared,
         scale: CGFloat,
-        background: RenderBackground
+        background: RenderBackground,
+        options: RenderOptions
     ) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
-            render: { MetafileExport.data(for: format, prepared: prepared, scale: scale, background: background) },
+            render: { MetafileExport.data(for: format, prepared: prepared, scale: scale, background: background, options: options) },
             done: { [weak self] data in
                 guard let self else { return }
                 guard let data else { self.errorMessage = format.failureMessage; return }
@@ -100,11 +101,12 @@ final class MacViewerExporter {
         prepared: MetafileRenderer.Prepared,
         baseName: String,
         scale: CGFloat,
-        background: RenderBackground
+        background: RenderBackground,
+        options: RenderOptions
     ) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
-            render: { MetafileExport.data(for: format, prepared: prepared, scale: scale, background: background) },
+            render: { MetafileExport.data(for: format, prepared: prepared, scale: scale, background: background, options: options) },
             done: { [weak self] data in
                 guard let self else { return }
                 guard let data else { self.errorMessage = format.failureMessage; return }

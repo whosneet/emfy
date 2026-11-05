@@ -41,31 +41,35 @@ enum MetafileExport {
     /// failure. `Prepared` is `Sendable`, so this is safe to call from a detached
     /// task. `scale` and `background` drive PNG only (PDF is a true vector page,
     /// unaffected); they default to the historical 2× opaque-white output so any
-    /// unchanged caller is byte-identical.
+    /// unchanged caller is byte-identical. `options` carries the user's Rendering
+    /// choices (antialiasing, font substitutions, EMF+ arbitration) so an export
+    /// matches the viewer; `.default` keeps the pre-option output byte-identical.
     static func data(
         for format: ExportFormat,
         prepared: MetafileRenderer.Prepared,
         scale: CGFloat = renderScale,
-        background: RenderBackground = .white
+        background: RenderBackground = .white,
+        options: RenderOptions = .default
     ) -> Data? {
         switch format {
-        case .png: return pngData(prepared, scale: scale, background: background)
-        case .pdf: return pdfData(prepared)
+        case .png: return pngData(prepared, scale: scale, background: background, options: options)
+        case .pdf: return pdfData(prepared, options: options)
         }
     }
 
-    /// PNG bytes: render at `scale` on `background`, then encode with the shared
-    /// `EMFExport.pngData` (ImageIO). `scale` comes from the Default PNG scale
-    /// setting via `ExportScale.pngOptions` (area-cap fallback applied there);
+    /// PNG bytes: render at `scale` on `background` with `options`, then encode with
+    /// the shared `EMFExport.pngData` (ImageIO). `scale` comes from the Default PNG
+    /// scale setting via `ExportScale.pngOptions` (area-cap fallback applied there);
     /// `background` is the PNG background setting. Checks cancellation between the
     /// bitmap render and the PNG encode (§k), so a cancelled export drops the
     /// (often large) bitmap without also spending the encode.
     static func pngData(
         _ prepared: MetafileRenderer.Prepared,
         scale: CGFloat = renderScale,
-        background: RenderBackground = .white
+        background: RenderBackground = .white,
+        options: RenderOptions = .default
     ) -> Data? {
-        guard let (image, _) = MetafileRenderer.makeImage(prepared, scale: scale, background: background) else {
+        guard let (image, _) = MetafileRenderer.makeImage(prepared, scale: scale, background: background, options: options) else {
             return nil
         }
         if Task.isCancelled { return nil }
@@ -73,9 +77,11 @@ enum MetafileExport {
     }
 
     /// Single-page true-vector PDF bytes, straight from EMFKit (same page sizing
-    /// as the Mac).
-    static func pdfData(_ prepared: MetafileRenderer.Prepared) -> Data? {
-        MetafileRenderer.pdfData(prepared)
+    /// as the Mac). `options` carries font substitutions and EMF+ arbitration;
+    /// EMFKit neutralises antialiasing for vector PDF output, so `.crisp` leaves
+    /// the PDF byte-identical.
+    static func pdfData(_ prepared: MetafileRenderer.Prepared, options: RenderOptions = .default) -> Data? {
+        MetafileRenderer.pdfData(prepared, options: options)
     }
 
     /// Writes `data` into a fresh, uniquely-named temporary directory under

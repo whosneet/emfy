@@ -94,12 +94,20 @@ final class DocumentSession {
     /// Resolves the entry's bytes. The store-bound binding throws
     /// `RecentsStore.ResolveFailure`; a missing entry throws `.notFound`.
     private let resolve: @MainActor (UUID) async throws -> Data
-    /// Parses bytes into the display model off the main actor. `nil` means the
-    /// bytes resolved but could not be parsed (`.unreadable`).
-    private let parse: @Sendable (Data) -> LoadedMetafile?
+    /// Parses bytes into the display model off the main actor, honouring the
+    /// Rendering options (the WMF embedded-EMF choice changes the content; the
+    /// render-time options shape the captured diagnostics). `nil` means the bytes
+    /// resolved but could not be parsed (`.unreadable`).
+    private let parse: @Sendable (Data, RenderOptions) -> LoadedMetafile?
     /// The on-disk URL to watch for changes, or `nil` when it can't be resolved
     /// (an imported copy still resolves; only a dead bookmark returns nil).
     private let watchURLProvider: @MainActor (UUID) -> URL?
+
+    /// The Rendering options this session prepares and renders with (S1b). Set at
+    /// construction from the current settings and updated live via
+    /// `applyRenderOptions`. `@ObservationIgnored` because the viewer drives redraws
+    /// from the settings directly; the session uses it only to re-prepare.
+    @ObservationIgnored private(set) var renderOptions: RenderOptions
 
     @ObservationIgnored private var presenter: DocumentFilePresenter?
 
@@ -108,18 +116,21 @@ final class DocumentSession {
     init(
         entryID: UUID,
         resolve: @escaping @MainActor (UUID) async throws -> Data,
-        parse: @escaping @Sendable (Data) -> LoadedMetafile? = { try? MetafileLoader.load($0) },
-        watchURLProvider: @escaping @MainActor (UUID) -> URL? = { _ in nil }
+        parse: @escaping @Sendable (Data, RenderOptions) -> LoadedMetafile? = { try? MetafileLoader.load($0, options: $1) },
+        watchURLProvider: @escaping @MainActor (UUID) -> URL? = { _ in nil },
+        options: RenderOptions = .default
     ) {
         self.entryID = entryID
         self.resolve = resolve
         self.parse = parse
         self.watchURLProvider = watchURLProvider
+        self.renderOptions = options
     }
 
     /// The window-facing initialiser: binds resolution, parsing, and the watch URL
-    /// to the shared recents store.
-    convenience init(entryID: UUID, store: RecentsStore) {
+    /// to the shared recents store. `options` seeds the first prepare so the opening
+    /// render already honours the current Rendering settings.
+    convenience init(entryID: UUID, store: RecentsStore, options: RenderOptions = .default) {
         self.init(
             entryID: entryID,
             resolve: { [weak store] id in
@@ -137,7 +148,8 @@ final class DocumentSession {
                     relativeTo: nil,
                     bookmarkDataIsStale: &isStale
                 )
-            }
+            },
+            options: options
         )
     }
 
@@ -204,7 +216,8 @@ final class DocumentSession {
 
         // Parse off the main actor; the result is Sendable.
         let parse = self.parse
-        let model = await Task.detached(priority: .userInitiated) { parse(data) }.value
+        let options = renderOptions
+        let model = await Task.detached(priority: .userInitiated) { parse(data, options) }.value
         guard generation == loadGeneration else { return }   // a newer load superseded this
 
         if let model {
@@ -221,6 +234,58 @@ final class DocumentSession {
             state = .failed(.unreadable)
             startWatching()   // keep watching after .unreadable (M4)
         }
+    }
+
+    // MARK: - Rendering options (S1b)
+
+    /// Applies new Rendering options and, when they change what a prepare produces
+    /// or what the diagnostics say, re-prepares the open file — keeping the current
+    /// render on screen until the new one is ready, so there is no loading flash and
+    /// the bytes (hence the content fingerprint) are unchanged. Antialiasing is
+    /// render-time only and changes neither the prepared content nor the
+    /// diagnostics, so it is applied by the viewer's live redraw and skips the
+    /// re-prepare. A prepare-affecting change (the WMF embedded-EMF choice) yields a
+    /// new `prepared`; the viewer rebuilds its tiles from it through its content
+    /// identity, which tracks that choice.
+    func applyRenderOptions(_ newOptions: RenderOptions) {
+        let old = renderOptions
+        guard newOptions != old else { return }
+        renderOptions = newOptions
+        guard loaded != nil, Self.needsReprepare(from: old, to: newOptions) else { return }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        Task { @MainActor in await reprepare(generation: generation, options: newOptions) }
+    }
+
+    /// Whether a change from `old` to `new` options needs a re-prepare: the WMF
+    /// embedded-EMF choice changes the content, and the EMF+ arbitration and font
+    /// table change the captured render log (the banner and the could-not-show
+    /// list). Antialiasing alone does neither, so it never forces a re-prepare.
+    static func needsReprepare(from old: RenderOptions, to new: RenderOptions) -> Bool {
+        old.useEmbeddedEMF != new.useEmbeddedEMF
+            || old.emfPlusArbitration != new.emfPlusArbitration
+            || old.fontSubstitutions != new.fontSubstitutions
+    }
+
+    /// Re-parses the open file's bytes with `options`, installing the new model
+    /// while the old one stays on screen. A transient resolve failure or an
+    /// unreadable re-parse keeps the current render (never a flash or a blank). The
+    /// content fingerprint is left untouched because the bytes are the same, so the
+    /// viewer preserves the zoom for a same-size re-prepare.
+    private func reprepare(generation: Int, options: RenderOptions) async {
+        let data: Data
+        do {
+            data = try await resolve(entryID)
+        } catch {
+            return   // keep the current render; a later change can retry
+        }
+        guard generation == loadGeneration else { return }
+        let parse = self.parse
+        let model = await Task.detached(priority: .userInitiated) { parse(data, options) }.value
+        guard generation == loadGeneration, let model else { return }
+        modelInstallCount &+= 1
+        state = .loaded(model)
+        startWatching()
     }
 
     /// A cheap content fingerprint (a seeded hash of the bytes). Stable within one

@@ -78,6 +78,12 @@ struct MacViewerPane: View {
             .background(zoomInEqualsShortcut)
             // Publish this window's actions to the shared menu bar (C3b scope 1).
             .focusedSceneValue(\.viewerActions, viewerActions)
+            // A Rendering settings change re-prepares the open file live, keeping the
+            // zoom and scroll where practical; render-time options also reach the tiles
+            // through the `options` prop above (S1b).
+            .onChange(of: settings.renderOptions) { _, new in
+                session.applyRenderOptions(new)
+            }
             .onDisappear { exporter.cancelOngoing() }
     }
 
@@ -101,13 +107,17 @@ struct MacViewerPane: View {
                     darkMode: settings.darkPageMode,
                     isDark: colorScheme == .dark
                 ),
-                scrollAction: settings.macScrollAction
+                scrollAction: settings.macScrollAction,
+                options: settings.renderOptions
             )
             .ignoresSafeArea()
             // Rebuild the tiled view only when the content actually changes, so a
             // changed-content reload shows the new drawing while an identical reload
-            // keeps the same view and its zoom (C4a M4).
-            .id(session.loadedContentID)
+            // keeps the same view and its zoom (C4a M4). The identity also tracks the
+            // prepared's size and its WMF embedded-EMF choice, so toggling that option
+            // (option 4) rebuilds with the new content, while the render-time options
+            // redraw the existing tiles (S1b).
+            .id(ViewerContentID(model: model, content: session.loadedContentID))
         case .failed(let reason):
             failedView(reason)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -300,13 +310,13 @@ struct MacViewerPane: View {
     private func export(_ format: ExportFormat) {
         guard let loaded else { return }
         let opts = ExportScale.pngOptions(for: loaded.prepared.naturalSize, settings: settings)
-        exporter.exportToFile(format, prepared: loaded.prepared, scale: opts.scale, background: opts.background)
+        exporter.exportToFile(format, prepared: loaded.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions)
     }
 
     private func share(_ format: ExportFormat) {
         guard let loaded, let entry else { return }
         let opts = ExportScale.pngOptions(for: loaded.prepared.naturalSize, settings: settings)
-        exporter.share(format, prepared: loaded.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background)
+        exporter.share(format, prepared: loaded.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background, options: settings.renderOptions)
     }
 
     private func shareOriginal() {

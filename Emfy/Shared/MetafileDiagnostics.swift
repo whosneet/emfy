@@ -17,6 +17,40 @@ struct DiagnosticNote: Hashable, Identifiable, Sendable {
     var id: String { summary + "\u{1}" + technicalDetail }
 }
 
+// MARK: - "Drawn from" label
+
+/// The Info inspector's "Drawn from" value, as a pure mapping so it is unit-tested
+/// without a view. It reads the prepared metafile's kind and embedded-EMF fate plus
+/// the live EMF+ arbitration setting, so it reflects the Rendering options (S1b):
+///
+/// - A WMF whose built-in EMF copy was turned off (option 4) draws from its own
+///   records, and says so.
+/// - An EMF+ dual file shown as GDI (option 3) draws from its GDI copy.
+enum DrawnFrom {
+    static func label(
+        kind: MetafileRenderer.Prepared.Kind,
+        embeddedEMF: MetafileRenderer.Prepared.EmbeddedEMF,
+        hasGDICopy: Bool,
+        arbitration: RenderOptions.EMFPlusArbitration
+    ) -> String {
+        switch kind {
+        case .emf:
+            // A dual EMF+ file the user chose to show as GDI draws from the GDI copy.
+            if hasGDICopy, arbitration == .gdi { return "GDI copy" }
+            switch embeddedEMF {
+            case .played: return "Built-in EMF copy"
+            case .declined: return wmfRecordsWithEMFOff
+            default: return "EMF records"
+            }
+        case .wmfRecords:
+            // The embedded EMF reassembled but the user turned it off (option 4).
+            return embeddedEMF == .declined ? wmfRecordsWithEMFOff : "WMF records"
+        }
+    }
+
+    private static let wmfRecordsWithEMFOff = "WMF records (built-in EMF copy turned off)"
+}
+
 // MARK: - Assembled notes
 
 /// Everything a viewer needs to decide the partial-support banner and to fill the

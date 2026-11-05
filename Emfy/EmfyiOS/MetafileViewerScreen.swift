@@ -161,6 +161,12 @@ struct MetafileViewerScreen: View {
                 UIAccessibility.post(notification: .announcement, argument: "Can’t show this file")
             }
         }
+        // A Rendering settings change re-prepares the open file live, keeping the zoom
+        // where practical; render-time options also reach the tiles through the
+        // `options` prop above (S1b).
+        .onChange(of: settings.renderOptions) { _, new in
+            session.applyRenderOptions(new)
+        }
         .onDisappear {
             pillHideTask?.cancel()
             exporter.cancelOngoing()
@@ -218,13 +224,17 @@ struct MetafileViewerScreen: View {
                     darkMode: settings.darkPageMode,
                     isDark: colorScheme == .dark
                 ),
+                options: settings.renderOptions,
                 onSingleTap: { toggleChrome() }
             )
             .ignoresSafeArea()
             // Rebuild the tiled view only when the content actually changes, so a
             // changed-content reload shows the new drawing while an identical reload
-            // keeps the same view and its zoom (C4a M4).
-            .id(session.loadedContentID)
+            // keeps the same view and its zoom (C4a M4). The identity also tracks the
+            // prepared's size and its WMF embedded-EMF choice, so toggling that option
+            // (option 4) rebuilds with the new content, while the render-time options
+            // redraw the existing tiles (S1b).
+            .id(ViewerContentID(model: model, content: session.loadedContentID))
         case .failed(let reason):
             failedView(reason)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -320,13 +330,13 @@ struct MetafileViewerScreen: View {
             }
             Divider()
             Button {
-                exporter.copyImage(prepared: model.prepared, scale: opts.scale, background: opts.background, toast: toast)
+                exporter.copyImage(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)
             } label: {
                 Label("Copy Image", systemImage: "doc.on.doc")
             }
             .accessibilityIdentifier("copyImage")
             Button {
-                exporter.saveToPhotos(prepared: model.prepared, scale: opts.scale, background: opts.background, toast: toast)
+                exporter.saveToPhotos(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)
             } label: {
                 Label("Save to Photos", systemImage: "square.and.arrow.down")
             }
@@ -356,13 +366,13 @@ struct MetafileViewerScreen: View {
         switch format {
         case .png:
             Button {
-                exporter.share(.png, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background)
+                exporter.share(.png, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background, options: settings.renderOptions)
             } label: {
                 Label("Share as PNG", systemImage: "photo")
             }
         case .pdf:
             Button {
-                exporter.share(.pdf, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background)
+                exporter.share(.pdf, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background, options: settings.renderOptions)
             } label: {
                 Label("Share as PDF", systemImage: "doc.richtext")
             }

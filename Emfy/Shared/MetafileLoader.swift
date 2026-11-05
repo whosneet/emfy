@@ -35,6 +35,28 @@ struct LoadedMetafile: Sendable {
     let partialSupportMessage: String?
 }
 
+/// The viewer's content identity (S1b): the SwiftUI `.id` for the tiled viewer, so
+/// it rebuilds only when what it draws actually changes. It combines the bytes'
+/// content fingerprint with the prepared metafile's display size and its WMF
+/// embedded-EMF choice (played vs record playback), so turning the built-in EMF
+/// copy on or off (option 4) rebuilds the tiles from the new content, while the
+/// render-time Rendering options redraw the existing tiles in place.
+struct ViewerContentID: Hashable {
+    let content: Int
+    let width: Int
+    let height: Int
+    let kindIsWMFRecords: Bool
+    let embeddedEMFDeclined: Bool
+
+    init(model: LoadedMetafile, content: Int) {
+        self.content = content
+        self.width = Int(model.displaySize.width.rounded())
+        self.height = Int(model.displaySize.height.rounded())
+        self.kindIsWMFRecords = model.prepared.kind == .wmfRecords
+        self.embeddedEMFDeclined = model.prepared.embeddedEMF == .declined
+    }
+}
+
 enum MetafileLoader {
     /// The maximum side, in points, the displayed picture may claim as geometry.
     /// Matches the renderer's own per-side cap.
@@ -65,13 +87,18 @@ enum MetafileLoader {
     /// Call from a cancellable background context; the result is `Sendable`. The
     /// one render below is skipped when the task has been cancelled (the viewer
     /// was popped), and is bounded in area regardless of the file's bounds.
-    static func load(_ data: Data) throws -> LoadedMetafile {
+    ///
+    /// `options` carries the user's Rendering choices (S1b): the WMF embedded-EMF
+    /// choice shapes what `prepare` produces, and the render-time options shape the
+    /// captured log — so the inspector's "What Emfy couldn't show" and the banner
+    /// match what the viewer draws. `.default` reproduces the pre-option load.
+    static func load(_ data: Data, options: RenderOptions = .default) throws -> LoadedMetafile {
         guard let opened = try? OpenedMetafile.open(data),
-              let prepared = MetafileRenderer.prepare(opened) else {
+              let prepared = MetafileRenderer.prepare(opened, options: options) else {
             throw UnreadableFile()
         }
         let displaySize = clampedDisplaySize(prepared.naturalSize)
-        let log = Task.isCancelled ? [] : captureRenderLog(prepared, displaySize: displaySize)
+        let log = Task.isCancelled ? [] : captureRenderLog(prepared, displaySize: displaySize, options: options)
         let diagnostics = ViewerDiagnostics(
             kind: prepared.kind,
             embeddedEMF: prepared.embeddedEMF,
@@ -95,7 +122,7 @@ enum MetafileLoader {
     /// `MetafileRenderer.render` into a caller-sized context — not `makeImage` —
     /// so it never allocates a large bitmap and never logs the on-screen
     /// `canvasClamped` note (which doesn't apply to the tiled viewer).
-    private static func captureRenderLog(_ prepared: MetafileRenderer.Prepared, displaySize: CGSize) -> [EMFRenderLog.Entry] {
+    private static func captureRenderLog(_ prepared: MetafileRenderer.Prepared, displaySize: CGSize, options: RenderOptions = .default) -> [EMFRenderLog.Entry] {
         let area = displaySize.width * displaySize.height
         let scale = area > logRenderMaxArea ? (logRenderMaxArea / area).squareRoot() : 1
         let width = max(1, Int((displaySize.width * scale).rounded()))
@@ -114,7 +141,8 @@ enum MetafileLoader {
         return MetafileRenderer.render(
             prepared,
             into: context,
-            target: CGRect(x: 0, y: 0, width: width, height: height)
+            target: CGRect(x: 0, y: 0, width: width, height: height),
+            options: options
         ).entries
     }
 

@@ -110,6 +110,11 @@ struct ZoomableMetafileView: UIViewRepresentable {
     var pageShadow: Bool = true
     /// How the tiles are painted — page background + dark-mode treatment (S1a-4b).
     var tilePaint: TilePaint = .plain
+    /// The render-time Rendering options — antialiasing, font substitutions, EMF+
+    /// arbitration (S1b). A change redraws the tiles; the prepare-time option (the
+    /// WMF embedded-EMF choice) arrives as a new `prepared` through the view's
+    /// content identity, so this view never swaps `prepared`.
+    var options: RenderOptions = .default
     /// Toggles the chrome; reused as the drawing's "Show/Hide controls" action.
     let onSingleTap: () -> Void
 
@@ -143,7 +148,8 @@ struct ZoomableMetafileView: UIViewRepresentable {
         let tiled = TiledMetafileView(
             prepared: prepared,
             naturalSize: naturalSize,
-            displayScale: displayScale
+            displayScale: displayScale,
+            options: options
         )
         tiled.frame = CGRect(origin: .zero, size: naturalSize)
         // The drawing is one accessibility element labelled e.g. "Drawing: House
@@ -190,6 +196,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
             tiled.applyAccessibility(chromeHidden: chromeHidden)
             tiled.setShadow(enabled: pageShadow)
             tiled.setPaint(tilePaint)       // live page background + dark-mode treatment
+            tiled.setOptions(options)       // live antialiasing / fonts / EMF+ arbitration (S1b)
             // Follow the display across a scale change (e.g. moving between
             // displays) — re-render the tiles at the new resolution.
             tiled.updateContentsScale(displayScale)
@@ -384,6 +391,9 @@ private final class TiledMetafileView: UIView {
     /// The tile paint (page + dark-mode treatment), read on the tiled-layer's
     /// background thread, set on the main thread — behind a lock (S1a-4b).
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
+    /// The render-time Rendering options, read on the tiled-layer's background
+    /// thread, set on the main thread — behind a lock (S1b).
+    private let optionsLock: OSAllocatedUnfairLock<RenderOptions>
 
     /// Zoom commands for the adjustable trait and the Zoom custom actions.
     weak var controller: MetafileZoomController?
@@ -397,6 +407,20 @@ private final class TiledMetafileView: UIView {
         }
         // CATiledLayer caches rasterised tiles; invalidate the layer directly so
         // the visible tiles re-rasterise with the new paint (S1a-4b live update).
+        if changed {
+            setNeedsDisplay()
+            tiledLayer.setNeedsDisplay()
+        }
+    }
+
+    /// Updates the render-time options and re-rasterises the visible tiles when they
+    /// change (S1b live update), the same way `setPaint` flushes the tile cache.
+    func setOptions(_ options: RenderOptions) {
+        let changed = optionsLock.withLock { current -> Bool in
+            guard current != options else { return false }
+            current = options
+            return true
+        }
         if changed {
             setNeedsDisplay()
             tiledLayer.setNeedsDisplay()
@@ -416,9 +440,10 @@ private final class TiledMetafileView: UIView {
         layer as! CATiledLayer
     }
 
-    init(prepared: MetafileRenderer.Prepared, naturalSize: CGSize, displayScale: CGFloat) {
+    init(prepared: MetafileRenderer.Prepared, naturalSize: CGSize, displayScale: CGFloat, options: RenderOptions) {
         self.prepared = prepared
         self.naturalSize = naturalSize
+        self.optionsLock = OSAllocatedUnfairLock<RenderOptions>(initialState: options)
         super.init(frame: CGRect(origin: .zero, size: naturalSize))
 
         let tiled = tiledLayer
@@ -502,6 +527,7 @@ private final class TiledMetafileView: UIView {
     nonisolated override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let paint = paintLock.withLock { $0 }
+        let options = optionsLock.withLock { $0 }
         let natural = naturalSize
         let prepared = self.prepared
         // Page, then the drawing, then the dark-mode treatment (S1a-4b). UIKit's
@@ -511,7 +537,7 @@ private final class TiledMetafileView: UIView {
         TilePainter.paint(paint, into: context, rect: rect) { ctx in
             ctx.translateBy(x: 0, y: natural.height)
             ctx.scaleBy(x: 1, y: -1)
-            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural))
+            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural), options: options)
         }
     }
 }

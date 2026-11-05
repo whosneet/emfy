@@ -1,6 +1,8 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 
 /// Emfy's Settings UI (S1a-2 / S1a-3). Every control reads and writes
@@ -99,6 +101,12 @@ extension EmfySettings.ExportFormat: SettingsOption {
 extension EmfySettings.RecentsCap: SettingsOption {
     var label: String { "\(rawValue)" }
 }
+extension EmfySettings.RenderEdges: SettingsOption {
+    var label: String { self == .smooth ? "Smooth" : "Crisp" }
+}
+extension EmfySettings.EMFPlusSource: SettingsOption {
+    var label: String { self == .emfPlus ? "Show EMF+" : "Show GDI" }
+}
 
 // MARK: - Thumbnail-size metrics (S1a-5)
 //
@@ -145,6 +153,178 @@ private enum SettingsFooter {
     static let iOSDiagnostics = "This copies app, system and device details only, with no file names or drawing content. A file’s own report is in the viewer’s share menu and the Info panel."
 }
 
+// MARK: - Rendering group (S1b)
+
+/// Footer sentences for the Rendering group, shared verbatim by both platforms.
+private enum RenderingFooter {
+    static let edges = "Crisp shows hard pixel edges, like Windows, with no smoothing."
+    static let emfPlus = "This only changes files that hold both an EMF+ and a GDI version."
+    static let wmf = "Some WMF files carry a fuller built-in EMF version of the drawing."
+    static let fonts = "Used only when a drawing asks for a font this device doesn’t have."
+    static let fontCap = "You can keep up to \(EmfySettings.fontSubstitutionRowLimit) substitutions."
+    static let emptyFonts = "No font substitutions yet."
+}
+
+/// The installed font families to choose a replacement from (S1b). Enumerated on
+/// the main actor because the font APIs are main-actor only; the pickers load it
+/// into state from a `.task`, so the enumeration never blocks a view initialiser.
+enum FontFamilyCatalog {
+    @MainActor static func installedFamilies() -> [String] {
+        #if os(macOS)
+        let families = NSFontManager.shared.availableFontFamilies
+        #else
+        let families = UIFont.familyNames
+        #endif
+        return families.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+}
+
+/// Drives the add/edit sheet for one substitution row. A fresh `id` per
+/// presentation, so re-opening always re-presents (`.sheet(item:)`).
+private struct FontSubstitutionDraft: Identifiable {
+    let id = UUID()
+    /// The row being edited, or `nil` when adding a new one.
+    var editingID: FontSubstitutionEntry.ID?
+    var requested: String = ""
+    var replacement: String = ""
+}
+
+/// One "requested → replacement" row label, shared by both platforms. One
+/// accessibility element that reads as a sentence.
+private struct SubstitutionRowLabel: View {
+    let entry: FontSubstitutionEntry
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(entry.requested)
+                .lineLimit(1)
+            Image(systemName: "arrow.right")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(entry.replacement)
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(entry.requested.isEmpty ? "Unnamed font" : entry.requested), replaced by \(entry.replacement)")
+    }
+}
+
+/// The add/edit sheet: a freely-typed requested family and a searchable installed
+/// replacement family (S1b). Shared by both platforms; presented as a sheet so it
+/// has its own `NavigationStack` for the font picker push on either platform.
+private struct FontSubstitutionEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var requested: String
+    @State private var replacement: String
+    private let isEditing: Bool
+    private let onSave: (String, String) -> Void
+
+    init(draft: FontSubstitutionDraft, onSave: @escaping (String, String) -> Void) {
+        _requested = State(initialValue: draft.requested)
+        _replacement = State(initialValue: draft.replacement)
+        isEditing = draft.editingID != nil
+        self.onSave = onSave
+    }
+
+    private var trimmedRequested: String { requested.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedReplacement: String { replacement.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var canSave: Bool { !trimmedRequested.isEmpty && !trimmedReplacement.isEmpty }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Font name in the drawing", text: $requested)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        #endif
+                } header: {
+                    Text("Requested font")
+                } footer: {
+                    Text("Type the font name as the drawing asks for it.")
+                }
+                Section("Replacement font") {
+                    NavigationLink {
+                        FontFamilyPicker(selection: $replacement)
+                    } label: {
+                        LabeledContent("Use instead") {
+                            Text(replacement.isEmpty ? "Choose…" : replacement)
+                                .foregroundStyle(replacement.isEmpty ? .secondary : .primary)
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle(isEditing ? "Edit Substitution" : "Add Substitution")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(trimmedRequested, trimmedReplacement)
+                        dismiss()
+                    }
+                    .disabled(!canSave)
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 460, minHeight: 360)
+        #endif
+    }
+}
+
+/// A searchable list of installed font families. Selecting one writes it back and
+/// pops the push (S1b).
+private struct FontFamilyPicker: View {
+    @Binding var selection: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var families: [String] = []
+    @State private var search = ""
+
+    private var filtered: [String] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return families }
+        return families.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        List(filtered, id: \.self) { family in
+            Button {
+                selection = family
+                dismiss()
+            } label: {
+                HStack {
+                    Text(family)
+                    Spacer(minLength: 8)
+                    if family == selection {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(family == selection ? [.isSelected] : [])
+        }
+        .searchable(text: $search, prompt: "Search fonts")
+        .navigationTitle("Replacement Font")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .task { families = FontFamilyCatalog.installedFamilies() }
+    }
+}
+
 /// The Settings "Copy Diagnostic Report" row (S1a-6). The Settings window has no
 /// toast surface and no open file, so it copies the system-only report (app,
 /// system and device) and confirms inline by briefly swapping its label.
@@ -187,6 +367,8 @@ private struct MacSettingsTabs: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             MacViewerTab()
                 .tabItem { Label("Viewer", systemImage: "eye") }
+            MacRenderingTab()
+                .tabItem { Label("Rendering", systemImage: "paintbrush.pointed") }
             MacExportTab()
                 .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
             MacHelpTab()
@@ -303,6 +485,97 @@ private struct MacViewerTab: View {
     }
 }
 
+/// The Rendering tab (S1b): edges, EMF+-dual arbitration, the WMF embedded-EMF
+/// toggle, and the font substitution table. The first three use the same
+/// `MacOptionRow` / `Toggle` pattern as the other tabs; the table lists
+/// "requested → replacement" rows with a trailing − to delete and an Add sheet.
+private struct MacRenderingTab: View {
+    @Environment(EmfySettings.self) private var settings
+    @State private var draft: FontSubstitutionDraft?
+
+    private var atCap: Bool { settings.fontSubstitutions.count >= EmfySettings.fontSubstitutionRowLimit }
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section {
+                MacOptionRow(title: "Edges", value: $settings.renderEdges, segmented: true)
+            } footer: {
+                Text(RenderingFooter.edges)
+            }
+            Section {
+                MacOptionRow(title: "EMF+ files with a GDI copy", value: $settings.emfPlusSource, segmented: true)
+            } footer: {
+                Text(RenderingFooter.emfPlus)
+            }
+            Section {
+                Toggle("WMF files: use built-in EMF copy", isOn: $settings.useEmbeddedEMF)
+            } footer: {
+                Text(RenderingFooter.wmf)
+            }
+            Section {
+                if settings.fontSubstitutions.isEmpty {
+                    Text(RenderingFooter.emptyFonts)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(settings.fontSubstitutions) { entry in
+                        HStack {
+                            Button {
+                                draft = FontSubstitutionDraft(editingID: entry.id, requested: entry.requested, replacement: entry.replacement)
+                            } label: {
+                                SubstitutionRowLabel(entry: entry)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Button(role: .destructive) {
+                                delete(entry.id)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .symbolRenderingMode(.hierarchical)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Delete substitution")
+                        }
+                    }
+                }
+                Button {
+                    draft = FontSubstitutionDraft()
+                } label: {
+                    Label("Add Substitution…", systemImage: "plus")
+                }
+                .disabled(atCap)
+            } header: {
+                Text("Font substitutions")
+            } footer: {
+                Text(atCap ? RenderingFooter.fontCap : RenderingFooter.fonts)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: macSettingsWidth)
+        .fixedSize(horizontal: false, vertical: true)
+        .sheet(item: $draft) { draft in
+            FontSubstitutionEditorSheet(draft: draft) { requested, replacement in
+                apply(draft, requested: requested, replacement: replacement)
+            }
+        }
+    }
+
+    private func delete(_ id: FontSubstitutionEntry.ID) {
+        settings.fontSubstitutions.removeAll { $0.id == id }
+    }
+
+    private func apply(_ draft: FontSubstitutionDraft, requested: String, replacement: String) {
+        var table = settings.fontSubstitutions
+        if let id = draft.editingID, let index = table.firstIndex(where: { $0.id == id }) {
+            table[index].requested = requested
+            table[index].replacement = replacement
+        } else {
+            table.append(FontSubstitutionEntry(requested: requested, replacement: replacement))
+        }
+        settings.fontSubstitutions = table
+    }
+}
+
 private struct MacExportTab: View {
     @Environment(EmfySettings.self) private var settings
 
@@ -404,6 +677,7 @@ private struct IOSSettingsForm: View {
                 IOSOptionRow(title: "Page background", value: $settings.pageBackground)
                 Toggle("Show partial support banner", isOn: $settings.showPartialSupportBanner)
                 NavigationLink("More Viewer Options") { IOSMoreViewerOptions() }
+                NavigationLink("Rendering") { IOSRenderingScreen() }
             }
             Section {
                 IOSOptionRow(title: "Recents to keep", value: $settings.recentsToKeep)
@@ -525,6 +799,84 @@ private struct IOSMoreLibraryOptions: View {
         }
         .navigationTitle("Library Options")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// The Rendering screen (S1b): edges, EMF+-dual arbitration, the WMF embedded-EMF
+/// toggle, and the font substitution table (swipe to delete, tap to edit, an Add
+/// sheet). Reached from a row in the main Settings form.
+private struct IOSRenderingScreen: View {
+    @Environment(EmfySettings.self) private var settings
+    @State private var draft: FontSubstitutionDraft?
+
+    private var atCap: Bool { settings.fontSubstitutions.count >= EmfySettings.fontSubstitutionRowLimit }
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section {
+                IOSOptionRow(title: "Edges", value: $settings.renderEdges)
+            } footer: {
+                Text(RenderingFooter.edges)
+            }
+            Section {
+                IOSOptionRow(title: "EMF+ files with a GDI copy", value: $settings.emfPlusSource)
+            } footer: {
+                Text(RenderingFooter.emfPlus)
+            }
+            Section {
+                Toggle("WMF files: use built-in EMF copy", isOn: $settings.useEmbeddedEMF)
+            } footer: {
+                Text(RenderingFooter.wmf)
+            }
+            Section {
+                if settings.fontSubstitutions.isEmpty {
+                    Text(RenderingFooter.emptyFonts)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(settings.fontSubstitutions) { entry in
+                        Button {
+                            draft = FontSubstitutionDraft(editingID: entry.id, requested: entry.requested, replacement: entry.replacement)
+                        } label: {
+                            SubstitutionRowLabel(entry: entry)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .onDelete { offsets in
+                        settings.fontSubstitutions.remove(atOffsets: offsets)
+                    }
+                }
+                Button {
+                    draft = FontSubstitutionDraft()
+                } label: {
+                    Label("Add Substitution", systemImage: "plus")
+                }
+                .disabled(atCap)
+            } header: {
+                Text("Font substitutions")
+            } footer: {
+                Text(atCap ? RenderingFooter.fontCap : RenderingFooter.fonts)
+            }
+        }
+        .navigationTitle("Rendering")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $draft) { draft in
+            FontSubstitutionEditorSheet(draft: draft) { requested, replacement in
+                apply(draft, requested: requested, replacement: replacement)
+            }
+        }
+    }
+
+    private func apply(_ draft: FontSubstitutionDraft, requested: String, replacement: String) {
+        var table = settings.fontSubstitutions
+        if let id = draft.editingID, let index = table.firstIndex(where: { $0.id == id }) {
+            table[index].requested = requested
+            table[index].replacement = replacement
+        } else {
+            table.append(FontSubstitutionEntry(requested: requested, replacement: replacement))
+        }
+        settings.fontSubstitutions = table
     }
 }
 

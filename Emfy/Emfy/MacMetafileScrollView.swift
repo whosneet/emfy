@@ -90,6 +90,11 @@ struct MacMetafileScrollView: NSViewRepresentable {
     var tilePaint: TilePaint = .plain
     /// Plain scroll pans (default) or zooms about the cursor (S1a-4b). Mac only.
     var scrollAction: EmfySettings.MacScrollAction = .pan
+    /// The render-time Rendering options — antialiasing, font substitutions, EMF+
+    /// arbitration (S1b). A change redraws the tiles with the new options; the
+    /// prepare-time option (the WMF embedded-EMF choice) arrives as a new `prepared`
+    /// through the view's content identity, so this view need never swap `prepared`.
+    var options: RenderOptions = .default
 
     /// The paper's drop shadow, built fresh each time it's applied (an `NSShadow`
     /// shouldn't be shared across views). `nil` when the setting is off.
@@ -147,7 +152,7 @@ struct MacMetafileScrollView: NSViewRepresentable {
         paper.layer?.backgroundColor = NSColor.white.cgColor
         paper.shadow = pageShadow ? Self.makePaperShadow() : nil
 
-        let tiled = TiledMetafileView(prepared: prepared, naturalSize: naturalSize)
+        let tiled = TiledMetafileView(prepared: prepared, naturalSize: naturalSize, options: options)
         tiled.frame = paper.bounds
         tiled.autoresizingMask = [.width, .height]
         tiled.setAccessibilityLabelText(drawingLabel)
@@ -181,6 +186,7 @@ struct MacMetafileScrollView: NSViewRepresentable {
             tiled.controller = controller
             tiled.setAccessibilityLabelText(drawingLabel)
             tiled.setPaint(tilePaint)       // live page background + dark-mode treatment
+            tiled.setOptions(options)       // live antialiasing / fonts / EMF+ arbitration (S1b)
         }
         // Live-toggle the paper shadow (the document view is the paper).
         scrollView.documentView?.shadow = pageShadow ? Self.makePaperShadow() : nil
@@ -482,6 +488,9 @@ private final class TiledMetafileView: NSView {
     /// The tile paint (page + dark-mode treatment), read on the tiled-layer's
     /// background thread, set on the main thread — behind a lock (S1a-4b).
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
+    /// The render-time Rendering options, read on the tiled-layer's background
+    /// thread, set on the main thread — behind a lock (S1b).
+    private let optionsLock: OSAllocatedUnfairLock<RenderOptions>
 
     /// Zoom commands for the accessibility value and the Zoom custom actions.
     weak var controller: MacMetafileZoomController?
@@ -503,9 +512,24 @@ private final class TiledMetafileView: NSView {
         }
     }
 
-    init(prepared: MetafileRenderer.Prepared, naturalSize: CGSize) {
+    /// Updates the render-time options and re-rasterises the visible tiles when they
+    /// change (S1b live update), the same way `setPaint` flushes the tile cache.
+    func setOptions(_ options: RenderOptions) {
+        let changed = optionsLock.withLock { current -> Bool in
+            guard current != options else { return false }
+            current = options
+            return true
+        }
+        if changed {
+            setNeedsDisplay(bounds)
+            layer?.setNeedsDisplay()
+        }
+    }
+
+    init(prepared: MetafileRenderer.Prepared, naturalSize: CGSize, options: RenderOptions) {
         self.prepared = prepared
         self.naturalSize = naturalSize
+        self.optionsLock = OSAllocatedUnfairLock<RenderOptions>(initialState: options)
         super.init(frame: CGRect(origin: .zero, size: naturalSize))
         wantsLayer = true
         configureAccessibility()
@@ -553,12 +577,13 @@ private final class TiledMetafileView: NSView {
     nonisolated override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let paint = paintLock.withLock { $0 }
+        let options = optionsLock.withLock { $0 }
         let natural = naturalSize
         let prepared = self.prepared
         // Page, then the drawing (y-up here, so no flip), then the dark-mode
         // treatment — all inside the tile's clip, set by CATiledLayer (S1a-4b).
         TilePainter.paint(paint, into: context, rect: dirtyRect) { ctx in
-            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural))
+            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural), options: options)
         }
     }
 

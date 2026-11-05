@@ -1,3 +1,4 @@
+import EMFRender
 import Foundation
 import Observation
 
@@ -11,8 +12,12 @@ import Observation
 /// construction reads without writing back. `UserDefaults` is injectable so tests
 /// use a throwaway suite, never the real domain.
 ///
-/// Keys are namespaced under `settings.*`. S1b will move only the (not-yet-added)
-/// Quick Look keys into an App Group suite, so the key set stays easy to split.
+/// Keys are namespaced under `settings.*`. The four **Rendering** keys (S1b) go
+/// through a SEPARATE injectable `sharedDefaults` so the next slice can point it
+/// at the App Group suite — letting the Quick Look extensions read the same
+/// rendering choices — without disturbing the rest. For now `sharedDefaults`
+/// defaults to `.standard`, exactly as the main store does, so there is no
+/// behavioural change yet.
 @MainActor
 @Observable
 final class EmfySettings {
@@ -20,6 +25,9 @@ final class EmfySettings {
     static let shared = EmfySettings()
 
     @ObservationIgnored private let defaults: UserDefaults
+    /// The defaults the four Rendering keys (S1b) persist through — a clean seam
+    /// so the next slice can swap in the App Group suite without touching the rest.
+    @ObservationIgnored private let sharedDefaults: UserDefaults
 
     // MARK: Viewer
 
@@ -111,10 +119,65 @@ final class EmfySettings {
         didSet { defaults.set(defaultExportFormat.rawValue, forKey: Keys.defaultExportFormat) }
     }
 
+    // MARK: Rendering (S1b — persisted through `sharedDefaults`)
+
+    /// Edge treatment: smooth antialiasing (today's behaviour) or crisp hard pixel
+    /// edges like Windows. Default `.smooth`, matching `RenderOptions.default`.
+    var renderEdges: RenderEdges {
+        didSet { sharedDefaults.set(renderEdges.rawValue, forKey: Keys.renderEdges) }
+    }
+    /// For an EMF+ dual file (one carrying both an EMF+ and a GDI description),
+    /// which to show. Default `.emfPlus`, matching `RenderOptions.default`.
+    var emfPlusSource: EMFPlusSource {
+        didSet { sharedDefaults.set(emfPlusSource.rawValue, forKey: Keys.emfPlusSource) }
+    }
+    /// Whether a WMF's complete, parseable built-in EMF supersedes its own records.
+    /// Default `true`, matching `RenderOptions.default`.
+    var useEmbeddedEMF: Bool {
+        didSet { sharedDefaults.set(useEmbeddedEMF, forKey: Keys.useEmbeddedEMF) }
+    }
+    /// The user's missing-family substitution table, consulted before the built-in
+    /// table when a drawing asks for a font this device doesn't have. Persisted as
+    /// JSON and kept within bounds on every write (`fontSubstitutionRowLimit` rows,
+    /// `fontSubstitutionNameLimit` characters per name); the reassignment inside
+    /// `didSet` is idempotent (`bounded(bounded) == bounded`), so it settles after
+    /// one pass and persists exactly once. Default `[]`, matching
+    /// `RenderOptions.default`.
+    var fontSubstitutions: [FontSubstitutionEntry] = [] {
+        didSet {
+            let bounded = Self.bounded(fontSubstitutions)
+            if bounded != fontSubstitutions {
+                fontSubstitutions = bounded
+            } else {
+                sharedDefaults.set(Self.encodeSubstitutions(bounded), forKey: Keys.fontSubstitutions)
+            }
+        }
+    }
+
+    /// The four Rendering settings mapped to EMFKit's `RenderOptions`, ready to pass
+    /// to every render/export call (S1b). Incomplete substitution rows (a blank
+    /// requested or replacement family) are dropped so a half-entered row never
+    /// shadows the built-in table. Equals `RenderOptions.default` while every
+    /// Rendering setting is at its default.
+    var renderOptions: RenderOptions {
+        RenderOptions(
+            antialiasing: renderEdges == .crisp ? .crisp : .smooth,
+            fontSubstitutions: fontSubstitutions.compactMap { entry in
+                let requested = entry.requested.trimmingCharacters(in: .whitespacesAndNewlines)
+                let replacement = entry.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !requested.isEmpty, !replacement.isEmpty else { return nil }
+                return FontSubstitution(requestedFamily: requested, replacementFamily: replacement)
+            },
+            emfPlusArbitration: emfPlusSource == .gdi ? .gdi : .emfPlus,
+            useEmbeddedEMF: useEmbeddedEMF
+        )
+    }
+
     // MARK: - Init
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, sharedDefaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.sharedDefaults = sharedDefaults
         defaultZoomOnOpen = Self.string(defaults, Keys.defaultZoomOnOpen, default: .fit)
         pageBackground = Self.string(defaults, Keys.pageBackground, default: .whitePage)
         showPartialSupportBanner = Self.bool(defaults, Keys.showPartialSupportBanner, default: true)
@@ -132,6 +195,13 @@ final class EmfySettings {
         defaultPNGScale = Self.int(defaults, Keys.defaultPNGScale, default: .x2)
         pngBackground = Self.string(defaults, Keys.pngBackground, default: .white)
         defaultExportFormat = Self.string(defaults, Keys.defaultExportFormat, default: .png)
+        // Rendering (S1b) reads from `sharedDefaults`. As with every other setting,
+        // assignment in `init` doesn't trigger `didSet`, so construction reads without
+        // writing back; the decoded table is already bounded.
+        renderEdges = Self.string(sharedDefaults, Keys.renderEdges, default: .smooth)
+        emfPlusSource = Self.string(sharedDefaults, Keys.emfPlusSource, default: .emfPlus)
+        useEmbeddedEMF = Self.bool(sharedDefaults, Keys.useEmbeddedEMF, default: true)
+        fontSubstitutions = Self.decodeSubstitutions(sharedDefaults, Keys.fontSubstitutions)
     }
 
     // MARK: - Backing reads (behaviour-preserving fallbacks)
@@ -150,6 +220,39 @@ final class EmfySettings {
     where E.RawValue == Int {
         guard d.object(forKey: key) != nil, let value = E(rawValue: d.integer(forKey: key)) else { return def }
         return value
+    }
+
+    // MARK: - Font substitution table (JSON, bounded, corruption-tolerant)
+
+    /// The most substitution rows the table keeps. Matches
+    /// `FontMapper.userSubstitutionLimit` (the renderer's own consumption cap).
+    /// `nonisolated` so the UI footers and bounds can reference it off the actor.
+    nonisolated static let fontSubstitutionRowLimit = 64
+    /// The longest family name a row keeps, in characters.
+    nonisolated static let fontSubstitutionNameLimit = 128
+
+    /// Clamps a table to the row and name-length limits (idempotent).
+    nonisolated static func bounded(_ entries: [FontSubstitutionEntry]) -> [FontSubstitutionEntry] {
+        entries.prefix(fontSubstitutionRowLimit).map { entry in
+            FontSubstitutionEntry(
+                id: entry.id,
+                requested: String(entry.requested.prefix(fontSubstitutionNameLimit)),
+                replacement: String(entry.replacement.prefix(fontSubstitutionNameLimit))
+            )
+        }
+    }
+
+    private nonisolated static func encodeSubstitutions(_ entries: [FontSubstitutionEntry]) -> Data {
+        (try? JSONEncoder().encode(entries)) ?? Data()
+    }
+
+    /// Decodes the persisted table, bounded. Corrupt or absent data falls back to
+    /// an empty table — a hostile or stale blob never throws or over-allocates.
+    private nonisolated static func decodeSubstitutions(_ d: UserDefaults, _ key: String) -> [FontSubstitutionEntry] {
+        guard let data = d.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([FontSubstitutionEntry].self, from: data)
+        else { return [] }
+        return bounded(decoded)
     }
 
     // MARK: - Keys
@@ -172,6 +275,33 @@ final class EmfySettings {
         static let defaultPNGScale = "settings.export.defaultPNGScale"
         static let pngBackground = "settings.export.pngBackground"
         static let defaultExportFormat = "settings.export.defaultExportFormat"
+        // Rendering (S1b) — persisted through `sharedDefaults`. Kept stable so the
+        // next slice can repoint `sharedDefaults` at the App Group suite unchanged.
+        static let renderEdges = "settings.rendering.edges"
+        static let emfPlusSource = "settings.rendering.emfPlusSource"
+        static let useEmbeddedEMF = "settings.rendering.useEmbeddedEMF"
+        static let fontSubstitutions = "settings.rendering.fontSubstitutions"
+    }
+}
+
+// MARK: - Font substitution entry
+
+/// One user-defined missing-family substitution row (S1b Settings › Rendering).
+/// A UI-facing, persistable mirror of EMFKit's render-time `FontSubstitution`: it
+/// carries a stable `id` for SwiftUI list identity and editing, and plain strings
+/// for the requested and replacement family names. Mapped to `FontSubstitution`
+/// (dropping blank rows) in `EmfySettings.renderOptions`.
+struct FontSubstitutionEntry: Codable, Equatable, Identifiable, Sendable {
+    var id: UUID
+    /// The family name as it appears in the drawing, typed freely by the user.
+    var requested: String
+    /// The installed family to use instead.
+    var replacement: String
+
+    init(id: UUID = UUID(), requested: String, replacement: String) {
+        self.id = id
+        self.requested = requested
+        self.replacement = replacement
     }
 }
 
@@ -192,6 +322,8 @@ extension EmfySettings {
     enum ThumbnailSize: String, CaseIterable, Sendable { case small, medium, large }
     enum PNGBackground: String, CaseIterable, Sendable { case white, transparent }
     enum ExportFormat: String, CaseIterable, Sendable { case png, pdf }
+    enum RenderEdges: String, CaseIterable, Sendable { case smooth, crisp }
+    enum EMFPlusSource: String, CaseIterable, Sendable { case emfPlus, gdi }
 
     /// The PNG export multiplier; its raw value is the integer scale.
     enum PNGScale: Int, CaseIterable, Sendable {
