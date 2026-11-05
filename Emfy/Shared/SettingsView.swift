@@ -367,12 +367,22 @@ private struct MacHelpTab: View {
 /// A system picker row; in a Form it renders as a navigation/menu row that reads
 /// its label and value to VoiceOver.
 private struct IOSOptionRow<E: SettingsOption>: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: String
     @Binding var value: E
 
     var body: some View {
-        Picker(title, selection: $value) {
+        let picker = Picker(title, selection: $value) {
             ForEach(Array(E.allCases), id: \.self) { Text($0.label).tag($0) }
+        }
+        // At accessibility text sizes the inline menu row breaks the label mid-word
+        // and collapses the value to "…"; the navigation-link style stacks the whole
+        // label above the value instead. Default sizes keep the automatic inline style
+        // unchanged (a secondary-grey value, not the tinted menu style).
+        if dynamicTypeSize.isAccessibilitySize {
+            picker.pickerStyle(.navigationLink)
+        } else {
+            picker
         }
     }
 }
