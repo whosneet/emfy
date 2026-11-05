@@ -81,6 +81,50 @@ extension EMFFile {
         return sawEMFPlusComment ? .shellOnly : .none
     }
 
+    /// Whether this is an EMF+ **dual** file: its first EMF+ record is an
+    /// EmfPlusHeader (0x4001) whose record-header `Flags` carries the Dual bit
+    /// (0x0001). [MS-EMFPLUS] §2.3.3.3 requires EmfPlusHeader to be the FIRST
+    /// EMF+ record, so the Dual bit can be read without walking the stream.
+    ///
+    /// A bounded, header-only read (the cheap signal `Prepared.hasGDICopy`
+    /// needs): it stops at the FIRST EMR_COMMENT_EMFPLUS and reads only that
+    /// comment's first EMF+ record header — never reassembling the stream or
+    /// copying beyond the few header bytes. §8: every read goes through the
+    /// bounds-checked `RecordSlice`, so a truncated comment, a first record that
+    /// is not EmfPlusHeader, or a pure-GDI file all return `false` without
+    /// trapping.
+    public func emfPlusIsDual() -> Bool {
+        for record in records where record.type == Self.commentType {
+            let slice = RecordSlice(reader: reader, record: record)
+
+            // EMR_COMMENT_EMFPLUS ([MS-EMF] §2.3.3.4): DataSize (u32) at record
+            // offset 8 must be at least 4 to carry the 4-byte CommentIdentifier
+            // at offset 12, which must equal "EMF+" (mirrors `emfPlusPresence`).
+            guard let dataSize = slice.u32(8), dataSize >= 4,
+                  let identifier = slice.u32(Self.commentIdentifierOffset),
+                  identifier == Self.emfPlusIdentifier
+            else {
+                continue
+            }
+
+            // First EMF+ comment found — the verdict is settled here (no later
+            // comment is consulted). The first EMF+ record begins just past the
+            // identifier (offset 16); its fixed header opens with Type (u16) then
+            // Flags (u16) ([MS-EMFPLUS] §2.3). If that record is EmfPlusHeader
+            // (0x4001, which MUST be first per §2.3.3.3), its Flags Dual bit is
+            // the answer; a non-header first record or a truncated header → not
+            // dual.
+            guard let type = slice.u16(Self.emfPlusStreamOffset),
+                  type == Self.emfPlusHeaderType,
+                  let flags = slice.u16(Self.emfPlusStreamOffset + 2)
+            else {
+                return false
+            }
+            return (flags & Self.emfPlusDualFlag) != 0
+        }
+        return false
+    }
+
     /// Walks the EMF+ record stream in `[start, end)` (record-relative offsets)
     /// and returns `true` as soon as a drawing record is seen, else `false`.
     ///
