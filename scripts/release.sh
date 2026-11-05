@@ -36,6 +36,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="${REPO_ROOT}/Emfy/Emfy.xcodeproj"
 SCHEME="Emfy"
 CONFIGURATION="Release"
+# The Emfy scheme is multiplatform (macOS + iOS). Pin the Mac so xcodebuild
+# never resolves an iOS destination for this Developer ID / DMG build.
+DESTINATION="generic/platform=macOS"
 
 DIST_DIR="${REPO_ROOT}/dist"
 
@@ -193,12 +196,14 @@ xcodebuild \
     -project "${PROJECT}" \
     -scheme "${SCHEME}" \
     -configuration "${CONFIGURATION}" \
+    -destination "${DESTINATION}" \
     -derivedDataPath "${DERIVED_DATA}" \
     clean build
 
 # Resolve the built app path from the build settings (first target = app).
 PRODUCTS_DIR="$(
     xcodebuild -project "${PROJECT}" -scheme "${SCHEME}" -configuration "${CONFIGURATION}" \
+        -destination "${DESTINATION}" \
         -derivedDataPath "${DERIVED_DATA}" -showBuildSettings 2>/dev/null \
         | awk -F' = ' '/ TARGET_BUILD_DIR = /{print $2; exit}'
 )"
