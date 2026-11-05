@@ -361,8 +361,12 @@ extension EMFRenderLog.Entry {
         case .fontSubstituted(let requested, let used, let count):
             // A blank face name must read naturally, not "unavailable font  (…)".
             let requestedPhrase = requested.isEmpty ? "an unnamed unavailable font" : "unavailable font \(requested)"
+            // The summary names no font: the substitute may be a user-configured
+            // replacement family, which must not reach the copyable diagnostic report
+            // (which prints summaries only). Both names stay in technicalDetail, shown
+            // only in the local Info panel (S-L4).
             return DiagnosticNote(
-                summary: "A font the file asked for wasn't available, so Emfy used \(used) instead \(occ(count)).",
+                summary: "A font the file asked for wasn't available, so Emfy used a substitute instead \(occ(count)).",
                 technicalDetail: "Used \(used) instead of \(requestedPhrase) \(occ(count))."
             )
         case .stockFontUsed(let rawValue, let count):

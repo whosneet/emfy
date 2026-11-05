@@ -12,6 +12,10 @@ import Foundation
 /// ready for a support email.
 struct DiagnosticReport {
 
+    /// The most record kinds the report lists in full before summarising the rest
+    /// as "and N other kinds" (S-L6).
+    static let maxRecordKinds = 30
+
     /// One record-type tally: a record name and how many of that kind appear.
     /// Structure only.
     struct RecordKind: Sendable, Equatable {
@@ -64,8 +68,15 @@ struct DiagnosticReport {
         if file.recordKinds.isEmpty {
             lines.append("• none recorded")
         } else {
-            for kind in file.recordKinds.sorted(by: recordKindOrder) {
+            let sorted = file.recordKinds.sorted(by: recordKindOrder)
+            // Cap the list so a pathological file with hundreds of record types can't
+            // bloat a support email; the tail is summarised as a count (S-L6).
+            for kind in sorted.prefix(maxRecordKinds) {
                 lines.append("• \(kind.name): \(kind.count)")
+            }
+            let remaining = sorted.count - min(sorted.count, maxRecordKinds)
+            if remaining > 0 {
+                lines.append("• and \(remaining) other kind\(remaining == 1 ? "" : "s")")
             }
         }
         lines.append("")
