@@ -42,12 +42,22 @@ public struct MetafileSignature: Sendable, Equatable {
     /// ([MS-WMF] §2.3.2.3).
     static let placeableHeaderSize = 22
 
+    /// How many leading bytes the sniff ever reads. The furthest read is the EMF
+    /// RecordSignature at offset 40 (4 bytes, so byte 43); 64 is a safe round
+    /// cover for every check below. Sniffing a bounded prefix keeps `detect` from
+    /// copying a whole multi-megabyte input into a `ByteReader` just to look at
+    /// the header — Quick Look sniffs every file Finder shows (§8).
+    static let sniffPrefixLength = 64
+
     // MARK: - Detection
 
     /// Classifies `data` by signature. Never reads past the buffer, never
     /// throws; short or unrecognised input is `.unknown`.
     public static func detect(_ data: Data) -> MetafileSignature {
-        let reader = ByteReader(data)
+        // Copy at most `sniffPrefixLength` bytes into the reader, never the whole
+        // input: every signature read below targets an offset under 64, and each
+        // read is bounds-checked, so a short prefix simply fails to match.
+        let reader = ByteReader(data.prefix(sniffPrefixLength))
 
         // gzip (RFC 1952 §2.3.1): ID1 0x1F, ID2 0x8B, CM 0x08 (DEFLATE). CM is
         // checked here too so a non-DEFLATE "gzip" is not advertised as
