@@ -47,6 +47,14 @@ struct RecentEntry: Identifiable, Hashable, Codable, Sendable {
     /// next opened.
     var reloadToken: UUID?
 
+    // MARK: - S1a field (optional, so a pre-S1a store decodes cleanly)
+
+    /// Whether the user pinned this file to the top of the library (S1a Library
+    /// extras). Absent by default, so a recents.json written before S1a decodes
+    /// unchanged (`nil` = not pinned). Pinned entries are exempt from cap
+    /// eviction.
+    var isPinned: Bool? = nil
+
     /// The file name without its extension, for the viewer navigation title and
     /// VoiceOver.
     var baseName: String {

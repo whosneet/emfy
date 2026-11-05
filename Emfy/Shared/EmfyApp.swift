@@ -15,12 +15,16 @@ import AppKit
 struct EmfyApp: App {
     @State private var store = RecentsStore.shared
     @State private var coordinator = OpenCoordinator.shared
+    // The S1a settings store, injected into every window on both platforms. No
+    // view reads it yet (S1a-1 is model-only); the Settings UIs land in S1a-2/3.
+    @State private var settings = EmfySettings.shared
 
     var body: some Scene {
         WindowGroup(id: "library", for: LibraryWindowValue.self) { $value in
             RootView(initialSelection: value?.entryID)
                 .environment(store)
                 .environment(coordinator)
+                .environment(settings)
                 #if os(macOS)
                 // Deliver Finder opens to an existing window instead of spawning a
                 // new one, while still creating a window on a cold launch (v3-plan
@@ -70,6 +74,7 @@ struct EmfyApp: App {
         Settings {
             SettingsView()
                 .environment(store)
+                .environment(settings)
         }
         #endif
     }

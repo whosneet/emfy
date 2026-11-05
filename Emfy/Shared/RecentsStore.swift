@@ -366,11 +366,14 @@ final class RecentsStore {
     /// Chooses which entries to drop when the list is over `max` (C4a H3 cap policy,
     /// owner decision): evict the oldest *non-received* entries first, and a received
     /// entry (`importedFileName != nil`, Emfy's only copy) only when no non-received
-    /// entry is left to drop. Pure, for the cap test.
+    /// entry is left to drop. Pinned entries are **exempt** (S1a Library extras), so
+    /// they are never candidates — a library heavy with pins can sit above the cap.
+    /// Pure, for the cap test. Behaviour is unchanged for data without pins.
     nonisolated static func entriesToEvict(from entries: [RecentEntry], max: Int) -> [RecentEntry] {
         let overflow = entries.count - Swift.max(max, 0)
         guard overflow > 0 else { return [] }
-        let oldestFirst = entries.sorted { $0.openedAt < $1.openedAt }
+        let candidates = entries.filter { !($0.isPinned ?? false) }
+        let oldestFirst = candidates.sorted { $0.openedAt < $1.openedAt }
         let nonReceived = oldestFirst.filter { $0.importedFileName == nil }
         let received = oldestFirst.filter { $0.importedFileName != nil }
         var evict = Array(nonReceived.prefix(overflow))

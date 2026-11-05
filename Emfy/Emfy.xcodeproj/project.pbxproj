@@ -106,6 +106,17 @@
 		B011000000000000000001F2 /* ViewerFailurePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000171 /* ViewerFailurePresentation.swift */; };
 		B011000000000000000001F3 /* PhotoSaveDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000172 /* PhotoSaveDecision.swift */; };
 		B011000000000000000001F4 /* AuditLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000001F0 /* AuditLogicTests.swift */; };
+		B01100000000000000000300 /* EmfySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000300 /* EmfySettings.swift */; };
+		B01100000000000000000301 /* RecentSort.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000301 /* RecentSort.swift */; };
+		B01100000000000000000302 /* ExportScale.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000302 /* ExportScale.swift */; };
+		B01100000000000000000303 /* DiagnosticReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000303 /* DiagnosticReport.swift */; };
+		B01100000000000000000304 /* RecentsCapPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000304 /* RecentsCapPolicy.swift */; };
+		B01100000000000000000310 /* EmfySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000300 /* EmfySettings.swift */; };
+		B01100000000000000000311 /* RecentSort.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000301 /* RecentSort.swift */; };
+		B01100000000000000000312 /* ExportScale.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000302 /* ExportScale.swift */; };
+		B01100000000000000000313 /* DiagnosticReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000303 /* DiagnosticReport.swift */; };
+		B01100000000000000000314 /* RecentsCapPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000304 /* RecentsCapPolicy.swift */; };
+		B01100000000000000000315 /* SettingsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000305 /* SettingsModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -227,6 +238,12 @@
 		B00100000000000000000177 /* ViewerActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerActions.swift; sourceTree = "<group>"; };
 		B00100000000000000000178 /* ViewerCommandsIOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerCommandsIOS.swift; sourceTree = "<group>"; };
 		B001000000000000000001F0 /* AuditLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditLogicTests.swift; sourceTree = "<group>"; };
+		B00100000000000000000300 /* EmfySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfySettings.swift; sourceTree = "<group>"; };
+		B00100000000000000000301 /* RecentSort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSort.swift; sourceTree = "<group>"; };
+		B00100000000000000000302 /* ExportScale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportScale.swift; sourceTree = "<group>"; };
+		B00100000000000000000303 /* DiagnosticReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticReport.swift; sourceTree = "<group>"; };
+		B00100000000000000000304 /* RecentsCapPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsCapPolicy.swift; sourceTree = "<group>"; };
+		B00100000000000000000305 /* SettingsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -316,6 +333,11 @@
 				B00100000000000000000174 /* ExportProgressOverlay.swift */,
 				B00100000000000000000175 /* SaveACopy.swift */,
 				B00100000000000000000177 /* ViewerActions.swift */,
+				B00100000000000000000300 /* EmfySettings.swift */,
+				B00100000000000000000301 /* RecentSort.swift */,
+				B00100000000000000000302 /* ExportScale.swift */,
+				B00100000000000000000303 /* DiagnosticReport.swift */,
+				B00100000000000000000304 /* RecentsCapPolicy.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -328,6 +350,7 @@
 				B001000000000000000000F4 /* ZoomMathTests.swift */,
 				B001000000000000000000F5 /* WhatsNewDecisionTests.swift */,
 				B001000000000000000001F0 /* AuditLogicTests.swift */,
+				B00100000000000000000305 /* SettingsModelTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -668,6 +691,11 @@
 				B01100000000000000000176 /* LibraryMoreMenu.swift in Sources */,
 				B01100000000000000000177 /* ViewerActions.swift in Sources */,
 				B01100000000000000000178 /* ViewerCommandsIOS.swift in Sources */,
+				B01100000000000000000300 /* EmfySettings.swift in Sources */,
+				B01100000000000000000301 /* RecentSort.swift in Sources */,
+				B01100000000000000000302 /* ExportScale.swift in Sources */,
+				B01100000000000000000303 /* DiagnosticReport.swift in Sources */,
+				B01100000000000000000304 /* RecentsCapPolicy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -717,6 +745,12 @@
 				B011000000000000000001F2 /* ViewerFailurePresentation.swift in Sources */,
 				B011000000000000000001F3 /* PhotoSaveDecision.swift in Sources */,
 				B011000000000000000001F4 /* AuditLogicTests.swift in Sources */,
+				B01100000000000000000310 /* EmfySettings.swift in Sources */,
+				B01100000000000000000311 /* RecentSort.swift in Sources */,
+				B01100000000000000000312 /* ExportScale.swift in Sources */,
+				B01100000000000000000313 /* DiagnosticReport.swift in Sources */,
+				B01100000000000000000314 /* RecentsCapPolicy.swift in Sources */,
+				B01100000000000000000315 /* SettingsModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
