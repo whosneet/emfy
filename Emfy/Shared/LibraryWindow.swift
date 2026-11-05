@@ -23,6 +23,12 @@ struct LibraryWindow: View {
 
     @State private var model = LibraryWindowModel()
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    #if os(iOS)
+    /// Drives the once-per-launch What's New sheet on iOS (C3b scope 7); hosted at
+    /// the window level so it presents on both iPhone and iPad regardless of the
+    /// sidebar variant.
+    @State private var showLaunchWhatsNew = false
+    #endif
 
     // Scene-scoped so each window (iOS multi-scene, Mac tabs/windows) restores its
     // own selection rather than sharing one.
@@ -47,6 +53,10 @@ struct LibraryWindow: View {
         .task {
             await store.loadIfNeeded()
             applyInitialSelection()
+            #if os(iOS)
+            // One scene, once per version, once per launch (C3b scope 7).
+            if WhatsNewPresenter.claimLaunchPresentation() { showLaunchWhatsNew = true }
+            #endif
         }
         .onChange(of: model.selection) { _, id in
             storedSelection = id?.uuidString
@@ -66,6 +76,9 @@ struct LibraryWindow: View {
             if let id = WindowOpenActivity.entryID(from: activity), store.entry(id: id) != nil {
                 model.selection = id
             }
+        }
+        .sheet(isPresented: $showLaunchWhatsNew) {
+            InfoSheet(title: "What's New") { WhatsNewView() }
         }
         #endif
         #if os(macOS)

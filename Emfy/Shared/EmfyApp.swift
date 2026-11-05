@@ -29,19 +29,14 @@ struct EmfyApp: App {
                 #endif
         }
         #if os(macOS)
-        // Keep the standard sidebar and inspector View-menu toggles and shortcuts
-        // (Axiom swiftui-differences.md). The full menu redesign is C3b; File ▸ Open
-        // is added here so the app still opens files from a menu now that
-        // DocumentGroup is gone.
+        // The full Mac menu bar (C3b scope 2): the standard sidebar/inspector View
+        // toggles, File (Open…, Open Recent, Export, Share), View (zoom), and Help.
+        // The menu bar owns the keyboard shortcuts; the toolbar buttons carry none.
         .commands {
             SidebarCommands()
             InspectorCommands()
-            CommandGroup(after: .newItem) {
-                Button("Open…") {
-                    coordinator.presentOpenPanel(store: store)
-                }
-                .keyboardShortcut("o", modifiers: .command)
-            }
+            FileMenuCommands(store: store, coordinator: coordinator)
+            ViewMenuCommands()
             EmfyCommands()
         }
         #endif
@@ -62,6 +57,13 @@ struct EmfyApp: App {
         }
         .handlesExternalEvents(matching: [])
         .defaultSize(width: 460, height: 600)
+
+        // The Settings scene (⌘,) — Library and Help & diagnostics in C3b (scope 6).
+        // The store is injected so Clear Recents can read and clear it.
+        Settings {
+            SettingsView()
+                .environment(store)
+        }
         #endif
     }
 }
@@ -70,9 +72,27 @@ struct EmfyApp: App {
 /// surfaces (I4 gates b/c) when launched with their environment flags; otherwise,
 /// and always on macOS, it is the library window.
 private struct RootView: View {
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     let initialSelection: UUID?
 
     var body: some View {
+        content
+        #if os(macOS)
+            // Open the What's New window once per installed version, once per launch
+            // (C3b scope 7). The decision and the once-per-launch guard are shared;
+            // the first library window to appear claims the presentation.
+            .onAppear {
+                if WhatsNewPresenter.claimLaunchPresentation() {
+                    openWindow(id: "whats-new")
+                }
+            }
+        #endif
+    }
+
+    @ViewBuilder
+    private var content: some View {
         #if os(iOS) && DEBUG
         if let probeIndex = QuickLookProbeView.requestedStartIndex {
             QuickLookProbeView(startIndex: probeIndex)

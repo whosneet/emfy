@@ -9,23 +9,10 @@ struct EmfyCommands: Commands {
     /// macOS 14, so the menu items can raise the What's New / Changelog windows.
     @Environment(\.openWindow) private var openWindow
 
-    /// The project's public repository, used as the developer documentation.
-    private static let documentationURL = URL(string: "https://github.com/whosneet/emfy")
-
-    /// A pre-addressed feedback email. Built with `URLComponents` so the
-    /// subject is percent-encoded correctly.
-    private static var feedbackURL: URL? {
-        var components = URLComponents()
-        components.scheme = "mailto"
-        components.path = "hello@arrley.com"
-        components.queryItems = [URLQueryItem(name: "subject", value: "Emfy - Feedback/Support")]
-        return components.url
-    }
-
     var body: some Commands {
         CommandGroup(replacing: .help) {
             Button("Developer Documentation") {
-                if let url = Self.documentationURL {
+                if let url = EmfyLinks.gitHub {
                     NSWorkspace.shared.open(url)
                 }
             }
@@ -42,7 +29,7 @@ struct EmfyCommands: Commands {
             Divider()
 
             Button("Contact the Developer") {
-                if let url = Self.feedbackURL {
+                if let url = EmfyLinks.contact {
                     NSWorkspace.shared.open(url)
                 }
             }

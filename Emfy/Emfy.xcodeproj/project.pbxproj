@@ -83,6 +83,16 @@
 		B01100000000000000000141 /* MacMetafileScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000141 /* MacMetafileScrollView.swift */; platformFilters = (macos, ); };
 		B01100000000000000000142 /* ZoomMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000140 /* ZoomMath.swift */; };
 		B01100000000000000000143 /* ZoomMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000F4 /* ZoomMathTests.swift */; };
+		B01100000000000000000150 /* WhatsNew.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000150 /* WhatsNew.swift */; };
+		B01100000000000000000151 /* OpenRecentList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000151 /* OpenRecentList.swift */; };
+		B01100000000000000000152 /* EmfyLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000152 /* EmfyLinks.swift */; };
+		B01100000000000000000153 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000153 /* SettingsView.swift */; };
+		B01100000000000000000154 /* ViewerCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000154 /* ViewerCommands.swift */; platformFilters = (macos, ); };
+		B01100000000000000000155 /* MacViewerExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000155 /* MacViewerExporter.swift */; platformFilters = (macos, ); };
+		B01100000000000000000160 /* WhatsNew.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000150 /* WhatsNew.swift */; };
+		B01100000000000000000161 /* OpenRecentList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000151 /* OpenRecentList.swift */; };
+		B01100000000000000000162 /* Changelog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000050 /* Changelog.swift */; };
+		B011000000000000000000F6 /* WhatsNewDecisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000F5 /* WhatsNewDecisionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -187,6 +197,13 @@
 		B00100000000000000000140 /* ZoomMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomMath.swift; sourceTree = "<group>"; };
 		B00100000000000000000141 /* MacMetafileScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMetafileScrollView.swift; sourceTree = "<group>"; };
 		B001000000000000000000F4 /* ZoomMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomMathTests.swift; sourceTree = "<group>"; };
+		B00100000000000000000150 /* WhatsNew.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsNew.swift; sourceTree = "<group>"; };
+		B00100000000000000000151 /* OpenRecentList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRecentList.swift; sourceTree = "<group>"; };
+		B00100000000000000000152 /* EmfyLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyLinks.swift; sourceTree = "<group>"; };
+		B00100000000000000000153 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B00100000000000000000154 /* ViewerCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerCommands.swift; sourceTree = "<group>"; };
+		B00100000000000000000155 /* MacViewerExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacViewerExporter.swift; sourceTree = "<group>"; };
+		B001000000000000000000F5 /* WhatsNewDecisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsNewDecisionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -265,6 +282,10 @@
 				B00100000000000000000134 /* MetafileInfoView.swift */,
 				B00100000000000000000135 /* MetafileTypes.swift */,
 				B00100000000000000000136 /* OpenCoordinator.swift */,
+				B00100000000000000000150 /* WhatsNew.swift */,
+				B00100000000000000000151 /* OpenRecentList.swift */,
+				B00100000000000000000152 /* EmfyLinks.swift */,
+				B00100000000000000000153 /* SettingsView.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -275,6 +296,7 @@
 				B001000000000000000000F0 /* EmfyTests.swift */,
 				B001000000000000000000F1 /* DocumentHostTests.swift */,
 				B001000000000000000000F4 /* ZoomMathTests.swift */,
+				B001000000000000000000F5 /* WhatsNewDecisionTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -284,6 +306,8 @@
 			children = (
 				B00100000000000000000137 /* MacViewerPane.swift */,
 				B00100000000000000000141 /* MacMetafileScrollView.swift */,
+				B00100000000000000000154 /* ViewerCommands.swift */,
+				B00100000000000000000155 /* MacViewerExporter.swift */,
 				B00100000000000000000004 /* EMFExport.swift */,
 				B00100000000000000000050 /* Changelog.swift */,
 				B00100000000000000000051 /* WhatsNewView.swift */,
@@ -596,6 +620,12 @@
 				B01100000000000000000110 /* DocumentSession.swift in Sources */,
 				B01100000000000000000111 /* OpenRouting.swift in Sources */,
 				B01100000000000000000112 /* ViewerFit.swift in Sources */,
+				B01100000000000000000150 /* WhatsNew.swift in Sources */,
+				B01100000000000000000151 /* OpenRecentList.swift in Sources */,
+				B01100000000000000000152 /* EmfyLinks.swift in Sources */,
+				B01100000000000000000153 /* SettingsView.swift in Sources */,
+				B01100000000000000000154 /* ViewerCommands.swift in Sources */,
+				B01100000000000000000155 /* MacViewerExporter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -637,6 +667,10 @@
 				B01100000000000000000123 /* DocumentHostTests.swift in Sources */,
 				B01100000000000000000142 /* ZoomMath.swift in Sources */,
 				B01100000000000000000143 /* ZoomMathTests.swift in Sources */,
+				B01100000000000000000160 /* WhatsNew.swift in Sources */,
+				B01100000000000000000161 /* OpenRecentList.swift in Sources */,
+				B01100000000000000000162 /* Changelog.swift in Sources */,
+				B011000000000000000000F6 /* WhatsNewDecisionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

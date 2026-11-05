@@ -20,6 +20,10 @@ struct MetafileInfoView: View {
     let zoomPercent: Int?
     /// Closes the inspector/sheet.
     let onClose: () -> Void
+    /// When set, the export rows route here instead of presenting this view's own
+    /// `fileExporter` (C3b scope 5). The Mac passes its hoisted exporter, so Export
+    /// works with the inspector closed; iOS passes nothing and keeps its own path.
+    var onExport: ((ExportFormat) -> Void)? = nil
 
     @State private var exportRunner = ExportTaskRunner()
     @State private var isRenderingExport = false
@@ -60,12 +64,12 @@ struct MetafileInfoView: View {
 
             Section {
                 Button {
-                    exportToFiles(.png)
+                    exportTapped(.png)
                 } label: {
                     Label("Export as PNG…", systemImage: "photo")
                 }
                 Button {
-                    exportToFiles(.pdf)
+                    exportTapped(.pdf)
                 } label: {
                     Label("Export as PDF…", systemImage: "doc.richtext")
                 }
@@ -161,6 +165,16 @@ struct MetafileInfoView: View {
     }
 
     // MARK: - Export
+
+    /// Routes to the hoisted exporter when one is provided (Mac), else this view's
+    /// own `fileExporter` path (iOS, unchanged).
+    private func exportTapped(_ format: ExportFormat) {
+        if let onExport {
+            onExport(format)
+        } else {
+            exportToFiles(format)
+        }
+    }
 
     private func exportToFiles(_ format: ExportFormat) {
         let prepared = self.prepared

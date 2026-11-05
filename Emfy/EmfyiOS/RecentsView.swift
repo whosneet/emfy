@@ -52,6 +52,7 @@ struct RecentsGrid: View {
                 case .about: AboutView()
                 case .whatsNew: InfoSheet(title: "What's New") { WhatsNewView() }
                 case .changelog: InfoSheet(title: "Changelog") { ChangelogView() }
+                case .settings: SettingsView()
                 }
             }
             .alert(
@@ -225,6 +226,10 @@ struct RecentsGrid: View {
 
     private var moreMenu: some View {
         Menu {
+            Button { activeSheet = .settings } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            Divider()
             Button { activeSheet = .about } label: {
                 Label("About Emfy", systemImage: "info.circle")
             }
@@ -298,21 +303,8 @@ struct RecentsGrid: View {
 
 /// The More-menu sheets.
 enum RecentsSheet: String, Identifiable {
-    case about, whatsNew, changelog
+    case settings, about, whatsNew, changelog
     var id: String { rawValue }
-}
-
-/// The project's outbound links, shared by the More menu and About sheet.
-enum EmfyLinks {
-    static let gitHub = URL(string: "https://github.com/whosneet/emfy")
-
-    static var contact: URL? {
-        var components = URLComponents()
-        components.scheme = "mailto"
-        components.path = "hello@arrley.com"
-        components.queryItems = [URLQueryItem(name: "subject", value: "Emfy - Feedback/Support")]
-        return components.url
-    }
 }
 
 /// Wraps a shared content view (What's New, Changelog) in a sheet with a Done
