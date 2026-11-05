@@ -2,6 +2,7 @@ import CoreGraphics
 import EMFParse
 import EMFRender
 import Foundation
+import ImageIO
 import Testing
 
 // Shared sources (EmfySettings, RecentEntry, RecentSort, ExportScale,
@@ -669,10 +670,14 @@ struct SettingsModelTests {
         #expect(red.r > red.g && red.r > red.b)                    // red stays red-ish
     }
 
-    // MARK: - Diagnostic report privacy
+    // MARK: - Diagnostic report privacy (S1a-6)
 
+    /// The report is built exactly as the app builds it — `prepare()` for the
+    /// record-kind counts, and a `FileInfo` whose only file-derived input is the
+    /// EXTENSION of a name that, along with the path and the drawing text, carries
+    /// a sentinel. None of those sentinels can appear in the report.
     @Test
-    func diagnosticReportLeaksNoFileNameOrDrawingText() throws {
+    func diagnosticReportLeaksNoFileNamePathOrDrawingText() throws {
         let data = try #require(
             try? Data(contentsOf: Self.corpusTextURL),
             "corpus/gate-p4-text.emf must be readable at \(Self.corpusTextURL.path)"
@@ -686,30 +691,174 @@ struct SettingsModelTests {
         }
         #expect(!texts.isEmpty, "the corpus file must carry text for this test to mean anything")
 
-        let bounds = file.header.bounds
-        let input = DiagnosticReport.input(
-            fileExtension: ("Secret Plan.emf" as NSString).pathExtension,
-            appVersion: "3.0",
-            appBuild: "300",
-            osVersion: "Test OS 1.0",
-            deviceModel: "Test Device",
+        let prepared = try #require(MetafileRenderer.prepare(try OpenedMetafile.open(data)))
+        let fileInfo = DiagnosticReport.fileInfo(
+            fileExtension: ("SENTINELNAME.emf" as NSString).pathExtension,
             byteCount: Int64(data.count),
-            pixelWidth: Int(bounds.right - bounds.left + 1),
-            pixelHeight: Int(bounds.bottom - bounds.top + 1),
-            recordCount: file.records.count,
+            recordKinds: prepared.recordKinds.map { DiagnosticReport.RecordKind(name: $0.name, count: $0.count) },
             couldNotShow: []
         )
-        let report = DiagnosticReport.text(input)
+        let report = DiagnosticReport.text(DiagnosticReport.Input(
+            appVersion: "3.0", appBuild: "300", osVersion: "Test OS 1.0", deviceClass: "Mac", file: fileInfo
+        ))
 
-        // No file name, no path.
-        #expect(!report.contains("Secret"))
-        #expect(!report.localizedCaseInsensitiveContains("secret plan"))
+        // No file name, no path (the path is never even an input to the builder).
+        #expect(!report.contains("SENTINELNAME"))
+        #expect(!report.contains("/Users/sentinel/SENTINELPATH"))
         // No drawing text.
         for text in texts {
             #expect(!report.contains(text), "report leaked drawing text: \(text)")
         }
-        // The safe fields are present.
+        // No exact byte count — only a coarse bucket.
+        #expect(!report.contains(String(data.count)))
+        #expect(report.contains("Size: \(DiagnosticReport.byteSizeBucket(Int64(data.count)))"))
+        // The safe fields are present: format, record counts by kind.
         #expect(report.contains("EMF"))
-        #expect(report.contains("Records: \(file.records.count)"))
+        #expect(report.contains("Enhanced Metafile"))
+        #expect(report.contains("Records by kind"))
+        #expect(report.contains("EMR_HEADER"))
+    }
+
+    /// Even a note whose TECHNICAL detail carries a sentinel (e.g. a requested font
+    /// face name) cannot leak: the report prints the plain-language summary only.
+    @Test
+    func diagnosticReportUsesNoteSummariesNotTechnicalDetail() {
+        let note = DiagnosticNote(
+            summary: "A font the file asked for wasn’t available, so a substitute was used.",
+            technicalDetail: "Used Helvetica instead of unavailable font SENTINELFONT (1 occurrence)."
+        )
+        let info = DiagnosticReport.fileInfo(fileExtension: "emf", byteCount: 1234, recordKinds: [], couldNotShow: [note])
+        let report = DiagnosticReport.text(DiagnosticReport.Input(
+            appVersion: "3", appBuild: "3", osVersion: "x", deviceClass: "Mac", file: info
+        ))
+        #expect(!report.contains("SENTINELFONT"))
+        #expect(report.contains("A font the file asked for"))
+    }
+
+    /// A system-only report (the Settings row, no file) carries app/system/device
+    /// only — no File or Records section at all.
+    @Test
+    func systemOnlyDiagnosticReportHasNoFileSection() {
+        let report = DiagnosticReport.text(DiagnosticReport.Input(
+            appVersion: "3.0", appBuild: "300", osVersion: "macOS 14.0", deviceClass: "Mac", file: nil
+        ))
+        #expect(report.contains("App: Emfy 3.0 (300)"))
+        #expect(report.contains("Device: Mac"))
+        #expect(!report.contains("Records by kind"))
+        #expect(!report.contains("Format:"))
+    }
+
+    @Test
+    func byteSizeBucketIsCoarseAndOrdered() {
+        #expect(DiagnosticReport.byteSizeBucket(500) == "under 10 KB")
+        #expect(DiagnosticReport.byteSizeBucket(50_000) == "10 KB to 100 KB")
+        #expect(DiagnosticReport.byteSizeBucket(500_000) == "100 KB to 1 MB")
+        #expect(DiagnosticReport.byteSizeBucket(5_000_000) == "1 MB to 10 MB")
+        #expect(DiagnosticReport.byteSizeBucket(500_000_000) == "over 100 MB")
+    }
+
+    // MARK: - Export menu ordering (default export format)
+
+    @Test
+    func exportMenuOrdersPrimaryFormatFirst() {
+        #expect(ExportMenuOrder.formats(default: .png) == [.png, .pdf])
+        #expect(ExportMenuOrder.formats(default: .pdf) == [.pdf, .png])
+    }
+
+    // MARK: - PNG export scale (wired path, including the cap)
+
+    @Test @MainActor
+    func pngExportScaleDrivesPixelSizeIncludingCap() throws {
+        let (defaults, name) = try freshDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = EmfySettings(defaults: defaults)
+
+        func pixels(width: Int32, height: Int32, scale: EmfySettings.PNGScale) throws -> (Int, Int) {
+            settings.defaultPNGScale = scale
+            let prepared = try #require(MetafileRenderer.prepare(try OpenedMetafile.open(EmfyTests.minimalEMF(width: width, height: height))))
+            let opts = ExportScale.pngOptions(for: prepared.naturalSize, settings: settings)
+            let (image, _) = try #require(MetafileRenderer.makeImage(prepared, scale: opts.scale, background: opts.background))
+            return (image.width, image.height)
+        }
+
+        #expect(try pixels(width: 100, height: 100, scale: .x1) == (100, 100))
+        #expect(try pixels(width: 100, height: 100, scale: .x2) == (200, 200))
+        #expect(try pixels(width: 100, height: 100, scale: .x3) == (300, 300))
+        // 5000×5000 at 3× = 225 MP and at 2× = 100 MP both exceed the 32 MP cap,
+        // so the fallback lands on 1× → the natural 5000×5000.
+        #expect(try pixels(width: 5000, height: 5000, scale: .x3) == (5000, 5000))
+    }
+
+    // MARK: - PNG export background (white vs transparent)
+
+    @Test
+    func pngExportBackgroundDrivesCornerAlpha() throws {
+        let prepared = try #require(MetafileRenderer.prepare(try OpenedMetafile.open(Self.filledRectEMF())))
+
+        // Transparent: an empty corner is clear, the filled shape is opaque.
+        let (clearImage, _) = try #require(MetafileRenderer.makeImage(prepared, scale: 1, background: .transparent))
+        let clearPNG = try #require(EMFExport.pngData(from: clearImage))
+        let clear = try #require(Self.decodePNG(clearPNG))
+        #expect(Self.alpha(of: clear, x: 5, y: 5) == 0)
+        #expect(Self.alpha(of: clear, x: clear.width / 2, y: clear.height / 2) == 255)
+
+        // White: opaque everywhere, including the empty corner.
+        let (whiteImage, _) = try #require(MetafileRenderer.makeImage(prepared, scale: 1, background: .white))
+        let whitePNG = try #require(EMFExport.pngData(from: whiteImage))
+        let white = try #require(Self.decodePNG(whitePNG))
+        #expect(Self.alpha(of: white, x: 5, y: 5) == 255)
+        #expect(Self.alpha(of: white, x: white.width / 2, y: white.height / 2) == 255)
+    }
+
+    // MARK: - Test fixtures for the PNG background test
+
+    /// A 100×100 EMF that fills a centred rectangle (25,25)-(75,75) solid red with a
+    /// brush, leaving the corners empty. Record layouts per [MS-EMF] §2.3.7.1
+    /// (CREATEBRUSHINDIRECT), §2.3.8.5 (SELECTOBJECT), §2.3.5.34 (RECTANGLE).
+    static func filledRectEMF() -> Data {
+        var d = Data()
+        func u32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        func i32(_ v: Int32) { u32(UInt32(bitPattern: v)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        // EMR_HEADER (88-byte base variant); bytes/records set true (88+24+12+24+20, 5).
+        u32(1); u32(88)
+        i32(0); i32(0); i32(99); i32(99)
+        i32(0); i32(0); i32(2117); i32(2117)
+        u32(0x464D4520); u32(0x0001_0000)
+        u32(168); u32(5)
+        u16(1); u16(0)
+        u32(0); u32(0); u32(0)
+        i32(1920); i32(1080); i32(508); i32(286)
+        // EMR_CREATEBRUSHINDIRECT: ihBrush 0, BS_SOLID, ColorRef red (R,G,B,0), hatch 0.
+        u32(39); u32(24); u32(0); u32(0); u32(0x0000_00FF); u32(0)
+        // EMR_SELECTOBJECT: table index 0.
+        u32(37); u32(12); u32(0)
+        // EMR_RECTANGLE: Box (25,25,75,75).
+        u32(43); u32(24); i32(25); i32(25); i32(75); i32(75)
+        // EMR_EOF.
+        u32(14); u32(20); u32(0); u32(16); u32(20)
+        return d
+    }
+
+    /// The alpha byte at (x, y) of `image`, read by drawing it into a known
+    /// premultiplied-last sRGB buffer (so padding and premultiply never confuse the
+    /// read).
+    static func alpha(of image: CGImage, x: Int, y: Int) -> UInt8 {
+        let w = image.width, h = image.height
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return 0 }
+        var buffer = [UInt8](repeating: 0, count: w * h * 4)
+        buffer.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(
+                data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return }
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        }
+        return buffer[(y * w + x) * 4 + 3]
+    }
+
+    static func decodePNG(_ data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 }

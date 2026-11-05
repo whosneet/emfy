@@ -26,6 +26,11 @@ struct ViewerActions {
     var sharePNG: () -> Void = {}
     var sharePDF: () -> Void = {}
 
+    /// Copies the current file's privacy-safe diagnostic report to the clipboard
+    /// (S1a-6), surfaced in the Mac Help menu. `nil` when no file is shown, so the
+    /// menu item reads as disabled.
+    var copyDiagnosticReport: (() -> Void)? = nil
+
     // iOS/iPadOS immersive chrome + the Info inspector, surfaced in the iOS View menu
     // (K1). `nil` on the Mac, which has its own View toggles and toolbar.
     var toggleChrome: (() -> Void)? = nil

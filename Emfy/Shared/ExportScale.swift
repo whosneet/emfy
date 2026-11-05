@@ -1,3 +1,4 @@
+import CoreGraphics
 import EMFRender
 import Foundation
 
@@ -50,5 +51,34 @@ enum ExportScale {
 
     private static func area(_ w: Int, _ h: Int, _ m: Int) -> Int64 {
         (Int64(w) * Int64(m)) * (Int64(h) * Int64(m))
+    }
+
+    /// The effective PNG render scale and background for a picture of
+    /// `naturalSize`, reading the live Export settings (S1a-6): the Default PNG
+    /// scale, reduced by the shared area cap when the picture is large, and the
+    /// PNG background. One resolution point so every PNG export and share — Mac
+    /// and iOS — chooses identically. `@MainActor` because it reads the settings
+    /// store; callers capture the returned Sendable values into the off-main
+    /// render.
+    @MainActor
+    static func pngOptions(for naturalSize: CGSize, settings: EmfySettings) -> (scale: CGFloat, background: RenderBackground) {
+        let result = select(
+            baseWidth: Int(naturalSize.width.rounded()),
+            baseHeight: Int(naturalSize.height.rounded()),
+            requested: settings.defaultPNGScale,
+            areaCap: areaCap
+        )
+        let background: RenderBackground = settings.pngBackground == .transparent ? .transparent : .white
+        return (CGFloat(result.multiplier), background)
+    }
+}
+
+/// The order the two export formats appear in, primary (the Default export
+/// format setting) first (S1a-6 Export › Default export format). Pure, so the
+/// Mac File menu, the iOS share menu and the inspector's export rows all order
+/// their PNG/PDF entries the same way and a single test covers the choice.
+enum ExportMenuOrder {
+    static func formats(default primary: EmfySettings.ExportFormat) -> [EmfySettings.ExportFormat] {
+        primary == .png ? [.png, .pdf] : [.pdf, .png]
     }
 }

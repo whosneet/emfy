@@ -34,6 +34,7 @@ struct MetafileInfoView: View {
     var onZoomStep: ((CGFloat) -> Void)? = nil
 
     @Environment(ToastCenter.self) private var toast
+    @Environment(EmfySettings.self) private var settings
     /// Moves VoiceOver focus to the header when the inspector opens (C4a A18).
     @AccessibilityFocusState private var headerFocused: Bool
     @State private var exportRunner = ExportTaskRunner()
@@ -72,16 +73,16 @@ struct MetafileInfoView: View {
             }
 
             Section {
-                Button {
-                    exportTapped(.png)
-                } label: {
-                    Label("Export as PNG…", systemImage: "photo")
+                // The default export format leads (S1a-6 Export › Default export format).
+                ForEach(ExportMenuOrder.formats(default: settings.defaultExportFormat), id: \.self) { format in
+                    exportRow(format)
                 }
                 Button {
-                    exportTapped(.pdf)
+                    copyDiagnosticReport()
                 } label: {
-                    Label("Export as PDF…", systemImage: "doc.richtext")
+                    Label("Copy Diagnostic Report", systemImage: "doc.on.clipboard")
                 }
+                .accessibilityIdentifier("copyDiagnosticReport")
             }
         }
         #if os(macOS)
@@ -197,6 +198,28 @@ struct MetafileInfoView: View {
 
     // MARK: - Export
 
+    /// One "Export as PNG/PDF…" row, so the default export format can lead.
+    @ViewBuilder
+    private func exportRow(_ format: EmfySettings.ExportFormat) -> some View {
+        switch format {
+        case .png:
+            Button { exportTapped(.png) } label: { Label("Export as PNG…", systemImage: "photo") }
+        case .pdf:
+            Button { exportTapped(.pdf) } label: { Label("Export as PDF…", systemImage: "doc.richtext") }
+        }
+    }
+
+    /// Copies the current file's privacy-safe diagnostic report and confirms with a
+    /// toast — the Info inspector's button (Mac) and the details sheet's (iOS).
+    private func copyDiagnosticReport() {
+        DiagnosticReportAction.copyFileReport(
+            entry: entry,
+            recordKinds: prepared.recordKinds,
+            notes: couldNotShowNotes,
+            toast: toast
+        )
+    }
+
     /// Routes to the hoisted exporter when one is provided (Mac), else this view's
     /// own `fileExporter` path (iOS, unchanged).
     private func exportTapped(_ format: ExportFormat) {
@@ -209,9 +232,10 @@ struct MetafileInfoView: View {
 
     private func exportToFiles(_ format: ExportFormat) {
         let prepared = self.prepared
+        let opts = ExportScale.pngOptions(for: prepared.naturalSize, settings: settings)
         exportRunner.run(
             setBusy: { busy in isRenderingExport = busy },
-            render: { MetafileExport.data(for: format, prepared: prepared) },
+            render: { MetafileExport.data(for: format, prepared: prepared, scale: opts.scale, background: opts.background) },
             done: { data in
                 guard let data else {
                     filesError = format.failureMessage

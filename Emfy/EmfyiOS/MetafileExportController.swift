@@ -61,11 +61,18 @@ final class MetafileExportController {
         }
     }
 
-    /// Renders `format` and opens the share sheet with "<base name>.<ext>".
-    func share(_ format: ExportFormat, prepared: MetafileRenderer.Prepared, baseName: String) {
+    /// Renders `format` and opens the share sheet with "<base name>.<ext>". `scale`
+    /// and `background` carry the Export settings into the PNG render (S1a-6).
+    func share(
+        _ format: ExportFormat,
+        prepared: MetafileRenderer.Prepared,
+        baseName: String,
+        scale: CGFloat,
+        background: RenderBackground
+    ) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
-            render: { MetafileExport.data(for: format, prepared: prepared) },
+            render: { MetafileExport.data(for: format, prepared: prepared, scale: scale, background: background) },
             done: { [weak self] data in
                 guard let self else { return }
                 guard let data else {
@@ -82,11 +89,12 @@ final class MetafileExportController {
     }
 
     /// Renders a PNG and copies it to the pasteboard, confirming with a toast (the
-    /// toast also announces to VoiceOver). C4a H6/A2.
-    func copyImage(prepared: MetafileRenderer.Prepared, toast: ToastCenter?) {
+    /// toast also announces to VoiceOver). C4a H6/A2. `scale`/`background` from the
+    /// Export settings (S1a-6).
+    func copyImage(prepared: MetafileRenderer.Prepared, scale: CGFloat, background: RenderBackground, toast: ToastCenter?) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
-            render: { MetafileExport.pngData(prepared) },
+            render: { MetafileExport.pngData(prepared, scale: scale, background: background) },
             done: { [weak self] data in
                 guard let self else { return }
                 guard let data else {
@@ -102,10 +110,10 @@ final class MetafileExportController {
     /// Renders a PNG and saves it to Photos via an add-only request; confirms with a
     /// toast, offers Settings only on a pre-existing denial, shows an informational
     /// alert when restricted, stays quiet on a fresh decline (C4a H6/A2, H7).
-    func saveToPhotos(prepared: MetafileRenderer.Prepared, toast: ToastCenter?) {
+    func saveToPhotos(prepared: MetafileRenderer.Prepared, scale: CGFloat, background: RenderBackground, toast: ToastCenter?) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
-            render: { MetafileExport.pngData(prepared) },
+            render: { MetafileExport.pngData(prepared, scale: scale, background: background) },
             done: { [weak self] data in
                 guard let self else { return }
                 guard let data else {

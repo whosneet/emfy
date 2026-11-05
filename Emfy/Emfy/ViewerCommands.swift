@@ -33,8 +33,18 @@ struct FileMenuCommands: Commands {
         // Export lives at the standard File ▸ import/export anchor. The Share
         // submenu routes to the same per-window exporter as the toolbar's Share.
         CommandGroup(replacing: .importExport) {
+            // ⇧⌘E exports in the default format (S1a-6 Export › Default export
+            // format). The explicit per-format items stay below it.
+            Button("Export…") {
+                switch EmfySettings.shared.defaultExportFormat {
+                case .png: actions?.exportPNG()
+                case .pdf: actions?.exportPDF()
+                }
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(noDocument)
+
             Button("Export as PNG…") { actions?.exportPNG() }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(noDocument)
             Button("Export as PDF…") { actions?.exportPDF() }
                 .disabled(noDocument)

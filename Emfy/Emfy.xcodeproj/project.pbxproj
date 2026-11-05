@@ -110,6 +110,7 @@
 		B01100000000000000000301 /* RecentSort.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000301 /* RecentSort.swift */; };
 		B01100000000000000000302 /* ExportScale.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000302 /* ExportScale.swift */; };
 		B01100000000000000000303 /* DiagnosticReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000303 /* DiagnosticReport.swift */; };
+		B0110000000000000000031C /* DiagnosticReportAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000030C /* DiagnosticReportAction.swift */; };
 		B01100000000000000000304 /* RecentsCapPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000304 /* RecentsCapPolicy.swift */; };
 		B01100000000000000000310 /* EmfySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000300 /* EmfySettings.swift */; };
 		B01100000000000000000311 /* RecentSort.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000301 /* RecentSort.swift */; };
@@ -253,6 +254,7 @@
 		B00100000000000000000301 /* RecentSort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSort.swift; sourceTree = "<group>"; };
 		B00100000000000000000302 /* ExportScale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportScale.swift; sourceTree = "<group>"; };
 		B00100000000000000000303 /* DiagnosticReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticReport.swift; sourceTree = "<group>"; };
+		B0010000000000000000030C /* DiagnosticReportAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticReportAction.swift; sourceTree = "<group>"; };
 		B00100000000000000000304 /* RecentsCapPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsCapPolicy.swift; sourceTree = "<group>"; };
 		B00100000000000000000305 /* SettingsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModelTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000306 /* ViewerZoomPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerZoomPolicy.swift; sourceTree = "<group>"; };
@@ -354,6 +356,7 @@
 				B00100000000000000000301 /* RecentSort.swift */,
 				B00100000000000000000302 /* ExportScale.swift */,
 				B00100000000000000000303 /* DiagnosticReport.swift */,
+				B0010000000000000000030C /* DiagnosticReportAction.swift */,
 				B00100000000000000000304 /* RecentsCapPolicy.swift */,
 				B00100000000000000000306 /* ViewerZoomPolicy.swift */,
 				B00100000000000000000307 /* ViewerTilePaint.swift */,
@@ -718,6 +721,7 @@
 				B01100000000000000000301 /* RecentSort.swift in Sources */,
 				B01100000000000000000302 /* ExportScale.swift in Sources */,
 				B01100000000000000000303 /* DiagnosticReport.swift in Sources */,
+				B0110000000000000000031C /* DiagnosticReportAction.swift in Sources */,
 				B01100000000000000000304 /* RecentsCapPolicy.swift in Sources */,
 				B01100000000000000000306 /* ViewerZoomPolicy.swift in Sources */,
 				B01100000000000000000307 /* ViewerTilePaint.swift in Sources */,

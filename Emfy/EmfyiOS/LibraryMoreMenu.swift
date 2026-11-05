@@ -31,7 +31,7 @@ struct LibraryMoreMenu: View {
             Button {
                 if let url = EmfyLinks.contact { openURL(url) }
             } label: {
-                Label("Contact", systemImage: "envelope")
+                Label("Contact Support", systemImage: "envelope")
             }
             Button {
                 if let url = EmfyLinks.gitHub { openURL(url) }

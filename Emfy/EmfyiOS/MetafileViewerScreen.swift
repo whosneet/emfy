@@ -308,32 +308,63 @@ struct MetafileViewerScreen: View {
     @ViewBuilder
     private var shareMenuItems: some View {
         if let model = loaded, let entry {
+            let opts = ExportScale.pngOptions(for: model.prepared.naturalSize, settings: settings)
             Button {
                 exporter.shareOriginal(entry: entry, store: store)
             } label: {
                 Label("Share File", systemImage: "square.and.arrow.up")
             }
-            Button {
-                exporter.share(.png, prepared: model.prepared, baseName: entry.baseName)
-            } label: {
-                Label("Share as PNG", systemImage: "photo")
-            }
-            Button {
-                exporter.share(.pdf, prepared: model.prepared, baseName: entry.baseName)
-            } label: {
-                Label("Share as PDF", systemImage: "doc.richtext")
+            // The default export format leads (S1a-6 Export › Default export format).
+            ForEach(ExportMenuOrder.formats(default: settings.defaultExportFormat), id: \.self) { format in
+                shareFormatButton(format, model: model, entry: entry, opts: opts)
             }
             Divider()
             Button {
-                exporter.copyImage(prepared: model.prepared, toast: toast)
+                exporter.copyImage(prepared: model.prepared, scale: opts.scale, background: opts.background, toast: toast)
             } label: {
                 Label("Copy Image", systemImage: "doc.on.doc")
             }
             .accessibilityIdentifier("copyImage")
             Button {
-                exporter.saveToPhotos(prepared: model.prepared, toast: toast)
+                exporter.saveToPhotos(prepared: model.prepared, scale: opts.scale, background: opts.background, toast: toast)
             } label: {
                 Label("Save to Photos", systemImage: "square.and.arrow.down")
+            }
+            Divider()
+            Button {
+                DiagnosticReportAction.copyFileReport(
+                    entry: entry,
+                    recordKinds: model.prepared.recordKinds,
+                    notes: model.couldNotShowNotes,
+                    toast: toast
+                )
+            } label: {
+                Label("Copy Diagnostic Report", systemImage: "doc.on.clipboard")
+            }
+            .accessibilityIdentifier("copyDiagnosticReport")
+        }
+    }
+
+    /// One "Share as PNG/PDF" button, so the default export format can lead the menu.
+    @ViewBuilder
+    private func shareFormatButton(
+        _ format: EmfySettings.ExportFormat,
+        model: LoadedMetafile,
+        entry: RecentEntry,
+        opts: (scale: CGFloat, background: RenderBackground)
+    ) -> some View {
+        switch format {
+        case .png:
+            Button {
+                exporter.share(.png, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background)
+            } label: {
+                Label("Share as PNG", systemImage: "photo")
+            }
+        case .pdf:
+            Button {
+                exporter.share(.pdf, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background)
+            } label: {
+                Label("Share as PDF", systemImage: "doc.richtext")
             }
         }
     }

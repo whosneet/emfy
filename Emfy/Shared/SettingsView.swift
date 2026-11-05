@@ -141,8 +141,38 @@ private enum SettingsFooter {
     static let darkPage = "Dim lowers the page brightness in Dark Mode; Invert flips a dark drawing to light while keeping its colours."
     static let exportLimit = "Very large drawings export at a lower scale to stay within size limits."
     static let pin = "Pin a file from its context menu to keep it at the top."
-    static let macDiagnostics = "Copy Diagnostic Report is available from the File menu and the Info panel when a file is open."
-    static let iOSDiagnostics = "Copy Diagnostic Report is available from the Info panel or the More menu when a file is open."
+    static let macDiagnostics = "This copies app, system and device details only, with no file names or drawing content. A file’s own report is in the File menu and the Info panel."
+    static let iOSDiagnostics = "This copies app, system and device details only, with no file names or drawing content. A file’s own report is in the viewer’s share menu and the Info panel."
+}
+
+/// The Settings "Copy Diagnostic Report" row (S1a-6). The Settings window has no
+/// toast surface and no open file, so it copies the system-only report (app,
+/// system and device) and confirms inline by briefly swapping its label.
+private struct DiagnosticReportRow: View {
+    @State private var copied = false
+
+    var body: some View {
+        #if os(macOS)
+        LabeledContent("Diagnostic report") {
+            Button(copied ? "Copied" : "Copy") { copy() }
+        }
+        #else
+        Button {
+            copy()
+        } label: {
+            Label(copied ? "Copied" : "Copy Diagnostic Report", systemImage: copied ? "checkmark" : "doc.on.clipboard")
+        }
+        #endif
+    }
+
+    private func copy() {
+        DiagnosticClipboard.copy(DiagnosticReportAction.systemReportText())
+        copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
+        }
+    }
 }
 
 #if os(macOS)
@@ -311,13 +341,16 @@ private struct MacHelpTab: View {
                 LabeledContent("Developer documentation") {
                     Button("Open") { if let url = EmfyLinks.gitHub { openURL(url) } }
                 }
-                LabeledContent("Contact the developer") {
+                LabeledContent("Contact Support") {
                     Button("Email") { if let url = EmfyLinks.contact { openURL(url) } }
                 }
             }
-            Section("Diagnostics") {
+            Section {
+                DiagnosticReportRow()
+            } header: {
+                Text("Diagnostics")
+            } footer: {
                 Text(SettingsFooter.macDiagnostics)
-                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -406,8 +439,16 @@ private struct IOSSettingsForm: View {
                 Button {
                     if let url = EmfyLinks.contact { openURL(url) }
                 } label: {
-                    Label("Contact the Developer", systemImage: "envelope")
+                    Label("Contact Support", systemImage: "envelope")
                 }
+                NavigationLink {
+                    AboutContent()
+                        .navigationTitle("About Emfy")
+                        .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    Label("About Emfy", systemImage: "info.circle")
+                }
+                DiagnosticReportRow()
             } header: {
                 Text("Help & diagnostics")
             } footer: {

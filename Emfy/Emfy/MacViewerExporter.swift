@@ -41,11 +41,17 @@ final class MacViewerExporter {
 
     // MARK: - Export to file
 
-    /// Renders `format` off-main, then opens the `fileExporter` for it.
-    func exportToFile(_ format: ExportFormat, prepared: MetafileRenderer.Prepared) {
+    /// Renders `format` off-main, then opens the `fileExporter` for it. `scale`
+    /// and `background` carry the Export settings into the PNG render (S1a-6).
+    func exportToFile(
+        _ format: ExportFormat,
+        prepared: MetafileRenderer.Prepared,
+        scale: CGFloat,
+        background: RenderBackground
+    ) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
-            render: { MetafileExport.data(for: format, prepared: prepared) },
+            render: { MetafileExport.data(for: format, prepared: prepared, scale: scale, background: background) },
             done: { [weak self] data in
                 guard let self else { return }
                 guard let data else { self.errorMessage = format.failureMessage; return }
@@ -88,10 +94,17 @@ final class MacViewerExporter {
     }
 
     /// Renders `format` off-main, then presents the share picker with "<base>.<ext>".
-    func share(_ format: ExportFormat, prepared: MetafileRenderer.Prepared, baseName: String) {
+    /// `scale` and `background` carry the Export settings into the PNG render (S1a-6).
+    func share(
+        _ format: ExportFormat,
+        prepared: MetafileRenderer.Prepared,
+        baseName: String,
+        scale: CGFloat,
+        background: RenderBackground
+    ) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
-            render: { MetafileExport.data(for: format, prepared: prepared) },
+            render: { MetafileExport.data(for: format, prepared: prepared, scale: scale, background: background) },
             done: { [weak self] data in
                 guard let self else { return }
                 guard let data else { self.errorMessage = format.failureMessage; return }

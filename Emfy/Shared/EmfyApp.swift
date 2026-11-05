@@ -47,6 +47,7 @@ struct EmfyApp: App {
         // toggles, File (Open…, Open Recent, Export, Share), View (zoom), and Help.
         // The menu bar owns the keyboard shortcuts; the toolbar buttons carry none.
         .commands {
+            AboutCommands()
             SidebarCommands()
             InspectorCommands()
             FileMenuCommands(store: store, coordinator: coordinator)

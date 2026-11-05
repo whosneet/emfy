@@ -299,17 +299,32 @@ struct MacViewerPane: View {
 
     private func export(_ format: ExportFormat) {
         guard let loaded else { return }
-        exporter.exportToFile(format, prepared: loaded.prepared)
+        let opts = ExportScale.pngOptions(for: loaded.prepared.naturalSize, settings: settings)
+        exporter.exportToFile(format, prepared: loaded.prepared, scale: opts.scale, background: opts.background)
     }
 
     private func share(_ format: ExportFormat) {
         guard let loaded, let entry else { return }
-        exporter.share(format, prepared: loaded.prepared, baseName: entry.baseName)
+        let opts = ExportScale.pngOptions(for: loaded.prepared.naturalSize, settings: settings)
+        exporter.share(format, prepared: loaded.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background)
     }
 
     private func shareOriginal() {
         guard let entry else { return }
         exporter.shareOriginal(entry: entry, store: store)
+    }
+
+    /// Builds the privacy-safe diagnostic report for the current file, copies it to
+    /// the clipboard and confirms with a toast (S1a-6). Published to the Help menu
+    /// via `ViewerActions` and called by the Info inspector's own button.
+    private func copyDiagnosticReport() {
+        guard let loaded, let entry else { return }
+        DiagnosticReportAction.copyFileReport(
+            entry: entry,
+            recordKinds: loaded.prepared.recordKinds,
+            notes: loaded.couldNotShowNotes,
+            toast: toast
+        )
     }
 
     /// The per-window actions published to the menu bar. Recomputed each body pass,
@@ -325,7 +340,8 @@ struct MacViewerPane: View {
             exportPDF: { export(.pdf) },
             shareFile: { shareOriginal() },
             sharePNG: { share(.png) },
-            sharePDF: { share(.pdf) }
+            sharePDF: { share(.pdf) },
+            copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil
         )
     }
 

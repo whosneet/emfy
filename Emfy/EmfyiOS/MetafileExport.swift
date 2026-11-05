@@ -39,20 +39,33 @@ enum MetafileExport {
 
     /// The exported bytes for `format`, or `nil` only on an allocation/encode
     /// failure. `Prepared` is `Sendable`, so this is safe to call from a detached
-    /// task.
-    static func data(for format: ExportFormat, prepared: MetafileRenderer.Prepared) -> Data? {
+    /// task. `scale` and `background` drive PNG only (PDF is a true vector page,
+    /// unaffected); they default to the historical 2× opaque-white output so any
+    /// unchanged caller is byte-identical.
+    static func data(
+        for format: ExportFormat,
+        prepared: MetafileRenderer.Prepared,
+        scale: CGFloat = renderScale,
+        background: RenderBackground = .white
+    ) -> Data? {
         switch format {
-        case .png: return pngData(prepared)
+        case .png: return pngData(prepared, scale: scale, background: background)
         case .pdf: return pdfData(prepared)
         }
     }
 
-    /// PNG bytes identical to the Mac's export: render at `renderScale`, then
-    /// encode with the shared `EMFExport.pngData` (ImageIO). Checks cancellation
-    /// between the bitmap render and the PNG encode (§k), so a cancelled export
-    /// drops the (often large) bitmap without also spending the encode.
-    static func pngData(_ prepared: MetafileRenderer.Prepared) -> Data? {
-        guard let (image, _) = MetafileRenderer.makeImage(prepared, scale: renderScale) else {
+    /// PNG bytes: render at `scale` on `background`, then encode with the shared
+    /// `EMFExport.pngData` (ImageIO). `scale` comes from the Default PNG scale
+    /// setting via `ExportScale.pngOptions` (area-cap fallback applied there);
+    /// `background` is the PNG background setting. Checks cancellation between the
+    /// bitmap render and the PNG encode (§k), so a cancelled export drops the
+    /// (often large) bitmap without also spending the encode.
+    static func pngData(
+        _ prepared: MetafileRenderer.Prepared,
+        scale: CGFloat = renderScale,
+        background: RenderBackground = .white
+    ) -> Data? {
+        guard let (image, _) = MetafileRenderer.makeImage(prepared, scale: scale, background: background) else {
             return nil
         }
         if Task.isCancelled { return nil }

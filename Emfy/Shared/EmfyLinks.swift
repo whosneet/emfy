@@ -13,7 +13,7 @@ enum EmfyLinks {
         var components = URLComponents()
         components.scheme = "mailto"
         components.path = "hello@arrley.com"
-        components.queryItems = [URLQueryItem(name: "subject", value: "Emfy - Feedback/Support")]
+        components.queryItems = [URLQueryItem(name: "subject", value: "Emfy support")]
         return components.url
     }
 }
