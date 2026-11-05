@@ -97,8 +97,11 @@ struct OpenRecentMenu: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        // Session-private opens are kept out of the Open Recent menu and its enabled
+        // state, so a Private-mode file name never surfaces there (S-M2).
+        let recents = OpenRecentList.items(from: store.nonPrivateEntries)
         Menu("Open Recent") {
-            ForEach(OpenRecentList.items(from: store.entries)) { entry in
+            ForEach(recents) { entry in
                 Button(entry.displayName) {
                     // Route to the front window, or open one when none exists (M5);
                     // the "Open files in → New window" setting forces a new one (S1a-4b).
@@ -113,7 +116,7 @@ struct OpenRecentMenu: View {
                 MacRecentsConfirmation.confirmClear(store: store)
             }
         }
-        .disabled(store.entries.isEmpty)
+        .disabled(recents.isEmpty)
     }
 }
 
@@ -125,8 +128,11 @@ struct OpenRecentMenu: View {
 enum MacRecentsConfirmation {
     @MainActor
     static func confirmClear(store: RecentsStore) {
-        let received = store.entries.filter { $0.importedFileName != nil }.count
-        let plan = RemovalConfirmation.plan(scope: .clear, receivedCount: received, totalCount: store.entries.count)
+        // Count only non-private entries, so the confirmation never reveals that a
+        // Private-mode file was opened — and never offers to Save a Copy of one (S-M2).
+        let visible = store.nonPrivateEntries
+        let received = visible.filter { $0.importedFileName != nil }.count
+        let plan = RemovalConfirmation.plan(scope: .clear, receivedCount: received, totalCount: visible.count)
 
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -160,7 +166,8 @@ enum MacRecentsConfirmation {
         panel.message = "Choose a folder to save copies of files Emfy received from other apps."
         guard panel.runModal() == .OK, let directory = panel.url else { return }
 
-        let received = store.entries.filter { $0.importedFileName != nil }
+        // Never write a copy of a session-private received file (S-M2).
+        let received = store.nonPrivateEntries.filter { $0.importedFileName != nil }
         Task { @MainActor in
             var savedAny = false
             for entry in received {

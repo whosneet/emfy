@@ -27,7 +27,10 @@ struct RecentsGrid: View {
     /// The fold-aware column count (27.1+), or `nil` to use the adaptive grid.
     @State private var columnCount: Int?
 
-    @SceneStorage("recents.search") private var searchText = ""
+    // The live query is plain state; it is mirrored into scene restoration only while
+    // Private mode is off, so a search typed over private files never persists (S-L3).
+    @State private var searchText = ""
+    @SceneStorage("recents.search") private var storedSearch = ""
 
     /// Minimum tile width per Thumbnail size (S1a-5), each scaled with Dynamic Type so
     /// big text doesn't clip — at accessibility sizes it grows enough to collapse the
@@ -69,7 +72,13 @@ struct RecentsGrid: View {
             ) { result in
                 handleImport(result)
             }
-            .librarySheets($activeSheet)
+            .librarySheets($activeSheet, store: store, settings: settings)
+            // Restore the last non-private query, then persist changes only while
+            // Private mode is off (S-L3).
+            .onAppear { if searchText.isEmpty { searchText = storedSearch } }
+            .onChange(of: searchText) { _, query in
+                if !settings.privateMode { storedSearch = query }
+            }
             // The "couldn't open" alert now lives at the window level (C4a M5).
             // Reset Select mode when the list empties or a file is chosen (C4a M1).
             .onChange(of: store.entries.isEmpty) { _, empty in

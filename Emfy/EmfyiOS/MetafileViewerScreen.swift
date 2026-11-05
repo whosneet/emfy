@@ -563,6 +563,11 @@ struct MetafileViewerScreen: View {
                 onClose: { closeInspector() },
                 onZoomStep: { delta in controller.step(by: delta) }
             )
+            // At compact width the inspector is a sheet — a separate hosting view that
+            // reads ToastCenter and EmfySettings — so re-inject them rather than rely on
+            // the presenting view's injection surviving the snapshot re-layout (C1).
+            .environment(toast)
+            .environment(settings)
         } else {
             ContentUnavailableView("No details yet", systemImage: "info.circle")
         }

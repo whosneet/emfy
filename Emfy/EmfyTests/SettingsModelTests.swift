@@ -70,7 +70,8 @@ struct SettingsModelTests {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let store = RecentsStore(locations: .init(
             supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
-            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)))
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true),
+            privateImportedDirectory: dir.appendingPathComponent("PrivateImports", isDirectory: true)))
         return (dir, store)
     }
 
@@ -523,13 +524,16 @@ struct SettingsModelTests {
 
     @Test @MainActor
     func privateModeAddsSessionEntryWithoutWritingHistoryOrThumbnails() async throws {
+        // Not "EmfyPrivate-…": that prefix is what the launch sweep reclaims (S-M3),
+        // and this fixture dir sits directly under the temporary directory.
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("EmfyPrivate-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("EmfyPrivTest-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = RecentsStore(locations: .init(
             supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
-            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true),
+            privateImportedDirectory: dir.appendingPathComponent("PrivateImports", isDirectory: true)
         ))
 
         store.setPrivate(true)
@@ -856,17 +860,25 @@ struct SettingsModelTests {
 
     /// Even a note whose TECHNICAL detail carries a sentinel (e.g. a requested font
     /// face name) cannot leak: the report prints the plain-language summary only.
+    /// Extended to the REAL substitution note, whose `used` name may be a
+    /// user-configured replacement family — it must not reach the report either (S-L4).
     @Test
     func diagnosticReportUsesNoteSummariesNotTechnicalDetail() {
         let note = DiagnosticNote(
             summary: "A font the file asked for wasn’t available, so a substitute was used.",
             technicalDetail: "Used Helvetica instead of unavailable font SENTINELFONT (1 occurrence)."
         )
-        let info = DiagnosticReport.fileInfo(fileExtension: "emf", byteCount: 1234, recordKinds: [], couldNotShow: [note])
+        // The real note the renderer builds, with a user-chosen replacement as `used`.
+        let userSubNote = EMFRenderLog.Entry
+            .fontSubstituted(requested: "Arial", used: "SENTINELREPLACEMENT", count: 2).note
+        let info = DiagnosticReport.fileInfo(
+            fileExtension: "emf", byteCount: 1234, recordKinds: [], couldNotShow: [note, userSubNote]
+        )
         let report = DiagnosticReport.text(DiagnosticReport.Input(
             appVersion: "3", appBuild: "3", osVersion: "x", deviceClass: "Mac", file: info
         ))
         #expect(!report.contains("SENTINELFONT"))
+        #expect(!report.contains("SENTINELREPLACEMENT"))
         #expect(report.contains("A font the file asked for"))
     }
 
@@ -890,6 +902,87 @@ struct SettingsModelTests {
         #expect(DiagnosticReport.byteSizeBucket(500_000) == "100 KB to 1 MB")
         #expect(DiagnosticReport.byteSizeBucket(5_000_000) == "1 MB to 10 MB")
         #expect(DiagnosticReport.byteSizeBucket(500_000_000) == "over 100 MB")
+    }
+
+    /// The report lists at most 30 record kinds in full, then summarises the rest as
+    /// "and N other kinds" (S-L6).
+    @Test
+    func diagnosticReportCapsRecordKindsAt30() {
+        let kinds = (0..<45).map { DiagnosticReport.RecordKind(name: "EMR_KIND_\($0)", count: 45 - $0) }
+        let info = DiagnosticReport.fileInfo(fileExtension: "emf", byteCount: 1, recordKinds: kinds, couldNotShow: [])
+        let report = DiagnosticReport.text(DiagnosticReport.Input(
+            appVersion: "3", appBuild: "3", osVersion: "x", deviceClass: "Mac", file: info
+        ))
+        let bulletLines = report.split(separator: "\n").filter { $0.hasPrefix("• EMR_KIND_") }
+        #expect(bulletLines.count == 30)
+        #expect(report.contains("• and 15 other kinds"))
+    }
+
+    @Test
+    func diagnosticReportRecordKindsSingularTail() {
+        let kinds = (0..<31).map { DiagnosticReport.RecordKind(name: "EMR_KIND_\($0)", count: 31 - $0) }
+        let info = DiagnosticReport.fileInfo(fileExtension: "emf", byteCount: 1, recordKinds: kinds, couldNotShow: [])
+        let report = DiagnosticReport.text(DiagnosticReport.Input(
+            appVersion: "3", appBuild: "3", osVersion: "x", deviceClass: "Mac", file: info
+        ))
+        #expect(report.contains("• and 1 other kind"))
+        #expect(!report.contains("other kinds"))
+    }
+
+    @Test
+    func diagnosticReportBelow30KindsHasNoOverflowLine() {
+        let kinds = (0..<5).map { DiagnosticReport.RecordKind(name: "EMR_KIND_\($0)", count: 1) }
+        let info = DiagnosticReport.fileInfo(fileExtension: "emf", byteCount: 1, recordKinds: kinds, couldNotShow: [])
+        let report = DiagnosticReport.text(DiagnosticReport.Input(
+            appVersion: "3", appBuild: "3", osVersion: "x", deviceClass: "Mac", file: info
+        ))
+        #expect(!report.contains("other kind"))
+    }
+
+    // MARK: - Private entries kept out of Open Recent and Clear counts (S-M2)
+
+    @Test @MainActor
+    func nonPrivateEntriesExcludesSessionPrivateFromOpenRecent() async throws {
+        let (dir, store) = makeDirStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let shownID = try #require(await addReceived(store, in: dir, name: "shown.emf"))
+        store.setPrivate(true)
+        let secretID = try #require(await addReceived(store, in: dir, name: "secret.emf"))
+
+        // Both entries are in `entries` (the library shows the private one, marked),
+        // but only the non-private one is eligible for the Mac Open Recent menu.
+        #expect(store.entries.contains { $0.id == secretID })
+        let visible = store.nonPrivateEntries
+        #expect(visible.contains { $0.id == shownID })
+        #expect(!visible.contains { $0.id == secretID })
+
+        let recentItems = OpenRecentList.items(from: store.nonPrivateEntries)
+        #expect(recentItems.contains { $0.id == shownID })
+        #expect(!recentItems.contains { $0.id == secretID })
+        #expect(!recentItems.contains { $0.displayName == "secret.emf" })
+    }
+
+    // MARK: - Private imports stage under the temporary directory, not Imported/ (S-M3)
+
+    @Test @MainActor
+    func privateImportGoesToTempNotImportedAndIsClearable() async throws {
+        let (dir, store) = makeDirStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        store.setPrivate(true)
+        // `dir` is an ephemeral-looking location, so the open imports a copy.
+        let id = try #require(await addReceived(store, in: dir, name: "secret.emf"))
+        let copyName = try #require(store.entry(id: id)?.importedFileName)
+
+        // The copy is in the per-launch temp directory, and Imported/ is empty.
+        let privateCopy = store.locations.privateImportedDirectory.appendingPathComponent(copyName)
+        let importedCopy = store.locations.importedDirectory.appendingPathComponent(copyName)
+        #expect(FileManager.default.fileExists(atPath: privateCopy.path))
+        #expect(!FileManager.default.fileExists(atPath: importedCopy.path))
+        let importedContents = (try? FileManager.default.contentsOfDirectory(atPath: store.locations.importedDirectory.path)) ?? []
+        #expect(importedContents.isEmpty)
+
+        // The quit/background cleanup removes the whole staging directory.
+        store.clearPrivateImports()
+        #expect(!FileManager.default.fileExists(atPath: privateCopy.path))
+        #expect(!FileManager.default.fileExists(atPath: store.locations.privateImportedDirectory.path))
     }
 
     // MARK: - Export menu ordering (default export format)

@@ -3,6 +3,34 @@ import Foundation
 import ImageIO
 import Observation
 import os
+#if canImport(UIKit)
+import UIKit
+#endif
+#if canImport(AppKit)
+import AppKit
+#endif
+
+/// Posts a VoiceOver announcement cross-platform, only while VoiceOver is running.
+/// A shared helper so `RecentsStore.togglePin` (A-M3) and the Settings diagnostic row
+/// (A-L5) announce consistently. Lives here rather than in a SwiftUI file so the
+/// logic-test bundle — which compiles `RecentsStore` but not the UI — still resolves
+/// it.
+enum AccessibilityAnnouncement {
+    @MainActor
+    static func post(_ message: String) {
+        #if os(macOS)
+        guard NSWorkspace.shared.isVoiceOverEnabled else { return }
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue]
+        )
+        #else
+        guard UIAccessibility.isVoiceOverRunning else { return }
+        UIAccessibility.post(notification: .announcement, argument: message)
+        #endif
+    }
+}
 
 /// The recents home's source of truth: the remembered files, their persistence,
 /// and the open-a-file flow. One cross-platform model (C2) compiled for macOS
@@ -53,6 +81,18 @@ final class RecentsStore {
     /// Thumbnail long-edge cap in pixels — a ~600 px tile is sharp at 2× and
     /// cheap in memory.
     nonisolated static let thumbnailLongEdge = 600
+
+    /// The prefix of this app's per-launch Private-import staging directories under
+    /// the system temporary directory (S-M3). The launch sweep reclaims any left by
+    /// a crash or a kill that skipped the quit/background cleanup.
+    nonisolated static let privateImportPrefix = "EmfyPrivate-"
+    /// This launch's Private-import directory — one per process, under the temporary
+    /// directory so a copy of a file opened in Private mode never persists past the
+    /// session. Deleted on Mac quit and iOS scene background/termination, and any
+    /// straggler is swept on the next launch (S-M3).
+    nonisolated static let privateImportLaunchDirectory: URL =
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent(privateImportPrefix + UUID().uuidString, isDirectory: true)
 
     /// Where recents.json, the thumbnail cache, and imported copies live.
     /// Injectable so tests use a temporary container, never the real one.
@@ -120,6 +160,16 @@ final class RecentsStore {
             return nil
         }
 
+        // Private mode can turn on during the detached prepare. Honour the state as it
+        // is now, not when the open began: reclaim the disk copy/thumbnail this
+        // non-private prepare wrote and redo the open as a session-only entry, so no
+        // persisted write or on-disk thumbnail survives for a file the user now wants
+        // private (S-L2).
+        if isPrivate {
+            deletePreparedSideFiles(prepared)
+            return await handleOpenedURLPrivate(url)
+        }
+
         let token = UUID()
         let id: UUID
         if let index = entries.firstIndex(where: { matches($0, prepared) }) {
@@ -177,8 +227,9 @@ final class RecentsStore {
     /// `privateIDs` entry — a fresh entry every time (never promoting or evicting
     /// persisted history), with its thumbnail held in memory only. Nothing is written
     /// to recents.json and no thumbnail PNG lands on disk; an imported copy (ephemeral
-    /// sources) goes to Imported/, where the next launch sweep reclaims it as an
-    /// orphan, and `purgeSessionPrivate` deletes it the moment Private mode turns off.
+    /// sources) goes to this launch's temporary `EmfyPrivate-*` directory — never
+    /// Imported/ — which is deleted on quit/background and swept on the next launch,
+    /// and `purgeSessionPrivate` deletes the copy the moment Private mode turns off (S-M3).
     private func handleOpenedURLPrivate(_ url: URL) async -> UUID? {
         let locations = self.locations
         let prepared = await Task.detached(priority: .userInitiated) {
@@ -187,6 +238,14 @@ final class RecentsStore {
         guard let prepared else {
             lastErrorMessage = "Emfy couldn’t open “\(url.lastPathComponent)”. The file may be empty, in a format Emfy doesn’t read, or damaged."
             return nil
+        }
+        // Private mode can turn off during the detached prepare — `purgeSessionPrivate`
+        // may have already run, so adding this now would leave a session-private entry
+        // lingering after Private turned off. Reclaim the temp copy and redo the open
+        // as a normal persisted entry instead (S-L2).
+        guard isPrivate else {
+            deletePreparedSideFiles(prepared)
+            return await handleOpenedURL(url)
         }
         let entry = RecentEntry(
             id: UUID(),
@@ -213,6 +272,13 @@ final class RecentsStore {
 
     /// Whether an entry is a session-only Private-mode entry (S1a-5).
     func isSessionPrivate(_ id: UUID) -> Bool { privateIDs.contains(id) }
+
+    /// Entries that are not session-private, newest-first order preserved. Surfaces
+    /// that must not reveal — or persist a copy of — a Private-mode open use this:
+    /// the Mac File ▸ Open Recent menu, its enabled state, and the Clear Recents
+    /// counts and Save-a-Copy loop (S-M2). The library itself still shows Private
+    /// entries, marked, via `entries`.
+    var nonPrivateEntries: [RecentEntry] { entries.filter { !privateIDs.contains($0.id) } }
 
     /// Turns Private mode on or off (synced from `EmfySettings.privateMode`). Turning
     /// it off drops every session-only entry and reclaims its side files; the persisted
@@ -251,9 +317,15 @@ final class RecentsStore {
         persist()
     }
 
-    /// Flips an entry's pinned state.
+    /// Flips an entry's pinned state. The single entry point every surface calls (the
+    /// grid tile's UIKit menu and VoiceOver action, the list row, the sidebar row), so
+    /// the VoiceOver announcement posted here covers all three consistently (A-M3).
     func togglePin(_ id: UUID) {
-        setPinned(id, !isPinned(id))
+        let nowPinned = !isPinned(id)
+        setPinned(id, nowPinned)
+        if let name = entries.first(where: { $0.id == id })?.baseName {
+            AccessibilityAnnouncement.post(nowPinned ? "Pinned \(name)" : "Unpinned \(name)")
+        }
     }
 
     // MARK: - Recents cap (S1a-5)
@@ -601,8 +673,32 @@ final class RecentsStore {
             try? FileManager.default.removeItem(at: locations.thumbnailsDirectory.appendingPathComponent(name))
         }
         if let name = entry.importedFileName {
+            // A Private-mode import lives in the per-launch temp directory, a normal
+            // one in Imported/; the name is a UUID, so removing from both is safe (S-M3).
             try? FileManager.default.removeItem(at: locations.importedDirectory.appendingPathComponent(name))
+            try? FileManager.default.removeItem(at: locations.privateImportedDirectory.appendingPathComponent(name))
         }
+    }
+
+    /// Deletes the disk side files a `prepareAdd` wrote — the thumbnail PNG and the
+    /// imported copy (in either import directory) — for the rare case where Private
+    /// mode flipped during the detached prepare and the result must be discarded and
+    /// redone through the other path (S-L2).
+    private func deletePreparedSideFiles(_ prepared: PreparedAdd) {
+        if let name = prepared.thumbnailFileName {
+            try? FileManager.default.removeItem(at: locations.thumbnailsDirectory.appendingPathComponent(name))
+        }
+        if let name = prepared.importedFileName {
+            try? FileManager.default.removeItem(at: locations.importedDirectory.appendingPathComponent(name))
+            try? FileManager.default.removeItem(at: locations.privateImportedDirectory.appendingPathComponent(name))
+        }
+    }
+
+    /// Deletes this launch's Private-import staging directory and everything in it
+    /// (S-M3). Called on Mac quit and iOS scene background/termination, so a file
+    /// opened in Private mode leaves no copy behind. Idempotent.
+    func clearPrivateImports() {
+        try? FileManager.default.removeItem(at: locations.privateImportedDirectory)
     }
 
     /// On promotion, deletes an entry's old side files only when they were
@@ -641,6 +737,22 @@ final class RecentsStore {
         sweepDirectory(locations.thumbnailsDirectory, keeping: keepThumbnails, cutoff: startedAt)
         sweepDirectory(locations.importedDirectory, keeping: keepImported, cutoff: startedAt)
         ExportTemp.sweep(startedAt: startedAt)
+        sweepPrivateImports(except: locations.privateImportedDirectory, startedAt: startedAt)
+    }
+
+    /// Deletes every `EmfyPrivate-*` staging directory left under the temporary
+    /// directory by a previous launch — a crash or a kill that skipped the
+    /// quit/background cleanup — but never this launch's own directory, nor one
+    /// written at/after `startedAt` (the C2 sweep race) (S-M3).
+    private nonisolated static func sweepPrivateImports(except current: URL, startedAt: Date) {
+        let tmp = FileManager.default.temporaryDirectory
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: tmp.path) else { return }
+        for name in names where name.hasPrefix(privateImportPrefix) {
+            let url = tmp.appendingPathComponent(name, isDirectory: true)
+            if url.standardizedFileURL == current.standardizedFileURL { continue }
+            if ExportTemp.wasWritten(after: startedAt, url) { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private nonisolated static func sweepDirectory(_ directory: URL, keeping: Set<String>, cutoff: Date) {
@@ -705,7 +817,7 @@ final class RecentsStore {
         if bookmark == nil || bookmark?.isEmpty == true {
             // Scope couldn't be taken, the file is in a disappearing place, or the
             // bookmark couldn't be made: copy the bytes into our container.
-            guard let (copyBookmark, copyName) = importCopy(data: data, originalName: url.lastPathComponent, locations: locations) else {
+            guard let (copyBookmark, copyName) = importCopy(data: data, originalName: url.lastPathComponent, locations: locations, isPrivate: isPrivate) else {
                 return nil
             }
             bookmark = copyBookmark
@@ -743,15 +855,18 @@ final class RecentsStore {
         )
     }
 
-    /// Copies `data` into Imported/<uuid>.<ext> and bookmarks the copy. Returns the
-    /// bookmark and the copy's file name (for later cleanup), or `nil` on failure.
-    private nonisolated static func importCopy(data: Data, originalName: String, locations: Locations) -> (bookmark: Data, fileName: String)? {
+    /// Copies `data` into the import directory as `<uuid>.<ext>` and bookmarks the
+    /// copy. A Private-mode import goes to the per-launch temporary directory, which
+    /// is never backed up and never persists past the session (S-M3); a normal import
+    /// goes to Imported/ and excludes the container from backup. Returns the bookmark
+    /// and the copy's file name (for later cleanup), or `nil` on failure.
+    private nonisolated static func importCopy(data: Data, originalName: String, locations: Locations, isPrivate: Bool) -> (bookmark: Data, fileName: String)? {
         let ext = MetafileFormatLabel.importedExtension(for: originalName)
         let name = UUID().uuidString + "." + ext
-        let directory = locations.importedDirectory
+        let directory = isPrivate ? locations.privateImportedDirectory : locations.importedDirectory
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            excludeFromBackup(locations.supportDirectory)
+            if !isPrivate { excludeFromBackup(locations.supportDirectory) }
             let fileURL = directory.appendingPathComponent(name)
             try data.write(to: fileURL, options: writeOptions)
             guard let bookmark = makeBookmark(for: fileURL), !bookmark.isEmpty else {
@@ -965,6 +1080,10 @@ final class RecentsStore {
     struct Locations: Sendable {
         var supportDirectory: URL
         var cachesDirectory: URL
+        /// Where a Private-mode ephemeral import is copied — the temporary directory,
+        /// never Application Support, so it leaves no persistent copy (S-M3). Defaults
+        /// to this launch's `EmfyPrivate-<uuid>/`; tests inject their own.
+        var privateImportedDirectory: URL = RecentsStore.privateImportLaunchDirectory
 
         var storeURL: URL { supportDirectory.appendingPathComponent("recents.json") }
         var corruptStoreURL: URL { supportDirectory.appendingPathComponent("recents.corrupt.json") }

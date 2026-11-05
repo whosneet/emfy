@@ -453,7 +453,10 @@ struct EmfyTests {
         let note = EMFRenderLog.Entry.fontSubstituted(requested: "", used: "Helvetica", count: 1).note
         #expect(note.technicalDetail == "Used Helvetica instead of an unnamed unavailable font (1 occurrence).")
         #expect(!note.technicalDetail.contains("font  "))   // no stranded double space
-        #expect(note.summary.contains("Helvetica"))
+        // The summary names NO substitute font — the replacement may be a user-chosen
+        // family, which must not reach the copyable diagnostic report (S-L4).
+        #expect(!note.summary.contains("Helvetica"))
+        #expect(note.summary == "A font the file asked for wasn't available, so Emfy used a substitute instead (1 occurrence).")
     }
 
     @Test func namedFontSubstitutionWording() {

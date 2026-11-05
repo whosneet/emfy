@@ -53,18 +53,30 @@ struct LibraryWindow: View {
     var body: some View {
         @Bindable var model = model
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            LibrarySidebar(selection: $model.selection, isCompact: isCompactWindow)
-                #if os(iOS)
-                // Compact width collapses the split view to this stack; push the
-                // viewer explicitly when the grid sets a selection. Inert at
-                // regular width, where the detail column shows instead.
-                .navigationDestination(item: $model.selection) { id in
-                    ViewerDetail(entryID: id, onRemove: { model.selection = nil })
-                        .id(id)
-                }
-                #endif
+            // Inject the window's observable environment INSIDE each column, not as a
+            // modifier on the whole split view. `NavigationSplitView` hosts its columns
+            // in separate UIKit containers; the app-switcher snapshot re-lays those
+            // column hosts out under an override orientation, and an `.environment`
+            // applied outside the split view isn't yet bridged into them at that point,
+            // so an `@Environment(Observable.self)` read force-unwraps nil and traps
+            // (C1: EXC_BREAKPOINT in EnvironmentBox.update during the snapshot rotation).
+            // Each column carrying its own copy keeps the reads valid through that pass.
+            withLibraryEnvironment {
+                LibrarySidebar(selection: $model.selection, isCompact: isCompactWindow)
+                    #if os(iOS)
+                    // Compact width collapses the split view to this stack; push the
+                    // viewer explicitly when the grid sets a selection. Inert at
+                    // regular width, where the detail column shows instead.
+                    .navigationDestination(item: $model.selection) { id in
+                        withLibraryEnvironment {
+                            ViewerDetail(entryID: id, onRemove: { model.selection = nil })
+                                .id(id)
+                        }
+                    }
+                    #endif
+            }
         } detail: {
-            detailColumn
+            withLibraryEnvironment { detailColumn }
         }
         .environment(toastCenter)
         .environment(removal)
@@ -130,7 +142,13 @@ struct LibraryWindow: View {
             }
         }
         .onChange(of: model.selection) { _, id in
-            storedSelection = id?.uuidString
+            // Never persist the selection of a session-private entry into scene
+            // restoration, so a Private-mode file isn't re-selected on relaunch (S-L3).
+            if let id, store.isSessionPrivate(id) {
+                storedSelection = nil
+            } else {
+                storedSelection = id?.uuidString
+            }
         }
         // Keep the store's Private mode in step with the setting (S1a-5): turning it
         // off drops this launch's Private entries; the persisted history is untouched.
@@ -176,6 +194,20 @@ struct LibraryWindow: View {
             }
         )
         #endif
+    }
+
+    /// Re-injects every observable the window's columns, pushed viewers and sheets
+    /// read, so each separately-hosted `NavigationSplitView` column (and the compact
+    /// pushed viewer) carries its own copy rather than relying on an injection made
+    /// outside the split view surviving the snapshot re-layout (C1).
+    @ViewBuilder
+    private func withLibraryEnvironment<V: View>(@ViewBuilder _ content: () -> V) -> some View {
+        content()
+            .environment(store)
+            .environment(coordinator)
+            .environment(settings)
+            .environment(toastCenter)
+            .environment(removal)
     }
 
     // MARK: - Detail column

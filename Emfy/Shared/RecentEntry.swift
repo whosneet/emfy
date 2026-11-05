@@ -101,6 +101,16 @@ extension RecentEntry {
         "\(formatLabel) · \(metaSecond(now: now))"
     }
 
+    /// The VoiceOver label shared by the grid tile, the list row and the sidebar row,
+    /// so all three read identically and all three append ", Pinned" / ", Private"
+    /// (A-M4). Name, format, then the same meta the surface shows.
+    func accessibilityLabel(pinned: Bool, isPrivate: Bool, now: Date = Date()) -> String {
+        var label = "\(baseName), \(formatLabel), \(metaSecond(now: now))"
+        if pinned { label += ", Pinned" }
+        if isPrivate { label += ", Private" }
+        return label
+    }
+
     /// The viewer subtitle: full format name · size ("Enhanced Metafile · 20 KB"),
     /// used by the iOS and Mac navigation subtitles (G6).
     var formatSizeSubtitle: String {

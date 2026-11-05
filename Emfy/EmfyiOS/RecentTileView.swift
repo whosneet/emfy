@@ -41,10 +41,10 @@ struct RecentTileView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        // Include the date/size the tile shows, so VoiceOver isn't missing it (A5).
-        .accessibilityLabel(isPrivate
-            ? "\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond()), Private"
-            : "\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())")
+        // One shared label so the tile, list row and sidebar row read identically and
+        // all three say ", Pinned" (A-M4) and ", Private" — the tile previously omitted
+        // the pin state.
+        .accessibilityLabel(entry.accessibilityLabel(pinned: store.isPinned(entry.id), isPrivate: isPrivate))
         .accessibilityAddTraits(isSelecting ? [] : .isButton)
         // While selecting, expose Remove as a VoiceOver action — the red badge is
         // otherwise hidden by `children: .ignore`.
@@ -128,6 +128,7 @@ struct RecentListRow: View {
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     @Environment(\.displayScale) private var displayScale
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let entry: RecentEntry
     let isSelecting: Bool
     let onOpen: () -> Void
@@ -139,21 +140,19 @@ struct RecentListRow: View {
         store.cachedThumbnail(for: entry) ?? loadedThumbnail
     }
     private var isPrivate: Bool { store.isSessionPrivate(entry.id) }
-    private var box: CGSize { settings.thumbnailSize.listThumbnail }
+
+    /// The list thumbnail, capped at accessibility text sizes so the (now multi-line)
+    /// name and meta keep horizontal room, mirroring the grid tile (A-H3).
+    private var box: CGSize {
+        let base = settings.thumbnailSize.listThumbnail
+        guard dynamicTypeSize.isAccessibilitySize else { return base }
+        let cap: CGFloat = 48
+        guard base.width > cap else { return base }
+        return CGSize(width: cap, height: base.height * (cap / base.width))
+    }
 
     var body: some View {
         rowContent
-            .contentShape(Rectangle())
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibilityLabel)
-            .accessibilityAddTraits(isSelecting ? [] : .isButton)
-            .accessibilityAction(.default) { if !isSelecting { onOpen() } }
-            .accessibilityActions {
-                if !isPrivate {
-                    Button(store.isPinned(entry.id) ? "Unpin" : "Pin") { store.togglePin(entry.id) }
-                }
-                Button("Remove from Recents", role: .destructive) { onRemove() }
-            }
             .contextMenu { menu }
             .swipeActions(edge: .trailing) {
                 Button(role: .destructive, action: onRemove) { Label("Remove", systemImage: "trash") }
@@ -167,21 +166,44 @@ struct RecentListRow: View {
     @ViewBuilder
     private var rowContent: some View {
         if isSelecting {
+            // Select mode: the remove badge is its OWN labelled element (not absorbed by
+            // the row), so Voice Control can target "Remove <file>" and it keeps a full
+            // 44 pt hit area (A-M5); the row body is a separate, non-interactive label.
             HStack(spacing: 12) {
-                Button(action: onRemove) {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.title3)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .red)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHidden(true)
+                removeBadge
                 rowBody
+                    .contentShape(Rectangle())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(accessibilityLabel)
             }
         } else {
             Button(action: onOpen) { rowBody }
                 .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilityLabel)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityActions {
+                    if !isPrivate {
+                        Button(store.isPinned(entry.id) ? "Unpin" : "Pin") { store.togglePin(entry.id) }
+                    }
+                    Button("Remove from Recents", role: .destructive) { onRemove() }
+                }
         }
+    }
+
+    private var removeBadge: some View {
+        Button(action: onRemove) {
+            Image(systemName: "minus.circle.fill")
+                .font(.title3)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, .red)
+                .frame(width: 44, height: 44)   // A-M5: full hit target
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Remove \(entry.baseName)")
+        .accessibilityInputLabels(["Remove \(entry.baseName)", "Remove"])   // A-M5: Voice Control
     }
 
     private var rowBody: some View {
@@ -190,12 +212,14 @@ struct RecentListRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.displayName)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
+                    // Big text gets up to three lines before truncating, like the grid
+                    // tile, instead of a single clipped line (A-H3).
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
                     .truncationMode(.middle)
                 Text(entry.metaLine())
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             }
             Spacer(minLength: 4)
             if store.isPinned(entry.id) {
@@ -253,9 +277,6 @@ struct RecentListRow: View {
     }
 
     private var accessibilityLabel: String {
-        var label = "\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())"
-        if store.isPinned(entry.id) { label += ", Pinned" }
-        if isPrivate { label += ", Private" }
-        return label
+        entry.accessibilityLabel(pinned: store.isPinned(entry.id), isPrivate: isPrivate)   // A-M4
     }
 }

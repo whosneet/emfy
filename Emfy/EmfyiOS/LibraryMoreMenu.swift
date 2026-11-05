@@ -55,13 +55,25 @@ extension View {
     /// Hosts the shared library sheets (Settings, About, What's New, Changelog) for a
     /// `RecentsSheet` binding, so both the grid and the regular-width sidebar present
     /// the same screens (C4a H1).
-    func librarySheets(_ activeSheet: Binding<RecentsSheet?>) -> some View {
+    ///
+    /// A sheet is a separate hosting view; the Settings screen reads `RecentsStore`
+    /// and `EmfySettings` from the environment, so they are re-injected here rather
+    /// than relying on the presenting column's injection surviving the app-switcher
+    /// snapshot re-layout (C1).
+    func librarySheets(
+        _ activeSheet: Binding<RecentsSheet?>,
+        store: RecentsStore,
+        settings: EmfySettings
+    ) -> some View {
         sheet(item: activeSheet) { sheet in
             switch sheet {
             case .about: AboutView()
             case .whatsNew: InfoSheet(title: "What's New") { WhatsNewView() }
             case .changelog: InfoSheet(title: "Changelog") { ChangelogView() }
-            case .settings: SettingsView()
+            case .settings:
+                SettingsView()
+                    .environment(store)
+                    .environment(settings)
             }
         }
     }

@@ -2,6 +2,9 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 #endif
+#if os(iOS)
+import UIKit
+#endif
 
 /// Emfy — one multiplatform viewer for EMF / WMF files and their gzip-wrapped
 /// .emz / .wmz forms, on macOS 14+ and iOS/iPadOS 17+ (v3-plan §9, §11). This one
@@ -112,6 +115,24 @@ private struct RootView: View {
                 if WhatsNewPresenter.claimLaunchPresentation(enabled: settings.showWhatsNewAfterUpdates) {
                     openWindow(id: "whats-new")
                 }
+            }
+            // Delete this launch's Private-import staging directory when the Mac app
+            // quits, so no copy of a Private-mode file lingers (S-M3). Idempotent and
+            // backed up by the next launch's sweep. Per window, but the deletion is a
+            // no-op after the first.
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                RecentsStore.shared.clearPrivateImports()
+            }
+        #endif
+        #if os(iOS)
+            // Delete this launch's Private-import staging directory on app TERMINATION,
+            // not on mere scene background — so opening a Mail attachment in Private mode
+            // and briefly switching away still leaves it openable on return (S-M3,
+            // main-session call). A suspended-then-killed app skips this callback, but the
+            // directory lives in temporaryDirectory (which iOS also purges) and the next
+            // launch's sweep reclaims any EmfyPrivate-* leftover.
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+                RecentsStore.shared.clearPrivateImports()
             }
         #endif
     }

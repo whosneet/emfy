@@ -62,7 +62,7 @@ struct RegularSidebarList: View {
             }
             // The "couldn't open" alert now lives at the window level (C4a M5).
             #if os(iOS)
-            .librarySheets($activeSheet)
+            .librarySheets($activeSheet, store: store, settings: settings)
             #endif
             // A readable sidebar width so file names aren't truncated to "gat….emf".
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
@@ -215,8 +215,13 @@ struct RegularSidebarList: View {
 /// the cache was purged) off the main actor, exactly as the grid tile does.
 struct RecentRow: View {
     @Environment(RecentsStore.self) private var store
+    @Environment(RemovalCoordinator.self) private var removal
+    @Environment(ToastCenter.self) private var toast
     @Environment(EmfySettings.self) private var settings
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     let entry: RecentEntry
     /// Whether this is a session-only Private-mode entry (shows the marker, hides Pin).
     var isPrivate: Bool = false
@@ -229,7 +234,15 @@ struct RecentRow: View {
         store.cachedThumbnail(for: entry) ?? loadedThumbnail
     }
 
-    private var thumbnailBox: CGSize { settings.thumbnailSize.sidebarThumbnail }
+    /// The sidebar thumbnail, capped at accessibility text sizes so the (now 3-line)
+    /// name and meta keep room, mirroring the grid tile and list row (A-M8).
+    private var thumbnailBox: CGSize {
+        let base = settings.thumbnailSize.sidebarThumbnail
+        guard dynamicTypeSize.isAccessibilitySize else { return base }
+        let cap: CGFloat = 40
+        guard base.width > cap else { return base }
+        return CGSize(width: cap, height: base.height * (cap / base.width))
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -238,29 +251,43 @@ struct RecentRow: View {
                 Text(entry.displayName)
                     .font(.subheadline.weight(.semibold))
                     // Wrap to two lines with middle truncation, so a long name reads
-                    // like "gate-p3-…shapes.emf" instead of "gat….emf".
-                    .lineLimit(2)
+                    // like "gate-p3-…shapes.emf" instead of "gat….emf"; three at
+                    // accessibility sizes, like the other two surfaces (A-M8).
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
                     .truncationMode(.middle)
                 Text(entry.metaLine())
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             }
             if isPrivate {
                 Spacer(minLength: 4)
                 Image(systemName: "eye.slash")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    // Mac tooltip on the Private marker (A-L1).
+                    .help("Private: not saved to history")
             }
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
-        // Include the same date/size the row shows, so VoiceOver isn't missing it (A5).
-        .accessibilityLabel(accessibilityLabel)
-        // A matching-name VoiceOver action for Pin/Unpin (not on Private entries).
+        // One shared label so all three surfaces read identically, including ", Pinned"
+        // (A-M4/A5).
+        .accessibilityLabel(entry.accessibilityLabel(pinned: store.isPinned(entry.id), isPrivate: isPrivate))
+        // The same VoiceOver actions the grid tile and list row offer, so all three
+        // surfaces match: Open in New Window (where a second window can exist),
+        // Pin/Unpin (not for Private), and Remove (A-M8).
         .accessibilityActions {
+            if OpenRouting.offersNewWindow(supportsMultipleWindows: supportsMultipleWindows) {
+                Button("Open in New Window") {
+                    openWindow(id: "library", value: LibraryWindowValue(entryID: entry.id))
+                }
+            }
             if !isPrivate {
                 Button(store.isPinned(entry.id) ? "Unpin" : "Pin") { store.togglePin(entry.id) }
+            }
+            Button("Remove from Recents", role: .destructive) {
+                removal.requestRemoval(id: entry.id, store: store, toast: toast)
             }
         }
         // Re-fire on a file change or a cache eviction while the row stays alive, so
@@ -269,12 +296,6 @@ struct RecentRow: View {
             guard store.cachedThumbnail(for: entry) == nil else { return }
             loadedThumbnail = await store.loadThumbnail(for: entry)
         }
-    }
-
-    private var accessibilityLabel: String {
-        var label = "\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())"
-        if isPrivate { label += ", Private" }
-        return label
     }
 
     private var thumbnailTile: some View {

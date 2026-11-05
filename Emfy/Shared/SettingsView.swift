@@ -151,7 +151,7 @@ extension EmfySettings.ThumbnailSize {
 // Footer sentences, shared verbatim by both platforms.
 private enum SettingsFooter {
     static let recentsCap = "Lowering Recents to keep may remove files Emfy received and is keeping; it’ll ask before removing any."
-    static let privateMode = "Private mode keeps no history — files you open aren’t added to Recents and leave no thumbnails."
+    static let privateMode = "Private mode keeps no history or copies of the files you open in Emfy. They aren’t added to Recents and leave no thumbnails."
     static let darkPage = "Dim lowers the page brightness in Dark Mode; Invert flips a dark drawing to light while keeping its colours."
     static let exportLimit = "Very large drawings export at a lower scale to stay within size limits."
     static let pin = "Pin a file from its context menu to keep it at the top."
@@ -205,19 +205,37 @@ private struct FontSubstitutionDraft: Identifiable {
 /// accessibility element that reads as a sentence.
 private struct SubstitutionRowLabel: View {
     let entry: FontSubstitutionEntry
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(entry.requested)
-                .lineLimit(1)
-            Image(systemName: "arrow.right")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Text(entry.replacement)
-                .lineLimit(1)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                // Stack requested above replacement with a downward arrow, and drop the
+                // single-line clamp, so neither name is truncated at large text (A-H2).
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.requested)
+                    Image(systemName: "arrow.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(entry.replacement)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 6) {
+                    Text(entry.requested)
+                        .lineLimit(1)
+                    Image(systemName: "arrow.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(entry.replacement)
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(entry.requested.isEmpty ? "Unnamed font" : entry.requested), replaced by \(entry.replacement)")
@@ -231,6 +249,7 @@ private struct FontSubstitutionEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var requested: String
     @State private var replacement: String
+    @FocusState private var requestedFocused: Bool
     private let isEditing: Bool
     private let onSave: (String, String) -> Void
 
@@ -250,6 +269,7 @@ private struct FontSubstitutionEditorSheet: View {
             Form {
                 Section {
                     TextField("Font name in the drawing", text: $requested)
+                        .focused($requestedFocused)   // A-M6: initial focus here
                         #if os(iOS)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
@@ -278,6 +298,7 @@ private struct FontSubstitutionEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .keyboardShortcut(.cancelAction)   // A-M6: Esc cancels
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -285,8 +306,11 @@ private struct FontSubstitutionEditorSheet: View {
                         dismiss()
                     }
                     .disabled(!canSave)
+                    .keyboardShortcut(.defaultAction)   // A-M6: Return saves
                 }
             }
+            // Land the keyboard/VoiceOver cursor in the Requested field (A-M6).
+            .onAppear { requestedFocused = true }
         }
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 360)
@@ -301,40 +325,82 @@ private struct FontFamilyPicker: View {
     @Environment(\.dismiss) private var dismiss
     @State private var families: [String] = []
     @State private var search = ""
+    #if os(macOS)
+    // The arrow-key highlight on the Mac; Return commits it (A-M7).
+    @State private var highlighted: String?
+    #endif
+
+    private var trimmedSearch: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var filtered: [String] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return families }
-        return families.filter { $0.localizedCaseInsensitiveContains(query) }
+        guard !trimmedSearch.isEmpty else { return families }
+        return families.filter { $0.localizedCaseInsensitiveContains(trimmedSearch) }
     }
 
     var body: some View {
+        content
+            .searchable(text: $search, prompt: "Search fonts")
+            .navigationTitle("Replacement Font")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .task { families = FontFamilyCatalog.installedFamilies() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        // When a search matches nothing, show the standard empty-search view rather
+        // than a blank list (A-M7).
+        if filtered.isEmpty && !trimmedSearch.isEmpty {
+            ContentUnavailableView.search(text: search)
+        } else {
+            list
+        }
+    }
+
+    private func pick(_ family: String) {
+        selection = family
+        dismiss()
+    }
+
+    private func rowLabel(_ family: String) -> some View {
+        HStack {
+            Text(family)
+            Spacer(minLength: 8)
+            if family == selection {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    #if os(macOS)
+    // A selection-driven List so the arrow keys move the highlight and Return picks it
+    // (A-M7); a double-click still picks directly.
+    private var list: some View {
+        List(filtered, id: \.self, selection: $highlighted) { family in
+            rowLabel(family)
+                .accessibilityAddTraits(family == selection ? [.isSelected] : [])
+                .onTapGesture(count: 2) { pick(family) }
+        }
+        .onKeyPress(.return) {
+            if let highlighted { pick(highlighted); return .handled }
+            return .ignored
+        }
+    }
+    #else
+    private var list: some View {
         List(filtered, id: \.self) { family in
-            Button {
-                selection = family
-                dismiss()
-            } label: {
-                HStack {
-                    Text(family)
-                    Spacer(minLength: 8)
-                    if family == selection {
-                        Image(systemName: "checkmark")
-                            .foregroundStyle(.tint)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .contentShape(Rectangle())
+            Button { pick(family) } label: {
+                rowLabel(family)
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(family == selection ? [.isSelected] : [])
         }
-        .searchable(text: $search, prompt: "Search fonts")
-        .navigationTitle("Replacement Font")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .task { families = FontFamilyCatalog.installedFamilies() }
     }
+    #endif
 }
 
 /// The Settings "Copy Diagnostic Report" row (S1a-6). The Settings window has no
@@ -360,6 +426,7 @@ private struct DiagnosticReportRow: View {
     private func copy() {
         DiagnosticClipboard.copy(DiagnosticReportAction.systemReportText())
         copied = true
+        AccessibilityAnnouncement.post("Copied")   // A-L5
         Task {
             try? await Task.sleep(for: .seconds(2))
             copied = false
@@ -391,6 +458,11 @@ private struct MacSettingsTabs: View {
 
 /// Fixed pane width so the tabs line up and the window never needs to scroll.
 private let macSettingsWidth: CGFloat = 520
+/// Bounded height for the Rendering tab, which — unlike the other tabs — can hold a
+/// full 64-row font table and grows at large text sizes. A fixed height lets the Form
+/// scroll internally so every control stays reachable, rather than the tab growing
+/// until the Add button and Quick Look section fall off the bottom of the screen (A-H1).
+private let macRenderingTabHeight: CGFloat = 520
 
 /// A describing label with a trailing fixed-width picker (C4b row idiom). Menu
 /// style by default; segmented for two or three short choices.
@@ -539,6 +611,7 @@ private struct MacRenderingTab: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityHint("Edits this substitution")   // A-L3
                             Button(role: .destructive) {
                                 delete(entry.id)
                             } label: {
@@ -546,7 +619,9 @@ private struct MacRenderingTab: View {
                                     .symbolRenderingMode(.hierarchical)
                             }
                             .buttonStyle(.borderless)
-                            .accessibilityLabel("Delete substitution")
+                            // Name the row the button deletes, so VoiceOver isn't 64
+                            // identical "Delete substitution" buttons (A-M1).
+                            .accessibilityLabel("Delete substitution for \(entry.requested.isEmpty ? "unnamed font" : entry.requested)")
                         }
                     }
                 }
@@ -556,6 +631,8 @@ private struct MacRenderingTab: View {
                     Label("Add Substitution…", systemImage: "plus")
                 }
                 .disabled(atCap)
+                // Say why Add is unavailable at the cap (A-L4).
+                .accessibilityHint(atCap ? "Limit of \(EmfySettings.fontSubstitutionRowLimit) reached" : "")
             } header: {
                 Text("Font substitutions")
             } footer: {
@@ -571,8 +648,9 @@ private struct MacRenderingTab: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: macSettingsWidth)
-        .fixedSize(horizontal: false, vertical: true)
+        // A bounded height (not intrinsic) so the Form scrolls when a full font table
+        // or large text would otherwise push controls off-screen (A-H1).
+        .frame(width: macSettingsWidth, height: macRenderingTabHeight)
         .sheet(item: $draft) { draft in
             FontSubstitutionEditorSheet(draft: draft) { requested, replacement in
                 apply(draft, requested: requested, replacement: replacement)
@@ -862,6 +940,7 @@ private struct IOSRenderingScreen: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityHint("Edits this substitution")   // A-L3
                     }
                     .onDelete { offsets in
                         settings.fontSubstitutions.remove(atOffsets: offsets)
@@ -873,6 +952,8 @@ private struct IOSRenderingScreen: View {
                     Label("Add Substitution", systemImage: "plus")
                 }
                 .disabled(atCap)
+                // Say why Add is unavailable at the cap (A-L4).
+                .accessibilityHint(atCap ? "Limit of \(EmfySettings.fontSubstitutionRowLimit) reached" : "")
             } header: {
                 Text("Font substitutions")
             } footer: {
