@@ -206,7 +206,9 @@ private struct MacViewerTab: View {
             Section("Viewer") {
                 MacOptionRow(title: "Default zoom on open", value: $settings.defaultZoomOnOpen, segmented: true)
                 MacOptionRow(title: "Page background", value: $settings.pageBackground)
-                Toggle("Show partial support banner", isOn: $settings.showPartialSupportBanner)
+                // The Mac retired its partial-support banner (0964d74); partial
+                // support shows in the Info inspector, so there is no toggle here.
+                // The toggle stays on iOS, where the banner still shows.
             }
             Section {
                 MacOptionRow(title: "Page in Dark Mode", value: $settings.darkPageMode, segmented: true)
