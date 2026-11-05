@@ -2,6 +2,18 @@ import CoreGraphics
 import EMFParse
 import Foundation
 
+/// The page background a bitmap render starts from (S1a Export › PNG
+/// background). `.white` fills the canvas opaque white first, exactly as every
+/// render did before this option existed — a metafile carries no page
+/// background of its own, so white is the default and preserves byte-identical
+/// output. `.transparent` skips that fill, leaving the canvas's alpha channel
+/// clear so the drawing sits on transparency. Bitmap renders only; the PDF path
+/// and in-context playback are unchanged.
+public enum RenderBackground: Sendable {
+    case white
+    case transparent
+}
+
 /// The EMF playback engine, phase-2 record set: DC state, object table, and
 /// core + 16-bit geometry played into a caller-supplied `CGContext`.
 ///
@@ -97,7 +109,8 @@ public enum EMFRenderer {
     /// itself never fails.
     public static func makeImage(
         _ file: EMFFile,
-        scale: CGFloat = 1
+        scale: CGFloat = 1,
+        background: RenderBackground = .white
     ) -> (CGImage, EMFRenderLog)? {
         var log = EMFRenderLog()
 
@@ -140,8 +153,13 @@ public enum EMFRenderer {
               )
         else { return nil }
 
-        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        // A metafile has no page background of its own: `.white` paints one
+        // (the historical, byte-identical default); `.transparent` leaves the
+        // premultiplied-alpha canvas clear so the drawing sits on transparency.
+        if background == .white {
+            context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
 
         let renderLog = render(
             file,

@@ -136,17 +136,20 @@ public enum MetafileRenderer {
 
     // MARK: - Render a prepared metafile
 
-    /// Renders `prepared` into a fresh white sRGB bitmap (× `scale`). Returns
-    /// `nil` only on a bitmap allocation failure.
+    /// Renders `prepared` into a fresh sRGB bitmap (× `scale`) on `background`
+    /// (opaque white by default, matching every render before this option;
+    /// `.transparent` leaves the page clear). Returns `nil` only on a bitmap
+    /// allocation failure.
     public static func makeImage(
         _ prepared: Prepared,
-        scale: CGFloat = 1
+        scale: CGFloat = 1,
+        background: RenderBackground = .white
     ) -> (CGImage, EMFRenderLog)? {
         switch prepared.content {
         case .emf(let file):
-            return EMFRenderer.makeImage(file, scale: scale)
+            return EMFRenderer.makeImage(file, scale: scale, background: background)
         case .wmfProgram(let program):
-            return renderProgramToImage(program, scale: scale)
+            return renderProgramToImage(program, scale: scale, background: background)
         }
     }
 
@@ -206,10 +209,11 @@ public enum MetafileRenderer {
     /// Returns `nil` for an unrecognised or header-less input.
     public static func makeImage(
         _ opened: OpenedMetafile,
-        scale: CGFloat = 1
+        scale: CGFloat = 1,
+        background: RenderBackground = .white
     ) -> (CGImage, EMFRenderLog)? {
         guard let prepared = prepare(opened) else { return nil }
-        return makeImage(prepared, scale: scale)
+        return makeImage(prepared, scale: scale, background: background)
     }
 
     /// Convenience over `prepare` + `render`. For an unrecognised or header-less
@@ -229,7 +233,8 @@ public enum MetafileRenderer {
     /// from the program's device canvas (× `scale`).
     private static func renderProgramToImage(
         _ program: WMFRenderProgram,
-        scale: CGFloat
+        scale: CGFloat,
+        background: RenderBackground = .white
     ) -> (CGImage, EMFRenderLog)? {
         // The caller-supplied scale is sanitised (not hostile file data); the
         // program canvas is already clamped by the translator.
@@ -250,8 +255,12 @@ public enum MetafileRenderer {
               )
         else { return nil }
 
-        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        // `.white` paints the historical opaque page; `.transparent` leaves the
+        // premultiplied-alpha canvas clear (S1a Export › PNG background).
+        if background == .white {
+            context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        }
 
         let log = renderProgram(program, into: context, target: CGRect(x: 0, y: 0, width: w, height: h))
         guard let image = context.makeImage() else { return nil }
