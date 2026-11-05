@@ -13,6 +13,22 @@ import WMFParse
 /// `EMFRenderer` API, byte-for-byte as before.
 public enum MetafileRenderer {
 
+    /// One record-type tally for the diagnostic report: a human-readable record
+    /// name and how many records of that kind the metafile carries. Structure
+    /// only — a count of record types, never any drawing content, text, or
+    /// object data. EMF names are the `EMR_*` enumeration ([MS-EMF] §2.1.1); WMF
+    /// names the `META_*` enumeration ([MS-WMF] §2.1.1.1); an undefined type id
+    /// is named "Unknown (…)".
+    public struct RecordKindCount: Sendable, Equatable {
+        public let name: String
+        public let count: Int
+
+        public init(name: String, count: Int) {
+            self.name = name
+            self.count = count
+        }
+    }
+
     // MARK: - Prepared metafile
 
     /// A metafile parsed once from an `OpenedMetafile` and ready to size, render,
@@ -62,6 +78,11 @@ public enum MetafileRenderer {
         public let kind: Kind
         /// The fate of a WMF's embedded EMF.
         public let embeddedEMF: EmbeddedEMF
+        /// Record counts grouped by type, for the diagnostic report. The EMF
+        /// record inventory for an EMF (or a WMF's played-back embedded EMF); the
+        /// WMF record inventory for WMF record playback. Sorted by type id
+        /// ascending. Structure only — never drawing content.
+        public let recordKinds: [RecordKindCount]
 
         let content: Content
 
@@ -74,10 +95,11 @@ public enum MetafileRenderer {
             return []
         }
 
-        init(content: Content, kind: Kind, embeddedEMF: EmbeddedEMF) {
+        init(content: Content, kind: Kind, embeddedEMF: EmbeddedEMF, recordKinds: [RecordKindCount]) {
             self.content = content
             self.kind = kind
             self.embeddedEMF = embeddedEMF
+            self.recordKinds = recordKinds
             self.naturalSize = Prepared.naturalSize(of: content)
         }
 
@@ -109,7 +131,7 @@ public enum MetafileRenderer {
         switch opened.format {
         case .emf:
             guard let file = try? EMFFile.parse(opened.data) else { return nil }
-            return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .notApplicable)
+            return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .notApplicable, recordKinds: emfRecordKinds(file))
 
         case .wmf, .placeableWMF:
             guard let wmf = try? WMFFile.parse(opened.data) else { return nil }
@@ -118,7 +140,7 @@ public enum MetafileRenderer {
             // records (owner decision); anything else falls back to the records.
             if case .reassembled(let bytes) = embedded,
                let file = try? EMFFile.parse(bytes) {
-                return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .played)
+                return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .played, recordKinds: emfRecordKinds(file))
             }
             let fate: Prepared.EmbeddedEMF
             switch embedded {
@@ -127,10 +149,35 @@ public enum MetafileRenderer {
             // escapes were present but unusable, so the WMF records played.
             case .rejected, .reassembled: fate = .rejected
             }
-            return Prepared(content: .wmfProgram(WMFTranslator.translate(wmf)), kind: .wmfRecords, embeddedEMF: fate)
+            return Prepared(content: .wmfProgram(WMFTranslator.translate(wmf)), kind: .wmfRecords, embeddedEMF: fate, recordKinds: wmfRecordKinds(wmf))
 
         case .gzip, .unknown:
             return nil
+        }
+    }
+
+    // MARK: - Record inventory (diagnostic report)
+
+    /// The EMF record inventory with each type resolved to its `EMR_*` name
+    /// (undefined ids named "Unknown (type …)"), preserving the inventory's
+    /// type-id-ascending order. Counts only; no record payload is read.
+    private static func emfRecordKinds(_ file: EMFFile) -> [RecordKindCount] {
+        file.recordInventory().map { entry in
+            RecordKindCount(
+                name: EMFRecordType.name(for: entry.type) ?? "Unknown (type \(entry.type))",
+                count: entry.count
+            )
+        }
+    }
+
+    /// The WMF record inventory with each RecordFunction resolved to its `META_*`
+    /// name (undefined functions named "Unknown (function 0x…)").
+    private static func wmfRecordKinds(_ file: WMFFile) -> [RecordKindCount] {
+        file.recordInventory().map { entry in
+            RecordKindCount(
+                name: WMFRecordType.name(for: entry.function) ?? String(format: "Unknown (function 0x%04X)", entry.function),
+                count: entry.count
+            )
         }
     }
 

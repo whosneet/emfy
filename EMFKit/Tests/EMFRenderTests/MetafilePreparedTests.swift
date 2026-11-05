@@ -135,6 +135,41 @@ struct MetafilePreparedTests {
         #expect(image.width == 372 && image.height == 272)
     }
 
+    // MARK: - Record inventory (diagnostic report)
+
+    @Test("prepare reports EMF record counts by kind, named")
+    func emfRecordKinds() throws {
+        var fixture = RenderFixture()
+        fixture.createSolidBrush(index: 0, r: 255, g: 0, b: 0)
+        fixture.selectObject(0)
+        fixture.rectangle(10, 10, 50, 50)
+        fixture.rectangle(20, 20, 60, 60)
+        let opened = try OpenedMetafile.open(fixture.data())
+        let prepared = try #require(MetafileRenderer.prepare(opened))
+        let counts = Dictionary(uniqueKeysWithValues: prepared.recordKinds.map { ($0.name, $0.count) })
+        #expect(counts["EMR_HEADER"] == 1)
+        #expect(counts["EMR_EOF"] == 1)
+        #expect(counts["EMR_RECTANGLE"] == 2)
+        #expect(counts["EMR_CREATEBRUSHINDIRECT"] == 1)
+        #expect(counts["EMR_SELECTOBJECT"] == 1)
+        // The tally is a count of record types only — no payload text leaks in.
+        #expect(prepared.recordKinds.allSatisfy { $0.count > 0 })
+    }
+
+    @Test("prepare reports WMF record counts by kind for record playback")
+    func wmfRecordKinds() throws {
+        let bytes = Self.metaHeader()
+            + Self.record(0x020B, Self.i16(0) + Self.i16(0))
+            + Self.record(0x020C, Self.i16(50) + Self.i16(100))
+            + Self.eof()
+        let opened = try OpenedMetafile.open(Data(bytes))
+        let prepared = try #require(MetafileRenderer.prepare(opened))
+        #expect(prepared.kind == .wmfRecords)
+        #expect(!prepared.recordKinds.isEmpty)
+        let names = prepared.recordKinds.map(\.name)
+        #expect(names.contains("META_SETWINDOWORG"))
+    }
+
     // MARK: - Embedded-EMF fate
 
     @Test("an inconsistent embedded EMF is rejected and the WMF records play")
