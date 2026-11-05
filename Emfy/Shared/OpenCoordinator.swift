@@ -68,9 +68,6 @@ final class OpenCoordinator {
     #if os(macOS)
     /// Routes an opened entry from the menu bar: into the front window when one
     /// exists, else opens a new library window showing it — so ⌘O and Open Recent
-    /// work with every window closed rather than queuing invisibly (C4a M5).
-    /// Routes an opened entry from the menu bar: into the front window when one
-    /// exists, else opens a new library window showing it — so ⌘O and Open Recent
     /// work with every window closed rather than queuing invisibly (C4a M5). When
     /// `inNewWindow` is set (the "Open files in → New window" setting, S1a-4b),
     /// it always spawns a new window instead of reusing the front one.
