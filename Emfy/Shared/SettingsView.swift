@@ -11,6 +11,10 @@ import AppKit
 /// layout is a sectioned `Form`, so S1 adds the Viewer / Export / Rendering /
 /// Quick Look / Updates groups as further sections without restructuring.
 struct SettingsView: View {
+    #if os(iOS)
+    @Environment(\.dismiss) private var dismiss
+    #endif
+
     var body: some View {
         #if os(macOS)
         SettingsForm()
@@ -23,24 +27,12 @@ struct SettingsView: View {
                 .navigationTitle("Settings")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        DismissSettingsButton()
-                    }
+                    SheetDoneToolbar { dismiss() }   // G2
                 }
         }
         #endif
     }
 }
-
-#if os(iOS)
-/// The iOS sheet's Done button — the Settings screen is presented modally there.
-private struct DismissSettingsButton: View {
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        Button("Done", systemImage: "checkmark") { dismiss() }
-    }
-}
-#endif
 
 /// The shared sectioned body: Library and Help & diagnostics. Each action branches
 /// per platform (macOS windows / `NSAlert`; iOS sheets / `openURL`) but the
@@ -59,67 +51,77 @@ private struct SettingsForm: View {
 
     var body: some View {
         Form {
+            #if os(macOS)
+            // The Mac Settings idiom: a describing label with a trailing action
+            // button, not a row-wide bordered button in the grouped Form (S1 / L).
+            Section("Library") {
+                LabeledContent("Recent files") {
+                    Button("Clear Recents…", role: .destructive) {
+                        MacRecentsConfirmation.confirmClear(store: store)
+                    }
+                    .disabled(store.entries.isEmpty)
+                }
+            }
+            Section("Help & diagnostics") {
+                LabeledContent("What's New") {
+                    Button("Show") { openWindow(id: "whats-new") }
+                }
+                LabeledContent("Changelog") {
+                    Button("Show") { openWindow(id: "changelog") }
+                }
+                LabeledContent("Developer documentation") {
+                    Button("Open") { if let url = EmfyLinks.gitHub { openURL(url) } }
+                }
+                LabeledContent("Contact the developer") {
+                    Button("Email") { if let url = EmfyLinks.contact { openURL(url) } }
+                }
+            }
+            #else
             Section("Library") {
                 clearRecentsButton
             }
-
             Section("Help & diagnostics") {
                 whatsNewRow
                 changelogRow
                 developerDocumentationRow
                 contactRow
             }
+            #endif
         }
         #if os(iOS)
         .recentsRemoval(removal, store: store, toast: nil)
         #endif
     }
 
+    #if os(iOS)
     // MARK: - Library
 
     private var clearRecentsButton: some View {
         Button(role: .destructive) {
-            #if os(macOS)
-            MacRecentsConfirmation.confirmClear(store: store)
-            #else
             removal.requestClear(store: store)
-            #endif
         } label: {
-            Label("Clear Recents", systemImage: "trash")
+            // "…" because it confirms first (L).
+            Label("Clear Recents…", systemImage: "trash")
         }
         .disabled(store.entries.isEmpty)
     }
 
     // MARK: - Help & diagnostics
 
-    @ViewBuilder
     private var whatsNewRow: some View {
-        #if os(macOS)
-        Button { openWindow(id: "whats-new") } label: {
-            Label("What's New", systemImage: "sparkles")
-        }
-        #else
         NavigationLink {
             WhatsNewView().navigationTitle("What's New").navigationBarTitleDisplayMode(.inline)
         } label: {
             Label("What's New", systemImage: "sparkles")
         }
-        #endif
     }
 
-    @ViewBuilder
     private var changelogRow: some View {
-        #if os(macOS)
-        Button { openWindow(id: "changelog") } label: {
-            Label("Changelog", systemImage: "list.bullet.rectangle")
-        }
-        #else
         NavigationLink {
             ChangelogView().navigationTitle("Changelog").navigationBarTitleDisplayMode(.inline)
         } label: {
             Label("Changelog", systemImage: "list.bullet.rectangle")
         }
-        #endif
     }
 
     private var developerDocumentationRow: some View {
@@ -137,4 +139,5 @@ private struct SettingsForm: View {
             Label("Contact the Developer", systemImage: "envelope")
         }
     }
+    #endif
 }

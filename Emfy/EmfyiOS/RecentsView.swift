@@ -44,7 +44,10 @@ struct RecentsGrid: View {
     }
 
     var body: some View {
-        content
+        // Filter the store once per body; `content` and `grid` reuse the result so
+        // the list is no longer filtered four times a pass (P7).
+        let filtered = filteredEntries
+        return content(filtered: filtered)
             .navigationTitle("Recents")
             .searchable(text: $searchText, prompt: "Search recent files")
             .toolbar { toolbarContent }
@@ -68,24 +71,26 @@ struct RecentsGrid: View {
 
     // MARK: - Content
 
-    private var content: some View {
+    private func content(filtered: [RecentEntry]) -> some View {
         ZStack {
             if !store.didLoad {
                 // Nothing until the persisted list has loaded (§h: no empty flash).
                 Color.clear
             } else if store.entries.isEmpty {
                 EmptyRecentsView(openAction: { isImporting = true })
-            } else if filteredEntries.isEmpty {
+            } else if filtered.isEmpty {
                 ContentUnavailableView.search(text: searchText)
             } else {
-                grid
+                grid(filtered: filtered)
             }
         }
     }
 
-    private var grid: some View {
-        ScrollView {
-            gridBody(columns: resolvedColumns)
+    private func grid(filtered: [RecentEntry]) -> some View {
+        // One pass splits today vs earlier, feeding both sections (P7).
+        let partition = RecentEntry.partitionedByDay(filtered)
+        return ScrollView {
+            gridBody(columns: resolvedColumns, partition: partition)
         }
         .background {
             GeometryReader { proxy in
@@ -116,10 +121,10 @@ struct RecentsGrid: View {
         if count != columnCount { columnCount = count }
     }
 
-    private func gridBody(columns: [GridItem]) -> some View {
+    private func gridBody(columns: [GridItem], partition: (today: [RecentEntry], earlier: [RecentEntry])) -> some View {
         LazyVStack(alignment: .leading, spacing: 8, pinnedViews: []) {
-            section(title: "Today", entries: todayEntries, columns: columns)
-            section(title: "Earlier", entries: earlierEntries, columns: columns)
+            section(title: "Today", entries: partition.today, columns: columns)
+            section(title: "Earlier", entries: partition.earlier, columns: columns)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -145,9 +150,9 @@ struct RecentsGrid: View {
     @ViewBuilder
     private func tile(for entry: RecentEntry) -> some View {
         if isSelecting {
-            RecentTileView(entry: entry, isSelecting: true) {
-                removal.requestRemoval(id: entry.id, store: store, toast: toast)
-            }
+            // The tile removes through the shared coordinator from the environment,
+            // so it no longer takes a per-entry closure (P3).
+            RecentTileView(entry: entry, isSelecting: true)
         } else {
             // A Button that sets the shared selection, pushing the viewer on compact
             // width. Assigning (not toggling) makes a rapid double tap idempotent.
@@ -157,7 +162,7 @@ struct RecentsGrid: View {
             // "Open" alternate where a second window can't be created (iPhone, Duo
             // outer) and makes one where it can (Duo inner split half). The tile keeps
             // its button label; VoiceOver activates it to open and has a Remove action.
-            RecentTileView(entry: entry, isSelecting: false, onRemove: {})
+            RecentTileView(entry: entry, isSelecting: false)
                 .overlay(
                     TileOpenInteraction(
                         entryID: entry.id,
@@ -180,12 +185,25 @@ struct RecentsGrid: View {
     private var toolbarContent: some ToolbarContent {
         openItem
         selectItem
+        trailingSpacer
         ToolbarItem(placement: .topBarTrailing) {
             LibraryMoreMenu(
                 activeSheet: $activeSheet,
                 entriesEmpty: store.entries.isEmpty,
                 onClear: { removal.requestClear(store: store) }
             )
+        }
+    }
+
+    /// On iOS 26.0–26.x, Select and More both land in `.topBarTrailing` and merge
+    /// into one glass pill; a fixed spacer splits them back into separate pills (G3).
+    /// From 27 the pinned/axis placements separate them, so no spacer is needed there.
+    @ToolbarContentBuilder
+    private var trailingSpacer: some ToolbarContent {
+        if #unavailable(iOS 27.0) {
+            if #available(iOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            }
         }
     }
 
@@ -269,14 +287,6 @@ struct RecentsGrid: View {
             $0.displayName.localizedStandardContains(searchText)
         }
     }
-
-    private var todayEntries: [RecentEntry] {
-        filteredEntries.filter { Calendar.current.isDateInToday($0.openedAt) }
-    }
-
-    private var earlierEntries: [RecentEntry] {
-        filteredEntries.filter { !Calendar.current.isDateInToday($0.openedAt) }
-    }
 }
 
 /// The More-menu sheets.
@@ -298,10 +308,27 @@ struct InfoSheet<Content: View>: View {
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done", systemImage: "checkmark") { dismiss() }
-                    }
+                    SheetDoneToolbar { dismiss() }
                 }
+        }
+    }
+}
+
+/// A dismiss-only sheet's close control (G2): the Liquid Glass close (X) button on
+/// 26, a plain "Done" text button below — text only, so a pre-26 "Done" never
+/// renders icon-only. Shared by the library sheets, About and the iOS Settings sheet.
+struct SheetDoneToolbar: ToolbarContent {
+    let onDismiss: () -> Void
+
+    var body: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(role: .close) { onDismiss() }
+            }
+        } else {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { onDismiss() }
+            }
         }
     }
 }

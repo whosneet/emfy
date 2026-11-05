@@ -99,6 +99,7 @@ struct MetafileViewerScreen: View {
         .inspectorColumnWidth(min: inspectorWidth, ideal: inspectorWidth, max: inspectorWidth)
         .sheet(item: shareSheetBinding, onDismiss: { exporter.cleanupTemp() }) { payload in
             ShareSheet(items: payload.items)
+                .presentationDetents([.medium, .large])   // G5
         }
         .alert(
             "Export Failed",
@@ -126,6 +127,9 @@ struct MetafileViewerScreen: View {
             }
         }
         .background(keyboardCommands)
+        // Publish the viewer's actions to the scene so the shared iOS View menu drives
+        // zoom / controls / Info even while the sidebar holds first responder (K1).
+        .focusedSceneValue(\.viewerActions, viewerActions)
         .task(id: session.entryID) {
             // The window drives the load; this covers the rare idle arrival.
             if case .idle = session.state { await session.load() }
@@ -325,44 +329,37 @@ struct MetafileViewerScreen: View {
         .accessibilityIdentifier("viewerInfo")
     }
 
-    // Keyboard shortcuts stay registered regardless of chrome visibility (a hidden
-    // toolbar deregisters its items' shortcuts). Aligned with the Mac (C4a M6/A15):
-    // ⌘0 Actual Size, ⌘9 Fit, ⌘+/⌘= Zoom In, ⌘− Zoom Out, ⌘I Info (loaded only),
-    // ⇧⌘H toggles the controls, Esc restores them. Not ⌃⌘F (the system Enter Full
-    // Screen shortcut, which iPadOS windowing intercepts) and not ⇧⌘\ (SwiftUI can't
-    // match a `\` KeyEquivalent while Shift is held, since Shift+\ emits `|`) —
-    // verified on the simulator (C4a M6 correction). ⇧⌘E is deliberately NOT bound:
-    // on the Mac it means Export-to-file, so it must not mean something else on iPad.
-    // Each is hidden from VoiceOver.
+    // The zoom group (⌘0 / ⌘9 / ⌘+ / ⌘= / ⌘−), the controls toggle (⌃⌘H) and Info
+    // (⌘I) are now registered once, in the shared iOS View menu (`ViewerCommandsIOS`),
+    // and driven by this viewer's `focusedSceneValue` — so they fire even while the
+    // sidebar holds first responder, which a view-level `.keyboardShortcut` could not
+    // (K1). Only Esc stays here: it just restores the chrome from immersive mode, and
+    // the user is already working inside the viewer to be in that mode. Hidden from
+    // VoiceOver.
     private var keyboardCommands: some View {
-        ZStack {
-            shortcutButton("Zoom In", "+") { controller.zoomIn() }
-            shortcutButton("Zoom In", "=") { controller.zoomIn() }
-            shortcutButton("Zoom Out", "-") { controller.zoomOut() }
-            shortcutButton("Actual Size", "0") { controller.actualSize() }
-            shortcutButton("Zoom to Fit", "9") { controller.fit() }
-            shortcutButton("Info", "i", enabled: loaded != nil) { toggleInspector() }
-            shortcutButton("Toggle Controls", "h", modifiers: [.command, .shift], enabled: isLoaded) { toggleChrome() }
-            Button("Show Controls") { if chromeHidden { toggleChrome() } }
-                .keyboardShortcut(.escape, modifiers: [])
-                .accessibilityHidden(true)
-        }
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .allowsHitTesting(false)
+        Button("Show Controls") { if chromeHidden { toggleChrome() } }
+            .keyboardShortcut(.escape, modifiers: [])
+            .accessibilityHidden(true)
+            .frame(width: 0, height: 0)
+            .opacity(0)
+            .allowsHitTesting(false)
     }
 
-    private func shortcutButton(
-        _ title: String,
-        _ key: KeyEquivalent,
-        modifiers: EventModifiers = .command,
-        enabled: Bool = true,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(title, action: action)
-            .keyboardShortcut(key, modifiers: modifiers)
-            .disabled(!enabled)
-            .accessibilityHidden(true)
+    /// The viewer actions published to the scene for the shared iOS View menu (K1):
+    /// the zoom group plus the immersive-controls and Info toggles. Rebuilt when
+    /// `isLoaded` or `chromeHidden` change — not per zoom frame — so it never churns
+    /// the menu bar while pinching.
+    private var viewerActions: ViewerActions {
+        ViewerActions(
+            isDocumentLoaded: isLoaded,
+            zoomIn: { controller.zoomIn() },
+            zoomOut: { controller.zoomOut() },
+            fit: { controller.fit() },
+            actualSize: { controller.actualSize() },
+            toggleChrome: isLoaded ? { toggleChrome() } : nil,
+            toggleInfo: { toggleInspector() },
+            isChromeHidden: chromeHidden
+        )
     }
 
     // MARK: - Top overlays (pill + banner), displaced clear of the Duo fold
@@ -376,17 +373,7 @@ struct MetafileViewerScreen: View {
             let sideWidth = DuoRegions.largerSideWidth(viewWidth: width, division: regions.division)
             let topInset = DuoRegions.overlayTopInset(base: 8, occlusion: regions.occlusion, division: regions.division, viewWidth: width)
             VStack(spacing: 8) {
-                if pillVisible {
-                    zoomPill
-                        .offset(x: xOffset)
-                        .transition(reduceMotion ? .identity : .opacity)
-                }
-                if showBanner, let message = partialMessage {
-                    banner(message)
-                        .frame(maxWidth: sideWidth - 24)
-                        .offset(x: xOffset)
-                        .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
-                }
+                floatingGroup(xOffset: xOffset, sideWidth: sideWidth)
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .top)
@@ -394,14 +381,28 @@ struct MetafileViewerScreen: View {
         }
     }
 
-    private var zoomPill: some View {
-        Text("\(zoomPercent)%")
-            .font(.subheadline.weight(.semibold).monospacedDigit())
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
-            .accessibilityHidden(true)
+    /// The pill and banner, wrapped in a `GlassEffectContainer` on 26 so the two
+    /// glass surfaces merge cleanly when both show; a plain stack below (G1).
+    @ViewBuilder
+    private func floatingGroup(xOffset: CGFloat, sideWidth: CGFloat) -> some View {
+        let content = VStack(spacing: 8) {
+            if pillVisible {
+                ZoomPill(controller: controller)
+                    .offset(x: xOffset)
+                    .transition(reduceMotion ? .identity : .opacity)
+            }
+            if showBanner, let message = partialMessage {
+                banner(message)
+                    .frame(maxWidth: sideWidth - 24)
+                    .offset(x: xOffset)
+                    .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
+            }
+        }
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 8) { content }
+        } else {
+            content
+        }
     }
 
     private var showBanner: Bool {
@@ -467,11 +468,7 @@ struct MetafileViewerScreen: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(.primary.opacity(0.08), lineWidth: 0.5)
-        )
+        .floatingSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal, 12)
     }
 
@@ -484,10 +481,13 @@ struct MetafileViewerScreen: View {
                 entry: entry,
                 prepared: model.prepared,
                 diagnostics: model.diagnostics,
+                couldNotShowNotes: model.couldNotShowNotes,
                 naturalSize: model.naturalSize,
                 // The Zoom row is reachable on both iPhone (sheet) and iPad (column),
-                // with − / + 25% steppers driving the viewer's controller (A14).
-                zoomPercent: zoomPercent,
+                // with − / + 25% steppers driving the viewer's controller (A14). A
+                // closure, so the live % is read inside the Zoom row's leaf, not here
+                // (P2).
+                zoomProvider: { Int((controller.zoom * 100).rounded()) },
                 onClose: { closeInspector() },
                 onZoomStep: { delta in controller.step(by: delta) }
             )
@@ -541,11 +541,7 @@ struct MetafileViewerScreen: View {
     }
 
     private var partialMessage: String? {
-        loaded?.diagnostics.partialSupportMessage
-    }
-
-    private var zoomPercent: Int {
-        Int((controller.zoom * 100).rounded())
+        loaded?.partialSupportMessage   // precomputed at load (P6)
     }
 
     private var entry: RecentEntry? {
@@ -553,9 +549,24 @@ struct MetafileViewerScreen: View {
     }
 
     private var subtitle: String {
-        guard let entry else { return "" }
-        let size = ByteCountFormatter.string(fromByteCount: entry.byteCount, countStyle: .file)
-        return "\(entry.fullFormatName) · \(size)"
+        entry?.formatSizeSubtitle ?? ""
+    }
+}
+
+/// The transient zoom pill, as its own leaf view reading the controller, so the live
+/// percentage invalidates only the pill each pinch frame — not `MetafileViewerScreen.body`,
+/// which hosts the inspector and publishes `viewerActions` (P2).
+private struct ZoomPill: View {
+    let controller: MetafileZoomController
+
+    var body: some View {
+        let percent = Int((controller.zoom * 100).rounded())
+        Text("\(percent)%")
+            .font(.subheadline.weight(.semibold).monospacedDigit())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .floatingSurface(in: Capsule())
+            .accessibilityHidden(true)
     }
 }
 

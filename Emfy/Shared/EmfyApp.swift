@@ -39,6 +39,13 @@ struct EmfyApp: App {
             ViewMenuCommands()
             EmfyCommands()
         }
+        #else
+        // The iPad/iPhone View menu: the viewer's zoom group, the controls toggle,
+        // and Info, routed through the menu bar so they fire without the detail
+        // holding focus (C4b K1).
+        .commands {
+            ViewerCommandsIOS()
+        }
         #endif
 
         #if os(macOS)

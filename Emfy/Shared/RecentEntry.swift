@@ -66,6 +66,69 @@ struct RecentEntry: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+// MARK: - Shared size / meta-line helpers (P3)
+
+extension RecentEntry {
+    /// One byte-count style for every size label, so the four former copies (the
+    /// grid tile, the sidebar row, the file info, the viewer subtitle) read
+    /// identically and no view builds a formatter in its body (P3).
+    static let byteCountStyle = ByteCountFormatStyle(style: .file)
+
+    /// The file size as a localised string ("20 KB").
+    var sizeLabel: String {
+        byteCount.formatted(RecentEntry.byteCountStyle)
+    }
+
+    /// The second half of the meta line — the size today, the abbreviated date
+    /// earlier. Reused for the VoiceOver label so it matches the visible text (A5).
+    func metaSecond(now: Date = Date()) -> String {
+        Calendar.current.isDate(openedAt, inSameDayAs: now)
+            ? sizeLabel
+            : openedAt.formatted(.dateTime.day().month(.abbreviated))
+    }
+
+    /// The meta line under the file name: "EMF · 20 KB" today, "EMF · 3 Nov"
+    /// earlier. One helper replacing the four duplicated copies (P3).
+    func metaLine(now: Date = Date()) -> String {
+        "\(formatLabel) · \(metaSecond(now: now))"
+    }
+
+    /// The viewer subtitle: full format name · size ("Enhanced Metafile · 20 KB"),
+    /// used by the iOS and Mac navigation subtitles (G6).
+    var formatSizeSubtitle: String {
+        "\(fullFormatName) · \(sizeLabel)"
+    }
+
+    /// Splits entries into today's and earlier, in a single pass, so the recents
+    /// grid partitions once per body instead of filtering four times (P7).
+    static func partitionedByDay(
+        _ entries: [RecentEntry],
+        now: Date = Date()
+    ) -> (today: [RecentEntry], earlier: [RecentEntry]) {
+        let calendar = Calendar.current
+        var today: [RecentEntry] = []
+        var earlier: [RecentEntry] = []
+        for entry in entries {
+            if calendar.isDate(entry.openedAt, inSameDayAs: now) {
+                today.append(entry)
+            } else {
+                earlier.append(entry)
+            }
+        }
+        return (today, earlier)
+    }
+}
+
+/// The identity a thumbnail-loading `.task(id:)` keys on, so it re-fires when the
+/// cached image is dropped while the tile stays alive (P4 / C4b review #3). Keyed on
+/// the thumbnail file name plus whether the tile currently has an image: when NSCache
+/// evicts, `needsLoad` flips true and the task reloads from the on-disk PNG. On a pure
+/// cache hit `needsLoad` is false, so the common path still sets no `@State`.
+struct ThumbnailTaskID: Equatable, Sendable {
+    let name: String?
+    let needsLoad: Bool
+}
+
 /// Maps a metafile's extension to the user-facing format names. Derived from the
 /// file name because that is what the recents grid and the mockups show
 /// ("House sketch.wmf" → "WMF" / "Windows Metafile"); the bytes are not needed.

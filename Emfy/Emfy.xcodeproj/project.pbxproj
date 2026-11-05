@@ -100,6 +100,8 @@
 		B01100000000000000000174 /* ExportProgressOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000174 /* ExportProgressOverlay.swift */; };
 		B01100000000000000000175 /* SaveACopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000175 /* SaveACopy.swift */; };
 		B01100000000000000000176 /* LibraryMoreMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000176 /* LibraryMoreMenu.swift */; platformFilters = (ios, ); };
+		B01100000000000000000177 /* ViewerActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000177 /* ViewerActions.swift */; };
+		B01100000000000000000178 /* ViewerCommandsIOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000178 /* ViewerCommandsIOS.swift */; platformFilters = (ios, ); };
 		B011000000000000000001F1 /* RemovalConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000170 /* RemovalConfirmation.swift */; };
 		B011000000000000000001F2 /* ViewerFailurePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000171 /* ViewerFailurePresentation.swift */; };
 		B011000000000000000001F3 /* PhotoSaveDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000172 /* PhotoSaveDecision.swift */; };
@@ -222,6 +224,8 @@
 		B00100000000000000000174 /* ExportProgressOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportProgressOverlay.swift; sourceTree = "<group>"; };
 		B00100000000000000000175 /* SaveACopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveACopy.swift; sourceTree = "<group>"; };
 		B00100000000000000000176 /* LibraryMoreMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryMoreMenu.swift; sourceTree = "<group>"; };
+		B00100000000000000000177 /* ViewerActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerActions.swift; sourceTree = "<group>"; };
+		B00100000000000000000178 /* ViewerCommandsIOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerCommandsIOS.swift; sourceTree = "<group>"; };
 		B001000000000000000001F0 /* AuditLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditLogicTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -311,6 +315,7 @@
 				B00100000000000000000173 /* ToastCenter.swift */,
 				B00100000000000000000174 /* ExportProgressOverlay.swift */,
 				B00100000000000000000175 /* SaveACopy.swift */,
+				B00100000000000000000177 /* ViewerActions.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -396,6 +401,7 @@
 			children = (
 				B00100000000000000000073 /* RecentsView.swift */,
 				B00100000000000000000176 /* LibraryMoreMenu.swift */,
+				B00100000000000000000178 /* ViewerCommandsIOS.swift */,
 				B00100000000000000000138 /* WindowOpenMenu.swift */,
 				B00100000000000000000074 /* RecentTileView.swift */,
 				B00100000000000000000075 /* EmptyRecentsView.swift */,
@@ -660,6 +666,8 @@
 				B01100000000000000000174 /* ExportProgressOverlay.swift in Sources */,
 				B01100000000000000000175 /* SaveACopy.swift in Sources */,
 				B01100000000000000000176 /* LibraryMoreMenu.swift in Sources */,
+				B01100000000000000000177 /* ViewerActions.swift in Sources */,
+				B01100000000000000000178 /* ViewerCommandsIOS.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

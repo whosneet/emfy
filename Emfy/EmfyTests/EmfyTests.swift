@@ -348,6 +348,28 @@ struct EmfyTests {
         #expect(store.cachedThumbnail(for: entry2) == nil)      // cleared
     }
 
+    /// After an in-memory eviction while the entry is still present (its on-disk PNG
+    /// intact), the cache reads nil — the trigger that flips the tile's task
+    /// `needsLoad` — and `loadThumbnail` repopulates it from disk, so the tile reloads
+    /// instead of staying blank (review #3).
+    @MainActor
+    @Test func thumbnailReloadsAfterInMemoryEviction() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        let id = try #require(await store.handleOpenedURL(writeEMF(to: dir, name: "evict.emf")))
+        let entry = try #require(store.entry(id: id))
+
+        _ = try #require(await store.loadThumbnail(for: entry))   // renders + caches
+        #expect(store.cachedThumbnail(for: entry) != nil)
+
+        store.evictThumbnailCacheForTesting()                     // simulate NSCache eviction
+        #expect(store.cachedThumbnail(for: entry) == nil)         // task would see nil -> needsLoad flips
+        #expect(store.entry(id: id) != nil)                       // entry (and its PNG) still there
+
+        #expect(await store.loadThumbnail(for: entry) != nil)     // reloads from the kept PNG
+        #expect(store.cachedThumbnail(for: entry) != nil)         // repopulated, tile no longer blank
+    }
+
     @MainActor
     @Test func thumbnailRegeneratesWhenCachePurged() async throws {
         let dir = makeTempDir(); defer { cleanup(dir) }
@@ -462,6 +484,118 @@ struct EmfyTests {
         #expect(!note.summary.isEmpty)
         #expect(!note.technicalDetail.isEmpty)
         #expect(note.summary != note.technicalDetail)
+    }
+}
+
+// MARK: - C4b pure helpers (P3 size/meta line, P7 grid partition, P6 notes-at-load, D1 grouping)
+
+@Suite struct C4bHelperTests {
+
+    private func entry(
+        name: String = "doc.emf",
+        format: String = "EMF",
+        fullName: String = "Enhanced Metafile",
+        bytes: Int64 = 20_480,
+        openedAt: Date
+    ) -> RecentEntry {
+        RecentEntry(
+            id: UUID(), displayName: name, formatLabel: format, fullFormatName: fullName,
+            byteCount: bytes, openedAt: openedAt, bookmark: Data([1]), thumbnailFileName: nil,
+            fileIdentity: name, importedFileName: nil, reloadToken: nil
+        )
+    }
+
+    // P3 — one size / meta-line helper, replacing the four former copies.
+
+    @Test func sizeLabelAndMetaLineToday() {
+        let now = Date()
+        let e = entry(openedAt: now)
+        #expect(!e.sizeLabel.isEmpty)
+        let line = e.metaLine(now: now)
+        #expect(line.hasPrefix("EMF · "))
+        #expect(line.hasSuffix(e.sizeLabel))            // today → size at the tail
+        #expect(e.metaSecond(now: now) == e.sizeLabel)
+        #expect(e.formatSizeSubtitle == "Enhanced Metafile · \(e.sizeLabel)")
+    }
+
+    @Test func metaLineEarlierShowsDateNotSize() {
+        let now = Date()
+        let earlier = Calendar.current.date(byAdding: .day, value: -10, to: now)!
+        let e = entry(openedAt: earlier)
+        let line = e.metaLine(now: now)
+        #expect(line.hasPrefix("EMF · "))
+        #expect(!line.hasSuffix(e.sizeLabel))           // earlier → date, not size
+        #expect(e.metaSecond(now: now) != e.sizeLabel)
+    }
+
+    // P7 — single-pass today/earlier partition.
+
+    @Test func partitionSplitsTodayAndEarlierInOrder() {
+        let now = Date()
+        let t1 = entry(name: "t1", openedAt: now)
+        let t2 = entry(name: "t2", openedAt: Calendar.current.startOfDay(for: now).addingTimeInterval(3600))
+        let old = entry(name: "old", openedAt: Calendar.current.date(byAdding: .day, value: -2, to: now)!)
+        let partition = RecentEntry.partitionedByDay([t1, old, t2], now: now)
+        #expect(partition.today.map(\.displayName) == ["t1", "t2"])   // input order kept
+        #expect(partition.earlier.map(\.displayName) == ["old"])
+    }
+
+    @Test func partitionEmptyIsEmpty() {
+        let partition = RecentEntry.partitionedByDay([], now: Date())
+        #expect(partition.today.isEmpty)
+        #expect(partition.earlier.isEmpty)
+    }
+
+    // D1 — identically-worded "unsupported record" rows merge into one summed row.
+
+    @Test func coalescesTwoIdenticallyWordedUnsupportedRows() {
+        let notes = ViewerDiagnostics.coalescedRenderNotes([
+            .unimplementedRecord(type: 70, count: 3),
+            .unimplementedRecord(type: 80, count: 1),
+        ])
+        #expect(notes.count == 1)
+        #expect(notes.first?.summary == "4 drawing instructions of a kind Emfy doesn't support yet were skipped.")
+        // The per-type technical detail is preserved under the merged row.
+        #expect(notes.first?.technicalDetail.contains("70") == true)
+        #expect(notes.first?.technicalDetail.contains("80") == true)
+    }
+
+    @Test func singleUnsupportedRowIsUnchanged() {
+        let notes = ViewerDiagnostics.coalescedRenderNotes([.unimplementedRecord(type: 70, count: 3)])
+        #expect(notes.count == 1)
+        #expect(notes.first?.summary == "3 drawing instructions of a kind Emfy doesn't support yet were skipped.")
+        #expect(notes.first?.technicalDetail == "Skipped unsupported record type 70 (3 occurrences).")
+    }
+
+    @Test func coalescingKeepsOtherNotesAndOrder() {
+        let notes = ViewerDiagnostics.coalescedRenderNotes([
+            .unimplementedRecord(type: 70, count: 1),
+            .malformedRecord(type: 99),
+            .unimplementedRecord(type: 71, count: 1),
+        ])
+        #expect(notes.count == 2)                                     // merged + the malformed note
+        #expect(notes.first?.summary == "2 drawing instructions of a kind Emfy doesn't support yet were skipped.")
+        #expect(notes.last?.summary.contains("damaged") == true)
+    }
+
+    @Test func couldNotShowMergesTheTwoRows() {
+        let diagnostics = ViewerDiagnostics(
+            kind: .emf, embeddedEMF: .notApplicable,
+            renderLog: [.unimplementedRecord(type: 70, count: 3), .unimplementedRecord(type: 80, count: 1)],
+            parserDiagnostics: [], frontDoorDiagnostics: [], wasDecompressed: false
+        )
+        let unsupported = diagnostics.couldNotShowNotes.filter { $0.summary.contains("doesn't support yet") }
+        #expect(unsupported.count == 1)
+        #expect(unsupported.first?.summary.contains("4 drawing instructions") == true)
+    }
+
+    // P6 — the "couldn't show" notes and partial-support message are computed once at
+    // load, and must equal the live diagnostics values.
+
+    @Test func loadedMetafilePrecomputesDiagnosticsNotes() throws {
+        let loaded = try MetafileLoader.load(EmfyTests.minimalEMF())
+        #expect(loaded.couldNotShowNotes == loaded.diagnostics.couldNotShowNotes)
+        #expect(loaded.partialSupportMessage == loaded.diagnostics.partialSupportMessage)
     }
 }
 

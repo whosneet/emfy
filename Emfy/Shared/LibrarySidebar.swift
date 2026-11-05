@@ -196,7 +196,13 @@ struct RecentRow: View {
     @Environment(\.displayScale) private var displayScale
     let entry: RecentEntry
 
-    @State private var thumbnail: CGImage?
+    /// Only held on a cache miss; the hit path reads the cache in `body` so a
+    /// rebuilt row never blanks and NSCache stays free to evict (P4).
+    @State private var loadedThumbnail: CGImage?
+
+    private var thumbnail: CGImage? {
+        store.cachedThumbnail(for: entry) ?? loadedThumbnail
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -208,7 +214,7 @@ struct RecentRow: View {
                     // like "gate-p3-…shapes.emf" instead of "gat….emf".
                     .lineLimit(2)
                     .truncationMode(.middle)
-                Text(metaLine)
+                Text(entry.metaLine())
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -217,10 +223,12 @@ struct RecentRow: View {
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
         // Include the same date/size the row shows, so VoiceOver isn't missing it (A5).
-        .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(metaSecond)")
-        .task(id: entry.thumbnailFileName) {
-            thumbnail = store.cachedThumbnail(for: entry)
-            thumbnail = await store.loadThumbnail(for: entry)
+        .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())")
+        // Re-fire on a file change or a cache eviction while the row stays alive, so
+        // an evicted thumbnail reloads rather than staying blank (P4 / review #3).
+        .task(id: ThumbnailTaskID(name: entry.thumbnailFileName, needsLoad: thumbnail == nil)) {
+            guard store.cachedThumbnail(for: entry) == nil else { return }
+            loadedThumbnail = await store.loadThumbnail(for: entry)
         }
     }
 
@@ -241,21 +249,5 @@ struct RecentRow: View {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
             }
-    }
-
-    private var metaLine: String {
-        "\(entry.formatLabel) · \(metaSecond)"
-    }
-
-    /// The size today, the date earlier — the second half of the meta line, reused
-    /// for the VoiceOver label (A5).
-    private var metaSecond: String {
-        Calendar.current.isDateInToday(entry.openedAt)
-            ? sizeString
-            : entry.openedAt.formatted(.dateTime.day().month(.abbreviated))
-    }
-
-    private var sizeString: String {
-        ByteCountFormatter.string(fromByteCount: entry.byteCount, countStyle: .file)
     }
 }

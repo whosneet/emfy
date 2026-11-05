@@ -314,9 +314,14 @@ struct MacMetafileScrollView: NSViewRepresentable {
         // MARK: Zoom state
 
         /// Mirrors the live zoom into the controller (toolbar / inspector) and the
-        /// drawing's accessibility value.
+        /// drawing's accessibility value. The clip-bounds notification fires on a
+        /// plain scroll too, where the magnification is unchanged, so only write when
+        /// the value actually moves — Observation doesn't dedupe equal writes, and an
+        /// unchanged write would invalidate the zoom-percent leaf each pan frame (P9).
         private func updateZoomState(_ scale: CGFloat) {
-            parent.controller.zoom = scale
+            if parent.controller.zoom != scale {
+                parent.controller.zoom = scale
+            }
             tiledView?.setAccessibilityValueText("\(Int((scale * 100).rounded())) percent")
         }
     }

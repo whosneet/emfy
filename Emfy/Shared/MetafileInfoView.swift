@@ -15,9 +15,13 @@ struct MetafileInfoView: View {
     let entry: RecentEntry
     let prepared: MetafileRenderer.Prepared
     let diagnostics: ViewerDiagnostics
+    /// The "What Emfy couldn't show" rows, computed once at load (P6).
+    let couldNotShowNotes: [DiagnosticNote]
     let naturalSize: CGSize
-    /// The live zoom percentage, shown in the Zoom row.
-    let zoomPercent: Int?
+    /// Reads the live zoom percentage. Called inside the Zoom row's own body so a
+    /// zoom change invalidates only that leaf, not this whole Form (P1/P2). `nil`
+    /// hides the Zoom row.
+    let zoomProvider: (() -> Int)?
     /// Closes the inspector/sheet.
     let onClose: () -> Void
     /// When set, the export rows route here instead of presenting this view's own
@@ -51,18 +55,17 @@ struct MetafileInfoView: View {
 
             Section {
                 LabeledContent("Format", value: entry.fullFormatName)
-                LabeledContent("Size", value: sizeString)
+                LabeledContent("Size", value: entry.sizeLabel)
                 LabeledContent("Picture size", value: pictureSizeString)
                 LabeledContent("Drawn from", value: drawnFrom)
-                if let zoomPercent {
-                    zoomRow(zoomPercent)
+                if let zoomProvider {
+                    ZoomInfoRow(percent: zoomProvider, onZoomStep: onZoomStep)
                 }
             }
 
-            let notes = diagnostics.couldNotShowNotes
-            if !notes.isEmpty {
+            if !couldNotShowNotes.isEmpty {
                 Section("What Emfy couldn't show") {
-                    ForEach(notes) { note in
+                    ForEach(couldNotShowNotes) { note in
                         noteRow(note)
                     }
                 }
@@ -111,7 +114,9 @@ struct MetafileInfoView: View {
         }
         .overlay {
             if isRenderingExport {
-                ExportProgressOverlay {
+                // Inside the inspector (an iPhone sheet / an iPad column): keep the
+                // card material, not glass over the sheet's own glass (G1).
+                ExportProgressOverlay(prefersGlass: false) {
                     exportRunner.cancel()
                     isRenderingExport = false
                 }
@@ -131,36 +136,6 @@ struct MetafileInfoView: View {
         case .failure(let error):
             if (error as? CocoaError)?.code == .userCancelled { return }
             filesError = error.localizedDescription
-        }
-    }
-
-    /// The Zoom row: on iOS/iPadOS a single-pointer − / + stepper (25% steps) with
-    /// the live % between them (A14, WCAG 2.5.1); on the Mac a read-only value, since
-    /// the Mac has toolbar zoom buttons.
-    @ViewBuilder
-    private func zoomRow(_ percent: Int) -> some View {
-        if let onZoomStep {
-            LabeledContent("Zoom") {
-                HStack(spacing: 12) {
-                    Button { onZoomStep(-0.25) } label: {
-                        Image(systemName: "minus")
-                    }
-                    .accessibilityLabel("Zoom out")
-                    Text("\(percent)%")
-                        .monospacedDigit()
-                        .frame(minWidth: 52)
-                        .accessibilityLabel("Zoom \(percent) percent")
-                    Button { onZoomStep(0.25) } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Zoom in")
-                }
-                .buttonStyle(.borderless)
-                .font(.body)
-            }
-        } else {
-            LabeledContent("Zoom", value: "\(percent)%")
-                .monospacedDigit()
         }
     }
 
@@ -256,10 +231,6 @@ struct MetafileInfoView: View {
 
     // MARK: - Derived text
 
-    private var sizeString: String {
-        ByteCountFormatter.string(fromByteCount: entry.byteCount, countStyle: .file)
-    }
-
     private var pictureSizeString: String {
         "\(Int(naturalSize.width.rounded())) × \(Int(naturalSize.height.rounded()))"
     }
@@ -283,5 +254,43 @@ struct MetafileInfoView: View {
         }
         let date = when.formatted(date: .abbreviated, time: .shortened)
         return "Opened \(date)"
+    }
+}
+
+/// The inspector's Zoom row, as its own leaf view so the live percentage invalidates
+/// only this row each zoom frame — not the whole Form or the pane/screen hosting the
+/// inspector (P1/P2). `percent()` reads `controller.zoom`, and because that read
+/// happens inside *this* view's body, Observation attributes the dependency here.
+/// On iOS/iPadOS a single-pointer − / + stepper (25% steps) with the live % between
+/// them (A14, WCAG 2.5.1); on the Mac a read-only value (it has toolbar zoom buttons).
+private struct ZoomInfoRow: View {
+    let percent: () -> Int
+    let onZoomStep: ((CGFloat) -> Void)?
+
+    var body: some View {
+        let value = percent()
+        if let onZoomStep {
+            LabeledContent("Zoom") {
+                HStack(spacing: 12) {
+                    Button { onZoomStep(-0.25) } label: {
+                        Image(systemName: "minus")
+                    }
+                    .accessibilityLabel("Zoom out")
+                    Text("\(value)%")
+                        .monospacedDigit()
+                        .frame(minWidth: 52)
+                        .accessibilityLabel("Zoom \(value) percent")
+                    Button { onZoomStep(0.25) } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Zoom in")
+                }
+                .buttonStyle(.borderless)
+                .font(.body)
+            }
+        } else {
+            LabeledContent("Zoom", value: "\(value)%")
+                .monospacedDigit()
+        }
     }
 }

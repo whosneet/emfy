@@ -108,8 +108,7 @@ struct ToastView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
+        .floatingSurface(in: Capsule())
         .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
         .accessibilityElement(children: .combine)
         // The one place a toast announces itself to VoiceOver — queued, not
@@ -140,7 +139,12 @@ extension View {
         self.overlay(alignment: .bottom) {
             if let toast = center.current {
                 ToastView(toast: toast) { center.performAction() }
-                    .padding(.bottom, 24)
+                    // Clear the bottom chrome: on iPhone the window-level overlay sits
+                    // at the home-indicator edge, but the Recents search field and the
+                    // viewer's bottom toolbar live just above it, so lift the toast
+                    // clear of a standard bottom bar there; the Mac has no bottom bar
+                    // (T1).
+                    .padding(.bottom, Self.toastBottomInset)
                     .padding(.horizontal, 16)
                     .transition(center.reduceMotion
                         ? .opacity
@@ -148,5 +152,15 @@ extension View {
                     .allowsHitTesting(toast.actionTitle != nil)
             }
         }
+    }
+
+    /// The toast's bottom inset above the safe area: enough to clear a bottom
+    /// toolbar / search field on iOS, a small margin on macOS (T1).
+    private static var toastBottomInset: CGFloat {
+        #if os(iOS)
+        64
+        #else
+        24
+        #endif
     }
 }

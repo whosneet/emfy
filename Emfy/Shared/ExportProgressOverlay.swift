@@ -12,33 +12,53 @@ import UIKit
 ///
 /// VoiceOver treats it as one modal element ("Preparing export") so focus stays on
 /// it, and it announces itself on appear. `.updatesFrequently` is dropped — the
-/// progress isn't readable, so it shouldn't nag. The card uses a material background
-/// now; C4b adds the glass (G1), except the iPhone-inspector instance stays material.
+/// progress isn't readable, so it shouldn't nag. The card is the shared floating
+/// surface — Liquid Glass on 26, a material below (G1) — except the instance shown
+/// inside the iPhone inspector sheet (`prefersGlass: false`), which stays material
+/// to avoid glass over the sheet's own glass.
 struct ExportProgressOverlay: View {
+    /// Glass on 26 for the full-screen overlays; material for the one inside the
+    /// iPhone inspector sheet (G1). Declared before `onCancel` so the trailing-closure
+    /// call sites keep compiling.
+    var prefersGlass: Bool = true
     /// Cancels the in-flight render.
     let onCancel: () -> Void
+
+    private let cardShape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.22)
                 .ignoresSafeArea()
-            VStack(spacing: 14) {
-                ProgressView()
-                    .controlSize(.large)
-                Text("Preparing…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Button("Cancel", role: .cancel, action: onCancel)
-                    .buttonStyle(.bordered)
-            }
-            .padding(24)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            card
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Preparing export")
         .accessibilityAddTraits(.isModal)
         .onAppear { announcePreparing() }
+    }
+
+    @ViewBuilder
+    private var card: some View {
+        let content = VStack(spacing: 14) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Preparing…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Cancel", role: .cancel, action: onCancel)
+                .buttonStyle(.bordered)
+        }
+        .padding(24)
+
+        if prefersGlass {
+            content.floatingSurface(in: cardShape)
+        } else {
+            content
+                .background(.regularMaterial, in: cardShape)
+                .overlay(cardShape.strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
+        }
     }
 
     private func announcePreparing() {
@@ -53,5 +73,22 @@ struct ExportProgressOverlay: View {
         guard UIAccessibility.isVoiceOverRunning else { return }
         UIAccessibility.post(notification: .announcement, argument: "Preparing export")
         #endif
+    }
+}
+
+extension View {
+    /// The one floating-surface background shared by the zoom pill, the
+    /// partial-support banner, the toast, and the export card (C4b G1): Liquid Glass
+    /// on iOS/macOS 26+, a `.regularMaterial` plus a 0.5 pt hairline below. Deployed
+    /// at iOS 17 / macOS 14, so every call site reads the same on every OS.
+    @ViewBuilder
+    func floatingSurface<S: InsettableShape>(in shape: S) -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self
+                .background(.regularMaterial, in: shape)
+                .overlay(shape.strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
+        }
     }
 }

@@ -33,6 +33,8 @@ struct MacViewerPane: View {
         @Bindable var exporter = exporter
         content
             .navigationTitle(entry?.baseName ?? "Metafile")
+            // Format · size under the title, using the shared helper (G6).
+            .navigationSubtitle(subtitle)
             .toolbar { toolbarContent }
             .inspector(isPresented: $showInspector) {
                 inspector
@@ -68,13 +70,6 @@ struct MacViewerPane: View {
                 if exporter.isRendering {
                     ExportProgressOverlay { exporter.cancelOngoing() }
                 }
-            }
-            // The share picker anchors to this small view at the toolbar's trailing
-            // edge, so it drops from under the Share button.
-            .overlay(alignment: .topTrailing) {
-                MacSharePresenter(payload: exporter.sharePayload)
-                    .frame(width: 24, height: 24)
-                    .allowsHitTesting(false)
             }
             // ⌘= also zooms in: a US keyboard sends "=" unshifted, and the View menu
             // item can show only ⌘+. This hidden accelerator covers the alternate.
@@ -162,8 +157,11 @@ struct MacViewerPane: View {
                 entry: entry,
                 prepared: loaded.prepared,
                 diagnostics: loaded.diagnostics,
+                couldNotShowNotes: loaded.couldNotShowNotes,
                 naturalSize: loaded.naturalSize,
-                zoomPercent: zoomPercent,
+                // A closure, so the live zoom is read inside the Zoom row's leaf, not
+                // this pane's body (P1). The Mac row is read-only (no onZoomStep).
+                zoomProvider: { Int((controller.zoom * 100).rounded()) },
                 onClose: { showInspector = false },
                 // Route the inspector's export rows through the hoisted exporter, so
                 // both surfaces share one path and the fileExporter presentation.
@@ -181,7 +179,7 @@ struct MacViewerPane: View {
         if #available(macOS 26, *) {
             ToolbarItemGroup {
                 zoomOutButton
-                zoomPercentLabel
+                MacZoomPercentLabel(controller: controller)
                 zoomInButton
             }
             ToolbarSpacer(.fixed)
@@ -193,7 +191,7 @@ struct MacViewerPane: View {
             // Pre-26 has no ToolbarSpacer: one group keeps the stated order.
             ToolbarItemGroup {
                 zoomOutButton
-                zoomPercentLabel
+                MacZoomPercentLabel(controller: controller)
                 zoomInButton
                 fitButton
                 shareMenu
@@ -233,16 +231,6 @@ struct MacViewerPane: View {
         .help("Fit to Window")
     }
 
-    private var zoomPercentLabel: some View {
-        Text(zoomPercentText)
-            .font(.system(.body, design: .rounded).monospacedDigit())
-            .frame(minWidth: 48)
-            // Give the bare percentage context for VoiceOver (A11).
-            .accessibilityElement()
-            .accessibilityLabel("Zoom")
-            .accessibilityValue("\(zoomPercent) percent")
-    }
-
     private var shareMenu: some View {
         Menu {
             Button {
@@ -262,6 +250,14 @@ struct MacViewerPane: View {
             }
         } label: {
             Label("Share", systemImage: "square.and.arrow.up")
+        }
+        // The share picker anchors to this hidden view sitting behind the Share
+        // toolbar item, so it drops from the Share glyph itself rather than the far
+        // trailing corner (which was under Info) — the picker tracks Share on both
+        // macOS 14 (single group) and 26 (spacers), with no magic offset (G7, review #4).
+        .background {
+            MacSharePresenter(payload: exporter.sharePayload)
+                .allowsHitTesting(false)
         }
         .disabled(loaded == nil)
         .help("Share")
@@ -323,15 +319,33 @@ struct MacViewerPane: View {
         )
     }
 
-    private var zoomPercent: Int {
-        Int((controller.zoom * 100).rounded())
-    }
-
-    private var zoomPercentText: String {
-        "\(zoomPercent)%"
-    }
-
     private var entry: RecentEntry? {
         store.entry(id: session.entryID)
+    }
+
+    /// Format · size for the navigation subtitle, via the shared helper (G6). Reads
+    /// the entry (which changes on load), never the zoom, so it stays off the per-
+    /// frame path.
+    private var subtitle: String {
+        entry?.formatSizeSubtitle ?? ""
+    }
+}
+
+/// The toolbar's zoom percentage, as its own leaf view reading the controller, so a
+/// zoom change invalidates only this label — not `MacViewerPane.body`, which would
+/// otherwise rebuild the inspector and republish `viewerActions` to the menu bar
+/// every frame (P1).
+private struct MacZoomPercentLabel: View {
+    let controller: MacMetafileZoomController
+
+    var body: some View {
+        let percent = Int((controller.zoom * 100).rounded())
+        Text("\(percent)%")
+            .font(.system(.body, design: .rounded).monospacedDigit())
+            .frame(minWidth: 48)
+            // Give the bare percentage context for VoiceOver (A11).
+            .accessibilityElement()
+            .accessibilityLabel("Zoom")
+            .accessibilityValue("\(percent) percent")
     }
 }

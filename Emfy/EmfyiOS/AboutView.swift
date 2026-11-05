@@ -50,9 +50,7 @@ struct AboutView: View {
             .navigationTitle("About Emfy")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", systemImage: "checkmark") { dismiss() }
-                }
+                SheetDoneToolbar { dismiss() }   // G2
             }
         }
     }

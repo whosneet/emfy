@@ -295,9 +295,13 @@ struct ZoomableMetafileView: UIViewRepresentable {
         }
 
         /// Mirrors the live zoom into the controller (pill / inspector) and the
-        /// drawing's accessibility value.
+        /// drawing's accessibility value. Observation doesn't dedupe equal writes, so
+        /// only write when the value actually moves, to avoid invalidating the
+        /// zoom-percent leaves on a frame where the scale didn't change (P9).
         private func updateZoomState(_ scale: CGFloat) {
-            parent.controller.zoom = scale
+            if parent.controller.zoom != scale {
+                parent.controller.zoom = scale
+            }
             tiledView?.accessibilityValue = "\(Int((scale * 100).rounded())) percent"
         }
 
@@ -368,6 +372,9 @@ private final class TiledMetafileView: UIView {
     /// Toggles the viewer chrome, for the "Show/Hide controls" custom action.
     var onToggleChrome: (() -> Void)?
     private var chromeHidden = false
+    /// The chrome state the accessibility actions were last built for, so
+    /// `applyAccessibility` only rebuilds when it actually changed (P2).
+    private var appliedChromeHidden: Bool?
 
     override class var layerClass: AnyClass { CATiledLayer.self }
 
@@ -414,6 +421,11 @@ private final class TiledMetafileView: UIView {
 
     func applyAccessibility(chromeHidden: Bool) {
         self.chromeHidden = chromeHidden
+        // `updateUIView` calls this every pass; the traits never change and the
+        // actions only differ in the toggle's name, so rebuild just when the chrome
+        // state actually moved — not on every unrelated update (P2).
+        guard appliedChromeHidden != chromeHidden else { return }
+        appliedChromeHidden = chromeHidden
         accessibilityTraits = [.image, .adjustable]
         accessibilityCustomActions = [
             UIAccessibilityCustomAction(name: "Zoom In") { [weak self] _ in self?.controller?.zoomIn(); return true },

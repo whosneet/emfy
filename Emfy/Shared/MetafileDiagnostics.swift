@@ -107,7 +107,40 @@ struct ViewerDiagnostics: Sendable, Equatable {
     var couldNotShowNotes: [DiagnosticNote] {
         fileNotes
             + missingContentParserDiagnostics.map(\.note)
-            + missingContentRenderLog.map(\.note)
+            + Self.coalescedRenderNotes(missingContentRenderLog)
+    }
+
+    /// Collapses the "a kind Emfy doesn't support yet was skipped" render-log notes
+    /// into one summed row (D1): the raw record type is only in the technical line,
+    /// so two such rows would read identically to a user ("3 … were skipped" /
+    /// "1 … was skipped"). Every other note keeps its order and wording; the merged
+    /// row carries each type's technical detail so nothing is lost. A single such
+    /// note is left exactly as before. Pure, for the grouping test.
+    static func coalescedRenderNotes(_ entries: [EMFRenderLog.Entry]) -> [DiagnosticNote] {
+        let unsupported = entries.filter { if case .unimplementedRecord = $0 { return true } else { return false } }
+        guard unsupported.count >= 2 else { return entries.map(\.note) }
+
+        let total = unsupported.reduce(0) { sum, entry in
+            if case .unimplementedRecord(_, let count) = entry { return sum + count } else { return sum }
+        }
+        let merged = DiagnosticNote(
+            summary: "\(total) drawing instruction\(total == 1 ? "" : "s") of a kind Emfy doesn't support yet \(total == 1 ? "was" : "were") skipped.",
+            technicalDetail: unsupported.map { $0.note.technicalDetail }.joined(separator: " ")
+        )
+
+        var result: [DiagnosticNote] = []
+        var insertedMerged = false
+        for entry in entries {
+            if case .unimplementedRecord = entry {
+                if !insertedMerged {
+                    result.append(merged)
+                    insertedMerged = true
+                }
+            } else {
+                result.append(entry.note)
+            }
+        }
+        return result
     }
 
     /// Every parser diagnostic, unfiltered, for the Mac's Render Details.

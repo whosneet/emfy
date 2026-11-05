@@ -40,7 +40,8 @@ struct LibraryMoreMenu: View {
             }
             Divider()
             Button(role: .destructive, action: onClear) {
-                Label("Clear Recents", systemImage: "trash")
+                // "…" because it confirms first (L).
+                Label("Clear Recents…", systemImage: "trash")
             }
             .disabled(entriesEmpty)
         } label: {

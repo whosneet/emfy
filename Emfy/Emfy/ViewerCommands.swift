@@ -1,29 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// The focused viewer's menu-exposable actions (C3b scope 1). `MacViewerPane`
-/// publishes this via `.focusedSceneValue` so the single, shared menu bar drives
-/// whichever library window is key, and each window drives its own document. The
-/// closures capture that window's zoom controller and exporter; `isDocumentLoaded`
-/// gates the menu items.
-struct ViewerActions {
-    var isDocumentLoaded: Bool
-    var zoomIn: () -> Void
-    var zoomOut: () -> Void
-    var fit: () -> Void
-    var actualSize: () -> Void
-    var exportPNG: () -> Void
-    var exportPDF: () -> Void
-    var shareFile: () -> Void
-    var sharePNG: () -> Void
-    var sharePDF: () -> Void
-}
-
-extension FocusedValues {
-    /// The key window's viewer actions, or `nil` when no library window is focused
-    /// (menu items then read as disabled).
-    @Entry var viewerActions: ViewerActions?
-}
+// `ViewerActions` and the `FocusedValues.viewerActions` entry moved to
+// `Shared/ViewerActions.swift` so iOS can publish and read them too (C4b K1). The
+// Mac menus below are unchanged; the `NSAlert`/`NSOpenPanel` confirmation stays
+// Mac-only here.
 
 /// The File menu (C3b scope 2): Open…, the Open Recent submenu, and the Export /
 /// Share group. New Window (⌘N) and the default File items come from the primary

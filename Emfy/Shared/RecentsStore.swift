@@ -211,6 +211,13 @@ final class RecentsStore {
         }
     }
 
+    /// Drops the in-memory thumbnail cache WITHOUT removing entries or their on-disk
+    /// PNGs, to simulate an NSCache eviction under memory pressure for the P4
+    /// eviction-reload test (review #3). DEBUG only — not a shipping affordance.
+    func evictThumbnailCacheForTesting() {
+        thumbnailCache.removeAll()
+    }
+
     /// A minimal but valid EMF (EMR_HEADER + EMR_EOF) for the seed hook.
     nonisolated private static func uiTestEMF() -> Data {
         var d = Data()
@@ -270,7 +277,9 @@ final class RecentsStore {
         thumbnailCache.insert(result.image, for: entry.id)
         if let name = result.regeneratedName, let index = entries.firstIndex(where: { $0.id == entry.id }) {
             entries[index].thumbnailFileName = name
-            persist()
+            // A Caches purge can regenerate many tiles at once; coalesce so a burst
+            // of regenerations writes recents.json once, not once per tile (P8).
+            persistCoalesced()
         }
         return result.image
     }
@@ -389,6 +398,22 @@ final class RecentsStore {
         let locations = self.locations
         let writer = persistence
         Task { await writer.write(snapshot, to: locations) }
+    }
+
+    @ObservationIgnored private var persistCoalesceTask: Task<Void, Never>?
+
+    /// A debounced persist for high-frequency, non-critical updates — currently the
+    /// thumbnail-regeneration path, where many tiles can each update their cached
+    /// name after a Caches purge. A short delay collapses the burst into one write;
+    /// the name is only a pointer into the regenerable Caches, so a dropped write on
+    /// quit just re-regenerates next launch (P8).
+    private func persistCoalesced() {
+        persistCoalesceTask?.cancel()
+        persistCoalesceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            self?.persist()
+        }
     }
 
     /// Deletes an entry's cached thumbnail PNG and its imported copy (§b).
@@ -724,14 +749,22 @@ final class RecentsStore {
         try? url.setResourceValues(values)
     }
 
+    /// Forces the full decode now, on this background task, so the first draw of a
+    /// thumbnail never pays a lazy decode on the main thread (P5). Both helpers run
+    /// off the main actor; the options are built locally because `CFDictionary` isn't
+    /// `Sendable` for a shared static under Swift 6.
+    private nonisolated static func immediateDecodeOptions() -> CFDictionary {
+        [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+    }
+
     nonisolated static func loadCGImage(_ url: URL) -> CGImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        return CGImageSourceCreateImageAtIndex(source, 0, immediateDecodeOptions())
     }
 
     nonisolated static func decodeCGImage(_ data: Data) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        return CGImageSourceCreateImageAtIndex(source, 0, immediateDecodeOptions())
     }
 
     // MARK: - Locations

@@ -28,6 +28,11 @@ struct LoadedMetafile: Sendable {
     let displaySize: CGSize
     /// Parse/render/front-door notes for the banner and the inspector.
     let diagnostics: ViewerDiagnostics
+    /// The "What Emfy couldn't show" list, computed once here at load so the viewer
+    /// and inspector bodies never re-filter the diagnostics per pass (P6).
+    let couldNotShowNotes: [DiagnosticNote]
+    /// The partial-support banner headline, computed once at load (P6).
+    let partialSupportMessage: String?
 }
 
 enum MetafileLoader {
@@ -79,7 +84,9 @@ enum MetafileLoader {
             prepared: prepared,
             naturalSize: prepared.naturalSize,
             displaySize: displaySize,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            couldNotShowNotes: diagnostics.couldNotShowNotes,
+            partialSupportMessage: diagnostics.partialSupportMessage
         )
     }
 
