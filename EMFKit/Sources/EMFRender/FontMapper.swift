@@ -49,6 +49,11 @@ enum FontMapper {
     /// pathological settings value cannot slow resolution.
     static let userSubstitutionLimit = 64
     static let familyNameLengthLimit = 128
+    /// The cap on a file-supplied requested family name. A LOGFONT face is at most
+    /// 32 UTF-16 units ([MS-EMF] §2.2.13) and EMF+ family names are short too, so 256
+    /// is generous; a longer name is hostile input and is truncated before any
+    /// normalise/lookup touches it (S-L5, primer §8).
+    static let requestedFamilyLengthLimit = 256
 
     /// A system font created ONCE and cached — the emergency fallback a queued
     /// lookup returns if it times out. The lookup machinery is what stalled, so
@@ -101,7 +106,12 @@ enum FontMapper {
     /// font stack). Substitutions are logged (coalesced) exactly as the GDI path.
     /// The caller sizes the returned base to the device point size at draw time.
     static func resolveFamily(_ family: String, bold: Bool, italic: Bool, substitutions: [FontSubstitution] = [], log: inout EMFRenderLog) -> CTFont {
-        let requested = family.trimmingCharacters(in: .whitespaces)
+        // Cap the file-supplied family before trimming, normalising, or any lookup:
+        // `prefix(n)` walks at most `n` graphemes, so even a pathological face name is
+        // bounded work from here down (S-L5). Covers the LOGFONT path (via `resolve`)
+        // and the EMF+ family path, which both land here.
+        let requested = String(family.prefix(requestedFamilyLengthLimit))
+            .trimmingCharacters(in: .whitespaces)
         let fallback: (font: CTFont, substitute: String?) = (emergencyFallbackFont, nil)
         let lookup = FontLookupQueue.run(fallback: fallback) { () -> (font: CTFont, substitute: String?) in
             let base = baseFont(forFamily: requested, substitutions: substitutions)
@@ -169,7 +179,12 @@ enum FontMapper {
     private static func userSubstitution(for requested: String, in substitutions: [FontSubstitution]) -> String? {
         let key = normalise(requested)
         for entry in substitutions.prefix(userSubstitutionLimit) {
-            guard entry.requestedFamily.count <= familyNameLengthLimit,
+            // The cheap UTF-8 byte count (O(1) for a native string) gates the O(n)
+            // grapheme `.count`: utf8.count > 4·limit guarantees count > limit, so an
+            // over-long name is rejected without walking it (S-L5).
+            guard entry.requestedFamily.utf8.count <= familyNameLengthLimit * 4,
+                  entry.replacementFamily.utf8.count <= familyNameLengthLimit * 4,
+                  entry.requestedFamily.count <= familyNameLengthLimit,
                   entry.replacementFamily.count <= familyNameLengthLimit else { continue }
             guard normalise(entry.requestedFamily) == key else { continue }
             let replacement = entry.replacementFamily.trimmingCharacters(in: .whitespaces)

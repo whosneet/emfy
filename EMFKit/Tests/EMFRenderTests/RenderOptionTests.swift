@@ -257,6 +257,37 @@ struct RenderOptionTests {
                 "case/space-insensitive match failed, log: \(log.entries)")
     }
 
+    // MARK: - Hostile family-name bounds (S-L5)
+
+    @Test("a huge file-supplied family name is capped before resolution and logging")
+    func hugeRequestedFamilyIsCapped() {
+        var log = EMFRenderLog()
+        let huge = String(repeating: "Z", count: 10_000)
+        // Resolves without walking the whole name; logs the CAPPED requested name.
+        _ = FontMapper.resolveFamily(huge, bold: false, italic: false, log: &log)
+        let capped = log.entries.contains { entry in
+            if case .fontSubstituted(let requested, _, _) = entry {
+                return requested.count == FontMapper.requestedFamilyLengthLimit
+            }
+            return false
+        }
+        #expect(capped, "expected the logged requested family to be capped to \(FontMapper.requestedFamilyLengthLimit), log: \(log.entries)")
+    }
+
+    @Test("a user-table entry whose names exceed the length limit is ignored")
+    func overLongUserSubstitutionIgnored() throws {
+        let file = try Self.textFile(faceName: Self.missingFamily)
+        let tooLong = String(repeating: "Q", count: FontMapper.familyNameLengthLimit + 50)
+        let options = RenderOptions(fontSubstitutions: [
+            FontSubstitution(requestedFamily: Self.missingFamily, replacementFamily: tooLong),
+        ])
+        let (_, log) = try #require(EMFRenderer.makeImage(file, options: options))
+        // The over-long replacement row is skipped, so resolution falls through to the
+        // built-in default rather than the (rejected) user replacement.
+        #expect(Self.substituted(log, requested: Self.missingFamily, used: FontMapper.defaultFamily),
+                "an over-long replacement must be ignored, log: \(log.entries)")
+    }
+
     // MARK: - Option 3: EMF+ dual arbitration
 
     @Test("a dual EMF+ file shows EMF+ content by default and its GDI copy under `.gdi`")
