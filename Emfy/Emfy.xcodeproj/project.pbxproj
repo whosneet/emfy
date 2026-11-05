@@ -68,6 +68,13 @@
 		B011000000000000000000D3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000D3 /* PrivacyInfo.xcprivacy */; platformFilters = (ios, ); };
 		B011000000000000000000D4 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000D4 /* PrivacyInfo.xcprivacy */; platformFilters = (ios, ); };
 		B011000000000000000000D5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000D5 /* PrivacyInfo.xcprivacy */; platformFilters = (ios, ); };
+		B01100000000000000000110 /* DocumentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000110 /* DocumentSession.swift */; };
+		B01100000000000000000111 /* OpenRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000111 /* OpenRouting.swift */; };
+		B01100000000000000000112 /* ViewerFit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000112 /* ViewerFit.swift */; };
+		B01100000000000000000120 /* DocumentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000110 /* DocumentSession.swift */; };
+		B01100000000000000000121 /* OpenRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000111 /* OpenRouting.swift */; };
+		B01100000000000000000122 /* ViewerFit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000112 /* ViewerFit.swift */; };
+		B01100000000000000000123 /* DocumentHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000F1 /* DocumentHostTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -141,6 +148,10 @@
 		B001000000000000000000E0 /* ExportTaskRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTaskRunner.swift; sourceTree = "<group>"; };
 		B001000000000000000000E1 /* ExportTemp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTemp.swift; sourceTree = "<group>"; };
 		B001000000000000000000F0 /* EmfyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyTests.swift; sourceTree = "<group>"; };
+		B001000000000000000000F1 /* DocumentHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentHostTests.swift; sourceTree = "<group>"; };
+		B00100000000000000000110 /* DocumentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSession.swift; sourceTree = "<group>"; };
+		B00100000000000000000111 /* OpenRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouting.swift; sourceTree = "<group>"; };
+		B00100000000000000000112 /* ViewerFit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerFit.swift; sourceTree = "<group>"; };
 		B00200000000000000000004 /* EmfyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EmfyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00100000000000000000090 /* MetafileExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileExport.swift; sourceTree = "<group>"; };
 		B00100000000000000000091 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
@@ -228,6 +239,9 @@
 				B0010000000000000000007D /* MetafileDiagnostics.swift */,
 				B001000000000000000000E0 /* ExportTaskRunner.swift */,
 				B001000000000000000000E1 /* ExportTemp.swift */,
+				B00100000000000000000110 /* DocumentSession.swift */,
+				B00100000000000000000111 /* OpenRouting.swift */,
+				B00100000000000000000112 /* ViewerFit.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -236,6 +250,7 @@
 			isa = PBXGroup;
 			children = (
 				B001000000000000000000F0 /* EmfyTests.swift */,
+				B001000000000000000000F1 /* DocumentHostTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -550,6 +565,9 @@
 				B01100000000000000000077 /* MetafileLoader.swift in Sources */,
 				B01100000000000000000078 /* AboutView.swift in Sources */,
 				B011000000000000000000C0 /* QuickLookProbeView.swift in Sources */,
+				B01100000000000000000110 /* DocumentSession.swift in Sources */,
+				B01100000000000000000111 /* OpenRouting.swift in Sources */,
+				B01100000000000000000112 /* ViewerFit.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -585,6 +603,10 @@
 				B011000000000000000000FE /* ExportTaskRunner.swift in Sources */,
 				B011000000000000000000FF /* ExportTemp.swift in Sources */,
 				B0110000000000000000010A /* EMFExport.swift in Sources */,
+				B01100000000000000000120 /* DocumentSession.swift in Sources */,
+				B01100000000000000000121 /* OpenRouting.swift in Sources */,
+				B01100000000000000000122 /* ViewerFit.swift in Sources */,
+				B01100000000000000000123 /* DocumentHostTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
