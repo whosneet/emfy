@@ -102,6 +102,11 @@ struct ZoomableMetafileView: UIViewRepresentable {
     /// Whether the chrome is currently hidden — drives the VoiceOver toggle
     /// action's name ("Show controls" vs "Hide controls").
     let chromeHidden: Bool
+    /// The default zoom a fresh open lands on (S1a-4). Applied once, so it never
+    /// overrides a zoom kept across an identical-content reload (C4a M4).
+    var defaultZoom: EmfySettings.DefaultZoom = .fit
+    /// Whether the page carries its drop shadow (S1a-4). Toggles live.
+    var pageShadow: Bool = true
     /// Toggles the chrome; reused as the drawing's "Show/Hide controls" action.
     let onSingleTap: () -> Void
 
@@ -146,6 +151,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
         tiled.controller = controller
         tiled.onToggleChrome = onSingleTap
         tiled.applyAccessibility(chromeHidden: chromeHidden)
+        tiled.setShadow(enabled: pageShadow)
         context.coordinator.tiledView = tiled
         scrollView.addSubview(tiled)
         scrollView.contentSize = naturalSize
@@ -178,6 +184,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
             tiled.controller = controller
             tiled.onToggleChrome = onSingleTap
             tiled.applyAccessibility(chromeHidden: chromeHidden)
+            tiled.setShadow(enabled: pageShadow)
             // Follow the display across a scale change (e.g. moving between
             // displays) — re-render the tiles at the new resolution.
             tiled.updateContentsScale(displayScale)
@@ -254,7 +261,10 @@ struct ZoomableMetafileView: UIViewRepresentable {
 
             if !hasSetInitialZoom {
                 hasSetInitialZoom = true
-                scrollView.zoomScale = fit
+                scrollView.zoomScale = ViewerZoomPolicy.initialScale(
+                    for: parent.defaultZoom, fit: fit,
+                    minScale: scrollView.minimumZoomScale, maxScale: scrollView.maximumZoomScale
+                )
             } else if geometryChanged {
                 // Keep the picture fitted across a resize or a bar toggle if it was
                 // fitted before; otherwise just clamp the current zoom into range.
@@ -415,6 +425,12 @@ private final class TiledMetafileView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         tiledLayer.shadowPath = UIBezierPath(rect: bounds).cgPath
+    }
+
+    /// Turns the paper drop shadow on or off (S1a-4 Page shadow). Off sets the
+    /// shadow opacity to zero, leaving the crisp tiles untouched.
+    func setShadow(enabled: Bool) {
+        tiledLayer.shadowOpacity = enabled ? 0.14 : 0
     }
 
     // MARK: - Accessibility (adjustable zoom + custom actions)

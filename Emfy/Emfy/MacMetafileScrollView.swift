@@ -79,6 +79,21 @@ struct MacMetafileScrollView: NSViewRepresentable {
     let naturalSize: CGSize
     let drawingLabel: String
     let controller: MacMetafileZoomController
+    /// The default zoom a fresh open lands on (S1a-4). Applied once, so it never
+    /// overrides a zoom kept across an identical-content reload (C4a M4).
+    var defaultZoom: EmfySettings.DefaultZoom = .fit
+    /// Whether the paper carries its drop shadow (S1a-4). Toggles live.
+    var pageShadow: Bool = true
+
+    /// The paper's drop shadow, built fresh each time it's applied (an `NSShadow`
+    /// shouldn't be shared across views). `nil` when the setting is off.
+    static func makePaperShadow() -> NSShadow {
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.shadowBlurRadius = 12
+        shadow.shadowOffset = NSSize(width: 0, height: -4)
+        return shadow
+    }
 
     /// The viewer backdrop: ~0.90 grey in light mode so the white page and its edge
     /// read clearly (macOS 27's underPageBackgroundColor is near-white there), and
@@ -124,11 +139,7 @@ struct MacMetafileScrollView: NSViewRepresentable {
         let paper = NSView(frame: CGRect(origin: .zero, size: naturalSize))
         paper.wantsLayer = true
         paper.layer?.backgroundColor = NSColor.white.cgColor
-        let paperShadow = NSShadow()
-        paperShadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
-        paperShadow.shadowBlurRadius = 12
-        paperShadow.shadowOffset = NSSize(width: 0, height: -4)
-        paper.shadow = paperShadow
+        paper.shadow = pageShadow ? Self.makePaperShadow() : nil
 
         let tiled = TiledMetafileView(prepared: prepared, naturalSize: naturalSize)
         tiled.frame = paper.bounds
@@ -161,6 +172,8 @@ struct MacMetafileScrollView: NSViewRepresentable {
             tiled.controller = controller
             tiled.setAccessibilityLabelText(drawingLabel)
         }
+        // Live-toggle the paper shadow (the document view is the paper).
+        scrollView.documentView?.shadow = pageShadow ? Self.makePaperShadow() : nil
     }
 
     /// Stop the `CATiledLayer` drawing into a view about to be freed, and break the
@@ -258,7 +271,11 @@ struct MacMetafileScrollView: NSViewRepresentable {
 
             if !hasSetInitialZoom {
                 hasSetInitialZoom = true
-                setMagnification(fit, on: scrollView)
+                let initial = ViewerZoomPolicy.initialScale(
+                    for: parent.defaultZoom, fit: fit,
+                    minScale: scrollView.minMagnification, maxScale: scrollView.maxMagnification
+                )
+                setMagnification(initial, on: scrollView)
                 // Give the drawing keyboard focus once it's laid out, so arrow/Page
                 // scrolling works without a click first (A4). Deferred to the next
                 // runloop so it runs after SwiftUI's split-view focus setup, which

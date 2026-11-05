@@ -1,3 +1,4 @@
+import CoreGraphics
 import EMFParse
 import EMFRender
 import Foundation
@@ -269,6 +270,20 @@ struct SettingsModelTests {
 
         // The PNGScale convenience agrees.
         #expect(ExportScale.select(baseWidth: 400, baseHeight: 300, requested: EmfySettings.PNGScale.x2, areaCap: cap).multiplier == 2)
+    }
+
+    // MARK: - Initial zoom (default zoom on open)
+
+    @Test
+    func initialZoomChoosesFitOrActualAndClamps() {
+        // Actual size = 100%, within range.
+        #expect(ViewerZoomPolicy.initialScale(for: .actualSize, fit: 0.4, minScale: 0.1, maxScale: 8) == 1)
+        // Fit uses the fit scale.
+        #expect(ViewerZoomPolicy.initialScale(for: .fit, fit: 0.4, minScale: 0.1, maxScale: 8) == 0.4)
+        // Clamped into range: 100% above the max comes down to the max.
+        #expect(ViewerZoomPolicy.initialScale(for: .actualSize, fit: 0.4, minScale: 0.1, maxScale: 0.8) == 0.8)
+        // A fit below the min clamps up.
+        #expect(ViewerZoomPolicy.initialScale(for: .fit, fit: 0.05, minScale: 0.1, maxScale: 8) == 0.1)
     }
 
     // MARK: - Diagnostic report privacy

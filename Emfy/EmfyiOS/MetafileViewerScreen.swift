@@ -16,6 +16,7 @@ import UIKit
 /// column rather than a NavigationStack-pushed view, and `.inspector` doesn't pop.
 struct MetafileViewerScreen: View {
     @Environment(RecentsStore.self) private var store
+    @Environment(EmfySettings.self) private var settings
     // Non-optional: verified at runtime that the window's ToastCenter reaches the
     // compact pushed viewer (the "Image copied" toast appears there).
     @Environment(ToastCenter.self) private var toast
@@ -204,6 +205,8 @@ struct MetafileViewerScreen: View {
                 controller: controller,
                 reduceMotion: reduceMotion,
                 chromeHidden: effectiveChromeHidden,
+                defaultZoom: settings.defaultZoomOnOpen,
+                pageShadow: settings.pageShadow,
                 onSingleTap: { toggleChrome() }
             )
             .ignoresSafeArea()
@@ -406,7 +409,9 @@ struct MetafileViewerScreen: View {
     }
 
     private var showBanner: Bool {
-        !chromeHidden && !bannerDismissed && partialMessage != nil
+        // The partial-support banner is hidden when the setting is off (S1a-4); the
+        // Info panel's notes stay either way.
+        settings.showPartialSupportBanner && !chromeHidden && !bannerDismissed && partialMessage != nil
     }
 
     private var bannerWarningIcon: some View {

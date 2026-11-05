@@ -19,6 +19,7 @@ import SwiftUI
 struct MacViewerPane: View {
     @Environment(RecentsStore.self) private var store
     @Environment(ToastCenter.self) private var toast
+    @Environment(EmfySettings.self) private var settings
     let session: DocumentSession
     /// Clears the window's selection when the file is removed from Recents.
     let onRemove: () -> Void
@@ -91,7 +92,9 @@ struct MacViewerPane: View {
                 prepared: model.prepared,
                 naturalSize: model.displaySize,
                 drawingLabel: "Drawing: \(entry?.baseName ?? "Metafile")",
-                controller: controller
+                controller: controller,
+                defaultZoom: settings.defaultZoomOnOpen,
+                pageShadow: settings.pageShadow
             )
             .ignoresSafeArea()
             // Rebuild the tiled view only when the content actually changes, so a
