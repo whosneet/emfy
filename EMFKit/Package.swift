@@ -19,7 +19,7 @@ let package = Package(
         ),
         .target(
             name: "EMFWrite",
-            dependencies: ["EMFParse"]
+            dependencies: ["EMFParse", "WMFParse"]
         ),
         .target(
             name: "EMFRender",

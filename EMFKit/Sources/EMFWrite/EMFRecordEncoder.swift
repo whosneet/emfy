@@ -650,7 +650,10 @@ public enum EMFRecordEncoder {
     /// BitCount/Compression and sizes the palette and pixel block from these, so
     /// this header makes the DIB a decode fixed point. Planes = 1,
     /// XPelsPerMeter/YPelsPerMeter = 0, ClrUsed = palette count, ClrImportant = 0.
-    private static func serializeDIB(_ dib: DIB) -> (bmi: [UInt8], bits: [UInt8])? {
+    /// Internal (not private) so the WMF STRETCHDIB encoder reuses the identical
+    /// packed-DIB form — EMR_STRETCHDIBITS and META_STRETCHDIB carry the same
+    /// DeviceIndependentBitmap object ([MS-WMF] §2.2.2.9).
+    static func serializeDIB(_ dib: DIB) -> (bmi: [UInt8], bits: [UInt8])? {
         guard case .pixels(let pixelBytes, _, let palette) = dib.content else {
             return nil
         }
