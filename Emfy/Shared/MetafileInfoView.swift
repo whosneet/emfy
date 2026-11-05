@@ -16,7 +16,7 @@ struct MetafileInfoView: View {
     let prepared: MetafileRenderer.Prepared
     let diagnostics: ViewerDiagnostics
     let naturalSize: CGSize
-    /// The live zoom percentage, shown only where there is room (regular width).
+    /// The live zoom percentage, shown in the Zoom row.
     let zoomPercent: Int?
     /// Closes the inspector/sheet.
     let onClose: () -> Void
@@ -24,7 +24,14 @@ struct MetafileInfoView: View {
     /// `fileExporter` (C3b scope 5). The Mac passes its hoisted exporter, so Export
     /// works with the inspector closed; iOS passes nothing and keeps its own path.
     var onExport: ((ExportFormat) -> Void)? = nil
+    /// iOS/iPadOS only: steps the viewer zoom by this fraction (±0.25) from the Zoom
+    /// row's − / + buttons (C4a A14, owner decision). `nil` on the Mac, which keeps
+    /// the read-only row and its toolbar buttons.
+    var onZoomStep: ((CGFloat) -> Void)? = nil
 
+    @Environment(ToastCenter.self) private var toast
+    /// Moves VoiceOver focus to the header when the inspector opens (C4a A18).
+    @AccessibilityFocusState private var headerFocused: Bool
     @State private var exportRunner = ExportTaskRunner()
     @State private var isRenderingExport = false
     @State private var isExportingPNG = false
@@ -48,8 +55,7 @@ struct MetafileInfoView: View {
                 LabeledContent("Picture size", value: pictureSizeString)
                 LabeledContent("Drawn from", value: drawnFrom)
                 if let zoomPercent {
-                    LabeledContent("Zoom", value: "\(zoomPercent)%")
-                        .monospacedDigit()
+                    zoomRow(zoomPercent)
                 }
             }
 
@@ -84,7 +90,7 @@ struct MetafileInfoView: View {
             contentType: .png,
             defaultFilename: entry.baseName
         ) { result in
-            if case .failure(let error) = result { filesError = error.localizedDescription }
+            handleExportResult(result, format: "PNG")
         }
         .fileExporter(
             isPresented: $isExportingPDF,
@@ -92,7 +98,7 @@ struct MetafileInfoView: View {
             contentType: .pdf,
             defaultFilename: entry.baseName
         ) { result in
-            if case .failure(let error) = result { filesError = error.localizedDescription }
+            handleExportResult(result, format: "PDF")
         }
         .alert(
             "Export Failed",
@@ -104,9 +110,58 @@ struct MetafileInfoView: View {
             Text(message)
         }
         .overlay {
-            if isRenderingExport { ExportSpinnerOverlay() }
+            if isRenderingExport {
+                ExportProgressOverlay {
+                    exportRunner.cancel()
+                    isRenderingExport = false
+                }
+            }
         }
         .onDisappear { exportRunner.cancel() }
+        // Move VoiceOver to the header when the inspector/sheet opens (A18).
+        .onAppear { headerFocused = true }
+    }
+
+    /// Ignores a user cancel (C4a M2); confirms a save with a toast (C4a M3); surfaces
+    /// a real failure.
+    private func handleExportResult(_ result: Result<URL, Error>, format: String) {
+        switch result {
+        case .success:
+            toast.show("Exported as \(format)", systemImage: "square.and.arrow.down")
+        case .failure(let error):
+            if (error as? CocoaError)?.code == .userCancelled { return }
+            filesError = error.localizedDescription
+        }
+    }
+
+    /// The Zoom row: on iOS/iPadOS a single-pointer − / + stepper (25% steps) with
+    /// the live % between them (A14, WCAG 2.5.1); on the Mac a read-only value, since
+    /// the Mac has toolbar zoom buttons.
+    @ViewBuilder
+    private func zoomRow(_ percent: Int) -> some View {
+        if let onZoomStep {
+            LabeledContent("Zoom") {
+                HStack(spacing: 12) {
+                    Button { onZoomStep(-0.25) } label: {
+                        Image(systemName: "minus")
+                    }
+                    .accessibilityLabel("Zoom out")
+                    Text("\(percent)%")
+                        .monospacedDigit()
+                        .frame(minWidth: 52)
+                        .accessibilityLabel("Zoom \(percent) percent")
+                    Button { onZoomStep(0.25) } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Zoom in")
+                }
+                .buttonStyle(.borderless)
+                .font(.body)
+            }
+        } else {
+            LabeledContent("Zoom", value: "\(percent)%")
+                .monospacedDigit()
+        }
     }
 
     @ViewBuilder
@@ -147,6 +202,7 @@ struct MetafileInfoView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
+            .accessibilityFocused($headerFocused)   // A18
 
             Spacer(minLength: 8)
             Button(action: onClose) {
@@ -227,30 +283,5 @@ struct MetafileInfoView: View {
         }
         let date = when.formatted(date: .abbreviated, time: .shortened)
         return "Opened \(date)"
-    }
-}
-
-/// A dimmed, tap-blocking overlay shown while an export renders. Cross-platform
-/// (the iOS viewer's own `RenderingOverlay` stays UIKit-adjacent); VoiceOver reads
-/// it as one "Preparing export" element.
-struct ExportSpinnerOverlay: View {
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.2)
-                .ignoresSafeArea()
-            VStack(spacing: 12) {
-                ProgressView()
-                    .controlSize(.large)
-                Text("Preparing…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(24)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Preparing export")
-        .accessibilityAddTraits(.updatesFrequently)
     }
 }

@@ -181,7 +181,12 @@ final class RecentsStore {
             }
             return data
         case .notFound:
-            remove(entry.id)
+            // The entry is NOT auto-pruned here: doing so while the viewer is loading
+            // this very entry would trip the H8 selection reconciliation and dismiss
+            // the viewer before its failed(.notFound) state — with its "Remove from
+            // Recents" action — could ever show (C4a H8/H4). The viewer surfaces the
+            // failure and the user's Remove takes it out; a background prune on a
+            // missing file would be indistinguishable from an external removal.
             throw ResolveFailure.notFound
         case .unavailable:
             throw ResolveFailure.unavailable
@@ -191,6 +196,37 @@ final class RecentsStore {
     func entry(id: UUID) -> RecentEntry? {
         entries.first { $0.id == id }
     }
+
+    #if DEBUG
+    /// Seeds `count` *received* EMF entries for UI testing (DEBUG only — excluded
+    /// from Release). Each is written to the temporary directory, so `handleOpenedURL`
+    /// imports a copy and the entry reads as "received" (Emfy holds the only copy) —
+    /// the H3 removal/Save-a-Copy path. Driven by the `EMFY_SEED_RECEIVED` launch env.
+    func seedReceivedForUITesting(count: Int) async {
+        for index in 0..<count {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("UISample-\(index + 1)-\(UUID().uuidString).emf")
+            try? Self.uiTestEMF().write(to: url)
+            _ = await handleOpenedURL(url)
+        }
+    }
+
+    /// A minimal but valid EMF (EMR_HEADER + EMR_EOF) for the seed hook.
+    nonisolated private static func uiTestEMF() -> Data {
+        var d = Data()
+        func u32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        func i32(_ v: Int32) { u32(UInt32(bitPattern: v)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        u32(1); u32(88)
+        i32(0); i32(0); i32(399); i32(299)
+        i32(0); i32(0); i32(2117); i32(2117)
+        u32(0x464D4520); u32(0x0001_0000); u32(108); u32(2)
+        u16(1); u16(0); u32(0); u32(0); u32(0)
+        i32(1920); i32(1080); i32(508); i32(286)
+        u32(14); u32(20); u32(0); u32(16); u32(20)
+        return d
+    }
+    #endif
 
     // MARK: - Thumbnails
 
@@ -239,17 +275,77 @@ final class RecentsStore {
         return result.image
     }
 
-    // MARK: - Removal
+    // MARK: - Removal (deferred deletion + undo — C4a H3)
 
+    /// A single removal awaiting its undo window. The entry is already out of
+    /// `entries` (so the UI updates at once), but its side files are NOT deleted
+    /// yet — Undo restores both, and only the commit on timeout deletes them.
+    struct PendingRemoval: Sendable {
+        let entry: RecentEntry
+        /// The entry's position before removal, so Undo restores it in place.
+        let index: Int
+    }
+    @ObservationIgnored private(set) var pendingRemoval: PendingRemoval?
+    @ObservationIgnored private var removalCommitTask: Task<Void, Never>?
+
+    /// How long a single removal can be undone before its side files are deleted.
+    nonisolated static let undoWindowSeconds: Double = 5
+
+    /// Whether an entry is a received copy (Emfy holds the only copy of it).
+    func isReceived(_ id: UUID) -> Bool {
+        entries.first { $0.id == id }?.importedFileName != nil
+    }
+
+    /// Removes an entry from the list immediately but defers deleting its side
+    /// files until the undo window expires, so `undoLastRemoval()` can restore the
+    /// entry *and* its file (C4a H3). Any earlier pending removal is committed first.
     func remove(_ id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        removeSideFiles(for: entries[index])
+        commitPendingRemoval()
+        let entry = entries[index]
+        // Drop the in-memory thumbnail (it regenerates from the kept PNG on undo).
         thumbnailCache.remove(id)
         entries.remove(at: index)
+        pendingRemoval = PendingRemoval(entry: entry, index: index)
+        persist()
+        scheduleCommit()
+    }
+
+    /// Restores the most recently removed entry and its file, cancelling the
+    /// pending deletion of its side files.
+    func undoLastRemoval() {
+        guard let pending = pendingRemoval else { return }
+        removalCommitTask?.cancel()
+        removalCommitTask = nil
+        pendingRemoval = nil
+        let index = min(max(pending.index, 0), entries.count)
+        entries.insert(pending.entry, at: index)
+        sortAndCap()
         persist()
     }
 
+    /// Finalises a pending removal now: deletes its side files. Called on timeout,
+    /// before a new removal, and before a clear.
+    func commitPendingRemoval() {
+        guard let pending = pendingRemoval else { return }
+        removalCommitTask?.cancel()
+        removalCommitTask = nil
+        pendingRemoval = nil
+        removeSideFiles(for: pending.entry)
+    }
+
+    private func scheduleCommit() {
+        removalCommitTask?.cancel()
+        let window = Self.undoWindowSeconds
+        removalCommitTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(window))
+            guard !Task.isCancelled else { return }
+            self?.commitPendingRemoval()
+        }
+    }
+
     func clear() {
+        commitPendingRemoval()
         for entry in entries { removeSideFiles(for: entry) }
         thumbnailCache.removeAll()
         entries.removeAll()
@@ -258,14 +354,33 @@ final class RecentsStore {
 
     // MARK: - Ordering, cap, persistence
 
+    /// Chooses which entries to drop when the list is over `max` (C4a H3 cap policy,
+    /// owner decision): evict the oldest *non-received* entries first, and a received
+    /// entry (`importedFileName != nil`, Emfy's only copy) only when no non-received
+    /// entry is left to drop. Pure, for the cap test.
+    nonisolated static func entriesToEvict(from entries: [RecentEntry], max: Int) -> [RecentEntry] {
+        let overflow = entries.count - Swift.max(max, 0)
+        guard overflow > 0 else { return [] }
+        let oldestFirst = entries.sorted { $0.openedAt < $1.openedAt }
+        let nonReceived = oldestFirst.filter { $0.importedFileName == nil }
+        let received = oldestFirst.filter { $0.importedFileName != nil }
+        var evict = Array(nonReceived.prefix(overflow))
+        if evict.count < overflow {
+            evict.append(contentsOf: received.prefix(overflow - evict.count))
+        }
+        return evict
+    }
+
     private func sortAndCap() {
         entries.sort { $0.openedAt > $1.openedAt }
-        guard entries.count > Self.maxEntries else { return }
-        for entry in entries[Self.maxEntries...] {
+        let evicted = Self.entriesToEvict(from: entries, max: Self.maxEntries)
+        guard !evicted.isEmpty else { return }
+        let evictedIDs = Set(evicted.map(\.id))
+        for entry in evicted {
             removeSideFiles(for: entry)
             thumbnailCache.remove(entry.id)
         }
-        entries.removeLast(entries.count - Self.maxEntries)
+        entries.removeAll { evictedIDs.contains($0.id) }
     }
 
     private func persist() {
@@ -359,7 +474,10 @@ final class RecentsStore {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        // A not-yet-downloaded iCloud file would fail the plain read and be reported
+        // as "damaged"; give the add path the same download/coordinated-read branch
+        // the resolve path has (C4a L3).
+        guard let data = readWithICloudFallback(url) else { return nil }
         // Reject here what the viewer could not show, so the user gets a clear
         // alert instead of a broken recents tile. A cheap open/prepare check.
         guard MetafileLoader.canOpen(data) else { return nil }
@@ -513,6 +631,19 @@ final class RecentsStore {
             return .notFound
         }
         return .unavailable
+    }
+
+    /// Reads `url`, and if the plain read fails because it is a not-yet-downloaded
+    /// iCloud placeholder, starts the download and does a coordinated read — the same
+    /// fallback `resolveBookmark` uses, so adding such a file doesn't misreport it as
+    /// damaged (C4a L3).
+    private nonisolated static func readWithICloudFallback(_ url: URL) -> Data? {
+        if let data = try? Data(contentsOf: url, options: .mappedIfSafe) { return data }
+        if isUbiquitousNotDownloaded(url) {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+            return coordinatedRead(url)
+        }
+        return nil
     }
 
     private nonisolated static func isUbiquitousNotDownloaded(_ url: URL) -> Bool {

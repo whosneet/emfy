@@ -34,12 +34,18 @@ struct LibrarySidebar: View {
 /// (Open in New Window, Show in Finder on macOS, Remove from Recents).
 struct RegularSidebarList: View {
     @Environment(RecentsStore.self) private var store
+    @Environment(RemovalCoordinator.self) private var removal
+    @Environment(ToastCenter.self) private var toast
     @Environment(\.openWindow) private var openWindow
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     @Binding var selection: UUID?
 
     @State private var searchText = ""
     @State private var isImporting = false
+    #if os(iOS)
+    // The shared library sheets, reachable from the iPad regular-width sidebar (H1).
+    @State private var activeSheet: RecentsSheet?
+    #endif
 
     var body: some View {
         content
@@ -53,18 +59,10 @@ struct RegularSidebarList: View {
             ) { result in
                 handleImport(result)
             }
-            .alert(
-                "Couldn’t open file",
-                isPresented: Binding(
-                    get: { store.lastErrorMessage != nil },
-                    set: { if !$0 { store.lastErrorMessage = nil } }
-                ),
-                presenting: store.lastErrorMessage
-            ) { _ in
-                Button("OK", role: .cancel) { store.lastErrorMessage = nil }
-            } message: { message in
-                Text(message)
-            }
+            // The "couldn't open" alert now lives at the window level (C4a M5).
+            #if os(iOS)
+            .librarySheets($activeSheet)
+            #endif
             // A readable sidebar width so file names aren't truncated to "gat….emf".
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
     }
@@ -112,7 +110,22 @@ struct RegularSidebarList: View {
                 Label("Open…", systemImage: "folder")
             }
             .help("Open a metafile")
+            // On iPad ⌘O opens from the sidebar; on macOS the menu bar owns ⌘O.
+            #if os(iOS)
+            .keyboardShortcut("o", modifiers: .command)
+            #endif
         }
+        #if os(iOS)
+        // The iPad regular-width sidebar reaches Settings/About/What's New/Changelog/
+        // Clear Recents through the shared More menu, like the compact grid (C4a H1).
+        ToolbarItem {
+            LibraryMoreMenu(
+                activeSheet: $activeSheet,
+                entriesEmpty: store.entries.isEmpty,
+                onClear: { removal.requestClear(store: store) }
+            )
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -134,7 +147,9 @@ struct RegularSidebarList: View {
         Divider()
         Button(role: .destructive) {
             if selection == entry.id { selection = nil }
-            store.remove(entry.id)
+            // Received files confirm first and offer Save a Copy; ordinary files are
+            // removed instantly with an Undo toast (C4a H3).
+            removal.requestRemoval(id: entry.id, store: store, toast: toast)
         } label: {
             Label("Remove from Recents", systemImage: "trash")
         }
@@ -147,7 +162,9 @@ struct RegularSidebarList: View {
             Task {
                 if let id = await store.handleOpenedURL(url) { selection = id }
             }
-        case .failure:
+        case .failure(let error):
+            // A user cancel isn't an error (C4a M2).
+            if (error as? CocoaError)?.code == .userCancelled { return }
             store.lastErrorMessage = "Emfy couldn’t open that file."
         }
     }
@@ -199,7 +216,8 @@ struct RecentRow: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(sizeString)")
+        // Include the same date/size the row shows, so VoiceOver isn't missing it (A5).
+        .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(metaSecond)")
         .task(id: entry.thumbnailFileName) {
             thumbnail = store.cachedThumbnail(for: entry)
             thumbnail = await store.loadThumbnail(for: entry)
@@ -226,10 +244,15 @@ struct RecentRow: View {
     }
 
     private var metaLine: String {
-        let second = Calendar.current.isDateInToday(entry.openedAt)
+        "\(entry.formatLabel) · \(metaSecond)"
+    }
+
+    /// The size today, the date earlier — the second half of the meta line, reused
+    /// for the VoiceOver label (A5).
+    private var metaSecond: String {
+        Calendar.current.isDateInToday(entry.openedAt)
             ? sizeString
             : entry.openedAt.formatted(.dateTime.day().month(.abbreviated))
-        return "\(entry.formatLabel) · \(second)"
     }
 
     private var sizeString: String {

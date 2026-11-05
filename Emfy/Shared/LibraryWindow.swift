@@ -13,6 +13,7 @@ import SwiftUI
 struct LibraryWindow: View {
     @Environment(RecentsStore.self) private var store
     @Environment(OpenCoordinator.self) private var coordinator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
@@ -23,6 +24,18 @@ struct LibraryWindow: View {
 
     @State private var model = LibraryWindowModel()
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    /// One toast surface and one removal coordinator per window, injected so the
+    /// sidebar, the viewer and the inspector all post to the same surface (C4a H3,
+    /// H6/A2, M3).
+    @State private var toastCenter = ToastCenter()
+    @State private var removal = RemovalCoordinator()
+    /// Drives the "No File Selected" detail's Open… button (C4a L1).
+    @State private var isImporting = false
+    #if os(macOS)
+    /// Whether this window is key, so the "couldn't open" alert shows only in the
+    /// front window rather than every window or none (C4a M5).
+    @State private var isKeyWindow = false
+    #endif
     #if os(iOS)
     /// Drives the once-per-launch What's New sheet on iOS (C3b scope 7); hosted at
     /// the window level so it presents on both iPhone and iPad regardless of the
@@ -50,13 +63,56 @@ struct LibraryWindow: View {
         } detail: {
             detailColumn
         }
+        .environment(toastCenter)
+        .environment(removal)
+        .toastOverlay(toastCenter)
+        .recentsRemoval(removal, store: store, toast: toastCenter)
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: MetafileTypes.readableContentTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task { if let id = await store.handleOpenedURL(url) { model.selection = id } }
+            }
+        }
+        // Host the "couldn't open" alert at the window (C4a M5): visible with the
+        // sidebar collapsed or a compact viewer pushed, and — on macOS — only in the
+        // key window, so several windows don't each raise it.
+        .alert(
+            "Couldn’t open file",
+            isPresented: Binding(
+                get: { store.lastErrorMessage != nil && errorAlertAllowed },
+                set: { if !$0 { store.lastErrorMessage = nil } }
+            ),
+            presenting: store.lastErrorMessage
+        ) { _ in
+            Button("OK", role: .cancel) { store.lastErrorMessage = nil }
+        } message: { message in
+            Text(message)
+        }
         .task {
             await store.loadIfNeeded()
+            #if DEBUG
+            // UI-test seeding (DEBUG only): SIMCTL_CHILD_EMFY_SEED_RECEIVED=<n>.
+            if let raw = ProcessInfo.processInfo.environment["EMFY_SEED_RECEIVED"], let n = Int(raw), n > 0 {
+                await store.seedReceivedForUITesting(count: n)
+            }
+            #endif
             applyInitialSelection()
             #if os(iOS)
             // One scene, once per version, once per launch (C3b scope 7).
             if WhatsNewPresenter.claimLaunchPresentation() { showLaunchWhatsNew = true }
             #endif
+        }
+        .onAppear { toastCenter.reduceMotion = reduceMotion }
+        .onChange(of: reduceMotion) { _, newValue in toastCenter.reduceMotion = newValue }
+        // Reconcile selection when the shown entry is removed — here or in another
+        // window, via Clear Recents or a prune — so the viewer never orphans (C4a H8).
+        .onChange(of: store.entries) { _, _ in
+            if let id = model.selection, store.entry(id: id) == nil {
+                model.selection = nil
+            }
         }
         .onChange(of: model.selection) { _, id in
             storedSelection = id?.uuidString
@@ -94,8 +150,9 @@ struct LibraryWindow: View {
             coordinator.unregister(windowID: model.windowID)
         }
         .background(
-            WindowFrontReporter {
-                coordinator.markFront(windowID: model.windowID)
+            WindowFrontReporter { isKey in
+                isKeyWindow = isKey
+                if isKey { coordinator.markFront(windowID: model.windowID) }
             }
         )
         #endif
@@ -132,12 +189,28 @@ struct LibraryWindow: View {
             ViewerDetail(entryID: id, onRemove: { model.selection = nil })
                 .id(id)
         } else {
-            ContentUnavailableView(
-                "No File Selected",
-                systemImage: "doc.richtext",
-                description: Text("Choose a file from the sidebar, or open one.")
-            )
+            // "No File Selected" now carries an Open… action, so the invitation to
+            // "open one" is actionable (C4a L1).
+            ContentUnavailableView {
+                Label("No File Selected", systemImage: "doc.richtext")
+            } description: {
+                Text("Choose a file from the sidebar, or open one.")
+            } actions: {
+                Button("Open…") { isImporting = true }
+                    .buttonStyle(.borderedProminent)
+            }
         }
+    }
+
+    /// Whether this window may raise the "couldn't open" alert: only the key window
+    /// on macOS, always on iOS (one active scene) — so several windows don't each
+    /// show it and a windowless open still surfaces one (C4a M5).
+    private var errorAlertAllowed: Bool {
+        #if os(macOS)
+        isKeyWindow
+        #else
+        true
+        #endif
     }
 
     // MARK: - Selection restoration

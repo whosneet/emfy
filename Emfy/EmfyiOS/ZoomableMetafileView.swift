@@ -28,16 +28,23 @@ final class MetafileZoomController {
 
     func fit() { setZoom(fitScale) }
     func actualSize() { setZoom(1) }
-    func zoomIn() { setZoom((scrollView?.zoomScale ?? zoom) * zoomStep) }
-    func zoomOut() { setZoom((scrollView?.zoomScale ?? zoom) / zoomStep) }
+    /// `announce: false` is used by the adjustable element's increment/decrement,
+    /// where VoiceOver already speaks the new value — so Emfy doesn't speak it twice
+    /// (A12).
+    func zoomIn(announce: Bool = true) { setZoom((scrollView?.zoomScale ?? zoom) * zoomStep, announce: announce) }
+    func zoomOut(announce: Bool = true) { setZoom((scrollView?.zoomScale ?? zoom) / zoomStep, announce: announce) }
 
-    private func setZoom(_ target: CGFloat) {
+    /// Steps the zoom by an additive fraction of 100% — the Info row's − / + buttons
+    /// step ±0.25 (25%), WCAG 2.5.1 single-pointer zoom (A14).
+    func step(by delta: CGFloat) { setZoom((scrollView?.zoomScale ?? zoom) + delta) }
+
+    private func setZoom(_ target: CGFloat, announce: Bool = true) {
         guard let scrollView else { return }
         let clamped = min(max(target, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
         scrollView.setZoomScale(clamped, animated: !reduceMotion)
         // setZoomScale(animated: false) may not fire the scroll delegate's
         // end-zooming callback, so announce here for every programmatic change.
-        announceZoom(clamped)
+        if announce { announceZoom(clamped) }
     }
 
     /// Announces the zoom to VoiceOver, debounced so a burst posts once, and only
@@ -420,8 +427,10 @@ private final class TiledMetafileView: UIView {
         ]
     }
 
-    override func accessibilityIncrement() { controller?.zoomIn() }
-    override func accessibilityDecrement() { controller?.zoomOut() }
+    // The adjustable trait makes VoiceOver speak the new value itself, so suppress
+    // Emfy's own zoom announcement here to avoid double speech (A12).
+    override func accessibilityIncrement() { controller?.zoomIn(announce: false) }
+    override func accessibilityDecrement() { controller?.zoomOut(announce: false) }
 
     /// Re-renders the tiles at a new display scale (e.g. moving between displays).
     func updateContentsScale(_ scale: CGFloat) {

@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import EMFRender
 import SwiftUI
@@ -17,6 +18,7 @@ import SwiftUI
 /// closed (C3b scope 5), through the off-main `MacViewerExporter`.
 struct MacViewerPane: View {
     @Environment(RecentsStore.self) private var store
+    @Environment(ToastCenter.self) private var toast
     let session: DocumentSession
     /// Clears the window's selection when the file is removed from Recents.
     let onRemove: () -> Void
@@ -43,7 +45,7 @@ struct MacViewerPane: View {
                 contentType: .png,
                 defaultFilename: entry?.baseName ?? "Metafile"
             ) { result in
-                if case .failure(let error) = result { exporter.errorMessage = error.localizedDescription }
+                handleExport(result, format: "PNG")
             }
             .fileExporter(
                 isPresented: $exporter.isExportingPDF,
@@ -51,7 +53,7 @@ struct MacViewerPane: View {
                 contentType: .pdf,
                 defaultFilename: entry?.baseName ?? "Metafile"
             ) { result in
-                if case .failure(let error) = result { exporter.errorMessage = error.localizedDescription }
+                handleExport(result, format: "PDF")
             }
             .alert(
                 "Export Failed",
@@ -63,7 +65,9 @@ struct MacViewerPane: View {
                 Text(message)
             }
             .overlay {
-                if exporter.isRendering { ExportSpinnerOverlay() }
+                if exporter.isRendering {
+                    ExportProgressOverlay { exporter.cancelOngoing() }
+                }
             }
             // The share picker anchors to this small view at the toolbar's trailing
             // edge, so it drops from under the Share button.
@@ -95,6 +99,10 @@ struct MacViewerPane: View {
                 controller: controller
             )
             .ignoresSafeArea()
+            // Rebuild the tiled view only when the content actually changes, so a
+            // changed-content reload shows the new drawing while an identical reload
+            // keeps the same view and its zoom (C4a M4).
+            .id(session.loadedContentID)
         case .failed(let reason):
             failedView(reason)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -102,18 +110,28 @@ struct MacViewerPane: View {
         }
     }
 
-    /// The failed state (v3-plan §9.1): Try Again keeps a transient file in Recents;
-    /// Remove dismisses the viewer for a definitively-gone or unreadable one.
+    /// The failed state: per-reason actions and wording shared with iOS through
+    /// `ViewerFailurePresentation` (C4a H4, M4). Try Again now also covers `.unreadable`
+    /// (a file still being written), per M4.
     private func failedView(_ reason: DocumentSession.FailureReason) -> some View {
         ContentUnavailableView {
             Label("Can’t show this file", systemImage: "exclamationmark.triangle")
         } description: {
-            Text(failureMessage(reason))
+            Text(ViewerFailurePresentation.message(for: reason))
         } actions: {
-            if reason == .unavailable {
-                Button("Try Again") { Task { await session.load() } }
-                    .buttonStyle(.borderedProminent)
+            ForEach(ViewerFailurePresentation.actions(for: reason), id: \.self) { action in
+                failedActionButton(action)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func failedActionButton(_ action: ViewerFailurePresentation.Action) -> some View {
+        switch action {
+        case .tryAgain:
+            Button("Try Again") { Task { await session.load() } }
+                .buttonStyle(.borderedProminent)
+        case .remove:
             Button("Remove from Recents", role: .destructive) {
                 store.remove(session.entryID)
                 onRemove()
@@ -121,14 +139,17 @@ struct MacViewerPane: View {
         }
     }
 
-    private func failureMessage(_ reason: DocumentSession.FailureReason) -> String {
-        switch reason {
-        case .unavailable:
-            return "Emfy couldn’t read this file right now. It may be offline, or on a drive that isn’t connected."
-        case .notFound:
-            return "This file has moved or been deleted, so Emfy removed it from Recents."
-        case .unreadable:
-            return "Emfy opened this file but couldn’t read it as a metafile. It may be empty or damaged."
+    /// Ignores a user cancel (C4a M2); confirms a save with a toast carrying a Show
+    /// in Finder action (C4a M3); surfaces a real failure.
+    private func handleExport(_ result: Result<URL, Error>, format: String) {
+        switch result {
+        case .success(let url):
+            toast.show("Exported as \(format)", systemImage: "square.and.arrow.down", actionTitle: "Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        case .failure(let error):
+            if (error as? CocoaError)?.code == .userCancelled { return }
+            exporter.errorMessage = error.localizedDescription
         }
     }
 
@@ -216,6 +237,10 @@ struct MacViewerPane: View {
         Text(zoomPercentText)
             .font(.system(.body, design: .rounded).monospacedDigit())
             .frame(minWidth: 48)
+            // Give the bare percentage context for VoiceOver (A11).
+            .accessibilityElement()
+            .accessibilityLabel("Zoom")
+            .accessibilityValue("\(zoomPercent) percent")
     }
 
     private var shareMenu: some View {

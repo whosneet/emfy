@@ -21,8 +21,11 @@ final class MetafileExportController {
     var sharePayload: SharePayload?
     /// Non-nil presents the "Export Failed" alert (render/share failures).
     var shareError: String?
-    /// Presents the "add photos permission denied" alert with a Settings path.
+    /// Presents the "add photos permission denied" alert with a Settings path — only
+    /// when access was already denied before the tap (C4a H7).
     var showPhotosDeniedAlert = false
+    /// Presents the informational "Photos access is restricted" alert (C4a H7).
+    var showPhotosRestrictedAlert = false
 
     @ObservationIgnored private let runner = ExportTaskRunner()
     /// The temp directory of the file currently being shared, removed on dismiss.
@@ -78,8 +81,9 @@ final class MetafileExportController {
         )
     }
 
-    /// Renders a PNG and copies it to the pasteboard, announcing the result.
-    func copyImage(prepared: MetafileRenderer.Prepared) {
+    /// Renders a PNG and copies it to the pasteboard, confirming with a toast (the
+    /// toast also announces to VoiceOver). C4a H6/A2.
+    func copyImage(prepared: MetafileRenderer.Prepared, toast: ToastCenter?) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
             render: { MetafileExport.pngData(prepared) },
@@ -90,14 +94,15 @@ final class MetafileExportController {
                     return
                 }
                 UIPasteboard.general.setData(data, forPasteboardType: UTType.png.identifier)
-                UIAccessibility.post(notification: .announcement, argument: "Image copied")
+                toast?.show("Image copied", systemImage: "doc.on.doc")
             }
         )
     }
 
-    /// Renders a PNG and saves it to Photos via an add-only request; announces
-    /// success, offers Settings on denial, alerts on failure.
-    func saveToPhotos(prepared: MetafileRenderer.Prepared) {
+    /// Renders a PNG and saves it to Photos via an add-only request; confirms with a
+    /// toast, offers Settings only on a pre-existing denial, shows an informational
+    /// alert when restricted, stays quiet on a fresh decline (C4a H6/A2, H7).
+    func saveToPhotos(prepared: MetafileRenderer.Prepared, toast: ToastCenter?) {
         runner.run(
             setBusy: { [weak self] busy in self?.isRendering = busy },
             render: { MetafileExport.pngData(prepared) },
@@ -110,9 +115,13 @@ final class MetafileExportController {
                 Task { @MainActor in
                     switch await PhotoLibrarySaver.save(pngData: data) {
                     case .saved:
-                        UIAccessibility.post(notification: .announcement, argument: "Saved to Photos")
-                    case .denied:
+                        toast?.show("Saved to Photos", systemImage: "checkmark.circle")
+                    case .restricted:
+                        self.showPhotosRestrictedAlert = true
+                    case .deniedNeedsSettings:
                         self.showPhotosDeniedAlert = true
+                    case .deniedSilently:
+                        break   // the system prompt just ran; stay quiet (H7)
                     case .failed(let message):
                         self.shareError = message
                     }
@@ -152,28 +161,9 @@ final class MetafileExportController {
             shareError = failure
         }
     }
-}
 
-/// A dimmed, tap-blocking overlay shown while an export renders. VoiceOver reads
-/// it as a single "Preparing export" element.
-struct RenderingOverlay: View {
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.25)
-                .ignoresSafeArea()
-            VStack(spacing: 12) {
-                ProgressView()
-                    .controlSize(.large)
-                Text("Preparing…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(24)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Preparing export")
-        .accessibilityAddTraits(.updatesFrequently)
+    /// Cancels the in-flight render (the merged export overlay's Cancel button, L2).
+    func cancelExport() {
+        cancelOngoing()
     }
 }

@@ -259,6 +259,14 @@ struct MacMetafileScrollView: NSViewRepresentable {
             if !hasSetInitialZoom {
                 hasSetInitialZoom = true
                 setMagnification(fit, on: scrollView)
+                // Give the drawing keyboard focus once it's laid out, so arrow/Page
+                // scrolling works without a click first (A4). Deferred to the next
+                // runloop so it runs after SwiftUI's split-view focus setup, which
+                // otherwise reclaims first responder for the sidebar.
+                DispatchQueue.main.async { [weak scrollView] in
+                    guard let scrollView, scrollView.window?.firstResponder !== scrollView else { return }
+                    scrollView.window?.makeFirstResponder(scrollView)
+                }
             } else if geometryChanged {
                 // Refit on resize ONLY while fitted; otherwise just clamp the live
                 // zoom back into the new range (§3 "Refit on window resize ONLY
@@ -316,10 +324,28 @@ struct MacMetafileScrollView: NSViewRepresentable {
 
 /// An `NSScrollView` that reports its laid-out visible size, so the magnification
 /// range and the initial fit are set once real bounds exist (and reset when they
-/// change), and intercepts ⌘-scroll to magnify anchored at the cursor.
+/// change), intercepts ⌘-scroll to magnify anchored at the cursor, and takes
+/// keyboard focus so arrow / Page / Home / End scroll a zoomed drawing (C4a A4).
 private final class ZoomMetafileScrollView: NSScrollView {
     var onLayout: ((CGSize) -> Void)?
     var onCommandScroll: ((NSEvent) -> Bool)?
+
+    // Take keyboard focus, with a focus ring, so arrow/Page/Home/End scroll (A4).
+    override var acceptsFirstResponder: Bool { true }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() { bounds.fill() }
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { noteFocusRingChanged() }
+        return became
+    }
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { noteFocusRingChanged() }
+        return resigned
+    }
+    private func noteFocusRingChanged() { setKeyboardFocusRingNeedsDisplay(bounds) }
 
     override func layout() {
         super.layout()
@@ -339,6 +365,40 @@ private final class ZoomMetafileScrollView: NSScrollView {
             return
         }
         super.scrollWheel(with: event)
+    }
+
+    /// Arrow / Page / Home / End scroll the zoomed drawing within the scrollable
+    /// range (A4). The clip view is non-flipped (y up), so the document's top is at
+    /// high y; "up" increases the origin's y.
+    override func keyDown(with event: NSEvent) {
+        guard handleScrollKey(event) else { super.keyDown(with: event); return }
+    }
+
+    private func handleScrollKey(_ event: NSEvent) -> Bool {
+        let clip = contentView
+        let visible = clip.bounds.size
+        var origin = clip.bounds.origin
+        let line: CGFloat = 48
+        let pageH = max(visible.height - 48, visible.height * 0.5)
+        let doc = documentView?.frame ?? .zero
+
+        switch event.keyCode {
+        case 126: origin.y += line                 // up arrow
+        case 125: origin.y -= line                 // down arrow
+        case 123: origin.x -= line                 // left arrow
+        case 124: origin.x += line                 // right arrow
+        case 116: origin.y += pageH                // page up
+        case 121: origin.y -= pageH                // page down
+        case 115: origin.y = doc.maxY              // home → top
+        case 119: origin.y = doc.minY              // end → bottom
+        default: return false
+        }
+
+        origin.x = min(max(origin.x, doc.minX), max(doc.minX, doc.maxX - visible.width))
+        origin.y = min(max(origin.y, doc.minY), max(doc.minY, doc.maxY - visible.height))
+        clip.scroll(to: origin)
+        reflectScrolledClipView(clip)
+        return true
     }
 }
 
@@ -466,7 +526,10 @@ private final class TiledMetafileView: NSView {
         setAccessibilityValue(value)
     }
 
-    /// VoiceOver adjusts an image's value with these; both route to the controller.
+    // VoiceOver's increment/decrement gestures (and the swipe on an adjustable
+    // element) route to the zoom controller; the element keeps its image role and
+    // its Zoom In/Out/Fit/Actual Size custom actions (A13 — comment corrected, no
+    // behaviour change).
     override func accessibilityPerformIncrement() -> Bool {
         controller?.zoomIn()
         return true

@@ -22,8 +22,9 @@ final class DocumentSession {
     /// Why a load failed. Each maps to a distinct recovery the viewer offers
     /// (v3-plan §9.1 "failed-state actions").
     enum FailureReason: Equatable, Sendable {
-        /// Definitively gone — the store has already pruned the entry. The viewer
-        /// offers Remove from Recents (the entry is dismissed).
+        /// Definitively gone — the file can't be resolved. The entry is kept so the
+        /// viewer can show this state and offer Remove from Recents, which the user
+        /// taps to take it out (the store no longer auto-prunes; C4a H8/H4).
         case notFound
         /// Transient — offline, locked, or a not-yet-downloaded iCloud item. The
         /// entry is kept; the viewer offers Try Again.
@@ -61,6 +62,27 @@ final class DocumentSession {
     }
 
     private(set) var state: LoadState = .idle
+
+    /// Increments whenever a *new* loaded model is installed into `state` — but not
+    /// on an identical-content reload, which is skipped. Lets the keep-loaded
+    /// behaviour be asserted without comparing non-identifiable model values (M4).
+    @ObservationIgnored private(set) var modelInstallCount = 0
+
+    /// A fingerprint of the bytes behind the current loaded model, so an external
+    /// change that yields identical content is a no-op and the zoom survives (M4).
+    @ObservationIgnored private var loadedContentFingerprint: Int?
+
+    /// A content identity for the loaded model, used as the viewer's `.id(...)` so a
+    /// *changed*-content reload rebuilds the tiled view (new drawing), while an
+    /// identical reload keeps the same id and preserves the zoom (M4). Stable within
+    /// a run; changes only when the installed model's bytes change. Read during a
+    /// `body` pass that already observes `state`, which changes in lockstep with it.
+    var loadedContentID: Int { loadedContentFingerprint ?? 0 }
+
+    /// Bumped on every load/reload; a result from a stale generation is discarded,
+    /// so the latest load wins even if an earlier one finishes later (M4).
+    @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private var reloadDebounce: Task<Void, Never>?
 
     /// The editor's undo stack (v3-plan §11.2). Present now, exercised when the
     /// editor lands; read-only playback never registers an undo action, so this
@@ -134,30 +156,79 @@ final class DocumentSession {
 
     // MARK: - Loading
 
-    /// Resolves and parses the document, driving the state machine. Safe to call
-    /// repeatedly (Try Again, a disk change): each call restarts from `.loading`.
+    /// User-initiated load (first open, Try Again): shows the loading state, then
+    /// resolves and parses. Safe to call repeatedly; the latest call wins (M4).
     func load() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         state = .loading
+        await runLoad(generation: generation, keepingCurrent: false)
+    }
+
+    /// The keep-loaded reload (M4): the current rendered model stays on screen until
+    /// a new parse succeeds, so a disk change never flashes the loading state or
+    /// resets the zoom. Identical content is a no-op; a transient read failure or a
+    /// mid-write unreadable file keeps the current model and keeps watching. Exposed
+    /// (not private) so the serialisation and keep-loaded behaviour are unit-tested
+    /// directly, without the debounce timer.
+    func reloadNow() async {
+        loadGeneration &+= 1
+        await runLoad(generation: loadGeneration, keepingCurrent: true)
+    }
+
+    private func runLoad(generation: Int, keepingCurrent: Bool) async {
+        let hadModel = loaded != nil
         let data: Data
         do {
             data = try await resolve(entryID)
         } catch {
-            state = .failed(Self.failureReason(for: error))
-            stopWatching()
+            guard generation == loadGeneration else { return }
+            let reason = Self.failureReason(for: error)
+            // During a keep-current reload, a transient failure must not tear down a
+            // good render; keep showing it and keep watching so it recovers (M4).
+            if keepingCurrent, hadModel, reason != .notFound { return }
+            state = .failed(reason)
+            // Keep watching for everything but a pruned, definitively-gone file (M4).
+            if reason == .notFound { stopWatching() } else { startWatching() }
+            return
+        }
+
+        // Identical content: skip the parse and the model swap entirely, so the zoom
+        // and pan survive a spurious or attribute-only change (M4).
+        let fingerprint = Self.fingerprint(of: data)
+        if keepingCurrent, hadModel, fingerprint == loadedContentFingerprint {
+            guard generation == loadGeneration else { return }
+            startWatching()
             return
         }
 
         // Parse off the main actor; the result is Sendable.
         let parse = self.parse
         let model = await Task.detached(priority: .userInitiated) { parse(data) }.value
+        guard generation == loadGeneration else { return }   // a newer load superseded this
 
         if let model {
+            loadedContentFingerprint = fingerprint
+            modelInstallCount &+= 1
             state = .loaded(model)
             startWatching()
+        } else if keepingCurrent, hadModel {
+            // A mid-write partial file reads as unreadable; keep the last good model
+            // on screen and keep watching so the completed write recovers (M4).
+            startWatching()
         } else {
+            loadedContentFingerprint = nil
             state = .failed(.unreadable)
-            stopWatching()
+            startWatching()   // keep watching after .unreadable (M4)
         }
+    }
+
+    /// A cheap content fingerprint (a seeded hash of the bytes). Stable within one
+    /// process run — all the identical-content comparison needs (M4).
+    private static func fingerprint(of data: Data) -> Int {
+        var hasher = Hasher()
+        hasher.combine(data)
+        return hasher.finalize()
     }
 
     /// Maps a resolve error to a failure reason. Only `RecentsStore.ResolveFailure`
@@ -191,10 +262,17 @@ final class DocumentSession {
         presenter = nil
     }
 
-    /// Read-only reload on an external change. When the editor lands this gains a
-    /// dirty-state check before clobbering unsaved edits (v3-plan §11.2 hook).
+    /// An external disk change: debounced (~300 ms) and generation-guarded, so a
+    /// burst of `presentedItemDidChange` callbacks runs one keep-loaded reload and
+    /// the newest wins (M4). When the editor lands this gains a dirty-state check
+    /// before clobbering unsaved edits (v3-plan §11.2 hook).
     private func reloadFromDiskChange() {
-        Task { await load() }
+        reloadDebounce?.cancel()
+        reloadDebounce = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await self?.reloadNow()
+        }
     }
 }
 

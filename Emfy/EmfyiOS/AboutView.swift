@@ -23,6 +23,7 @@ struct AboutView: View {
 
                     Text("Emfy")
                         .font(.largeTitle.weight(.bold))
+                        .accessibilityAddTraits(.isHeader)   // A6
                     Text(version)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

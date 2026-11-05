@@ -16,6 +16,9 @@ import UIKit
 /// column rather than a NavigationStack-pushed view, and `.inspector` doesn't pop.
 struct MetafileViewerScreen: View {
     @Environment(RecentsStore.self) private var store
+    // Non-optional: verified at runtime that the window's ToastCenter reaches the
+    // compact pushed viewer (the "Image copied" toast appears there).
+    @Environment(ToastCenter.self) private var toast
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -37,8 +40,7 @@ struct MetafileViewerScreen: View {
     private enum Phase {
         case loading
         case loaded(LoadedMetafile)
-        case unrenderable
-        case failed
+        case failed(DocumentSession.FailureReason)
     }
 
     /// The viewer phase, derived from the session's load state.
@@ -46,10 +48,17 @@ struct MetafileViewerScreen: View {
         switch session.state {
         case .idle, .loading: return .loading
         case .loaded(let model): return .loaded(model)
-        case .failed(.unreadable): return .unrenderable
-        case .failed: return .failed
+        case .failed(let reason): return .failed(reason)
         }
     }
+
+    private var isLoaded: Bool { if case .loaded = phase { return true }; return false }
+    private var isFailed: Bool { if case .failed = phase { return true }; return false }
+
+    /// Chrome is only hidden while a drawing is actually loaded — the immersive black
+    /// background and hidden bars must never survive into loading or a failed state,
+    /// or the user is left on a black screen with no Back button (C4a H5).
+    private var effectiveChromeHidden: Bool { chromeHidden && isLoaded }
 
     private var isRegularWidth: Bool { horizontalSizeClass == .regular }
 
@@ -80,9 +89,9 @@ struct MetafileViewerScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .metafileNavigationSubtitle(subtitle)
         .toolbar { bottomBar }
-        .toolbar(chromeHidden ? .hidden : .visible, for: .navigationBar)
-        .toolbar(chromeHidden ? .hidden : .visible, for: .bottomBar)
-        .statusBarHidden(chromeHidden)
+        .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .navigationBar)
+        .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .bottomBar)
+        .statusBarHidden(effectiveChromeHidden)
         .overlay(alignment: .top) { topOverlays }
         // Built-in inspector: a column on iPad, a sheet on iPhone (screenshot #6).
         // A fixed width so the drawing's reserved trailing space matches it exactly.
@@ -106,9 +115,14 @@ struct MetafileViewerScreen: View {
         } message: {
             Text("Emfy needs permission to add pictures to your photo library. You can allow access in Settings.")
         }
+        .alert("Photos Access Restricted", isPresented: photosRestrictedBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Photos access is restricted on this device, so Emfy can’t save pictures to your photo library.")
+        }
         .overlay {
             if exporter.isRendering {
-                RenderingOverlay()
+                ExportProgressOverlay { exporter.cancelExport() }
             }
         }
         .background(keyboardCommands)
@@ -119,9 +133,21 @@ struct MetafileViewerScreen: View {
         .onChange(of: controller.isZooming) { _, zooming in
             updatePill(zooming: zooming)
         }
-        .onChange(of: showBanner) { _, shown in
-            if shown, let message = partialMessage {
+        // Announce only when the partial-support message first appears, not each time
+        // the chrome returns (A9).
+        .onChange(of: partialMessage) { old, new in
+            if old == nil, let message = new {
                 UIAccessibility.post(notification: .announcement, argument: message)
+            }
+        }
+        // Reset immersive mode and announce the failed state when the phase leaves
+        // loaded, so the chrome returns and VoiceOver is told (A10, H5).
+        .onChange(of: isLoaded) { _, loaded in
+            if !loaded { chromeHidden = false }
+        }
+        .onChange(of: isFailed) { _, failed in
+            if failed {
+                UIAccessibility.post(notification: .announcement, argument: "Can’t show this file")
             }
         }
         .onDisappear {
@@ -143,13 +169,17 @@ struct MetafileViewerScreen: View {
         Binding(get: { exporter.showPhotosDeniedAlert }, set: { exporter.showPhotosDeniedAlert = $0 })
     }
 
+    private var photosRestrictedBinding: Binding<Bool> {
+        Binding(get: { exporter.showPhotosRestrictedAlert }, set: { exporter.showPhotosRestrictedAlert = $0 })
+    }
+
     private func openSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
     }
 
     private var backgroundColor: Color {
-        chromeHidden ? .black : Color(.systemGroupedBackground)
+        effectiveChromeHidden ? .black : Color(.systemGroupedBackground)
     }
 
     // MARK: - Drawing
@@ -159,6 +189,7 @@ struct MetafileViewerScreen: View {
         switch phase {
         case .loading:
             ProgressView()
+                .accessibilityLabel("Loading drawing")   // A10
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .loaded(let model):
             ZoomableMetafileView(
@@ -168,37 +199,42 @@ struct MetafileViewerScreen: View {
                 drawingLabel: "Drawing: \(entry?.baseName ?? "Metafile")",
                 controller: controller,
                 reduceMotion: reduceMotion,
-                chromeHidden: chromeHidden,
+                chromeHidden: effectiveChromeHidden,
                 onSingleTap: { toggleChrome() }
             )
             .ignoresSafeArea()
-        case .unrenderable:
-            message("This drawing couldn’t be rendered.")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .failed:
-            failedView
+            // Rebuild the tiled view only when the content actually changes, so a
+            // changed-content reload shows the new drawing while an identical reload
+            // keeps the same view and its zoom (C4a M4).
+            .id(session.loadedContentID)
+        case .failed(let reason):
+            failedView(reason)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private func message(_ text: String) -> some View {
+    /// The failed state: per-reason actions and wording, shared with the Mac through
+    /// `ViewerFailurePresentation` (C4a H4). Try Again only where it can help
+    /// (transient or a mid-write unreadable file), Remove otherwise.
+    private func failedView(_ reason: DocumentSession.FailureReason) -> some View {
         ContentUnavailableView {
             Label("Can’t show this file", systemImage: "exclamationmark.triangle")
         } description: {
-            Text(text)
-        }
-    }
-
-    /// The failed state (v3-plan §9.1): Try Again for a transient failure (offline,
-    /// not-yet-downloaded), Remove from Recents for a definitively-gone file.
-    private var failedView: some View {
-        ContentUnavailableView {
-            Label("Can’t show this file", systemImage: "exclamationmark.triangle")
-        } description: {
-            Text("Emfy couldn’t read this file right now. It may have been moved or deleted, or it may be offline.")
+            Text(ViewerFailurePresentation.message(for: reason))
         } actions: {
+            ForEach(ViewerFailurePresentation.actions(for: reason), id: \.self) { action in
+                failedActionButton(action)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func failedActionButton(_ action: ViewerFailurePresentation.Action) -> some View {
+        switch action {
+        case .tryAgain:
             Button("Try Again") { Task { await session.load() } }
                 .buttonStyle(.borderedProminent)
+        case .remove:
             Button("Remove from Recents", role: .destructive) {
                 store.remove(session.entryID)
                 onRemove()
@@ -233,6 +269,7 @@ struct MetafileViewerScreen: View {
             Label("Share", systemImage: "square.and.arrow.up")
         }
         .disabled(loaded == nil)
+        .accessibilityIdentifier("viewerShare")
     }
 
     @ViewBuilder
@@ -255,12 +292,13 @@ struct MetafileViewerScreen: View {
             }
             Divider()
             Button {
-                exporter.copyImage(prepared: model.prepared)
+                exporter.copyImage(prepared: model.prepared, toast: toast)
             } label: {
                 Label("Copy Image", systemImage: "doc.on.doc")
             }
+            .accessibilityIdentifier("copyImage")
             Button {
-                exporter.saveToPhotos(prepared: model.prepared)
+                exporter.saveToPhotos(prepared: model.prepared, toast: toast)
             } label: {
                 Label("Save to Photos", systemImage: "square.and.arrow.down")
             }
@@ -284,27 +322,46 @@ struct MetafileViewerScreen: View {
         }
         .disabled(loaded == nil)
         .accessibilityAddTraits(showInspector ? [.isSelected] : [])
+        .accessibilityIdentifier("viewerInfo")
     }
 
     // Keyboard shortcuts stay registered regardless of chrome visibility (a hidden
-    // toolbar deregisters its items' shortcuts), so iPad gets ⌘+/⌘−/⌘0/⌘1/⌘I. Each
-    // is hidden from VoiceOver.
+    // toolbar deregisters its items' shortcuts). Aligned with the Mac (C4a M6/A15):
+    // ⌘0 Actual Size, ⌘9 Fit, ⌘+/⌘= Zoom In, ⌘− Zoom Out, ⌘I Info (loaded only),
+    // ⇧⌘H toggles the controls, Esc restores them. Not ⌃⌘F (the system Enter Full
+    // Screen shortcut, which iPadOS windowing intercepts) and not ⇧⌘\ (SwiftUI can't
+    // match a `\` KeyEquivalent while Shift is held, since Shift+\ emits `|`) —
+    // verified on the simulator (C4a M6 correction). ⇧⌘E is deliberately NOT bound:
+    // on the Mac it means Export-to-file, so it must not mean something else on iPad.
+    // Each is hidden from VoiceOver.
     private var keyboardCommands: some View {
         ZStack {
             shortcutButton("Zoom In", "+") { controller.zoomIn() }
+            shortcutButton("Zoom In", "=") { controller.zoomIn() }
             shortcutButton("Zoom Out", "-") { controller.zoomOut() }
-            shortcutButton("Fit", "0") { controller.fit() }
-            shortcutButton("Actual Size", "1") { controller.actualSize() }
-            shortcutButton("Info", "i") { toggleInspector() }
+            shortcutButton("Actual Size", "0") { controller.actualSize() }
+            shortcutButton("Zoom to Fit", "9") { controller.fit() }
+            shortcutButton("Info", "i", enabled: loaded != nil) { toggleInspector() }
+            shortcutButton("Toggle Controls", "h", modifiers: [.command, .shift], enabled: isLoaded) { toggleChrome() }
+            Button("Show Controls") { if chromeHidden { toggleChrome() } }
+                .keyboardShortcut(.escape, modifiers: [])
+                .accessibilityHidden(true)
         }
         .frame(width: 0, height: 0)
         .opacity(0)
         .allowsHitTesting(false)
     }
 
-    private func shortcutButton(_ title: String, _ key: KeyEquivalent, action: @escaping () -> Void) -> some View {
+    private func shortcutButton(
+        _ title: String,
+        _ key: KeyEquivalent,
+        modifiers: EventModifiers = .command,
+        enabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(title, action: action)
-            .keyboardShortcut(key, modifiers: .command)
+            .keyboardShortcut(key, modifiers: modifiers)
+            .disabled(!enabled)
             .accessibilityHidden(true)
     }
 
@@ -365,6 +422,7 @@ struct MetafileViewerScreen: View {
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
             .hoverEffect()
+            .accessibilityLabel("Details about what Emfy couldn’t show")   // A9
     }
 
     private var bannerDismissButton: some View {
@@ -379,7 +437,7 @@ struct MetafileViewerScreen: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .hoverEffect()
-        .accessibilityLabel("Dismiss")
+        .accessibilityLabel("Dismiss warning")   // A9
     }
 
     @ViewBuilder
@@ -427,8 +485,11 @@ struct MetafileViewerScreen: View {
                 prepared: model.prepared,
                 diagnostics: model.diagnostics,
                 naturalSize: model.naturalSize,
-                zoomPercent: isRegularWidth ? zoomPercent : nil,
-                onClose: { closeInspector() }
+                // The Zoom row is reachable on both iPhone (sheet) and iPad (column),
+                // with − / + 25% steppers driving the viewer's controller (A14).
+                zoomPercent: zoomPercent,
+                onClose: { closeInspector() },
+                onZoomStep: { delta in controller.step(by: delta) }
             )
         } else {
             ContentUnavailableView("No details yet", systemImage: "info.circle")

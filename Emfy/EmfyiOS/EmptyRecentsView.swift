@@ -6,6 +6,9 @@ import SwiftUI
 struct EmptyRecentsView: View {
     let openAction: () -> Void
 
+    /// The hero icon scales with Dynamic Type so it grows with the text (A8).
+    @ScaledMetric private var iconSize: CGFloat = 52
+
     var body: some View {
         // Centred when there's room; scrolls (keeping the Open button and the
         // previews card reachable) when height is tight — compact/Duo-outer
@@ -17,10 +20,12 @@ struct EmptyRecentsView: View {
 
                     VStack(spacing: 14) {
                         Image(systemName: "photo.on.rectangle.angled")
-                            .font(.system(size: 52, weight: .regular))
+                            .font(.system(size: iconSize, weight: .regular))
                             .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)   // A8: decorative
                         Text("No recent files")
                             .font(.title2.weight(.bold))
+                            .accessibilityAddTraits(.isHeader)   // A6
                         Text("Open an EMF or WMF file from Files, or tap Share in Mail or Messages and choose Emfy. Compressed .emz and .wmz files work too.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -53,6 +58,7 @@ struct EmptyRecentsView: View {
             Image(systemName: "eye")
                 .font(.title3)
                 .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)   // A8: decorative
             VStack(alignment: .leading, spacing: 2) {
                 Text("Previews work without opening Emfy")
                     .font(.subheadline.weight(.semibold))

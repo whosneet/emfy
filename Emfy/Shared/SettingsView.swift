@@ -52,7 +52,9 @@ private struct SettingsForm: View {
     @Environment(\.openWindow) private var openWindow
     #endif
     #if os(iOS)
-    @State private var showClearConfirmation = false
+    // The Settings sheet hosts its own removal flow, because the window-level one is
+    // covered by this sheet (C4a H3, M5). Clear confirms and offers Save a Copy.
+    @State private var removal = RemovalCoordinator()
     #endif
 
     var body: some View {
@@ -69,12 +71,7 @@ private struct SettingsForm: View {
             }
         }
         #if os(iOS)
-        .alert("Clear Recents?", isPresented: $showClearConfirmation) {
-            Button("Clear Recents", role: .destructive) { store.clear() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes every file from your recent list. The files themselves are not deleted.")
-        }
+        .recentsRemoval(removal, store: store, toast: nil)
         #endif
     }
 
@@ -85,7 +82,7 @@ private struct SettingsForm: View {
             #if os(macOS)
             MacRecentsConfirmation.confirmClear(store: store)
             #else
-            showClearConfirmation = true
+            removal.requestClear(store: store)
             #endif
         } label: {
             Label("Clear Recents", systemImage: "trash")

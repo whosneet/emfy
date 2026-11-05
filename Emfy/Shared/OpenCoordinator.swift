@@ -65,16 +65,30 @@ final class OpenCoordinator {
         }
     }
 
-    /// Imports each URL into Recents (off-main) and selects it in the front window.
-    /// Used by the macOS File ▸ Open panel; Finder opens arrive via `onOpenURL`.
-    func open(urls: [URL], store: RecentsStore) {
+    #if os(macOS)
+    /// Routes an opened entry from the menu bar: into the front window when one
+    /// exists, else opens a new library window showing it — so ⌘O and Open Recent
+    /// work with every window closed rather than queuing invisibly (C4a M5).
+    func route(_ entryID: UUID, openWindow: OpenWindowAction) {
+        if let id = frontWindowID, let select = selectors[id] {
+            select(entryID)
+        } else {
+            openWindow(id: "library", value: LibraryWindowValue(entryID: entryID))
+        }
+    }
+
+    /// Imports each URL into Recents (off-main) and routes it (front window, or a new
+    /// window when none is open). Used by the macOS File ▸ Open panel; Finder opens
+    /// arrive via `onOpenURL`.
+    func open(urls: [URL], store: RecentsStore, openWindow: OpenWindowAction) {
         Task { @MainActor in
             for url in urls {
                 guard let entryID = await store.handleOpenedURL(url) else { continue }
-                selectInFront(entryID)
+                route(entryID, openWindow: openWindow)
             }
         }
     }
+    #endif
 
     private func drainPending() {
         guard !pending.isEmpty, let id = frontWindowID, let select = selectors[id] else { return }
@@ -88,53 +102,52 @@ final class OpenCoordinator {
 import UniformTypeIdentifiers
 
 extension OpenCoordinator {
-    /// File ▸ Open (⌘O): an `NSOpenPanel` limited to the metafile types, routed
-    /// through the same front-window path as a Finder open.
-    func presentOpenPanel(store: RecentsStore) {
+    /// File ▸ Open (⌘O): an `NSOpenPanel` limited to the metafile types, routed to
+    /// the front window, or a new window when none is open (C4a M5).
+    func presentOpenPanel(store: RecentsStore, openWindow: OpenWindowAction) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = MetafileTypes.readableContentTypes
         guard panel.runModal() == .OK else { return }
-        open(urls: panel.urls, store: store)
+        open(urls: panel.urls, store: store, openWindow: openWindow)
     }
 }
 
-/// Reports to the coordinator when its host window becomes key, so routing follows
-/// the frontmost window. A zero-size, non-drawing representable; it only observes.
+/// Reports to the coordinator when its host window's key state changes, so routing
+/// follows the frontmost window and the window-level alert shows only in the key one
+/// (C4a M5). A zero-size, non-drawing representable; it only observes.
 struct WindowFrontReporter: NSViewRepresentable {
-    let onBecomeKey: () -> Void
+    /// Called with `true` when the window becomes key and `false` when it resigns.
+    let onKeyChange: (Bool) -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = ReporterView()
-        view.onBecomeKey = onBecomeKey
+        view.onKeyChange = onKeyChange
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? ReporterView)?.onBecomeKey = onBecomeKey
+        (nsView as? ReporterView)?.onKeyChange = onKeyChange
     }
 
     private final class ReporterView: NSView {
-        var onBecomeKey: (() -> Void)?
+        var onKeyChange: ((Bool) -> Void)?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+            let center = NotificationCenter.default
+            center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+            center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
             guard let window else { return }
-            if window.isKeyWindow { onBecomeKey?() }
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(windowDidBecomeKey),
-                name: NSWindow.didBecomeKeyNotification,
-                object: window
-            )
+            onKeyChange?(window.isKeyWindow)
+            center.addObserver(self, selector: #selector(windowDidBecomeKey), name: NSWindow.didBecomeKeyNotification, object: window)
+            center.addObserver(self, selector: #selector(windowDidResignKey), name: NSWindow.didResignKeyNotification, object: window)
         }
 
-        @objc private func windowDidBecomeKey() {
-            onBecomeKey?()
-        }
+        @objc private func windowDidBecomeKey() { onKeyChange?(true) }
+        @objc private func windowDidResignKey() { onKeyChange?(false) }
 
         deinit {
             NotificationCenter.default.removeObserver(self)

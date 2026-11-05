@@ -200,3 +200,96 @@ import Testing
         #expect(session.state.kind == .failedNotFound)
     }
 }
+
+// MARK: - DocumentSession reload serialisation + keep-loaded (M4)
+
+/// A mutable, Sendable holder so a test can change what `resolve` returns between a
+/// first load and a keep-loaded reload.
+private final class ResolveBox: @unchecked Sendable {
+    var result: Result<Data, Error>
+    init(_ data: Data) { result = .success(data) }
+    func get() throws -> Data { try result.get() }
+}
+
+@MainActor
+@Suite struct DocumentSessionReloadTests {
+
+    @Test func identicalContentReloadKeepsModelAndDoesNotReset() async {
+        let data = EmfyTests.minimalEMF()
+        let box = ResolveBox(data)
+        let session = DocumentSession(entryID: UUID(), resolve: { _ in try box.get() })
+        await session.load()
+        #expect(session.state.kind == .loaded)
+        #expect(session.modelInstallCount == 1)
+
+        await session.reloadNow()                 // same bytes
+        #expect(session.state.kind == .loaded)
+        #expect(session.modelInstallCount == 1)   // no swap: the zoom survives
+    }
+
+    @Test func changedContentReloadInstallsANewModel() async {
+        let box = ResolveBox(EmfyTests.minimalEMF(width: 100, height: 100))
+        let session = DocumentSession(entryID: UUID(), resolve: { _ in try box.get() })
+        await session.load()
+        #expect(session.modelInstallCount == 1)
+
+        box.result = .success(EmfyTests.minimalEMF(width: 240, height: 120))
+        await session.reloadNow()
+        #expect(session.state.kind == .loaded)
+        #expect(session.modelInstallCount == 2)   // new content: a fresh model
+    }
+
+    @Test func transientFailureDuringReloadKeepsTheLoadedModel() async {
+        let box = ResolveBox(EmfyTests.minimalEMF())
+        let session = DocumentSession(entryID: UUID(), resolve: { _ in try box.get() })
+        await session.load()
+        #expect(session.state.kind == .loaded)
+
+        box.result = .failure(RecentsStore.ResolveFailure.unavailable)
+        await session.reloadNow()
+        #expect(session.state.kind == .loaded)    // the good render stays on screen
+        #expect(session.modelInstallCount == 1)
+    }
+
+    @Test func midWriteUnreadableDuringReloadKeepsTheLoadedModel() async {
+        let box = ResolveBox(EmfyTests.minimalEMF())
+        let session = DocumentSession(entryID: UUID(), resolve: { _ in try box.get() })
+        await session.load()
+        #expect(session.state.kind == .loaded)
+
+        box.result = .success(Data([1, 2, 3]))    // a partial file that won't parse
+        await session.reloadNow()
+        #expect(session.state.kind == .loaded)     // keep the last good model
+        #expect(session.modelInstallCount == 1)
+    }
+
+    @Test func notFoundDuringReloadFailsThrough() async {
+        let box = ResolveBox(EmfyTests.minimalEMF())
+        let session = DocumentSession(entryID: UUID(), resolve: { _ in try box.get() })
+        await session.load()
+        box.result = .failure(RecentsStore.ResolveFailure.notFound)
+        await session.reloadNow()
+        #expect(session.state.kind == .failedNotFound)   // a gone file is surfaced
+    }
+
+    @Test func theLatestLoadWinsWhenAnOlderOneFinishesLast() async {
+        let a = EmfyTests.minimalEMF(width: 100, height: 100)
+        let b = EmfyTests.minimalEMF(width: 240, height: 120)
+        let box = ResolveBox(a)
+        // The first load (a) resolves slowly; the reload (b) resolves at once, so the
+        // older, slower load finishes last and must be discarded by the generation
+        // guard rather than overwriting b.
+        let session = DocumentSession(entryID: UUID(), resolve: { _ in
+            let data = try box.get()
+            if data == a { try? await Task.sleep(for: .milliseconds(150)) }
+            return data
+        })
+        async let first: Void = session.load()
+        try? await Task.sleep(for: .milliseconds(30))   // let the slow load enter resolve
+        box.result = .success(b)
+        await session.reloadNow()
+        await first
+        #expect(session.state.kind == .loaded)
+        #expect(session.modelInstallCount == 1)          // only b was installed
+    }
+}

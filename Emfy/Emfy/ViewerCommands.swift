@@ -32,13 +32,14 @@ struct FileMenuCommands: Commands {
     let store: RecentsStore
     let coordinator: OpenCoordinator
     @FocusedValue(\.viewerActions) private var actions
+    @Environment(\.openWindow) private var openWindow
 
     private var noDocument: Bool { actions?.isDocumentLoaded != true }
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("Open…") {
-                coordinator.presentOpenPanel(store: store)
+                coordinator.presentOpenPanel(store: store, openWindow: openWindow)
             }
             .keyboardShortcut("o", modifiers: .command)
 
@@ -99,12 +100,14 @@ struct ViewMenuCommands: Commands {
 struct OpenRecentMenu: View {
     let store: RecentsStore
     let coordinator: OpenCoordinator
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Menu("Open Recent") {
             ForEach(OpenRecentList.items(from: store.entries)) { entry in
                 Button(entry.displayName) {
-                    coordinator.selectInFront(entry.id)
+                    // Route to the front window, or open one when none exists (M5).
+                    coordinator.route(entry.id, openWindow: openWindow)
                 }
             }
             Divider()
@@ -116,20 +119,74 @@ struct OpenRecentMenu: View {
     }
 }
 
-/// The shared "clear the recent files" confirmation (C3b scope 2, 6). One `NSAlert`
-/// so the Open Recent menu's Clear Menu and the macOS Settings' Clear Recents ask
-/// the same question before calling the store's existing `clear()`.
+/// The shared "clear the recent files" confirmation (C3b scope 2, 6; C4a H3). One
+/// `NSAlert` so the Open Recent menu's Clear Menu and the macOS Settings' Clear
+/// Recents ask the same question, with the same `RemovalConfirmation` wording. When
+/// received files are present it offers "Save a Copy…", which writes copies into a
+/// chosen folder before clearing (the only copies Emfy holds).
 enum MacRecentsConfirmation {
     @MainActor
     static func confirmClear(store: RecentsStore) {
+        let received = store.entries.filter { $0.importedFileName != nil }.count
+        let plan = RemovalConfirmation.plan(scope: .clear, receivedCount: received, totalCount: store.entries.count)
+
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Clear Recents?"
-        alert.informativeText = "This removes every file from your recent list. The files themselves are not deleted."
-        alert.addButton(withTitle: "Clear Recents")
+        alert.messageText = plan.title
+        alert.informativeText = plan.message
+        if plan.offersSaveCopy { alert.addButton(withTitle: "Save a Copy…") }
+        alert.addButton(withTitle: plan.destructiveTitle)
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
+
+        let response = alert.runModal()
+        if plan.offersSaveCopy {
+            switch response {
+            case .alertFirstButtonReturn: saveCopiesThenClear(store: store)
+            case .alertSecondButtonReturn: store.clear()
+            default: break
+            }
+        } else if response == .alertFirstButtonReturn {
             store.clear()
         }
+    }
+
+    /// Lets the user pick a folder, writes copies of every received file there under
+    /// its real name, then clears — only if at least one copy was written.
+    @MainActor
+    private static func saveCopiesThenClear(store: RecentsStore) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Save Copies"
+        panel.message = "Choose a folder to save copies of files Emfy received from other apps."
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+
+        let received = store.entries.filter { $0.importedFileName != nil }
+        Task { @MainActor in
+            var savedAny = false
+            for entry in received {
+                guard let data = try? await store.resolveData(for: entry) else { continue }
+                let destination = uniqueDestination(in: directory, name: entry.displayName)
+                if (try? data.write(to: destination)) != nil { savedAny = true }
+            }
+            if savedAny { store.clear() }
+        }
+    }
+
+    /// A non-colliding destination URL in `directory` for `name`.
+    private static func uniqueDestination(in directory: URL, name: String) -> URL {
+        let fm = FileManager.default
+        var candidate = directory.appendingPathComponent(name)
+        guard fm.fileExists(atPath: candidate.path) else { return candidate }
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        var index = 2
+        while fm.fileExists(atPath: candidate.path) {
+            let newName = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
+            candidate = directory.appendingPathComponent(newName)
+            index += 1
+        }
+        return candidate
     }
 }

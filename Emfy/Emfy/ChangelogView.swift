@@ -10,11 +10,13 @@ struct ChangelogView: View {
             VStack(alignment: .leading, spacing: 24) {
                 Text("Emfy Changelog")
                     .font(.title.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)   // A6
 
                 ForEach(entries) { entry in
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Version \(entry.version) (Build \(entry.build)) — \(entry.date)")
                             .font(.headline)
+                            .accessibilityAddTraits(.isHeader)   // A6
 
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(entry.changes, id: \.self) { change in

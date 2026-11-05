@@ -114,10 +114,10 @@ struct EmfyTests {
         #expect(isUnavailable(RecentsStore.resolveBookmark(bookmark)))
     }
 
-    // MARK: - §a Prune only on not-found
+    // MARK: - §a Resolve classifies but no longer auto-prunes (C4a H8/H4)
 
     @MainActor
-    @Test func pruneOnNotFoundButKeepOnUnavailable() async throws {
+    @Test func resolveClassifiesFailuresAndKeepsTheEntry() async throws {
         let dir = makeTempDir(); defer { cleanup(dir) }
         let store = makeStore(in: dir)
         let src = writeEMF(to: dir, name: "doc.emf")
@@ -136,12 +136,14 @@ struct EmfyTests {
         #expect(store.entries.count == 1)
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: importedURL.path)
 
-        // Definitive not-found prunes the entry.
+        // A definitive not-found now also keeps the entry — the viewer shows the
+        // failed state and the user's Remove takes it out, so the viewer isn't
+        // dismissed out from under them by an auto-prune (C4a H8/H4).
         try FileManager.default.removeItem(at: importedURL)
         await #expect(throws: RecentsStore.ResolveFailure.notFound) {
             _ = try await store.resolveData(for: entry)
         }
-        #expect(store.entries.isEmpty)
+        #expect(store.entries.count == 1)
     }
 
     // MARK: - §b Import a copy of ephemeral files, remove it with the entry
@@ -158,6 +160,10 @@ struct EmfyTests {
         #expect(FileManager.default.fileExists(atPath: importedURL.path))
 
         store.remove(id)
+        // C4a H3 defers side-file deletion until the undo window expires; it is kept
+        // until the pending removal commits (here, driven directly).
+        #expect(FileManager.default.fileExists(atPath: importedURL.path))
+        store.commitPendingRemoval()
         #expect(!FileManager.default.fileExists(atPath: importedURL.path))
     }
 

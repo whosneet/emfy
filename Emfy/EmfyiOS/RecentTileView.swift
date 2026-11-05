@@ -33,7 +33,8 @@ struct RecentTileView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(sizeString)")
+        // Include the date/size the tile shows, so VoiceOver isn't missing it (A5).
+        .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(metaSecond)")
         .accessibilityAddTraits(isSelecting ? [] : .isButton)
         // While selecting, expose Remove as a VoiceOver action — the red badge is
         // otherwise hidden by `children: .ignore`.
@@ -86,10 +87,14 @@ struct RecentTileView: View {
     }
 
     private var metaLine: String {
-        let second = Calendar.current.isDateInToday(entry.openedAt)
+        "\(entry.formatLabel) · \(metaSecond)"
+    }
+
+    /// The size today, the date earlier — reused for the VoiceOver label (A5).
+    private var metaSecond: String {
+        Calendar.current.isDateInToday(entry.openedAt)
             ? sizeString
             : entry.openedAt.formatted(.dateTime.day().month(.abbreviated))
-        return "\(entry.formatLabel) · \(second)"
     }
 
     private var sizeString: String {

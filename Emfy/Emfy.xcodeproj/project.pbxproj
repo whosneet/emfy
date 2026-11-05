@@ -93,6 +93,17 @@
 		B01100000000000000000161 /* OpenRecentList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000151 /* OpenRecentList.swift */; };
 		B01100000000000000000162 /* Changelog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000050 /* Changelog.swift */; };
 		B011000000000000000000F6 /* WhatsNewDecisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000F5 /* WhatsNewDecisionTests.swift */; };
+		B01100000000000000000170 /* RemovalConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000170 /* RemovalConfirmation.swift */; };
+		B01100000000000000000171 /* ViewerFailurePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000171 /* ViewerFailurePresentation.swift */; };
+		B01100000000000000000172 /* PhotoSaveDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000172 /* PhotoSaveDecision.swift */; };
+		B01100000000000000000173 /* ToastCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000173 /* ToastCenter.swift */; };
+		B01100000000000000000174 /* ExportProgressOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000174 /* ExportProgressOverlay.swift */; };
+		B01100000000000000000175 /* SaveACopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000175 /* SaveACopy.swift */; };
+		B01100000000000000000176 /* LibraryMoreMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000176 /* LibraryMoreMenu.swift */; platformFilters = (ios, ); };
+		B011000000000000000001F1 /* RemovalConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000170 /* RemovalConfirmation.swift */; };
+		B011000000000000000001F2 /* ViewerFailurePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000171 /* ViewerFailurePresentation.swift */; };
+		B011000000000000000001F3 /* PhotoSaveDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000172 /* PhotoSaveDecision.swift */; };
+		B011000000000000000001F4 /* AuditLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000001F0 /* AuditLogicTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -204,6 +215,14 @@
 		B00100000000000000000154 /* ViewerCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerCommands.swift; sourceTree = "<group>"; };
 		B00100000000000000000155 /* MacViewerExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacViewerExporter.swift; sourceTree = "<group>"; };
 		B001000000000000000000F5 /* WhatsNewDecisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsNewDecisionTests.swift; sourceTree = "<group>"; };
+		B00100000000000000000170 /* RemovalConfirmation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemovalConfirmation.swift; sourceTree = "<group>"; };
+		B00100000000000000000171 /* ViewerFailurePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerFailurePresentation.swift; sourceTree = "<group>"; };
+		B00100000000000000000172 /* PhotoSaveDecision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSaveDecision.swift; sourceTree = "<group>"; };
+		B00100000000000000000173 /* ToastCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastCenter.swift; sourceTree = "<group>"; };
+		B00100000000000000000174 /* ExportProgressOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportProgressOverlay.swift; sourceTree = "<group>"; };
+		B00100000000000000000175 /* SaveACopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveACopy.swift; sourceTree = "<group>"; };
+		B00100000000000000000176 /* LibraryMoreMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryMoreMenu.swift; sourceTree = "<group>"; };
+		B001000000000000000001F0 /* AuditLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditLogicTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -286,6 +305,12 @@
 				B00100000000000000000151 /* OpenRecentList.swift */,
 				B00100000000000000000152 /* EmfyLinks.swift */,
 				B00100000000000000000153 /* SettingsView.swift */,
+				B00100000000000000000170 /* RemovalConfirmation.swift */,
+				B00100000000000000000171 /* ViewerFailurePresentation.swift */,
+				B00100000000000000000172 /* PhotoSaveDecision.swift */,
+				B00100000000000000000173 /* ToastCenter.swift */,
+				B00100000000000000000174 /* ExportProgressOverlay.swift */,
+				B00100000000000000000175 /* SaveACopy.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -297,6 +322,7 @@
 				B001000000000000000000F1 /* DocumentHostTests.swift */,
 				B001000000000000000000F4 /* ZoomMathTests.swift */,
 				B001000000000000000000F5 /* WhatsNewDecisionTests.swift */,
+				B001000000000000000001F0 /* AuditLogicTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -369,6 +395,7 @@
 			isa = PBXGroup;
 			children = (
 				B00100000000000000000073 /* RecentsView.swift */,
+				B00100000000000000000176 /* LibraryMoreMenu.swift */,
 				B00100000000000000000138 /* WindowOpenMenu.swift */,
 				B00100000000000000000074 /* RecentTileView.swift */,
 				B00100000000000000000075 /* EmptyRecentsView.swift */,
@@ -626,6 +653,13 @@
 				B01100000000000000000153 /* SettingsView.swift in Sources */,
 				B01100000000000000000154 /* ViewerCommands.swift in Sources */,
 				B01100000000000000000155 /* MacViewerExporter.swift in Sources */,
+				B01100000000000000000170 /* RemovalConfirmation.swift in Sources */,
+				B01100000000000000000171 /* ViewerFailurePresentation.swift in Sources */,
+				B01100000000000000000172 /* PhotoSaveDecision.swift in Sources */,
+				B01100000000000000000173 /* ToastCenter.swift in Sources */,
+				B01100000000000000000174 /* ExportProgressOverlay.swift in Sources */,
+				B01100000000000000000175 /* SaveACopy.swift in Sources */,
+				B01100000000000000000176 /* LibraryMoreMenu.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -671,6 +705,10 @@
 				B01100000000000000000161 /* OpenRecentList.swift in Sources */,
 				B01100000000000000000162 /* Changelog.swift in Sources */,
 				B011000000000000000000F6 /* WhatsNewDecisionTests.swift in Sources */,
+				B011000000000000000001F1 /* RemovalConfirmation.swift in Sources */,
+				B011000000000000000001F2 /* ViewerFailurePresentation.swift in Sources */,
+				B011000000000000000001F3 /* PhotoSaveDecision.swift in Sources */,
+				B011000000000000000001F4 /* AuditLogicTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

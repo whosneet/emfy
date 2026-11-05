@@ -28,6 +28,7 @@ struct WhatsNewView: View {
             Text("What's New in Emfy \(entry.version)")
                 .font(.title2.weight(.semibold))
                 .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)   // A6
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
@@ -52,6 +53,7 @@ struct ChangeBullet: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("•")
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)   // A7: the bullet shouldn't be read aloud
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)
         }
