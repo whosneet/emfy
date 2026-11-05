@@ -211,6 +211,24 @@ final class RecentsStore {
         }
     }
 
+    /// Seeds *received* entries from existing files on disk (DEBUG only), for UI
+    /// testing and screenshots. Each file's bytes are copied into the temporary
+    /// directory first, so `handleOpenedURL` imports its own copy and the entry
+    /// reads as "received" — the same path as `seedReceivedForUITesting`. Driven by
+    /// the `EMFY_SEED_FILES` launch env (colon-separated absolute paths); the
+    /// original file extension is preserved so format detection is unchanged.
+    /// Missing or unreadable paths are skipped.
+    func seedReceivedFilesForUITesting(paths: [String]) async {
+        for path in paths where !path.isEmpty {
+            let source = URL(fileURLWithPath: path)
+            guard let data = try? Data(contentsOf: source) else { continue }
+            let dest = FileManager.default.temporaryDirectory
+                .appendingPathComponent("UISeed-\(UUID().uuidString)-\(source.lastPathComponent)")
+            guard (try? data.write(to: dest)) != nil else { continue }
+            _ = await handleOpenedURL(dest)
+        }
+    }
+
     /// Drops the in-memory thumbnail cache WITHOUT removing entries or their on-disk
     /// PNGs, to simulate an NSCache eviction under memory pressure for the P4
     /// eviction-reload test (review #3). DEBUG only — not a shipping affordance.

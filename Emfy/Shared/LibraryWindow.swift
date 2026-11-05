@@ -98,6 +98,11 @@ struct LibraryWindow: View {
             if let raw = ProcessInfo.processInfo.environment["EMFY_SEED_RECEIVED"], let n = Int(raw), n > 0 {
                 await store.seedReceivedForUITesting(count: n)
             }
+            // Seed specific host files as received entries (DEBUG only):
+            // SIMCTL_CHILD_EMFY_SEED_FILES=<path1:path2:…> — used for screenshots.
+            if let files = ProcessInfo.processInfo.environment["EMFY_SEED_FILES"], !files.isEmpty {
+                await store.seedReceivedFilesForUITesting(paths: files.split(separator: ":").map(String.init))
+            }
             #endif
             applyInitialSelection()
             #if os(iOS)
