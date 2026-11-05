@@ -21,29 +21,35 @@ public enum EMFDocumentWriter {
     /// The result re-parses to a record stream equal to `file`'s (same count and
     /// order; typed payloads equal; passthrough bytes identical) with a header
     /// whose Bytes/Records/Handles are now correct for the bytes written.
-    public static func reEmit(_ file: EMFFile, source: Data) throws(EMFWriteError) -> Data {
+    ///
+    /// With `repackageEMFPlus` set, the parsed EMF+ stream is rebuilt through the
+    /// EMF+ encoder instead of passed through: each source EMR_COMMENT_EMFPLUS
+    /// that ANCHORS EMF+ records (its `sourceRecordIndex`) is replaced in place by
+    /// freshly framed comment(s) carrying those records, and the tail-only EMF+
+    /// comments it spilled into are dropped (their bytes are now in the anchor
+    /// comment). GDI records, non-EMF+ comments and the comment POSITIONS are
+    /// preserved, so the GetDC interleaving a dual file relies on survives, the
+    /// reassembled EMF+ record stream is equal (type/flags/data), and
+    /// `emfPlusIsDual()` is unchanged. Default `false` keeps E0a behaviour and
+    /// every existing re-emit test byte-for-byte identical.
+    public static func reEmit(
+        _ file: EMFFile,
+        source: Data,
+        repackageEMFPlus: Bool = false
+    ) throws(EMFWriteError) -> Data {
         let src = [UInt8](source)
 
         // The header record is always records[0] after a successful parse.
         let headerRecord = file.records[0]
         var headerBytes = try rawRecordBytes(src, headerRecord)
 
-        // Encode (or pass through) every body record.
-        var bodyChunks: [[UInt8]] = []
-        bodyChunks.reserveCapacity(file.records.count - 1)
-
-        if file.records.count > 1 {
-            for index in 1 ..< file.records.count {
-                let record = file.records[index]
-                let payload = file.payload(of: record)
-                if EMFRecordEncoder.isFaithfullyEncodable(payload) {
-                    let encoded = try EMFRecordEncoder.encode(payload)
-                    bodyChunks.append([UInt8](encoded))
-                } else {
-                    bodyChunks.append(try rawRecordBytes(src, record))
-                }
-            }
+        let body: (chunks: [[UInt8]], recordCount: Int)
+        if repackageEMFPlus {
+            body = try repackagedBody(file, src: src)
+        } else {
+            body = try passthroughBody(file, src: src)
         }
+        let bodyChunks = body.chunks
 
         let bodyTotal = bodyChunks.reduce(0) { $0 + $1.count }
         let totalBytes = headerBytes.count + bodyTotal
@@ -52,7 +58,7 @@ public enum EMFDocumentWriter {
         }
         // Record count is bounded by the walker's 1,000,000 cap, so it always
         // fits a UInt32; computed defensively all the same.
-        let recordCount = UInt32(clamping: file.records.count)
+        let recordCount = UInt32(clamping: body.recordCount)
         // Handles is recomputed from the raw record stream (not the decoded
         // payloads): object-creation records the EMF decoder does not decode —
         // EMR_CREATEPALETTE, EMR_CREATEMONOBRUSH, … — still consume table slots,
@@ -71,6 +77,103 @@ public enum EMFDocumentWriter {
             out.append(contentsOf: chunk)
         }
         return Data(out)
+    }
+
+    // MARK: - Body builders
+
+    /// The E0a body: every record[1…] typed-encoded when faithful, else sliced
+    /// from `src` verbatim. Record count is the walked count (header included).
+    private static func passthroughBody(
+        _ file: EMFFile,
+        src: [UInt8]
+    ) throws(EMFWriteError) -> (chunks: [[UInt8]], recordCount: Int) {
+        var chunks: [[UInt8]] = []
+        guard file.records.count > 1 else { return (chunks, file.records.count) }
+        chunks.reserveCapacity(file.records.count - 1)
+        for index in 1 ..< file.records.count {
+            let record = file.records[index]
+            let payload = file.payload(of: record)
+            if EMFRecordEncoder.isFaithfullyEncodable(payload) {
+                chunks.append([UInt8](try EMFRecordEncoder.encode(payload)))
+            } else {
+                chunks.append(try rawRecordBytes(src, record))
+            }
+        }
+        return (chunks, file.records.count)
+    }
+
+    /// The repackage body: EMF+ comments rebuilt through the EMF+ encoder (see
+    /// `reEmit(_:source:repackageEMFPlus:)`), everything else as passthrough.
+    private static func repackagedBody(
+        _ file: EMFFile,
+        src: [UInt8]
+    ) throws(EMFWriteError) -> (chunks: [[UInt8]], recordCount: Int) {
+        let plus = file.emfPlusStream()
+        // No EMF+ content: nothing to repackage — identical to passthrough.
+        guard !plus.records.isEmpty else { return try passthroughBody(file, src: src) }
+
+        // Group every reassembled EMF+ record by the comment its header started in.
+        var grouped: [Int: [EMFPlusRecord]] = [:]
+        for record in plus.records {
+            grouped[record.sourceRecordIndex, default: []].append(record)
+        }
+
+        var chunks: [[UInt8]] = []
+        var recordCount = 1   // header
+        guard file.records.count > 1 else { return (chunks, recordCount) }
+        for index in 1 ..< file.records.count {
+            let record = file.records[index]
+            if record.type == emrCommentType {
+                if let group = grouped[index] {
+                    // Anchor comment: re-frame its records and re-pack into comment(s).
+                    var stream: [UInt8] = []
+                    for plusRecord in group {
+                        stream.append(contentsOf: EMFPlusCommentWriter.frame(plusRecord))
+                    }
+                    chunks.append(EMFPlusCommentWriter.packComments(streamBytes: stream))
+                    recordCount += emfPlusCommentCount(streamByteCount: stream.count)
+                } else if isEMFPlusComment(src, record) {
+                    // Tail-only EMF+ comment: its bytes moved to the anchor — drop it.
+                    continue
+                } else {
+                    // A non-EMF+ comment (public/GDIC): preserve verbatim.
+                    chunks.append(try rawRecordBytes(src, record))
+                    recordCount += 1
+                }
+            } else {
+                let payload = file.payload(of: record)
+                if EMFRecordEncoder.isFaithfullyEncodable(payload) {
+                    chunks.append([UInt8](try EMFRecordEncoder.encode(payload)))
+                } else {
+                    chunks.append(try rawRecordBytes(src, record))
+                }
+                recordCount += 1
+            }
+        }
+        return (chunks, recordCount)
+    }
+
+    /// EMR_COMMENT type id ([MS-EMF] §2.1.1).
+    private static let emrCommentType: UInt32 = 70
+
+    /// Whether `record` is an EMR_COMMENT_EMFPLUS: DataSize (at offset 8) is at
+    /// least 4 and the CommentIdentifier (at offset 12) is "EMF+" — the same test
+    /// `EMFFile.emfPlusPresence` applies, read defensively from `src`.
+    private static func isEMFPlusComment(_ src: [UInt8], _ record: EMFRawRecord) -> Bool {
+        let base = record.offset
+        guard record.size >= 16, base >= 0, base <= src.count - 16 else { return false }
+        func u32(_ at: Int) -> UInt32 {
+            UInt32(src[at]) | (UInt32(src[at + 1]) << 8) | (UInt32(src[at + 2]) << 16) | (UInt32(src[at + 3]) << 24)
+        }
+        return u32(base + 8) >= 4 && u32(base + 12) == EMFPlusCommentWriter.emfPlusIdentifier
+    }
+
+    /// The comment-record count `packComments` emits for a run (mirrors its
+    /// per-`maxCommentPayload`-slice loop).
+    private static func emfPlusCommentCount(streamByteCount: Int) -> Int {
+        guard streamByteCount > 0 else { return 0 }
+        let limit = max(4, EMFPlusCommentWriter.defaultMaxCommentPayload & ~3)
+        return (streamByteCount + limit - 1) / limit
     }
 
     // MARK: - Shared internals (used by EMFDocumentBuilder too)
