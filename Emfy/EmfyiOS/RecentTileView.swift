@@ -11,6 +11,8 @@ struct RecentTileView: View {
     @Environment(\.displayScale) private var displayScale
     let entry: RecentEntry
     let isSelecting: Bool
+    /// Whether this is a session-only Private-mode entry (shows the marker — S1a-5).
+    var isPrivate: Bool = false
 
     /// Holds a thumbnail only when the in-memory cache missed and this tile loaded it
     /// off-main (P4). The common path reads the cache in `body` instead, so a
@@ -40,7 +42,9 @@ struct RecentTileView: View {
         }
         .accessibilityElement(children: .ignore)
         // Include the date/size the tile shows, so VoiceOver isn't missing it (A5).
-        .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())")
+        .accessibilityLabel(isPrivate
+            ? "\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond()), Private"
+            : "\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())")
         .accessibilityAddTraits(isSelecting ? [] : .isButton)
         // While selecting, expose Remove as a VoiceOver action — the red badge is
         // otherwise hidden by `children: .ignore`.
@@ -81,6 +85,17 @@ struct RecentTileView: View {
                 }
                 .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
 
+            if isPrivate {
+                Image(systemName: "eye.slash.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.white)
+                    .padding(5)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .accessibilityHidden(true)
+            }
+
             if isSelecting {
                 Button(action: remove) {
                     Image(systemName: "minus.circle.fill")
@@ -99,5 +114,148 @@ struct RecentTileView: View {
     /// so the tile carries no per-entry closure that would defeat diffing (P3).
     private func remove() {
         removal.requestRemoval(id: entry.id, store: store, toast: toast)
+    }
+}
+
+/// One row of the iOS list layout (S1a-5 Library › Layout = List): a leading paper
+/// thumbnail sized by the Thumbnail-size setting, the file name and meta line, an
+/// optional Private marker, and a pin glyph for pinned entries. Tap opens; a context
+/// menu and a trailing swipe give Pin/Unpin and Remove; Select mode shows a leading
+/// remove badge instead, mirroring the grid tile.
+struct RecentListRow: View {
+    @Environment(RecentsStore.self) private var store
+    @Environment(EmfySettings.self) private var settings
+    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.openWindow) private var openWindow
+    let entry: RecentEntry
+    let isSelecting: Bool
+    let onOpen: () -> Void
+    let onRemove: () -> Void
+
+    @State private var loadedThumbnail: CGImage?
+
+    private var thumbnail: CGImage? {
+        store.cachedThumbnail(for: entry) ?? loadedThumbnail
+    }
+    private var isPrivate: Bool { store.isSessionPrivate(entry.id) }
+    private var box: CGSize { settings.thumbnailSize.listThumbnail }
+
+    var body: some View {
+        rowContent
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityAddTraits(isSelecting ? [] : .isButton)
+            .accessibilityAction(.default) { if !isSelecting { onOpen() } }
+            .accessibilityActions {
+                if !isPrivate {
+                    Button(store.isPinned(entry.id) ? "Unpin" : "Pin") { store.togglePin(entry.id) }
+                }
+                Button("Remove from Recents", role: .destructive) { onRemove() }
+            }
+            .contextMenu { menu }
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive, action: onRemove) { Label("Remove", systemImage: "trash") }
+            }
+            .task(id: ThumbnailTaskID(name: entry.thumbnailFileName, needsLoad: thumbnail == nil)) {
+                guard store.cachedThumbnail(for: entry) == nil else { return }
+                loadedThumbnail = await store.loadThumbnail(for: entry)
+            }
+    }
+
+    @ViewBuilder
+    private var rowContent: some View {
+        if isSelecting {
+            HStack(spacing: 12) {
+                Button(action: onRemove) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.title3)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .red)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHidden(true)
+                rowBody
+            }
+        } else {
+            Button(action: onOpen) { rowBody }
+                .buttonStyle(.plain)
+        }
+    }
+
+    private var rowBody: some View {
+        HStack(spacing: 12) {
+            thumbnailTile
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(entry.metaLine())
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if store.isPinned(entry.id) {
+                Image(systemName: "pin.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if isPrivate {
+                Image(systemName: "eye.slash")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var thumbnailTile: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(.white)
+            .frame(width: box.width, height: box.height)
+            .overlay {
+                if let thumbnail {
+                    Image(decorative: thumbnail, scale: displayScale)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .padding(5)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+            }
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        if OpenRouting.offersNewWindow(supportsMultipleWindows: supportsMultipleWindows) {
+            Button {
+                openWindow(id: "library", value: LibraryWindowValue(entryID: entry.id))
+            } label: {
+                Label("Open in New Window", systemImage: "macwindow.badge.plus")
+            }
+        }
+        if !isPrivate {
+            let pinned = store.isPinned(entry.id)
+            Button {
+                store.togglePin(entry.id)
+            } label: {
+                Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin")
+            }
+        }
+        Button(role: .destructive, action: onRemove) {
+            Label("Remove from Recents", systemImage: "trash")
+        }
+    }
+
+    private var accessibilityLabel: String {
+        var label = "\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())"
+        if store.isPinned(entry.id) { label += ", Pinned" }
+        if isPrivate { label += ", Private" }
+        return label
     }
 }

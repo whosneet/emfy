@@ -31,6 +31,23 @@ final class RecentsStore {
     /// alert. Cleared when the alert is dismissed.
     var lastErrorMessage: String?
 
+    /// The ids of entries opened during this launch while Private mode was on
+    /// (S1a-5). They sit in `entries` for the session but are never persisted,
+    /// have no on-disk thumbnail, and vanish when Private mode turns off or the app
+    /// quits. Observed so the "Private" section updates as they come and go.
+    private(set) var privateIDs: Set<UUID> = []
+
+    /// The live recents cap, synced from `EmfySettings.recentsToKeep` by the app
+    /// (S1a-5). Defaults to the historical 50 so the model, its tests, and any code
+    /// that doesn't set it behave exactly as before. Used by `sortAndCap` and
+    /// `applyCap`.
+    @ObservationIgnored var capLimit: Int = maxEntries
+
+    /// Private mode (S1a-5): while on, no recents.json write and no thumbnail PNG
+    /// touches the disk; opens become session-only `privateIDs` entries. Set by the
+    /// app from `EmfySettings.privateMode`; toggle through `setPrivate`.
+    @ObservationIgnored private(set) var isPrivate = false
+
     /// How many recents to keep. Stated cap (primer §8 — bound every list).
     nonisolated static let maxEntries = 50
     /// Thumbnail long-edge cap in pixels — a ~600 px tile is sharp at 2× and
@@ -91,6 +108,8 @@ final class RecentsStore {
         // empty-then-one-entry list would wipe the real history.
         await loadIfNeeded()
 
+        if isPrivate { return await handleOpenedURLPrivate(url) }
+
         let locations = self.locations
         let prepared = await Task.detached(priority: .userInitiated) {
             Self.prepareAdd(url: url, locations: locations)
@@ -150,6 +169,115 @@ final class RecentsStore {
             return a == b
         }
         return entry.displayName == prepared.displayName && entry.byteCount == prepared.byteCount
+    }
+
+    // MARK: - Private mode (S1a-5)
+
+    /// Opens a file while Private mode is on: it joins `entries` as a session-only
+    /// `privateIDs` entry — a fresh entry every time (never promoting or evicting
+    /// persisted history), with its thumbnail held in memory only. Nothing is written
+    /// to recents.json and no thumbnail PNG lands on disk; an imported copy (ephemeral
+    /// sources) goes to Imported/, where the next launch sweep reclaims it as an
+    /// orphan, and `purgeSessionPrivate` deletes it the moment Private mode turns off.
+    private func handleOpenedURLPrivate(_ url: URL) async -> UUID? {
+        let locations = self.locations
+        let prepared = await Task.detached(priority: .userInitiated) {
+            Self.prepareAdd(url: url, locations: locations, isPrivate: true)
+        }.value
+        guard let prepared else {
+            lastErrorMessage = "Emfy couldn’t open “\(url.lastPathComponent)”. The file may be empty, in a format Emfy doesn’t read, or damaged."
+            return nil
+        }
+        let entry = RecentEntry(
+            id: UUID(),
+            displayName: prepared.displayName,
+            formatLabel: prepared.formatLabel,
+            fullFormatName: prepared.fullFormatName,
+            byteCount: prepared.byteCount,
+            openedAt: prepared.openedAt,
+            bookmark: prepared.bookmark,
+            thumbnailFileName: nil,
+            fileIdentity: prepared.fileIdentity,
+            importedFileName: prepared.importedFileName,
+            reloadToken: UUID()
+        )
+        if let png = prepared.thumbnailPNGData, let image = Self.decodeCGImage(png) {
+            thumbnailCache.insert(image, for: entry.id)
+        }
+        entries.append(entry)
+        entries.sort { $0.openedAt > $1.openedAt }
+        privateIDs.insert(entry.id)
+        // No sortAndCap, no persist: Private opens never touch disk or evict history.
+        return entry.id
+    }
+
+    /// Whether an entry is a session-only Private-mode entry (S1a-5).
+    func isSessionPrivate(_ id: UUID) -> Bool { privateIDs.contains(id) }
+
+    /// Turns Private mode on or off (synced from `EmfySettings.privateMode`). Turning
+    /// it off drops every session-only entry and reclaims its side files; the persisted
+    /// history is untouched throughout.
+    func setPrivate(_ on: Bool) {
+        guard isPrivate != on else { return }
+        isPrivate = on
+        if !on { purgeSessionPrivate() }
+    }
+
+    /// Drops all session-only Private entries and deletes their in-memory thumbnails
+    /// and any imported copy. The persisted list is already correct (Private opens
+    /// never wrote to it), so the trailing `persist()` only re-asserts it.
+    private func purgeSessionPrivate() {
+        guard !privateIDs.isEmpty else { return }
+        let ids = privateIDs
+        privateIDs = []
+        for id in ids where entries.contains(where: { $0.id == id }) {
+            if let entry = entries.first(where: { $0.id == id }) { removeSideFiles(for: entry) }
+            thumbnailCache.remove(id)
+        }
+        entries.removeAll { ids.contains($0.id) }
+        persist()
+    }
+
+    // MARK: - Pinning (S1a-5)
+
+    /// Whether an entry is pinned to the top of the library.
+    func isPinned(_ id: UUID) -> Bool { entries.first { $0.id == id }?.isPinned ?? false }
+
+    /// Pins or unpins an entry and persists it (`isPinned` in recents.json). Pinned
+    /// entries are exempt from the recents cap (see `entriesToEvict`).
+    func setPinned(_ id: UUID, _ pinned: Bool) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].isPinned = pinned
+        persist()
+    }
+
+    /// Flips an entry's pinned state.
+    func togglePin(_ id: UUID) {
+        setPinned(id, !isPinned(id))
+    }
+
+    // MARK: - Recents cap (S1a-5)
+
+    /// Applies a new recents cap now, evicting over-cap entries (oldest unpinned
+    /// non-received first, received copies last, pinned exempt — `entriesToEvict`)
+    /// and deleting their side files, then persisting. Returns what it evicted so the
+    /// caller can report it. Session-only Private entries are excluded from the cap
+    /// accounting, so they are never counted or evicted (S1a-5 review). The
+    /// confirmation before dropping a received copy is the UI's
+    /// (`CapReductionController`); this is the commit.
+    @discardableResult
+    func applyCap(_ newCap: Int) -> [RecentEntry] {
+        capLimit = newCap
+        let evicted = Self.entriesToEvict(from: entries.filter { !privateIDs.contains($0.id) }, max: newCap)
+        guard !evicted.isEmpty else { return [] }
+        let ids = Set(evicted.map(\.id))
+        for entry in evicted {
+            removeSideFiles(for: entry)
+            thumbnailCache.remove(entry.id)
+        }
+        entries.removeAll { ids.contains($0.id) }
+        persist()
+        return evicted
     }
 
     // MARK: - Resolving an entry's bytes
@@ -277,6 +405,9 @@ final class RecentsStore {
         let bookmark = entry.bookmark
         let longEdge = Self.thumbnailLongEdge
         let existingName = entry.thumbnailFileName
+        // A session-only Private entry never writes a PNG to disk: regenerate it in
+        // memory and keep it off the cache file (S1a-5).
+        let allowDiskWrite = !privateIDs.contains(entry.id)
 
         let result = await Task.detached(priority: .utility) { () -> (image: CGImage, regeneratedName: String?)? in
             // 1. The cached PNG on disk.
@@ -290,6 +421,7 @@ final class RecentsStore {
                   let image = Self.decodeCGImage(png) else {
                 return nil
             }
+            guard allowDiskWrite else { return (image, nil) }
             let name = UUID().uuidString + ".png"
             try? FileManager.default.createDirectory(at: locations.thumbnailsDirectory, withIntermediateDirectories: true)
             let wrote = (try? png.write(to: locations.thumbnailsDirectory.appendingPathComponent(name), options: .atomic)) != nil
@@ -408,7 +540,8 @@ final class RecentsStore {
 
     private func sortAndCap() {
         entries.sort { $0.openedAt > $1.openedAt }
-        let evicted = Self.entriesToEvict(from: entries, max: Self.maxEntries)
+        // Session-only Private entries never count toward the cap (S1a-5 review).
+        let evicted = Self.entriesToEvict(from: entries.filter { !privateIDs.contains($0.id) }, max: capLimit)
         guard !evicted.isEmpty else { return }
         let evictedIDs = Set(evicted.map(\.id))
         for entry in evicted {
@@ -418,13 +551,33 @@ final class RecentsStore {
         entries.removeAll { evictedIDs.contains($0.id) }
     }
 
+    @ObservationIgnored private var lastPersistTask: Task<Void, Never>?
+
     private func persist() {
-        // Snapshot on the main actor, then write on a background actor (§h).
-        let snapshot = entries
+        // Private entries are never written (S1a-5 review): only the persisted,
+        // non-private entries are snapshotted. The write ALWAYS runs — a removal, pin
+        // or cap change to a persisted entry during Private mode must still reach disk,
+        // so a quit mid-session can't leave a dangling entry whose file was deleted.
+        let snapshot = entries.filter { !privateIDs.contains($0.id) }
         let locations = self.locations
         let writer = persistence
-        Task { await writer.write(snapshot, to: locations) }
+        // Chain writes so they complete in submission order (the persistence actor
+        // alone doesn't order separately-spawned tasks). The last task completing then
+        // implies all prior writes did, which a test can await deterministically.
+        let previous = lastPersistTask
+        lastPersistTask = Task {
+            await previous?.value
+            await writer.write(snapshot, to: locations)
+        }
     }
+
+    #if DEBUG
+    /// Awaits the most recently scheduled recents.json write (DEBUG only), so a test
+    /// observes persistence deterministically rather than racing the background write.
+    func waitForPersistenceForTesting() async {
+        await lastPersistTask?.value
+    }
+    #endif
 
     @ObservationIgnored private var persistCoalesceTask: Task<Void, Never>?
 
@@ -513,6 +666,10 @@ final class RecentsStore {
         let importedFileName: String?
         let fileIdentity: String?
         let openedAt: Date
+        /// The rendered thumbnail PNG held in memory, set only for a Private-mode
+        /// add (S1a-5) so the tile can show a thumbnail that never touches the disk.
+        /// `nil` for a normal add, which writes the PNG and sets `thumbnailFileName`.
+        var thumbnailPNGData: Data? = nil
     }
 
     /// Reads `url` while holding its security scope, confirms it opens through
@@ -521,7 +678,7 @@ final class RecentsStore {
     /// whose scope couldn't be taken (or whose bookmark couldn't be made) — its
     /// bytes are copied into Imported/ and the copy is bookmarked instead (§b).
     /// Returns `nil` for an unreadable file.
-    nonisolated static func prepareAdd(url: URL, locations: Locations) -> PreparedAdd? {
+    nonisolated static func prepareAdd(url: URL, locations: Locations, isPrivate: Bool = false) -> PreparedAdd? {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
@@ -558,11 +715,17 @@ final class RecentsStore {
 
         let names = MetafileFormatLabel.names(for: url.lastPathComponent)
         var thumbnailFileName: String?
+        var thumbnailPNGData: Data?
         if let png = MetafileLoader.thumbnailPNG(data, maxLongEdge: thumbnailLongEdge) {
-            let name = UUID().uuidString + ".png"
-            try? FileManager.default.createDirectory(at: locations.thumbnailsDirectory, withIntermediateDirectories: true)
-            if (try? png.write(to: locations.thumbnailsDirectory.appendingPathComponent(name), options: .atomic)) != nil {
-                thumbnailFileName = name
+            if isPrivate {
+                // Private mode: keep the thumbnail in memory only — nothing on disk.
+                thumbnailPNGData = png
+            } else {
+                let name = UUID().uuidString + ".png"
+                try? FileManager.default.createDirectory(at: locations.thumbnailsDirectory, withIntermediateDirectories: true)
+                if (try? png.write(to: locations.thumbnailsDirectory.appendingPathComponent(name), options: .atomic)) != nil {
+                    thumbnailFileName = name
+                }
             }
         }
 
@@ -575,7 +738,8 @@ final class RecentsStore {
             thumbnailFileName: thumbnailFileName,
             importedFileName: importedFileName,
             fileIdentity: fileIdentity,
-            openedAt: Date()
+            openedAt: Date(),
+            thumbnailPNGData: thumbnailPNGData
         )
     }
 

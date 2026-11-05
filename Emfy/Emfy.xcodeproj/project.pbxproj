@@ -121,6 +121,13 @@
 		B01100000000000000000316 /* ViewerZoomPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000306 /* ViewerZoomPolicy.swift */; };
 		B01100000000000000000307 /* ViewerTilePaint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000307 /* ViewerTilePaint.swift */; };
 		B01100000000000000000317 /* ViewerTilePaint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000307 /* ViewerTilePaint.swift */; };
+		B01100000000000000000308 /* LaunchSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000308 /* LaunchSelection.swift */; };
+		B01100000000000000000318 /* LaunchSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000308 /* LaunchSelection.swift */; };
+		B01100000000000000000309 /* RecentSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000309 /* RecentSections.swift */; };
+		B01100000000000000000319 /* RecentSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000309 /* RecentSections.swift */; };
+		B0110000000000000000030A /* CapReduction.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000030A /* CapReduction.swift */; };
+		B0110000000000000000030B /* CapReductionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000030B /* CapReductionController.swift */; };
+		B0110000000000000000031B /* CapReductionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000030B /* CapReductionController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -250,6 +257,10 @@
 		B00100000000000000000305 /* SettingsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModelTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000306 /* ViewerZoomPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerZoomPolicy.swift; sourceTree = "<group>"; };
 		B00100000000000000000307 /* ViewerTilePaint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerTilePaint.swift; sourceTree = "<group>"; };
+		B00100000000000000000308 /* LaunchSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSelection.swift; sourceTree = "<group>"; };
+		B00100000000000000000309 /* RecentSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSections.swift; sourceTree = "<group>"; };
+		B0010000000000000000030A /* CapReduction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapReduction.swift; sourceTree = "<group>"; };
+		B0010000000000000000030B /* CapReductionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapReductionController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -346,6 +357,10 @@
 				B00100000000000000000304 /* RecentsCapPolicy.swift */,
 				B00100000000000000000306 /* ViewerZoomPolicy.swift */,
 				B00100000000000000000307 /* ViewerTilePaint.swift */,
+				B00100000000000000000308 /* LaunchSelection.swift */,
+				B00100000000000000000309 /* RecentSections.swift */,
+				B0010000000000000000030A /* CapReduction.swift */,
+				B0010000000000000000030B /* CapReductionController.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -706,6 +721,10 @@
 				B01100000000000000000304 /* RecentsCapPolicy.swift in Sources */,
 				B01100000000000000000306 /* ViewerZoomPolicy.swift in Sources */,
 				B01100000000000000000307 /* ViewerTilePaint.swift in Sources */,
+				B01100000000000000000308 /* LaunchSelection.swift in Sources */,
+				B01100000000000000000309 /* RecentSections.swift in Sources */,
+				B0110000000000000000030A /* CapReduction.swift in Sources */,
+				B0110000000000000000030B /* CapReductionController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -763,6 +782,9 @@
 				B01100000000000000000315 /* SettingsModelTests.swift in Sources */,
 				B01100000000000000000316 /* ViewerZoomPolicy.swift in Sources */,
 				B01100000000000000000317 /* ViewerTilePaint.swift in Sources */,
+				B01100000000000000000318 /* LaunchSelection.swift in Sources */,
+				B01100000000000000000319 /* RecentSections.swift in Sources */,
+				B0110000000000000000031B /* CapReductionController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

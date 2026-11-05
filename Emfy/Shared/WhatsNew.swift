@@ -26,6 +26,13 @@ enum WhatsNew {
         return lastSeenVersion != currentVersion
     }
 
+    /// The decision gated by the "Show What's New after updates" setting (S1a-5):
+    /// when the setting is off, What's New never presents on launch, whatever the
+    /// stored version. Pure — the unit test drives it.
+    static func shouldShow(enabled: Bool, lastSeenVersion: String?, currentVersion: String) -> Bool {
+        enabled && shouldShow(lastSeenVersion: lastSeenVersion, currentVersion: currentVersion)
+    }
+
     /// The launch-time decision, reading the stored version from `defaults`. In
     /// DEBUG, the reset launch argument clears the stored version first.
     static func shouldShowOnLaunch(
@@ -66,5 +73,13 @@ enum WhatsNewPresenter {
         didPresentThisLaunch = true
         WhatsNew.recordShown()
         return true
+    }
+
+    /// As `claimLaunchPresentation`, but gated by the "Show What's New after updates"
+    /// setting (S1a-5). When the setting is off it returns `false` and records
+    /// nothing — so turning the setting back on later still shows the latest.
+    static func claimLaunchPresentation(enabled: Bool) -> Bool {
+        guard enabled else { return false }
+        return claimLaunchPresentation()
     }
 }

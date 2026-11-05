@@ -15,9 +15,19 @@ import AppKit
 struct EmfyApp: App {
     @State private var store = RecentsStore.shared
     @State private var coordinator = OpenCoordinator.shared
-    // The S1a settings store, injected into every window on both platforms. No
-    // view reads it yet (S1a-1 is model-only); the Settings UIs land in S1a-2/3.
+    // The S1a settings store, injected into every window on both platforms.
     @State private var settings = EmfySettings.shared
+
+    init() {
+        // Sync the settings-driven cap and Private mode into the shared store before
+        // any scene appears or a cold-launch open arrives (S1a-5 review): a Finder /
+        // Files open at launch, and a windowless Settings change on the Mac, must
+        // honour them even with no library window open. The per-window sync in
+        // LibraryWindow stays as an idempotent backstop.
+        let settings = EmfySettings.shared
+        RecentsStore.shared.capLimit = settings.recentsToKeep.count
+        RecentsStore.shared.setPrivate(settings.privateMode)
+    }
 
     var body: some Scene {
         WindowGroup(id: "library", for: LibraryWindowValue.self) { $value in
@@ -86,6 +96,7 @@ struct EmfyApp: App {
 private struct RootView: View {
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
+    @Environment(EmfySettings.self) private var settings
     #endif
     let initialSelection: UUID?
 
@@ -93,10 +104,11 @@ private struct RootView: View {
         content
         #if os(macOS)
             // Open the What's New window once per installed version, once per launch
-            // (C3b scope 7). The decision and the once-per-launch guard are shared;
-            // the first library window to appear claims the presentation.
+            // (C3b scope 7), gated by the "Show What's New after updates" setting
+            // (S1a-5). The decision and the once-per-launch guard are shared; the
+            // first library window to appear claims the presentation.
             .onAppear {
-                if WhatsNewPresenter.claimLaunchPresentation() {
+                if WhatsNewPresenter.claimLaunchPresentation(enabled: settings.showWhatsNewAfterUpdates) {
                     openWindow(id: "whats-new")
                 }
             }

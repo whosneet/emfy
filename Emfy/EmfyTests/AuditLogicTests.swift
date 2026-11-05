@@ -256,8 +256,10 @@ struct DeferredRemovalTests {
             store.remove(id)                                     // pending; side files deferred
             #expect(store.pendingRemoval != nil)
             #expect(FileManager.default.fileExists(atPath: imported.path))
-            // "Quit": drop the store without committing. The persisted list already
-            // excludes the removed entry.
+            // "Quit": drop the store without committing. Await the removal's write so
+            // the relaunch below reads the persisted list (which excludes the removed
+            // entry) rather than racing the background write.
+            await store.waitForPersistenceForTesting()
         }
 
         // Next launch: a fresh store over the same locations runs the orphan sweep.

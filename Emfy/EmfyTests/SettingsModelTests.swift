@@ -45,6 +45,35 @@ struct SettingsModelTests {
         )
     }
 
+    // MARK: - Store helpers (injected temp directory)
+
+    @MainActor
+    private func makeDirStore() -> (URL, RecentsStore) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyS1a5-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let store = RecentsStore(locations: .init(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)))
+        return (dir, store)
+    }
+
+    /// Adds a file from the temp directory, so it imports a copy and reads as received.
+    @MainActor
+    @discardableResult
+    private func addReceived(_ store: RecentsStore, in dir: URL, name: String) async -> UUID? {
+        let url = dir.appendingPathComponent(name)
+        try? EmfyTests.minimalEMF().write(to: url)
+        return await store.handleOpenedURL(url)
+    }
+
+    /// The display names currently on disk in recents.json.
+    private func persistedNames(_ store: RecentsStore) -> [String] {
+        guard let data = try? Data(contentsOf: store.locations.storeURL),
+              let arr = try? JSONDecoder().decode([RecentEntry].self, from: data) else { return [] }
+        return arr.map(\.displayName)
+    }
+
     /// `<repo>/corpus/gate-p4-text.emf`, from this file's compile-time path.
     static let corpusTextURL = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()   // EmfyTests
@@ -236,6 +265,293 @@ struct SettingsModelTests {
 
         #expect(RecentSort.sorted(input, by: .name).map(\.displayName) == ["a.emf", "b.emf", "c.emf"])
         #expect(RecentSort.sorted(input, by: .size).map(\.byteCount) == [30, 20, 10])   // largest first
+    }
+
+    // MARK: - Section building (sort + pin + private)
+
+    @Test
+    func sectionsSplitTodayEarlierByDateAndCollapseForNameSize() {
+        let now = Date()
+        let today1 = entry(name: "b.emf", bytes: 10, opened: now)
+        let today2 = entry(name: "a.emf", bytes: 30, opened: now.addingTimeInterval(-60))
+        let earlier = entry(name: "c.emf", bytes: 20, opened: now.addingTimeInterval(-90_000))
+        let input = [today1, today2, earlier]
+
+        // Date keeps the Today / Earlier split, newest first within each.
+        let byDate = RecentSections.build(input, sort: .date, now: now)
+        #expect(byDate.map(\.kind) == [.today, .earlier])
+        #expect(byDate[0].entries.map(\.id) == [today1.id, today2.id])
+        #expect(byDate[1].entries.map(\.id) == [earlier.id])
+
+        // Name collapses to one untitled section, alphabetical.
+        let byName = RecentSections.build(input, sort: .name, now: now)
+        #expect(byName.map(\.kind) == [.all])
+        #expect(byName[0].title == nil)
+        #expect(byName[0].entries.map(\.displayName) == ["a.emf", "b.emf", "c.emf"])
+
+        // Size collapses to one section, largest first.
+        let bySize = RecentSections.build(input, sort: .size, now: now)
+        #expect(bySize.map(\.kind) == [.all])
+        #expect(bySize[0].entries.map(\.byteCount) == [30, 20, 10])
+    }
+
+    @Test
+    func pinnedSectionLeadsEverySortAndIsDrawnOut() {
+        let now = Date()
+        let pinned = entry(name: "pin.emf", bytes: 5, opened: now.addingTimeInterval(-99_999), pinned: true)
+        let today = entry(name: "today.emf", bytes: 10, opened: now)
+        let input = [pinned, today]
+        for sort in EmfySettings.SortOrder.allCases {
+            let sections = RecentSections.build(input, sort: sort, now: now)
+            #expect(sections.first?.kind == .pinned)
+            #expect(sections.first?.entries.map(\.id) == [pinned.id])
+            // A pinned file is drawn out of the later sections, never shown twice.
+            let later = sections.dropFirst().flatMap { $0.entries.map(\.id) }
+            #expect(!later.contains(pinned.id))
+            #expect(later.contains(today.id))
+        }
+    }
+
+    @Test
+    func privateSectionLeadsAndSearchIsJustPreFiltering() {
+        let now = Date()
+        let priv = entry(name: "secret.emf", bytes: 10, opened: now)
+        let pinned = entry(name: "pin.emf", bytes: 10, opened: now, pinned: true)
+        let normal = entry(name: "normal.emf", bytes: 10, opened: now)
+        let input = [priv, pinned, normal]
+
+        let sections = RecentSections.build(input, sort: .date, privateIDs: [priv.id], now: now)
+        #expect(sections.map(\.kind) == [.privateSession, .pinned, .today])
+        #expect(sections[0].entries.map(\.id) == [priv.id])
+
+        // Search filters before sectioning, so every sort still searches.
+        let filtered = input.filter { $0.displayName.localizedStandardContains("normal") }
+        let searched = RecentSections.build(filtered, sort: .name, privateIDs: [priv.id], now: now)
+        #expect(searched.map(\.kind) == [.all])
+        #expect(searched.flatMap { $0.entries.map(\.id) } == [normal.id])
+    }
+
+    // MARK: - Launch selection (reopen last file)
+
+    @Test
+    func launchSelectionHonoursReopenSettingAndExplicitRequests() {
+        let requested = UUID()
+        let stored = UUID()
+        // Reopen on: restore the stored selection. Off: start empty.
+        #expect(LaunchSelection.restored(reopenLastFile: true, requested: nil, stored: stored) == stored)
+        #expect(LaunchSelection.restored(reopenLastFile: false, requested: nil, stored: stored) == nil)
+        // An explicit request (Open in New Window) always wins, whatever the setting.
+        #expect(LaunchSelection.restored(reopenLastFile: false, requested: requested, stored: stored) == requested)
+        #expect(LaunchSelection.restored(reopenLastFile: true, requested: requested, stored: stored) == requested)
+        // Nothing stored: nil even with reopen on.
+        #expect(LaunchSelection.restored(reopenLastFile: true, requested: nil, stored: nil) == nil)
+    }
+
+    // MARK: - What's New gating
+
+    @Test
+    func whatsNewRespectsTheShowAfterUpdatesSetting() {
+        // Enabled: the version decision stands.
+        #expect(WhatsNew.shouldShow(enabled: true, lastSeenVersion: nil, currentVersion: "3.0"))
+        #expect(!WhatsNew.shouldShow(enabled: true, lastSeenVersion: "3.0", currentVersion: "3.0"))
+        #expect(WhatsNew.shouldShow(enabled: true, lastSeenVersion: "2.9", currentVersion: "3.0"))
+        // Disabled: never shows, whatever the versions.
+        #expect(!WhatsNew.shouldShow(enabled: false, lastSeenVersion: nil, currentVersion: "3.0"))
+        #expect(!WhatsNew.shouldShow(enabled: false, lastSeenVersion: "2.9", currentVersion: "3.0"))
+    }
+
+    // MARK: - Cap shrink: affected received files
+
+    @Test
+    func capShrinkReportsAffectedReceivedFiles() {
+        let now = Date()
+        func at(_ s: TimeInterval) -> Date { now.addingTimeInterval(s) }
+        let n1 = entry(name: "n1.emf", bytes: 1, opened: at(0))
+        let r1 = entry(name: "r1.emf", bytes: 1, opened: at(10), received: true)
+        let r2 = entry(name: "r2.emf", bytes: 1, opened: at(20), received: true)
+        let r3 = entry(name: "r3.emf", bytes: 1, opened: at(30), received: true)
+        let entries = [n1, r1, r2, r3]
+
+        // Cap 1 → the lone non-received, then the two oldest received copies.
+        let to1 = RecentsCapPolicy.shrink(entries, to: 1)
+        #expect(to1.dropsReceivedFile == true)
+        #expect(Set(to1.evictedReceived.map(\.id)) == Set([r1.id, r2.id]))
+
+        // Cap 3 → only the non-received drops; no received file is affected.
+        let to3 = RecentsCapPolicy.shrink(entries, to: 3)
+        #expect(to3.dropsReceivedFile == false)
+        #expect(to3.evictedReceived.isEmpty)
+    }
+
+    // MARK: - Private mode: persistence gating
+
+    @Test @MainActor
+    func privateModeAddsSessionEntryWithoutWritingHistoryOrThumbnails() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyPrivate-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RecentsStore(locations: .init(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        ))
+
+        store.setPrivate(true)
+        let url = dir.appendingPathComponent("secret.emf")
+        try EmfyTests.minimalEMF().write(to: url)
+        let id = try #require(await store.handleOpenedURL(url))
+
+        // The session entry is visible and marked private.
+        #expect(store.entries.contains { $0.id == id })
+        #expect(store.isSessionPrivate(id))
+
+        // Private mode writes no recents.json and no thumbnail PNG to disk.
+        #expect(!FileManager.default.fileExists(atPath: store.locations.storeURL.path))
+        let thumbs = (try? FileManager.default.contentsOfDirectory(atPath: store.locations.thumbnailsDirectory.path)) ?? []
+        #expect(thumbs.isEmpty)
+
+        // Turning Private mode off drops the session entry.
+        store.setPrivate(false)
+        #expect(store.entries.isEmpty)
+    }
+
+    // MARK: - Private mode: persist non-private changes (review #1)
+
+    @Test @MainActor
+    func privateModeStillPersistsRemovalOfAHistoryEntry() async throws {
+        let (dir, store) = makeDirStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try #require(await addReceived(store, in: dir, name: "keep.emf"))
+        let goneID = try #require(await addReceived(store, in: dir, name: "gone.emf"))
+        await store.waitForPersistenceForTesting()
+        let copy = store.locations.importedDirectory
+            .appendingPathComponent(try #require(store.entry(id: goneID)?.importedFileName))
+        #expect(FileManager.default.fileExists(atPath: copy.path))
+
+        // Private on, open a private file, then remove a PERSISTED entry.
+        store.setPrivate(true)
+        await addReceived(store, in: dir, name: "secret.emf")
+        store.remove(goneID)
+        store.commitPendingRemoval()                 // delete the removed entry's side files now
+        await store.waitForPersistenceForTesting()
+
+        // The removal reached disk (no dangling entry), the copy is gone, and the
+        // private entry was never written.
+        let names = persistedNames(store)
+        #expect(!names.contains("gone.emf"))
+        #expect(names.contains("keep.emf"))
+        #expect(!names.contains("secret.emf"))
+        #expect(!FileManager.default.fileExists(atPath: copy.path))
+    }
+
+    @Test @MainActor
+    func privateModeStillPersistsPinningAHistoryEntry() async throws {
+        let (dir, store) = makeDirStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        let id = try #require(await addReceived(store, in: dir, name: "doc.emf"))
+        await store.waitForPersistenceForTesting()
+
+        store.setPrivate(true)
+        await addReceived(store, in: dir, name: "secret.emf")
+        store.setPinned(id, true)
+        await store.waitForPersistenceForTesting()
+
+        // A fresh store over the same locations sees the pin; the private entry is gone.
+        let reloaded = RecentsStore(locations: store.locations)
+        await reloaded.loadIfNeeded()
+        #expect(reloaded.entries.count == 1)
+        #expect(reloaded.entry(id: id)?.isPinned == true)
+        #expect(reloaded.entries.first?.displayName == "doc.emf")
+    }
+
+    @Test @MainActor
+    func privateModeEntriesAreExemptFromTheCap() async throws {
+        let (dir, store) = makeDirStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        await addReceived(store, in: dir, name: "a.emf")
+        await addReceived(store, in: dir, name: "b.emf")
+        await store.waitForPersistenceForTesting()
+
+        store.setPrivate(true)
+        for i in 0..<3 { await addReceived(store, in: dir, name: "p\(i).emf") }
+        #expect(store.entries.count == 5)
+        #expect(store.privateIDs.count == 3)
+
+        // Lower the cap to 1: only the two persisted entries are accounted, so one is
+        // evicted and no private entry is touched.
+        store.applyCap(1)
+        await store.waitForPersistenceForTesting()
+        #expect(store.privateIDs.count == 3)
+        #expect(persistedNames(store).count == 1)
+    }
+
+    // MARK: - Cold-launch ordering (review #2)
+
+    @Test @MainActor
+    func aStoreMadePrivateBeforeItsFirstOpenPersistsNothing() async throws {
+        // Simulates the EmfyApp.init sync setting Private on before any open arrives.
+        let (dir, store) = makeDirStore(); defer { try? FileManager.default.removeItem(at: dir) }
+        store.setPrivate(true)
+        let id = try #require(await addReceived(store, in: dir, name: "secret.emf"))
+        #expect(store.isSessionPrivate(id))
+        await store.waitForPersistenceForTesting()
+        #expect(!FileManager.default.fileExists(atPath: store.locations.storeURL.path))
+    }
+
+    // MARK: - Cap-reduction controller (review #3)
+
+    @MainActor
+    private func seededCapScenario(count: Int) async throws -> (URL, RecentsStore, EmfySettings, String, CapReductionController) {
+        let (dir, store) = makeDirStore()
+        for i in 0..<count { await addReceived(store, in: dir, name: "r\(i).emf") }
+        await store.waitForPersistenceForTesting()
+        let (defaults, name) = try freshDefaults()
+        let settings = EmfySettings(defaults: defaults)
+        settings.recentsToKeep = .fifty
+        return (dir, store, settings, name, CapReductionController())
+    }
+
+    @Test @MainActor
+    func capControllerCancelRestoresAndReduceAnywayShrinks() async throws {
+        let (dir, store, settings, suite, cap) = try await seededCapScenario(count: 12)
+        defer { try? FileManager.default.removeItem(at: dir); UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        // Lowering 50 → 10 would drop a received copy, so it confirms (pending set).
+        cap.handleChange(from: .fifty, to: .ten, store: store)
+        #expect(cap.pending != nil)
+
+        // Cancel restores the picker and leaves Recents untouched.
+        cap.cancel(settings: settings)
+        #expect(cap.pending == nil)
+        #expect(settings.recentsToKeep == .fifty)
+        #expect(store.entries.count == 12)
+
+        // Reduce Anyway shrinks to the new cap.
+        cap.handleChange(from: .fifty, to: .ten, store: store)
+        cap.reduceAnyway(store: store)
+        await store.waitForPersistenceForTesting()
+        #expect(store.entries.count == 10)
+    }
+
+    @Test @MainActor
+    func capControllerExportFailureRestoresAndSuccessShrinks() async throws {
+        let (dir, store, settings, suite, cap) = try await seededCapScenario(count: 12)
+        defer { try? FileManager.default.removeItem(at: dir); UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        // Export failure (or cancel) must restore the picker — not leave it ahead of
+        // the store, which never shrank.
+        cap.handleChange(from: .fifty, to: .ten, store: store)
+        cap.saveCopiesThenReduce(store: store, settings: settings)
+        await cap.waitForExportPreparationForTesting()
+        #expect(cap.isExporting)
+        cap.finishExport(success: false, store: store, settings: settings)
+        #expect(settings.recentsToKeep == .fifty)
+        #expect(store.entries.count == 12)
+
+        // A successful export shrinks.
+        cap.handleChange(from: .fifty, to: .ten, store: store)
+        cap.saveCopiesThenReduce(store: store, settings: settings)
+        await cap.waitForExportPreparationForTesting()
+        cap.finishExport(success: true, store: store, settings: settings)
+        await store.waitForPersistenceForTesting()
+        #expect(store.entries.count == 10)
     }
 
     // MARK: - Export scale/cap selection

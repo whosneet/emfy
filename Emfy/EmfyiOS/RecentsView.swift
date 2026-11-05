@@ -15,6 +15,7 @@ struct RecentsGrid: View {
     @Environment(RecentsStore.self) private var store
     @Environment(RemovalCoordinator.self) private var removal
     @Environment(ToastCenter.self) private var toast
+    @Environment(EmfySettings.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -28,10 +29,20 @@ struct RecentsGrid: View {
 
     @SceneStorage("recents.search") private var searchText = ""
 
-    /// Minimum tile width, scaled with Dynamic Type so big text doesn't clip — at
-    /// accessibility sizes this grows enough to collapse the grid to one column on
-    /// a phone (A3).
-    @ScaledMetric private var minTileWidth: CGFloat = 158
+    /// Minimum tile width per Thumbnail size (S1a-5), each scaled with Dynamic Type so
+    /// big text doesn't clip — at accessibility sizes it grows enough to collapse the
+    /// grid to one column on a phone (A3).
+    @ScaledMetric private var smallTileWidth: CGFloat = 120
+    @ScaledMetric private var mediumTileWidth: CGFloat = 158
+    @ScaledMetric private var largeTileWidth: CGFloat = 196
+
+    private var minTileWidth: CGFloat {
+        switch settings.thumbnailSize {
+        case .small: smallTileWidth
+        case .medium: mediumTileWidth
+        case .large: largeTileWidth
+        }
+    }
 
     /// At accessibility sizes the grid is a single flexible column; otherwise it is
     /// adaptive with a maximum that can't fall below the (scaled) minimum, so a wide
@@ -71,32 +82,60 @@ struct RecentsGrid: View {
 
     // MARK: - Content
 
+    @ViewBuilder
     private func content(filtered: [RecentEntry]) -> some View {
-        ZStack {
-            if !store.didLoad {
-                // Nothing until the persisted list has loaded (§h: no empty flash).
-                Color.clear
-            } else if store.entries.isEmpty {
-                EmptyRecentsView(openAction: { isImporting = true })
-            } else if filtered.isEmpty {
-                ContentUnavailableView.search(text: searchText)
-            } else {
-                grid(filtered: filtered)
-            }
+        if !store.didLoad {
+            // Nothing until the persisted list has loaded (§h: no empty flash).
+            Color.clear
+        } else if store.entries.isEmpty {
+            EmptyRecentsView(openAction: { isImporting = true })
+        } else if filtered.isEmpty {
+            ContentUnavailableView.search(text: searchText)
+        } else if settings.recentsLayout == .list {
+            listLayout(sections: sections(filtered))
+        } else {
+            grid(sections: sections(filtered))
         }
     }
 
-    private func grid(filtered: [RecentEntry]) -> some View {
-        // One pass splits today vs earlier, feeding both sections (P7).
-        let partition = RecentEntry.partitionedByDay(filtered)
-        return ScrollView {
-            gridBody(columns: resolvedColumns, partition: partition)
+    /// The sorted, pinned/private-aware sections for the current search and sort
+    /// (S1a-5). Search filters first, so every sort still searches.
+    private func sections(_ filtered: [RecentEntry]) -> [RecentSections.Section] {
+        RecentSections.build(filtered, sort: settings.sortRecentsBy, privateIDs: store.privateIDs)
+    }
+
+    private func grid(sections: [RecentSections.Section]) -> some View {
+        ScrollView {
+            gridBody(columns: resolvedColumns, sections: sections)
         }
         .background {
             GeometryReader { proxy in
                 Color.clear.task(id: proxy.size.width) { resolveColumns(proxy) }
             }
         }
+    }
+
+    /// The Thumbnail-size list layout (S1a-5): a system `List` of sections, each a
+    /// row with a leading thumbnail. Tap opens; a context menu and swipe give Pin and
+    /// Remove, and Select mode swaps in a per-row remove badge, as the grid does.
+    private func listLayout(sections: [RecentSections.Section]) -> some View {
+        List {
+            ForEach(sections) { section in
+                Section {
+                    ForEach(section.entries) { entry in
+                        RecentListRow(
+                            entry: entry,
+                            isSelecting: isSelecting,
+                            onOpen: { selection = entry.id },
+                            onRemove: { removal.requestRemoval(id: entry.id, store: store, toast: toast) }
+                        )
+                    }
+                } header: {
+                    if let title = section.title { Text(title) }
+                }
+            }
+        }
+        .listStyle(.plain)
     }
 
     private var resolvedColumns: [GridItem] {
@@ -121,10 +160,11 @@ struct RecentsGrid: View {
         if count != columnCount { columnCount = count }
     }
 
-    private func gridBody(columns: [GridItem], partition: (today: [RecentEntry], earlier: [RecentEntry])) -> some View {
+    private func gridBody(columns: [GridItem], sections: [RecentSections.Section]) -> some View {
         LazyVStack(alignment: .leading, spacing: 8, pinnedViews: []) {
-            section(title: "Today", entries: partition.today, columns: columns)
-            section(title: "Earlier", entries: partition.earlier, columns: columns)
+            ForEach(sections) { section in
+                gridSection(section, columns: columns)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -132,17 +172,18 @@ struct RecentsGrid: View {
     }
 
     @ViewBuilder
-    private func section(title: String, entries: [RecentEntry], columns: [GridItem]) -> some View {
-        if !entries.isEmpty {
+    private func gridSection(_ section: RecentSections.Section, columns: [GridItem]) -> some View {
+        // Name/size collapse to one untitled section; pinned/private/date keep a header.
+        if let title = section.title {
             Text(title)
                 .font(.title3.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
                 .padding(.top, 14)
                 .padding(.bottom, 6)
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-                ForEach(entries) { entry in
-                    tile(for: entry)
-                }
+        }
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+            ForEach(section.entries) { entry in
+                tile(for: entry)
             }
         }
     }
@@ -152,7 +193,7 @@ struct RecentsGrid: View {
         if isSelecting {
             // The tile removes through the shared coordinator from the environment,
             // so it no longer takes a per-entry closure (P3).
-            RecentTileView(entry: entry, isSelecting: true)
+            RecentTileView(entry: entry, isSelecting: true, isPrivate: store.isSessionPrivate(entry.id))
         } else {
             // A Button that sets the shared selection, pushing the viewer on compact
             // width. Assigning (not toggling) makes a rapid double tap idempotent.
@@ -162,16 +203,22 @@ struct RecentsGrid: View {
             // "Open" alternate where a second window can't be created (iPhone, Duo
             // outer) and makes one where it can (Duo inner split half). The tile keeps
             // its button label; VoiceOver activates it to open and has a Remove action.
-            RecentTileView(entry: entry, isSelecting: false)
+            RecentTileView(entry: entry, isSelecting: false, isPrivate: store.isSessionPrivate(entry.id))
                 .overlay(
                     TileOpenInteraction(
                         entryID: entry.id,
                         onOpen: { selection = entry.id },
-                        onRemove: { removal.requestRemoval(id: entry.id, store: store, toast: toast) }
+                        onRemove: { removal.requestRemoval(id: entry.id, store: store, toast: toast) },
+                        isPinned: store.isPinned(entry.id),
+                        canPin: !store.isSessionPrivate(entry.id),
+                        onPin: { store.togglePin(entry.id) }
                     )
                 )
                 .accessibilityAction(.default) { selection = entry.id }
                 .accessibilityActions {
+                    if !store.isSessionPrivate(entry.id) {
+                        Button(store.isPinned(entry.id) ? "Unpin" : "Pin") { store.togglePin(entry.id) }
+                    }
                     Button("Remove from Recents", role: .destructive) {
                         removal.requestRemoval(id: entry.id, store: store, toast: toast)
                     }

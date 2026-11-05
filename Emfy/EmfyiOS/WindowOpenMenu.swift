@@ -33,6 +33,11 @@ struct TileOpenInteraction: UIViewRepresentable {
     /// Tap, and the "Open" alternate — show the file in the current window.
     let onOpen: () -> Void
     let onRemove: () -> Void
+    /// Pin/Unpin (S1a-5). `canPin` is false for a session-only Private entry, which
+    /// can't be pinned; `isPinned` chooses the title.
+    var isPinned: Bool = false
+    var canPin: Bool = true
+    var onPin: () -> Void = {}
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
@@ -41,12 +46,19 @@ struct TileOpenInteraction: UIViewRepresentable {
         view.accessibilityElementsHidden = true
         view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap)))
         view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
-        context.coordinator.update(entryID: entryID, onOpen: onOpen, onRemove: onRemove)
+        pushState(context)
         return view
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.update(entryID: entryID, onOpen: onOpen, onRemove: onRemove)
+        pushState(context)
+    }
+
+    private func pushState(_ context: Context) {
+        context.coordinator.update(
+            entryID: entryID, onOpen: onOpen, onRemove: onRemove,
+            isPinned: isPinned, canPin: canPin, onPin: onPin
+        )
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -55,11 +67,20 @@ struct TileOpenInteraction: UIViewRepresentable {
         private var entryID = UUID()
         private var onOpen: () -> Void = {}
         private var onRemove: () -> Void = {}
+        private var isPinned = false
+        private var canPin = true
+        private var onPin: () -> Void = {}
 
-        func update(entryID: UUID, onOpen: @escaping () -> Void, onRemove: @escaping () -> Void) {
+        func update(
+            entryID: UUID, onOpen: @escaping () -> Void, onRemove: @escaping () -> Void,
+            isPinned: Bool, canPin: Bool, onPin: @escaping () -> Void
+        ) {
             self.entryID = entryID
             self.onOpen = onOpen
             self.onRemove = onRemove
+            self.isPinned = isPinned
+            self.canPin = canPin
+            self.onPin = onPin
         }
 
         @objc func handleTap() { onOpen() }
@@ -97,7 +118,15 @@ struct TileOpenInteraction: UIViewRepresentable {
             ) { _ in
                 UIWindowScene.ActivationConfiguration(userActivity: WindowOpenActivity.make(id))
             }
-            return UIMenu(children: [newWindow, remove])
+            var children: [UIMenuElement] = [newWindow]
+            if canPin {
+                children.append(UIAction(
+                    title: isPinned ? "Unpin" : "Pin",
+                    image: UIImage(systemName: isPinned ? "pin.slash" : "pin")
+                ) { [onPin] _ in onPin() })
+            }
+            children.append(remove)
+            return UIMenu(children: children)
         }
     }
 }

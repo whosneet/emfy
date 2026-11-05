@@ -100,6 +100,40 @@ extension EmfySettings.RecentsCap: SettingsOption {
     var label: String { "\(rawValue)" }
 }
 
+// MARK: - Thumbnail-size metrics (S1a-5)
+//
+// One mapping from the Thumbnail size setting to the dimensions each surface uses,
+// so the Mac sidebar row, the iOS grid tile and the iOS list row all scale together.
+
+extension EmfySettings.ThumbnailSize {
+    /// The Mac sidebar row's thumbnail box.
+    var sidebarThumbnail: CGSize {
+        switch self {
+        case .small: CGSize(width: 36, height: 27)
+        case .medium: CGSize(width: 46, height: 34)
+        case .large: CGSize(width: 62, height: 46)
+        }
+    }
+
+    /// The iOS grid's minimum tile width (before Dynamic Type scaling).
+    var gridMinWidth: CGFloat {
+        switch self {
+        case .small: 120
+        case .medium: 158
+        case .large: 196
+        }
+    }
+
+    /// The iOS list row's thumbnail box.
+    var listThumbnail: CGSize {
+        switch self {
+        case .small: CGSize(width: 44, height: 33)
+        case .medium: CGSize(width: 58, height: 43)
+        case .large: CGSize(width: 76, height: 57)
+        }
+    }
+}
+
 // Footer sentences, shared verbatim by both platforms.
 private enum SettingsFooter {
     static let recentsCap = "Lowering Recents to keep may remove files Emfy received and is keeping; it’ll ask before removing any."
@@ -162,6 +196,7 @@ private struct MacOptionRow<E: SettingsOption>: View {
 private struct MacGeneralTab: View {
     @Environment(RecentsStore.self) private var store
     @Environment(EmfySettings.self) private var settings
+    @State private var cap = CapReductionController()
 
     var body: some View {
         @Bindable var settings = settings
@@ -194,6 +229,17 @@ private struct MacGeneralTab: View {
         .formStyle(.grouped)
         .frame(width: macSettingsWidth)
         .fixedSize(horizontal: false, vertical: true)
+        // Lowering the cap applies at once; one that would delete a received copy
+        // confirms first (S1a-5).
+        .onChange(of: settings.recentsToKeep) { old, new in
+            cap.handleChange(from: old, to: new, store: store)
+        }
+        // Private mode toggled here reaches the store even with no library window open
+        // (the Mac Settings scene is separate — S1a-5 review).
+        .onChange(of: settings.privateMode) { _, on in
+            store.setPrivate(on)
+        }
+        .capReduction(cap, store: store, settings: settings)
     }
 }
 
@@ -305,6 +351,7 @@ private struct IOSSettingsForm: View {
     // The Settings sheet hosts its own removal flow (the window-level one is
     // covered by this sheet — C4a H3). Clear confirms and offers Save a Copy.
     @State private var removal = RemovalCoordinator()
+    @State private var cap = CapReductionController()
 
     var body: some View {
         @Bindable var settings = settings
@@ -368,6 +415,16 @@ private struct IOSSettingsForm: View {
             }
         }
         .recentsRemoval(removal, store: store, toast: nil)
+        // Lowering the cap applies at once; one that would delete a received copy
+        // confirms first (S1a-5).
+        .onChange(of: settings.recentsToKeep) { old, new in
+            cap.handleChange(from: old, to: new, store: store)
+        }
+        // Private mode toggled in More Library Options reaches the store directly.
+        .onChange(of: settings.privateMode) { _, on in
+            store.setPrivate(on)
+        }
+        .capReduction(cap, store: store, settings: settings)
     }
 }
 

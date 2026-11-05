@@ -20,6 +20,12 @@ enum RecentsCapPolicy {
         var dropsReceivedFile: Bool {
             evicted.contains { $0.importedFileName != nil }
         }
+
+        /// The evicted entries that are received copies — the ones a "Save Copies…"
+        /// confirmation offers to export before the shrink deletes them.
+        var evictedReceived: [RecentEntry] {
+            evicted.filter { $0.importedFileName != nil }
+        }
     }
 
     /// What shrinking `entries` to `newCap` would evict.

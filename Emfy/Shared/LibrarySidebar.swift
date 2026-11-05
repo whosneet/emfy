@@ -36,6 +36,7 @@ struct RegularSidebarList: View {
     @Environment(RecentsStore.self) private var store
     @Environment(RemovalCoordinator.self) private var removal
     @Environment(ToastCenter.self) private var toast
+    @Environment(EmfySettings.self) private var settings
     @Environment(\.openWindow) private var openWindow
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     @Binding var selection: UUID?
@@ -78,16 +79,28 @@ struct RegularSidebarList: View {
             ContentUnavailableView.search(text: searchText)
         } else {
             List(selection: $selection) {
-                ForEach(filteredEntries) { entry in
-                    RecentRow(entry: entry)
-                        .tag(entry.id)
-                        .contextMenu { rowMenu(for: entry) }
+                ForEach(sections) { section in
+                    Section {
+                        ForEach(section.entries) { entry in
+                            RecentRow(entry: entry, isPrivate: store.isSessionPrivate(entry.id))
+                                .tag(entry.id)
+                                .contextMenu { rowMenu(for: entry) }
+                        }
+                    } header: {
+                        if let title = section.title { Text(title) }
+                    }
                 }
             }
             #if os(macOS)
             .listStyle(.sidebar)
             #endif
         }
+    }
+
+    /// The sorted, pinned/private-aware sections for the current search and sort
+    /// (S1a-5). Search filters first, so every sort still searches.
+    private var sections: [RecentSections.Section] {
+        RecentSections.build(filteredEntries, sort: settings.sortRecentsBy, privateIDs: store.privateIDs)
     }
 
     private var emptyState: some View {
@@ -144,6 +157,15 @@ struct RegularSidebarList: View {
             Label("Show in Finder", systemImage: "folder")
         }
         #endif
+        // A session-only Private entry can't be pinned (it never persists).
+        if !store.isSessionPrivate(entry.id) {
+            let pinned = store.isPinned(entry.id)
+            Button {
+                store.togglePin(entry.id)
+            } label: {
+                Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin")
+            }
+        }
         Divider()
         Button(role: .destructive) {
             if selection == entry.id { selection = nil }
@@ -193,8 +215,11 @@ struct RegularSidebarList: View {
 /// the cache was purged) off the main actor, exactly as the grid tile does.
 struct RecentRow: View {
     @Environment(RecentsStore.self) private var store
+    @Environment(EmfySettings.self) private var settings
     @Environment(\.displayScale) private var displayScale
     let entry: RecentEntry
+    /// Whether this is a session-only Private-mode entry (shows the marker, hides Pin).
+    var isPrivate: Bool = false
 
     /// Only held on a cache miss; the hit path reads the cache in `body` so a
     /// rebuilt row never blanks and NSCache stays free to evict (P4).
@@ -203,6 +228,8 @@ struct RecentRow: View {
     private var thumbnail: CGImage? {
         store.cachedThumbnail(for: entry) ?? loadedThumbnail
     }
+
+    private var thumbnailBox: CGSize { settings.thumbnailSize.sidebarThumbnail }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -219,11 +246,23 @@ struct RecentRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            if isPrivate {
+                Spacer(minLength: 4)
+                Image(systemName: "eye.slash")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
         // Include the same date/size the row shows, so VoiceOver isn't missing it (A5).
-        .accessibilityLabel("\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())")
+        .accessibilityLabel(accessibilityLabel)
+        // A matching-name VoiceOver action for Pin/Unpin (not on Private entries).
+        .accessibilityActions {
+            if !isPrivate {
+                Button(store.isPinned(entry.id) ? "Unpin" : "Pin") { store.togglePin(entry.id) }
+            }
+        }
         // Re-fire on a file change or a cache eviction while the row stays alive, so
         // an evicted thumbnail reloads rather than staying blank (P4 / review #3).
         .task(id: ThumbnailTaskID(name: entry.thumbnailFileName, needsLoad: thumbnail == nil)) {
@@ -232,10 +271,16 @@ struct RecentRow: View {
         }
     }
 
+    private var accessibilityLabel: String {
+        var label = "\(entry.baseName), \(entry.formatLabel), \(entry.metaSecond())"
+        if isPrivate { label += ", Private" }
+        return label
+    }
+
     private var thumbnailTile: some View {
         RoundedRectangle(cornerRadius: 5, style: .continuous)
             .fill(.white)
-            .frame(width: 46, height: 34)
+            .frame(width: thumbnailBox.width, height: thumbnailBox.height)
             .overlay {
                 if let thumbnail {
                     Image(decorative: thumbnail, scale: displayScale)

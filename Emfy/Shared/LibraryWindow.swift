@@ -96,6 +96,10 @@ struct LibraryWindow: View {
         }
         .task {
             await store.loadIfNeeded()
+            // Sync the settings-driven cap and Private mode into the store before the
+            // first open can add anything (S1a-5).
+            store.capLimit = settings.recentsToKeep.count
+            store.setPrivate(settings.privateMode)
             #if DEBUG
             // UI-test seeding (DEBUG only): SIMCTL_CHILD_EMFY_SEED_RECEIVED=<n>.
             if let raw = ProcessInfo.processInfo.environment["EMFY_SEED_RECEIVED"], let n = Int(raw), n > 0 {
@@ -109,8 +113,11 @@ struct LibraryWindow: View {
             #endif
             applyInitialSelection()
             #if os(iOS)
-            // One scene, once per version, once per launch (C3b scope 7).
-            if WhatsNewPresenter.claimLaunchPresentation() { showLaunchWhatsNew = true }
+            // One scene, once per version, once per launch (C3b scope 7), gated by the
+            // "Show What's New after updates" setting (S1a-5).
+            if WhatsNewPresenter.claimLaunchPresentation(enabled: settings.showWhatsNewAfterUpdates) {
+                showLaunchWhatsNew = true
+            }
             #endif
         }
         .onAppear { toastCenter.reduceMotion = reduceMotion }
@@ -124,6 +131,11 @@ struct LibraryWindow: View {
         }
         .onChange(of: model.selection) { _, id in
             storedSelection = id?.uuidString
+        }
+        // Keep the store's Private mode in step with the setting (S1a-5): turning it
+        // off drops this launch's Private entries; the persisted history is untouched.
+        .onChange(of: settings.privateMode) { _, on in
+            store.setPrivate(on)
         }
         // External opens (Finder, Files, Mail, Messages) land in the front window.
         // SwiftUI spawns a window for the file event and delivers the URL here; on
@@ -226,13 +238,15 @@ struct LibraryWindow: View {
     /// Honours a window opened on a specific entry, else restores the window's last
     /// selection — each only when the entry still exists.
     private func applyInitialSelection() {
-        if let initialSelection, store.entry(id: initialSelection) != nil {
-            model.selection = initialSelection
-        } else if let stored = storedSelection,
-                  let id = UUID(uuidString: stored),
-                  store.entry(id: id) != nil {
-            model.selection = id
-        }
+        let storedID = storedSelection.flatMap { UUID(uuidString: $0) }
+        // "Reopen last file at launch" off starts the window empty unless a specific
+        // entry was requested (Open in New Window), which is always honoured (S1a-5).
+        guard let id = LaunchSelection.restored(
+            reopenLastFile: settings.reopenLastFileAtLaunch,
+            requested: initialSelection,
+            stored: storedID
+        ), store.entry(id: id) != nil else { return }
+        model.selection = id
     }
 
     /// Imports a file arriving from Finder / Files / Mail / Messages and shows it per
