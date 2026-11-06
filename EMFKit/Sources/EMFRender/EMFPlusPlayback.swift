@@ -1753,16 +1753,21 @@ struct EMFPlusPlayback {
         var reader = PlusReader(record.data)
         guard reader.u32() != nil, let srcUnit = reader.i32(), let srcRect = reader.rectF() else { return nil }
         let destBounds: CGRect
+        var corners: [CGPoint]?
         if points {
             guard let count = reader.u32(), let pts = reader.points(count: Int(count), compressed: cBit), pts.count >= 3 else { return nil }
             // Parallelogram from the three defining corners (fourth extrapolated).
             let upperLeft = pts[0], upperRight = pts[1], lowerLeft = pts[2]
             let lowerRight = CGPoint(x: upperRight.x + lowerLeft.x - upperLeft.x, y: upperRight.y + lowerLeft.y - upperLeft.y)
+            // The device-space corners (upper-left, upper-right, lower-right,
+            // lower-left) — kept so an editor re-emits the parallelogram, not its box.
+            let deviceCorners = [upperLeft, upperRight, lowerRight, lowerLeft].map { $0.applying(worldToDevice) }
+            corners = deviceCorners
             let quad = CGMutablePath()
-            quad.move(to: upperLeft, transform: worldToDevice)
-            quad.addLine(to: upperRight, transform: worldToDevice)
-            quad.addLine(to: lowerRight, transform: worldToDevice)
-            quad.addLine(to: lowerLeft, transform: worldToDevice)
+            quad.move(to: deviceCorners[0])
+            quad.addLine(to: deviceCorners[1])
+            quad.addLine(to: deviceCorners[2])
+            quad.addLine(to: deviceCorners[3])
             quad.closeSubpath()
             destBounds = quad.boundingBoxOfPath
         } else {
@@ -1770,7 +1775,7 @@ struct EMFPlusPlayback {
             destBounds = dest.standardized.applying(worldToDevice)
         }
         guard let image = table.image(objectID) else { return nil }
-        return PlusImage(image: image, srcRect: srcRect, srcUnit: srcUnit, destRectDevice: destBounds)
+        return PlusImage(image: image, srcRect: srcRect, srcUnit: srcUnit, destRectDevice: destBounds, destCornersDevice: corners)
     }
 }
 

@@ -22,7 +22,7 @@ import Foundation
 /// the SAME shared canvas caps the GDI DIB path uses (16384/side, 32 Mpx). A
 /// violation returns `nil` plus a typed `Skip`; nothing here force-unwraps,
 /// overflows, or over-allocates.
-enum EMFPlusImageDecoder {
+public enum EMFPlusImageDecoder {
 
     /// Reuse the renderer's canvas caps so an EMF+ image decode and the canvas
     /// share ONE clamp rule (per-side 16384, total area 32 Mpx).
@@ -102,6 +102,15 @@ enum EMFPlusImageDecoder {
     static func decode(_ image: EMFPlusImage) -> (image: CGImage?, skip: Skip?) {
         let (cg, skip, _) = decode(image, destTargetRect: unbounded)
         return (cg, skip)
+    }
+
+    /// A native-resolution TOP-DOWN `CGImage` for an EmfPlusImage, or nil when it
+    /// cannot be decoded (an unsupported pixel format, a non-PNG/JPEG compressed
+    /// stream, a metafile-content image, or a malformed payload). Exposed for the
+    /// editor (EMFEdit), which re-encodes an edited/inserted EMF+ image as a
+    /// compressed PNG bitmap through its own ImageIO path (never the parse path).
+    public static func cgImage(from image: EMFPlusImage) -> CGImage? {
+        decode(image).image
     }
 
     // MARK: - Destination decode budget (audit H1 / A2)

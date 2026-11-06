@@ -266,12 +266,18 @@ public struct PlusImage: Sendable, Equatable {
     /// SrcUnit ([MS-EMFPLUS] §2.1.1.32), normally Pixel.
     public let srcUnit: Int32
     public let destRectDevice: CGRect
+    /// The device-space destination PARALLELOGRAM (upper-left, upper-right,
+    /// lower-right, lower-left) for an EmfPlusDrawImagePoints draw (§2.3.4.9); nil
+    /// for an axis-aligned EmfPlusDrawImage. `destRectDevice` is its bounding box.
+    /// Carried so an editor re-emits the exact placement rather than its box.
+    public let destCornersDevice: [CGPoint]?
 
-    public init(image: EMFPlusImage, srcRect: CGRect, srcUnit: Int32, destRectDevice: CGRect) {
+    public init(image: EMFPlusImage, srcRect: CGRect, srcUnit: Int32, destRectDevice: CGRect, destCornersDevice: [CGPoint]? = nil) {
         self.image = image
         self.srcRect = srcRect
         self.srcUnit = srcUnit
         self.destRectDevice = destRectDevice
+        self.destCornersDevice = destCornersDevice
     }
 }
 

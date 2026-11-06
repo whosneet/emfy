@@ -17,7 +17,22 @@ import Foundation
 /// EMF/DIB row order: BOTTOM-UP when the header height is positive (source row
 /// 0 is the image's bottom row), TOP-DOWN when negative. The output CGImage is
 /// always top-down (row 0 = top), so a bottom-up source is read in reverse.
-enum BitmapDecoder {
+public enum BitmapDecoder {
+
+    /// A native-resolution TOP-DOWN `CGImage` for a `.pixels` DIB (24/32-bpp
+    /// BI_RGB or 8-bpp palettised), or nil when it is unsupported/undecodable.
+    /// Decodes the whole image (no src crop) bounded by the shared canvas caps
+    /// (16384/side, 32 Mpx). 32-bpp BI_RGB's fourth byte is RESERVED, not alpha,
+    /// so it is ignored and the output is opaque. Exposed for the editor
+    /// (EMFEdit), which re-encodes an edited/inserted GDI image through its own
+    /// ImageIO path — never a parse path.
+    public static func cgImage(from dib: DIB) -> CGImage? {
+        let w = Int(dib.width)
+        let h = abs(Int(dib.height))
+        guard w > 0, h > 0 else { return nil }
+        let budget = decodeBudget(destTargetRect: CGRect(x: 0, y: 0, width: CGFloat.infinity, height: CGFloat.infinity), nativeW: w, nativeH: h)
+        return decode(dib, srcRect: SourceRect(x: 0, y: 0, width: w, height: h), budget: budget).image
+    }
 
     /// A source sub-rectangle in SOURCE pixels (top-down image space): the
     /// STRETCHDIBITS/BITBLT src fields, or the SETDIBITSTODEVICE scan window.
