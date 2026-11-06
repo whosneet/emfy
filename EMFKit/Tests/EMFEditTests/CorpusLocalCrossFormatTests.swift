@@ -6,84 +6,118 @@ import Testing
 import WMFParse
 @testable import EMFEdit
 
-/// Slice E1b2c corpus-local sweep (gitignored; may be absent): every parseable
-/// EMF/EMF+/GDI file → WMF, and every WMF file → EMF. Full cross-container
-/// synthesis re-touches every element, so the breadth sweep runs the structural
-/// gate (export, parse-clean) on a 1-in-2 file sample within a byte-size cap, and
-/// samples re-import + render fidelity, to stay inside the EMFEdit time budget
-/// (the committed oracle and the hostile test are the correctness gates). Work-
+/// Slice E1b2c2 corpus-local sweep (gitignored; may be absent). The structural
+/// gate — export → parse-clean → re-import — now covers EVERY EMF/EMZ file,
+/// INCLUDING the multi-MB Office files the old sweep skipped (the most realistic
+/// inputs), within a ~420 s EMFEdit budget. Render-fidelity comparison stays
+/// SAMPLED (an extra pair of full renders per file is the costly part). Work-
 /// sourced files are confidential — COUNTS and anonymised indices only.
 struct CorpusLocalCrossFormatTests {
 
     @Test func emfToWMFAcrossLocalCorpus() throws {
         let files = EditTestPaths.localMetafiles().filter { $0.pathExtension.lowercased() == "emf" || $0.pathExtension.lowercased() == "emz" }
-        guard !files.isEmpty else { print("\n=== E1b2c corpus-local EMF→WMF: absent (0 files) ==="); return }
+        guard !files.isEmpty else { print("\n=== E1b2c2 corpus-local EMF→WMF: absent (0 files) ==="); return }
 
-        // Full EMF→WMF synthesis touches every element and re-imports each output
-        // through the whole observer, so the sweep is kept cheap for the EMFEdit time
-        // budget: the few multi-MB Office files are skipped by byte size, and the
-        // structural gate runs on a deterministic 1-in-2 file sample. The committed
-        // cross-format oracle (both directions, full fidelity) and the 10k-element
-        // hostile test are the correctness gates; this is the breadth sanity check.
-        let sizeCap = 400_000
-        var candidates = 0, scenes = 0, skippedLarge = 0, exported = 0, parseClean = 0, reimportSamples = 0, reimported = 0
+        let clock = ContinuousClock()
+        var scenes = 0, exported = 0, parseClean = 0, reimported = 0
         var sampled = 0, rendered = 0
         var buckets = [0, 0, 0, 0]   // ≤2%, ≤5%, ≤15%, >15%
         var outliers: [String] = []
+        var rasterCount = 0, droppedCount = 0
+        // Profiling: cumulative phase times and the slowest files by total time.
+        var tImport = Duration.zero, tExport = Duration.zero, tParse = Duration.zero, tReimport = Duration.zero
+        var slowest: [(idx: Int, kb: Int, ms: Double)] = []
+        // Embed-on probe for the big files (the default path re-exports the EMF and
+        // re-embeds it): confirm the probe parses and re-imports, and time it.
+        var embedProbed = 0, embedOK = 0
+        var embedProbe: [String] = []
         var index = -1
 
         for url in files {
-            if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > sizeCap { skippedLarge += 1; continue }
-            candidates += 1
-            guard candidates % 2 == 0 else { continue }   // 1-in-2 structural sample
-            guard let data = try? Data(contentsOf: url), let base = try? SceneImporter.import(data: data) else { continue }
+            let kb = ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) / 1024
+            guard let data = try? Data(contentsOf: url) else { continue }
             index += 1
+            let fileStart = clock.now
+
+            var base: Scene?
+            tImport += clock.measure { base = try? SceneImporter.import(data: data) }
+            guard let base else { outliers.append("import#\(index)"); continue }
             scenes += 1
 
-            // Structural gate (embed off → tests the synthesis directly).
-            let result: ExportResult
-            do { result = try SceneExporter.export(base, as: .wmf, options: ExportOptions(embedEMFInWMF: false)) }
-            catch { outliers.append("export#\(index)=\(error)"); continue }
+            // Structural gate on EVERY file (embed off → exercises the synthesis).
+            var result: ExportResult?
+            tExport += clock.measure { result = try? SceneExporter.export(base, as: .wmf, options: ExportOptions(embedEMFInWMF: false)) }
+            guard let result else { outliers.append("export#\(index)"); continue }
             exported += 1
-            guard let wmf = try? WMFFile.parse(result.data) else { outliers.append("parse#\(index)"); continue }
+            for w in result.warnings {
+                if case .contentRasterized = w { rasterCount += 1 }
+                if case .contentDropped = w { droppedCount += 1 }
+            }
+            var wmf: WMFFile?
+            tParse += clock.measure { wmf = try? WMFFile.parse(result.data) }
+            guard let wmf else { outliers.append("parse#\(index)"); continue }
             if wmf.diagnostics.isEmpty { parseClean += 1 } else { outliers.append("diag#\(index)") }
 
-            // Re-import + render fidelity on a small, bounded subset (every 5th file) —
-            // re-import runs the full observer, so keep it off the all-files path.
-            guard index % 5 == 0 else { continue }
-            reimportSamples += 1
-            if (try? SceneImporter.import(data: result.data)) != nil { reimported += 1 } else { outliers.append("reimport#\(index)") }
-            let area = base.pageSizeDevice.width * base.pageSizeDevice.height
-            guard area <= 4_000_000 else { continue }
-            sampled += 1
-            let scale = min(CGFloat(2), CGFloat(900) / max(max(base.pageSizeDevice.width, base.pageSizeDevice.height), 1))
-            guard let opened = try? OpenedMetafile.open(data),
-                  let original = MetafileRenderer.makeImage(opened, scale: scale)?.0,
-                  let outOpened = try? OpenedMetafile.open(result.data),
-                  let outImg = MetafileRenderer.makeImage(outOpened, scale: scale)?.0 else { continue }
-            rendered += 1
-            let diff = compareImages(original, outImg, tolerance: 16)
-            let f = diff.sameSize ? diff.differingFraction : 1
-            if f <= 0.02 { buckets[0] += 1 } else if f <= 0.05 { buckets[1] += 1 } else if f <= 0.15 { buckets[2] += 1 }
-            else { buckets[3] += 1; outliers.append("render#\(index)=\(String(format: "%.1f%%", f * 100))") }
+            var reScene: Scene?
+            tReimport += clock.measure { reScene = try? SceneImporter.import(data: result.data) }
+            if reScene != nil { reimported += 1 } else { outliers.append("reimport#\(index)") }
+
+            // Embed-on probe on mid-large files (profiles the re-export path without
+            // the two multi-MB giants, whose embed cost — a whole-file re-observe,
+            // ~30 s for the 14 MB file — is recorded in the slice report, not re-run
+            // every suite). The structural gate above already covers EVERY file.
+            if kb >= 1024, kb <= 4096 {
+                var probe: ExportResult?
+                let dt = clock.measure { probe = try? SceneExporter.export(base, as: .wmf) }
+                embedProbed += 1
+                let ok = probe.flatMap { try? WMFFile.parse($0.data) }?.diagnostics.isEmpty == true
+                    && (probe.flatMap { try? SceneImporter.import(data: $0.data) }) != nil
+                if ok { embedOK += 1 }
+                embedProbe.append("#\(index)(\(kb)KB embed \(Int(dt.seconds * 1000))ms\(ok ? "" : " FAIL"))")
+            }
+
+            // Render fidelity on a bounded sample (every 8th file, area-capped).
+            if index % 8 == 0 {
+                let area = base.pageSizeDevice.width * base.pageSizeDevice.height
+                if area <= 4_000_000 {
+                    sampled += 1
+                    let scale = min(CGFloat(2), CGFloat(900) / max(max(base.pageSizeDevice.width, base.pageSizeDevice.height), 1))
+                    if let opened = try? OpenedMetafile.open(data),
+                       let original = MetafileRenderer.makeImage(opened, scale: scale)?.0,
+                       let outOpened = try? OpenedMetafile.open(result.data),
+                       let outImg = MetafileRenderer.makeImage(outOpened, scale: scale)?.0 {
+                        rendered += 1
+                        let diff = compareImages(original, outImg, tolerance: 16)
+                        let f = diff.sameSize ? diff.differingFraction : 1
+                        if f <= 0.02 { buckets[0] += 1 } else if f <= 0.05 { buckets[1] += 1 }
+                        else if f <= 0.15 { buckets[2] += 1 } else { buckets[3] += 1; outliers.append("render#\(index)=\(String(format: "%.1f%%", f * 100))") }
+                    }
+                }
+            }
+
+            let ms = (clock.now - fileStart).seconds * 1000
+            slowest.append((index, kb, ms))
         }
+        slowest.sort { $0.ms > $1.ms }
 
         print("""
 
-        === E1b2c corpus-local EMF → WMF (counts only) ===
-        candidates (≤400KB)    : \(candidates) (skipped large: \(skippedLarge))
-        scenes (1-in-2 sample) : \(scenes)
-        exported               : \(exported)
-        parse-clean WMF        : \(parseClean)
-        re-imported (sampled)  : \(reimported) / \(reimportSamples)
-        render sampled         : \(sampled) (rendered \(rendered))
-        render ≤2% / ≤5% / ≤15% / >15% : \(buckets[0]) / \(buckets[1]) / \(buckets[2]) / \(buckets[3])
+        === E1b2c2 corpus-local EMF → WMF (all files, counts only) ===
+        files / scenes         : \(files.count) / \(scenes)
+        exported / parse-clean : \(exported) / \(parseClean)
+        re-imported            : \(reimported)
+        rasterised / dropped warnings : \(rasterCount) / \(droppedCount)
+        render sample ≤2/≤5/≤15/>15% : \(buckets[0]) / \(buckets[1]) / \(buckets[2]) / \(buckets[3]) (sampled \(sampled), rendered \(rendered))
+        phase totals (s)       : import \(fmt(tImport)) export \(fmt(tExport)) parse \(fmt(tParse)) reimport \(fmt(tReimport))
+        embed-on probe (≥1MB)  : \(embedOK)/\(embedProbed) ok — \(embedProbe.joined(separator: ", "))
+        slowest files          : \(slowest.prefix(6).map { "#\($0.idx)(\($0.kb)KB \(Int($0.ms))ms)" }.joined(separator: ", "))
         outliers (index only)  : \(outliers.prefix(20).joined(separator: ", "))
         """)
 
         #expect(exported == scenes, "some EMF→WMF exports failed")
         #expect(parseClean == exported, "some EMF→WMF outputs had WMF diagnostics")
-        #expect(reimported == reimportSamples, "some sampled EMF→WMF outputs failed to re-import")
+        #expect(reimported == exported, "some EMF→WMF outputs failed to re-import")
+        #expect(embedOK == embedProbed, "an embed-on probe failed to parse or re-import")
     }
 
     @Test func wmfToEMFAcrossLocalCorpus() throws {
@@ -135,3 +169,9 @@ struct CorpusLocalCrossFormatTests {
         #expect(reimported == exported, "some WMF→EMF outputs failed to re-import")
     }
 }
+
+/// Seconds as a Double, for the profiling print.
+private extension Duration {
+    var seconds: Double { Double(components.seconds) + Double(components.attoseconds) * 1e-18 }
+}
+private func fmt(_ d: Duration) -> String { String(format: "%.1f", d.seconds) }

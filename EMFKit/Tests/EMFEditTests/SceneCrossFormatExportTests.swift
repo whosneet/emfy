@@ -161,6 +161,41 @@ struct SceneCrossFormatExportTests {
         print(report)
     }
 
+    // MARK: - Self-generated WMF round trip (exercises WMF→EMF; corpus has no WMF)
+
+    /// corpus-local holds no WMF files, so the WMF→EMF synthesis is exercised here
+    /// over SELF-generated WMFs: each committed EMF fixture is written to a plain WMF
+    /// (embed off, so the import sees only synthesised WMF records), re-imported, and
+    /// written back to EMF. The final EMF is compared to the ORIGINAL EMF render — a
+    /// two-synthesis round trip (EMF→WMF→EMF) through Int16 logical scaling, so the
+    /// budget is wider than a single cross-format hop; it proves the loop stays
+    /// recognisable and never fails structurally.
+    @Test func emfToWMFToEMFSelfRoundTrip() throws {
+        var report = "\n=== E1b2c2 EMF → WMF → EMF self round trip ===\n"
+        for (name, _) in Self.emfFixtures {
+            let base = try importScene(name)
+            guard let original = render(base.source.data) else { Issue.record("\(name): original render failed"); continue }
+
+            let wmf = try SceneExporter.export(base, as: .wmf, options: ExportOptions(embedEMFInWMF: false))
+            #expect(try WMFFile.parse(wmf.data).diagnostics.isEmpty, "\(name): round-trip WMF has diagnostics")
+            let wmfScene = try SceneImporter.import(data: wmf.data)
+            let emf = try SceneExporter.export(wmfScene, as: .emf)
+            let file = try EMFFile.parse(emf.data)
+            #expect(file.diagnostics.isEmpty, "\(name): round-trip EMF has diagnostics \(file.diagnostics)")
+            #expect(Int(file.header.records) == file.records.count, "\(name): round-trip EMF header Records mismatch")
+            #expect((try? SceneImporter.import(data: emf.data)) != nil, "\(name): round-trip EMF did not re-import")
+
+            guard let outImg = render(emf.data) else { Issue.record("\(name): round-trip EMF render failed"); continue }
+            let diff = compareImages(original, outImg, tolerance: Self.tolerance)
+            report += String(format: "%-30@ frac=%@ sameSize=%@\n", name, pct(diff.differingFraction), "\(diff.sameSize)")
+            #expect(diff.sameSize, "\(name): round-trip EMF size != original")
+            // A two-hop vector/text round trip: vector lands under a few %, a rasterised
+            // or gradient-flattened fixture is looser (two resamples / a flatten).
+            #expect(diff.differingFraction <= 0.30, "\(name): EMF→WMF→EMF \(pct(diff.differingFraction)) over 30%")
+        }
+        print(report)
+    }
+
     // MARK: - WMF scene + alpha edit → dual EMF (reuses E1b2b)
 
     @Test func wmfSceneAlphaEditUpgradesToDual() throws {
