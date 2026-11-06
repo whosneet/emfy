@@ -2,6 +2,7 @@ import CoreGraphics
 import EMFParse
 import Foundation
 import Testing
+import WMFParse
 @testable import EMFEdit
 
 /// Hostile-input gate (§8): the importer returns typed errors or bounded
@@ -87,6 +88,51 @@ struct SceneHostileTests {
         for format in [ExportFormat.emf, .emz, .wmf, .wmz] {
             // A typed error is fine; a trap is not.
             _ = try? SceneExporter.export(scene, as: format)
+        }
+    }
+
+    @Test func hostileWMFSynthesisIsBounded() throws {
+        // A cross-container EMF→WMF full synthesis of an adversarial scene: 10k
+        // elements, coordinates far outside Int16, absurd text, and an object table
+        // near its cap. It must not trap (§8); any failure is a typed error. When it
+        // succeeds, the output WMF's object table never exceeds the header's
+        // NumberOfObjects (the from-scratch blocks free their own slots).
+        var scene = try SceneImporter.import(data: Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("gate-p4-text.emf")))
+        let blue = SceneStyle(fill: SceneFill(color: SceneColor(red: 0, green: 0, blue: 1), evenOdd: false))
+
+        var elements: [Element] = []
+        for i in 0 ..< 10_000 {
+            let x = Double(i % 100) * 3, y = Double(i / 100) * 3
+            elements.append(Element(
+                id: 100_000 + i, kind: .rect,
+                geometryDevice: ScenePath(CGPath(rect: CGRect(x: x, y: y, width: 2, height: 2), transform: nil)),
+                transform: .identity, style: blue, provenance: Provenance(sourceRecordIndices: [])))
+        }
+        // Coordinates far outside Int16 (both directions).
+        elements.append(Element(
+            id: 200_001, kind: .rect,
+            geometryDevice: ScenePath(CGPath(rect: CGRect(x: -1_000_000_000, y: 0, width: 2_000_000_000, height: 10), transform: nil)),
+            transform: .identity, style: blue, provenance: Provenance(sourceRecordIndices: [])))
+        // Absurd text (height Int32.min, a long string).
+        if let source = scene.editableElements.first(where: { $0.kind == .text }), var text = source.text {
+            text.logicalHeight = Int32.min
+            text.string = String(repeating: "X", count: 5000)
+            elements.append(Element(
+                id: 200_002, kind: .text, geometryDevice: ScenePath(), transform: source.transform,
+                text: text, provenance: Provenance(sourceRecordIndices: [])))
+        }
+        scene.layers[0].elements = elements
+
+        // Export to WMF/WMZ: a typed error is acceptable; a trap is not.
+        for format in [ExportFormat.wmf, .wmz] {
+            if let result = try? SceneExporter.export(scene, as: format) {
+                if format == .wmf, let wmf = try? WMFFile.parse(result.data) {
+                    // The declared table covers every slot a record references, and it
+                    // stays bounded (balanced create/delete blocks → a tiny peak).
+                    #expect(wmf.diagnostics.isEmpty, "hostile WMF synthesis produced diagnostics")
+                    #expect(wmf.header.numberOfObjects <= 16, "hostile WMF object table unexpectedly large: \(wmf.header.numberOfObjects)")
+                }
+            }
         }
     }
 

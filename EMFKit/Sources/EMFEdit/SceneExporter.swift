@@ -361,11 +361,23 @@ public enum SceneExporter {
         let h = max(1, page.height.isFinite ? page.height : 1)
 
         // The coordinate magnitude the records must hold, relative to the anchor.
+        // Use each element's UNCLIPPED device extent (the synthesis emits geometry
+        // before the clip), so a shape extending far outside a small clip is still
+        // scaled to fit — `boundsDevice` is clip-intersected and would under-measure.
         var maxExtent = max(w, h)
-        for element in scene.elements where !element.hidden {
-            let b = element.boundsDevice
-            guard !b.isNull else { continue }
-            for v in [abs(b.minX - anchorX), abs(b.maxX - anchorX), abs(b.minY - anchorY), abs(b.maxY - anchorY)]
+        for element in scene.elements where !element.hidden && element.kind != .passthrough && element.kind != .group {
+            var box = element.geometryDevice.boundingBox
+            if let image = element.image {
+                box = box.isNull ? image.destRectDevice : box.union(image.destRectDevice)
+            }
+            if let text = element.text {
+                let ref = CGPoint(x: text.referenceLogical.x, y: text.referenceLogical.y).applying(element.transform)
+                if ref.x.isFinite, ref.y.isFinite {
+                    box = box.isNull ? CGRect(origin: ref, size: .zero) : box.union(CGRect(origin: ref, size: .zero))
+                }
+            }
+            guard !box.isNull else { continue }
+            for v in [abs(box.minX - anchorX), abs(box.maxX - anchorX), abs(box.minY - anchorY), abs(box.maxY - anchorY)]
             where v.isFinite { maxExtent = max(maxExtent, v) }
         }
         // 30000 leaves headroom under Int16's 32767 for pen widths and rounding.
