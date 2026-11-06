@@ -176,7 +176,7 @@ enum SceneSynthesis {
         out.append(.selectObject(.table(index: fontHandle)))
         out.append(.extTextOutW(ExtTextPayload(graphicsMode: 1, exScale: 1, eyScale: 1, reference: reference,
             rectangle: RectL(left: 0, top: 0, right: 0, bottom: 0), string: text.string,
-            options: ExtTextOutOptions(rawValue: 0), dx: nil)))
+            options: ExtTextOutOptions(rawValue: 0), dx: deviceAdvances(text, scale: scale))))
         out.append(.selectObject(.stock(.systemFont)))
         out.append(.deleteObject(.table(index: fontHandle)))
         out.append(.restoreDC(savedDC: -1))
@@ -492,6 +492,19 @@ enum SceneSynthesis {
     }
     private static func joinBits(_ join: CGLineJoin) -> UInt32 {
         switch join { case .miter: return Pen.joinMiter; case .bevel: return Pen.joinBevel; default: return 0 }
+    }
+
+    /// The EmrText intercharacter advances in DEVICE units for the re-emitted run,
+    /// or nil to use the font's natural advances. The block draws in device space
+    /// (identity transform after `emfReset`), so each logical advance is scaled by
+    /// the element's world→device scale — the same `scale` the font em uses. Kept
+    /// only when the captured array still matches the (possibly edited) string, so a
+    /// replaced string falls back to natural advances rather than mis-spacing
+    /// ([MS-EMF] §2.2.5).
+    private static func deviceAdvances(_ text: SceneText, scale: Double) -> [UInt32]? {
+        let advances = text.advancesLogical
+        guard !advances.isEmpty, advances.count == text.string.utf16.count else { return nil }
+        return advances.map { SceneNumeric.uint32(Double($0) * scale) }
     }
 
     private static func logFont(for text: SceneText, deviceEmHeight: Int32) -> LogFont {

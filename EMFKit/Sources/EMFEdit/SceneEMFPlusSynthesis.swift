@@ -173,51 +173,67 @@ enum SceneEMFPlusSynthesis {
         let color = element.style.fill?.color ?? text.color
         // The block draws text through the element's logical→device `transform`
         // (SetWorldTransform) on the 1:1-pixel page, so translate, scale AND
-        // rotation in an edit all survive. `referenceLogical` is the reference
-        // point in the run's PRE-transform (logical/world) space and the em size
-        // is in logical units; the world transform maps both to device. See the
-        // reference-point convention documented on `SceneText.referenceLogical`.
-        let worldScale = SceneSynthesis.averageScale(element.transform)
-        let deviceEm = deviceFontSize(text, element: element)
-        let logicalEm = worldScale > 0 ? deviceEm / worldScale : deviceEm
-        let font = EMFPlusFont(
-            version: graphicsVersion, emSize: safeFloat(CGFloat(logicalEm)), sizeUnit: unitWorld,
-            styleFlags: fontStyle(text), familyName: text.requestedFamily.isEmpty ? text.fontFamily : text.requestedFamily)
+        // rotation in an edit all survive. `referenceLogical` is the reference point
+        // in the run's PRE-transform (logical/world) space; the world transform maps
+        // it to device. See the convention documented on `SceneText.referenceLogical`.
+        let familyName = text.requestedFamily.isEmpty ? text.fontFamily : text.requestedFamily
+        let font: EMFPlusFont
+        if text.isEMFPlus, text.emSize > 0 {
+            // Re-emit the font in its ORIGINAL size unit and em size. The overlay
+            // keeps the source EmfPlusHeader, so a physical-unit font (Point/Inch/mm)
+            // resolves through the SAME LogicalDpiY it did originally, and a World/
+            // Pixel-unit font scales by the re-established world transform — exact for
+            // every unit, with no hardcoded DPI ([MS-EMFPLUS] §2.1.1.32, §2.3.3.3).
+            font = EMFPlusFont(
+                version: graphicsVersion, emSize: safeFloat(CGFloat(text.emSize)), sizeUnit: text.emSizeUnit,
+                styleFlags: fontStyle(text), familyName: familyName)
+        } else {
+            // A new or GDI-origin text run has no EMF+ em size: size it from the
+            // logical cell/em height in World units, which the world transform scales
+            // to the device size the lift resolved.
+            font = EMFPlusFont(
+                version: graphicsVersion, emSize: safeFloat(CGFloat(abs(text.logicalHeight))), sizeUnit: unitWorld,
+                styleFlags: fontStyle(text), familyName: familyName)
+        }
+
+        // The layout rect in WORLD space: the run's real rectangle when it has extent
+        // (so alignment and wrap/clip behave as in the source), else a zero-size
+        // point rect at the reference origin (Near point-origin). The world transform
+        // (SetWorldTransform) maps it to device, exactly like the lift inverted it.
         let origin = text.referenceLogical
-        // A zero-size layout rect draws from its origin under Near alignment (the
-        // no-format default), reproducing the reference point ([MS-EMFPLUS]
-        // §2.3.4.14, §2.2.1.9); FormatID 0xFFFFFFFF names no StringFormat object.
-        let layout = EMFPlusRectF(x: safeFloat(origin.x), y: safeFloat(origin.y), width: 0, height: 0)
-        return [
+        let layout: EMFPlusRectF
+        if text.layoutReference.isNull || (text.layoutReference.width == 0 && text.layoutReference.height == 0) {
+            layout = EMFPlusRectF(x: safeFloat(origin.x), y: safeFloat(origin.y), width: 0, height: 0)
+        } else {
+            let r = text.layoutReference
+            layout = EMFPlusRectF(x: safeFloat(r.minX), y: safeFloat(r.minY), width: safeFloat(r.width), height: safeFloat(r.height))
+        }
+
+        var emits: [Emit] = [
             .record(.setWorldTransform(matrix(element.transform))),
             .object(id: fontID, type: .font, value: .font(font)),
-            .record(.drawString(fontID: fontID, brush: .color(argb(color, opacity: element.style.opacity)),
-                                 formatID: EMFPlusRecordPayload.noImageAttributes, layoutRect: layout, text: text.string)),
         ]
-    }
-
-    /// The DEVICE-space em height the font would draw at under the element's
-    /// current transform: a physical unit converts via the metafile DPI
-    /// (transform-independent); World/Pixel/Display scale by the element's own
-    /// world→device scale ([MS-EMFPLUS] §2.1.1.32/§2.2.1.3). `textEmits` divides
-    /// this by the world→device scale to recover the logical em the world
-    /// transform then scales back, so the drawn device size is unchanged at import
-    /// and tracks the edit's scale.
-    private static func deviceFontSize(_ text: SceneText, element: Element) -> Double {
-        let em = text.isEMFPlus ? text.emSize : Double(abs(text.logicalHeight))
-        if let factor = physicalUnitFactor(text.emSizeUnit) { return em * factor }
-        return em * SceneSynthesis.averageScale(element.transform)
-    }
-
-    private static func physicalUnitFactor(_ unit: UInt32, dpi: Double = 96) -> Double? {
-        switch unit {
-        case 0x02: return 1               // Pixel (device pixels, like EMFRender)
-        case 0x03: return dpi / 72        // Point
-        case 0x04: return dpi             // Inch
-        case 0x05: return dpi / 300       // Document
-        case 0x06: return dpi / 25.4      // Millimeter
-        default: return nil               // World / Display / unknown
+        // Re-emit a StringFormat object whenever the run carried a non-default
+        // alignment, line alignment, or format flag; the no-format default (FormatID
+        // 0xFFFFFFFF) is Near/Near with wrap+clip on and reproduces a plain run
+        // byte-for-byte ([MS-EMFPLUS] §2.3.4.14, §2.2.1.9). Only the fields playback
+        // honours (StringAlignment, LineAlign, StringFormatFlags) need to match.
+        var formatID = EMFPlusRecordPayload.noImageAttributes
+        if text.alignRawValue != 0 || text.lineAlignRawValue != 0 || text.stringFormatFlags != 0 {
+            if let formatSlot = allocate() {
+                let format = EMFPlusStringFormat(
+                    version: graphicsVersion, stringFormatFlags: text.stringFormatFlags, language: 0,
+                    stringAlignment: text.alignRawValue, lineAlign: text.lineAlignRawValue,
+                    digitSubstitution: 0, digitLanguage: 0, firstTabOffset: 0, hotkeyPrefix: 0,
+                    leadingMargin: 0, trailingMargin: 0, tracking: 1, trimming: 0,
+                    tabStops: [], characterRanges: [])
+                emits.append(.object(id: formatSlot, type: .stringFormat, value: .stringFormat(format)))
+                formatID = UInt32(formatSlot)
+            }
         }
+        emits.append(.record(.drawString(fontID: fontID, brush: .color(argb(color, opacity: element.style.opacity)),
+                                         formatID: formatID, layoutRect: layout, text: text.string)))
+        return emits
     }
 
     private static func fontStyle(_ text: SceneText) -> Int32 {
@@ -238,12 +254,21 @@ enum SceneEMFPlusSynthesis {
         guard let imageID = allocate() else { return nil }
         let dest = scImage.destRectDevice.standardized
         guard dest.width > 0, dest.height > 0 else { warnings.append(.imageDropped(elementID: element.id)); return nil }
-        // SrcRect is the whole re-encoded image in pixel units (§2.3.4.8). The PNG
+        // SrcRect honours the source crop when one was recorded (§2.3.4.8): the PNG
+        // re-encodes the whole image at native pixel size, so a pixel-unit crop that
+        // fits the PNG re-emits verbatim; otherwise the whole image is drawn. The PNG
         // header carries the native pixel size.
         let (pw, ph): (Float, Float)
         if case .bitmap(let header, _) = plus.content { pw = Float(header.width); ph = Float(header.height) }
         else { pw = Float(dest.width); ph = Float(dest.height) }
-        let src = EMFPlusRectF(x: 0, y: 0, width: pw, height: ph)
+        let crop = scImage.srcRect
+        let src: EMFPlusRectF
+        if !crop.isNull, crop.width > 0, crop.height > 0, scImage.srcUnit == Int32(unitPixel),
+           crop.minX >= -0.5, crop.minY >= -0.5, crop.maxX <= Double(pw) + 0.5, crop.maxY <= Double(ph) + 0.5 {
+            src = EMFPlusRectF(x: safeFloat(crop.minX), y: safeFloat(crop.minY), width: safeFloat(crop.width), height: safeFloat(crop.height))
+        } else {
+            src = EMFPlusRectF(x: 0, y: 0, width: pw, height: ph)
+        }
         // A rotation/shear edit stored the true device parallelogram — write
         // EmfPlusDrawImagePoints (upper-left, upper-right, lower-left; §2.3.4.9) so
         // the rotation survives. An axis-aligned dest uses EmfPlusDrawImage.

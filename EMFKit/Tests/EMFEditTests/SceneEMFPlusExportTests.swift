@@ -27,10 +27,15 @@ struct SceneEMFPlusExportTests {
     private func scene(_ name: String) throws -> Scene {
         try SceneImporter.import(data: try Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent(name)))
     }
-    private func render(_ data: Data, options: RenderOptions = .default) -> CGImage? {
+    private func render(_ data: Data, options: RenderOptions = .default, scale: CGFloat = Self.renderScale) -> CGImage? {
         guard let opened = try? OpenedMetafile.open(data) else { return nil }
-        return MetafileRenderer.makeImage(opened, scale: Self.renderScale, options: options)?.0
+        return MetafileRenderer.makeImage(opened, scale: scale, options: options)?.0
     }
+    /// The corpus-local identity sweep renders at a lower scale than the committed
+    /// oracle: a quarter of the pixels (scale 1 vs 2) keeps the confidential-file
+    /// sweep well under budget without changing what it measures (an area-fraction
+    /// diff is scale-stable), and the committed oracle keeps full precision.
+    static let corpusScale: CGFloat = 1
 
     // MARK: - Unchanged EMF+ re-emits byte-identically
 
@@ -249,20 +254,18 @@ struct SceneEMFPlusExportTests {
     /// Thresholds (measured on the committed fixtures, justified):
     /// - Geometry re-emits the same device vertices — pixel-tight (observed
     ///   0.000%; budget 0.5%).
-    /// - An image re-emits its exact placement: an axis-aligned DrawImage, or (now)
-    ///   a DrawImagePoints whose parallelogram the lift preserves, re-encoded
-    ///   lossless PNG — pixel-tight (observed 0.000%; budget 0.5%).
-    /// - Text re-draws through its transform with a World-unit font equal to the
-    ///   original's device em (Near-aligned runs observed 0.000%). The ONE residual:
-    ///   a run with a non-Near StringAlignment (center/far) re-emits LEFT-aligned at
-    ///   the layout-rect origin, because the lift keeps only that origin, not the
-    ///   rect extent an alignment needs — a sub-text-width horizontal shift,
-    ///   measured at worst 1.124% (mean delta 1.19) on the one centered committed
-    ///   run. Budget 1.5% with headroom; flagged for a follow-up (store the layout
-    ///   rect + StringFormat) if tighter text fidelity is wanted.
+    /// - An image re-emits its exact placement: an axis-aligned DrawImage, or a
+    ///   DrawImagePoints whose parallelogram the lift preserves (rotation/shear/
+    ///   mirror), re-encoded lossless PNG, honouring the source SrcRect crop —
+    ///   pixel-tight (observed 0.000%; budget 0.5%).
+    /// - Text re-draws through its transform in the source font's own em size and
+    ///   size unit, with the real layout rect and a re-emitted StringFormat object
+    ///   when the run is center/far/line-aligned or carries format flags, so a
+    ///   centered run lands exactly where the source did (observed 0.000%, down from
+    ///   the pre-fix 1.124% on the one centered committed run). Budget 0.5%.
     @Test func identityEditFidelityOracle() throws {
         let geometryBudget = 0.005
-        let textBudget = 0.015
+        let textBudget = 0.005
         let imageBudget = 0.005
         var report = "\n=== E1b2a identity-edit fidelity oracle (render(export) vs MetafileRenderer(original)) ===\n"
         for name in Self.emfPlusFiles {
@@ -434,6 +437,63 @@ struct SceneEMFPlusExportTests {
         element.image = image
         _ = SceneSynthesis.emfBlock(for: element, baseHandle: 1, warnings: &warnings)
         #expect(warnings.contains(.imageRotated(elementID: element.id)), "GDI image synthesis did not warn on a rotated dest")
+    }
+
+    // MARK: - Horizontal mirror of an image (negative determinant keeps corners)
+
+    /// A horizontal mirror is a negative-determinant transform with b == c == 0, so
+    /// `applyDeviceTransform` must keep the four device corners (a flip survives only
+    /// as an oriented parallelogram), and the EMF+ export must re-emit it as a
+    /// DrawImagePoints whose orientation is flipped — a left-red / right-blue image
+    /// comes back right-red / left-blue.
+    @Test func horizontalMirrorOfImageKeepsFlip() throws {
+        let w = 8, h = 8
+        var pixels: [UInt8] = []
+        for _ in 0 ..< h {
+            for col in 0 ..< w { pixels += col < w / 2 ? [0, 0, 255, 255] : [255, 0, 0, 255] }   // B,G,R,A: left red, right blue
+        }
+        let header = EMFPlusImageBitmapHeader(width: Int32(w), height: Int32(h), stride: Int32(w * 4), pixelFormat: 0x0026_200A, bitmapDataType: 0)
+        let plusImage = EMFPlusImage(version: 0xDBC0_1002, content: .bitmap(header, data: Data(pixels)))
+
+        let page = RectL(left: 0, top: 0, right: 199, bottom: 199)
+        let builder = EMFPlusDualDocumentBuilder(bounds: page, frame: page, device: SizeL(cx: 0, cy: 0), millimeters: SizeL(cx: 0, cy: 0))
+        let imageID = try builder.addObject(.image(plusImage))
+        builder.appendPlus(.drawImage(imageID: imageID, imageAttributesID: nil, srcUnit: 2 /* pixel */,
+                                      srcRect: EMFPlusRectF(x: 0, y: 0, width: Float(w), height: Float(h)),
+                                      destRect: EMFPlusRectF(x: 20, y: 20, width: 160, height: 160)))
+        let data = try builder.finish()
+
+        let base = try SceneImporter.import(data: data)
+        let original = try #require(base.editableElements.first { $0.kind == .image })
+        let box = try #require(original.image).destRectDevice.standardized
+        // A horizontal mirror about the image centre (negative x-scale: det < 0, b == c == 0).
+        let cx = box.midX
+        let mirror = CGAffineTransform(translationX: cx, y: 0).scaledBy(x: -1, y: 1).translatedBy(x: -cx, y: 0)
+        var scene = base
+        try scene.applyTransform([original.id], mirror)
+        // The flip is kept as four device corners (not standardised to a box).
+        let corners = try #require(scene.element(id: original.id)?.image?.destCornersDevice)
+        #expect(corners.count == 4, "mirror did not store four device corners")
+        // The former top-left corner is now to the RIGHT of the former top-right.
+        #expect(corners[0].x > corners[1].x, "horizontal mirror not reflected in the corners: \(corners)")
+
+        let result = try SceneExporter.export(scene, as: .emf)
+        #expect(try EMFFile.parse(result.data).emfPlusStream().diagnostics.isEmpty, "mirrored image: diagnostics")
+        #expect(!result.data.isEmpty)
+        // Rendered in EMF+ mode, the mirror swaps the colours left↔right: the left
+        // band is now blue, the right band now red.
+        let out = try #require(render(result.data), "mirror render failed")
+        let img = try #require(PixelImage(out))
+        func sample(_ deviceRect: CGRect) -> (r: Int, g: Int, b: Int) {
+            let r = targetPixelRect(deviceRect, pageBounds: base.pageBoundsDevice, targetW: img.width, targetH: img.height)
+            let x = min(max(Int(r.midX), 0), img.width - 1), y = min(max(Int(r.midY), 0), img.height - 1)
+            let o = (y * img.width + x) * 4
+            return (Int(img.pixels[o]), Int(img.pixels[o + 1]), Int(img.pixels[o + 2]))
+        }
+        let left = sample(CGRect(x: 45, y: 90, width: 10, height: 20))    // device left band
+        let right = sample(CGRect(x: 145, y: 90, width: 10, height: 20))  // device right band
+        #expect(left.b > 150 && left.r < 100, "mirrored image left band not blue: \(left)")
+        #expect(right.r > 150 && right.b < 100, "mirrored image right band not red: \(right)")
     }
 
     // MARK: - Slot restore (all 64 object slots live)
@@ -682,7 +742,10 @@ struct SceneEMFPlusExportTests {
             // replays per element run and is too slow for large lifted files.
             if let file = try? EMFFile.parse(result.data), file.diagnostics.isEmpty, file.emfPlusStream().diagnostics.isEmpty { parseClean += 1 }
             if (try? SceneImporter.import(data: result.data)) != nil { reimported += 1 }
-            if render(result.data) != nil { rendered += 1 }
+            // A capped, low scale: this only checks the export renders without
+            // trapping, so a quarter-res (or less, for a huge page) buffer suffices.
+            let maxDim = max(base.pageSizeDevice.width, base.pageSizeDevice.height)
+            if render(result.data, scale: min(1, CGFloat(1100) / max(maxDim, 1))) != nil { rendered += 1 }
         }
         print("\n=== corpus-local EMF+ export: \(plusFiles) files, exported \(exported), parse-clean \(parseClean), re-imported \(reimported), rendered \(rendered) ===")
         if plusFiles > 0 { #expect(exported == plusFiles && parseClean == plusFiles && reimported == plusFiles && rendered == plusFiles) }
@@ -699,11 +762,16 @@ struct SceneEMFPlusExportTests {
         var outliers: [(index: Int, pct: Double)] = []
         for (index, url) in urls.enumerated() {
             guard let data = try? Data(contentsOf: url), let base = try? SceneImporter.import(data: data),
-                  base.source.renderPath == .emfPlus, !base.editableElements.isEmpty,
-                  let originalImg = render(data) else { continue }
+                  base.source.renderPath == .emfPlus, !base.editableElements.isEmpty else { continue }
+            // Adaptive scale: small pages render at full `corpusScale`; a huge page is
+            // capped so the sweep stays fast (fidelity is an area fraction, so a capped
+            // resolution still measures it). Both renders share the scale → same size.
+            let maxDim = max(base.pageSizeDevice.width, base.pageSizeDevice.height)
+            let scale = min(Self.corpusScale, CGFloat(1100) / max(maxDim, 1))
+            guard let originalImg = render(data, scale: scale) else { continue }
             var scene = base
             try? scene.translate(Set(base.editableElements.map(\.id)), dx: 0, dy: 0)
-            guard let result = try? SceneExporter.export(scene, as: .emf), let outImg = render(result.data) else { continue }
+            guard let result = try? SceneExporter.export(scene, as: .emf), let outImg = render(result.data, scale: scale) else { continue }
             let diff = compareImages(originalImg, outImg, tolerance: Self.tolerance)
             guard diff.sameSize else { continue }
             files += 1
@@ -714,8 +782,15 @@ struct SceneEMFPlusExportTests {
         let outlierText = outliers.sorted { $0.pct > $1.pct }.prefix(12)
             .map { "#\($0.index)=\(pct($0.pct))" }.joined(separator: ", ")
         print("\n=== corpus-local EMF+ identity-edit fidelity: \(files) files — ≤0.5%: \(within05), ≤2%: \(within2), >2%: \(over2) — outliers: \(outlierText) ===")
-        // No hard threshold on confidential files: the committed oracle asserts the
-        // bounds, this distribution surfaces regressions and outliers for review.
+        // A COUNT floor only (the files are confidential, so no file is named): most
+        // EMF+ files re-emit an identity edit within 0.5%, and the few residuals are
+        // GDI text in GetDC windows whose fractional source world transform quantises
+        // to an integer EMR reference — a sub-pixel shift, documented, not a
+        // regression. The floor catches a broad regression without being flaky.
+        if files >= 20 {
+            #expect(within05 >= files - 7,
+                    "corpus-local identity fidelity regressed: only \(within05)/\(files) within 0.5%")
+        }
     }
 
     // MARK: - Interop evidence (translated text, rotated image)

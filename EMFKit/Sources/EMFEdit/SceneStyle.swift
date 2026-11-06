@@ -233,6 +233,20 @@ public struct SceneText: Sendable, Equatable {
     /// both the GDI and EMF+ synthesisers re-emit it by drawing through `transform`.
     public var referenceLogical: CGPoint
     public var alignRawValue: UInt32
+    /// The run's layout rectangle in the SAME pre-transform (world/logical) space as
+    /// `referenceLogical` (`.null` for GDI content or a zero-size point run). An EMF+
+    /// DrawString run keeps the real extent so a center/far-aligned or wrapped run
+    /// re-emits identically through `transform` ([MS-EMFPLUS] §2.3.4.14, §2.2.1.9).
+    public var layoutReference: CGRect
+    /// EMF+ StringFormat LineAlign ([MS-EMFPLUS] §2.2.1.9; 0 for GDI content).
+    public var lineAlignRawValue: UInt32
+    /// EMF+ StringFormat flags ([MS-EMFPLUS] §2.1.1.31; 0 for GDI content).
+    public var stringFormatFlags: UInt32
+    /// GDI intercharacter-spacing advances in LOGICAL units, one per UTF-16 code
+    /// unit ([MS-EMF] §2.2.5); empty for EMF+ runs or runs without explicit spacing.
+    /// A GDI text run re-emits these so the file's exact (often condensed) spacing
+    /// survives an edit; dropped when the string is replaced (count no longer matches).
+    public var advancesLogical: [UInt32]
     /// True for an EMF+ DrawString run.
     public var isEMFPlus: Bool
 
@@ -251,6 +265,10 @@ public struct SceneText: Sendable, Equatable {
         self.color = SceneColor(lifted.color)
         self.referenceLogical = CGPoint(x: CGFloat(lifted.referenceLogical.x), y: CGFloat(lifted.referenceLogical.y))
         self.alignRawValue = lifted.alignRawValue
+        self.layoutReference = .null
+        self.lineAlignRawValue = 0
+        self.stringFormatFlags = 0
+        self.advancesLogical = lifted.advancesLogical
         self.isEMFPlus = false
     }
 
@@ -269,6 +287,14 @@ public struct SceneText: Sendable, Equatable {
         self.color = SceneColor(plus.color)
         self.referenceLogical = plus.layoutRectDevice.origin
         self.alignRawValue = plus.stringAlignment
+        // The layout rect is kept in WORLD space (like `referenceLogical` after the
+        // importer's world→device inversion), so the synthesis re-emits it through
+        // `transform`. A zero-size rect stays null — the point-origin case.
+        self.layoutReference = (plus.layoutRectWorld.width != 0 || plus.layoutRectWorld.height != 0)
+            ? plus.layoutRectWorld : .null
+        self.lineAlignRawValue = plus.lineAlignment
+        self.stringFormatFlags = plus.stringFormatFlags
+        self.advancesLogical = []
         self.isEMFPlus = true
     }
 }
@@ -296,6 +322,9 @@ public struct SceneImage: Sendable, Equatable {
     /// The source crop rectangle in the image's own units (EMF+ content); `.null`
     /// for GDI images.
     public var srcRect: CGRect
+    /// SrcUnit of `srcRect` ([MS-EMFPLUS] §2.1.1.33 UnitType; normally Pixel = 2).
+    /// 0 for GDI images. Re-emitted so an edited image keeps the source crop.
+    public var srcUnit: Int32
 
     public init(_ lifted: LiftedImage, deviceTransform: CGAffineTransform) {
         self.destOriginLogical = CGPoint(x: CGFloat(lifted.destOrigin.x), y: CGFloat(lifted.destOrigin.y))
@@ -306,6 +335,7 @@ public struct SceneImage: Sendable, Equatable {
         self.sourceDIB = lifted.sourceDIB
         self.emfPlusImage = nil
         self.srcRect = .null
+        self.srcUnit = 0
     }
 
     /// From an EMF+ lifted image: the destination is already in DEVICE space.
@@ -319,6 +349,7 @@ public struct SceneImage: Sendable, Equatable {
         self.sourceDIB = nil
         self.emfPlusImage = plus.image
         self.srcRect = plus.srcRect
+        self.srcUnit = plus.srcUnit
     }
 }
 

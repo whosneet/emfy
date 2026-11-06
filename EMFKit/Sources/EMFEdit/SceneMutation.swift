@@ -46,11 +46,14 @@ extension Element {
         // position lives in `geometryDevice`.
         transform = transform.concatenating(t)
         if var img = image {
-            // A rotation/shear (or an already-tracked parallelogram) must keep the
-            // true four device corners — standardising to a bounding box would
-            // silently drop the rotation. An axis-aligned edit keeps the fast
-            // bounding-box path. `destRectDevice` always holds the bounding box.
-            if img.destCornersDevice != nil || t.b != 0 || t.c != 0 {
+            // A rotation/shear, a MIRROR (negative determinant — a flip survives only
+            // as an oriented parallelogram), or an already-tracked parallelogram must
+            // keep the true four device corners; standardising to a bounding box would
+            // silently drop the rotation or the flip. A plain axis-aligned edit
+            // (positive determinant, no skew) keeps the fast bounding-box path.
+            // `destRectDevice` always holds the bounding box.
+            let determinant = t.a * t.d - t.b * t.c
+            if img.destCornersDevice != nil || t.b != 0 || t.c != 0 || determinant < 0 {
                 let corners = (img.destCornersDevice ?? img.destRectDevice.standardized.cornersTLTRBRBL).map { $0.applying(t) }
                 img.destCornersDevice = corners
                 img.destRectDevice = Element.boundingBox(of: corners)
