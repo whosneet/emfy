@@ -77,6 +77,12 @@ struct DeviceContext {
     /// so font resolution stays byte-identical to before the option.
     let fontSubstitutions: [FontSubstitution]
 
+    /// Optional scene-import observer (E1). Nil on every normal render, so the
+    /// hot path is untouched and every committed snapshot is byte-identical;
+    /// only an import attaches one. When set, drawing records report their
+    /// resolved operation and path brackets report their construction records.
+    var observer: RenderObserver?
+
     /// Path-bracket construction state ([MS-EMF] §2.3.10). This is DC-level,
     /// NOT part of the saveable `State`: a bracket is a transient
     /// record-recording mode bounded by EMR_BEGINPATH … EMR_ENDPATH, orthogonal
@@ -215,6 +221,7 @@ struct DeviceContext {
             // (GDI advanced-mode); outside, it only moves the position.
             if isRecordingPath {
                 startSubpath(at: point)
+                observer?.noteBracketRecord()
             }
             return true
 
@@ -240,14 +247,17 @@ struct DeviceContext {
         // three construction records below carry no drawing and are consumed.
         case .beginPath:
             beginPathBracket(log: &log)
+            observer?.beginBracket()
             return true
 
         case .endPath:
             endPathBracket()
+            observer?.endBracket()
             return true
 
         case .closeFigure:
             closeFigure()
+            observer?.noteBracketRecord()
             return true
 
         case .selectClipPath(let mode):
@@ -469,6 +479,9 @@ struct DeviceContext {
             log.note(.noCurrentPath(record: 67))
             return
         }
+        // The path's construction records fed a clip, not a drawing element:
+        // the import classifies them as state, not passthrough geometry.
+        observer?.consumePathForClip()
         switch mode {
         case .copy:
             state.clip.replace(with: .path(path))

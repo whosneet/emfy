@@ -127,6 +127,51 @@ struct ClipRegion: Equatable {
         }
     }
 
+    /// A best-effort DEVICE-space clip path for scene import (E1). Nil for the
+    /// whole canvas (the common case). A single rect/path primitive reproduces
+    /// exactly; an intersection of several primitives is approximated by the
+    /// intersection of their bounding boxes — the editor records a clip so
+    /// edited content stays inside it, and exact multi-primitive clips are an
+    /// E1b concern (flagged). `.excludeRect` primitives are ignored here.
+    func devicePath() -> CGPath? {
+        let shaping = primitives.filter {
+            if case .excludeRect = $0 { return false }
+            return true
+        }
+        guard !shaping.isEmpty else { return nil }
+        if shaping.count == 1 { return path(for: shaping[0]) }
+        var box = CGRect.infinite
+        for primitive in shaping {
+            let b: CGRect
+            switch primitive {
+            case .rects(let rects):
+                b = rects.reduce(CGRect.null) { $0.union($1) }
+            case .path(let p):
+                b = p.boundingBoxOfPath
+            case .excludeRect:
+                continue
+            }
+            box = box.intersection(b)
+        }
+        guard !box.isNull, !box.isInfinite else { return nil }
+        let out = CGMutablePath()
+        out.addRect(box)
+        return out
+    }
+
+    private func path(for primitive: Primitive) -> CGPath? {
+        switch primitive {
+        case .rects(let rects):
+            let out = CGMutablePath()
+            for rect in rects where !rect.isNull { out.addRect(rect) }
+            return out.isEmpty ? nil : out
+        case .path(let p):
+            return p
+        case .excludeRect:
+            return nil
+        }
+    }
+
     /// Intersects the gstate clip with `path` (nonzero winding: the union of its
     /// subpaths). L5 fix: CoreGraphics' `clip()` with an EMPTY path — and even
     /// `clip(to: .null)` — is a NO-OP that would REMOVE clipping, so a genuinely

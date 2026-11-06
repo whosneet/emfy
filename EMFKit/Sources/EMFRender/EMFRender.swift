@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import EMFParse
 import Foundation
 
@@ -48,7 +49,8 @@ public enum EMFRenderer {
         _ file: EMFFile,
         into context: CGContext,
         target: CGRect,
-        options: RenderOptions = .default
+        options: RenderOptions = .default,
+        observer: RenderObserver? = nil
     ) -> EMFRenderLog {
         var log = EMFRenderLog()
         let base = deviceToTarget(header: file.header, target: target, log: &log)
@@ -87,15 +89,24 @@ public enum EMFRenderer {
         // leaves `forceGDI` false, so existing output is byte-identical.
         let forceGDI = options.emfPlusArbitration == .gdi && (plus.header?.isDual ?? false)
         if !forceGDI, plus.records.contains(where: \.isDrawing) {
+            // EMF+ drives output: the import observer (if any) does NOT attach —
+            // v1 lifts EMF+ as passthrough (the import entry records this path),
+            // so no EMF+ sub-record is reported as a GDI op.
             EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, options: options, log: &log)
             return log
         }
 
+        // Attach the observer only for the GDI loop (above the EMF+ return), so
+        // a GetDC-window GDI draw inside EMF+ playback never reports a stale op.
+        dc.observer = observer
         // records[0] is EMR_HEADER — already consumed as file.header, never
-        // a playback record.
-        for record in file.records.dropFirst() {
-            playGDIRecord(file.payload(of: record), into: context, dc: &dc, base: base, log: &log)
+        // a playback record. The index is into `file.records` so the import can
+        // map an op back to its source record (0 = header).
+        for index in file.records.indices.dropFirst() {
+            observer?.currentRecordIndex = index
+            playGDIRecord(file.payload(of: file.records[index]), into: context, dc: &dc, base: base, log: &log)
         }
+        observer?.finalize()
         return log
     }
 
@@ -331,28 +342,50 @@ public enum EMFRenderer {
         // state — GDI does not record EXTTEXTOUTW or the blits into a path
         // bracket, so an open bracket does not capture them.
         case .extTextOutW(let text):
+            // Capture BEFORE drawing: the anchor is the pre-draw current
+            // position under TA_UPDATECP.
+            if dc.observer != nil { captureTextOp(text, dc: dc) }
             TextDrawer.draw(text, into: context, dc: &dc, base: base, log: &log)
             return
         case .stretchDIBits(let payload):
             BitmapDrawer.drawStretchDIBits(payload, into: context, dc: dc, base: base, log: &log)
+            if dc.observer != nil {
+                captureImageOp(destOrigin: payload.dest, destSize: payload.destSize, dib: payload.dib, payload: .stretchDIBits(payload), dc: dc)
+            }
             return
         case .bitBlt(let payload):
             BitmapDrawer.drawBitBlt(payload, stretch: false, into: context, dc: dc, base: base, log: &log)
+            if dc.observer != nil {
+                captureImageOp(destOrigin: payload.dest, destSize: payload.destSize, dib: payload.dib, payload: .bitBlt(payload), dc: dc)
+            }
             return
         case .stretchBlt(let payload):
             BitmapDrawer.drawBitBlt(payload, stretch: true, into: context, dc: dc, base: base, log: &log)
+            if dc.observer != nil {
+                captureImageOp(destOrigin: payload.dest, destSize: payload.destSize, dib: payload.dib, payload: .stretchBlt(payload), dc: dc)
+            }
             return
         case .setDIBitsToDevice(let payload):
             BitmapDrawer.drawSetDIBitsToDevice(payload, into: context, dc: dc, base: base, log: &log)
+            if dc.observer != nil {
+                captureImageOp(destOrigin: payload.dest, destSize: payload.srcSize, dib: payload.dib, payload: .setDIBitsToDevice(payload), dc: dc)
+            }
             return
 
         // WMF-sourced direct draws ([MS-WMF] §2.3.3.12/.19). Like text and
         // bitmaps they are never captured into a path bracket.
         case .setPixel(let point, let color):
             drawSetPixel(point: point, color: color, into: context, dc: dc, base: base)
+            if dc.observer != nil {
+                let rect = CGRect(x: CGFloat(point.x), y: CGFloat(point.y), width: 1, height: 1)
+                capturePassthroughOp(deviceRect: rect, payload: .setPixel(point: point, color: color), dc: dc)
+            }
             return
         case .patBlt(let bounds, let rasterOperation):
             drawPatBlt(bounds: bounds, rasterOperation: rasterOperation, into: context, dc: dc, base: base, log: &log)
+            if dc.observer != nil {
+                capturePassthroughOp(deviceRect: PathBuilder.cgRect(bounds), payload: .patBlt(bounds: bounds, rasterOperation: rasterOperation), dc: dc)
+            }
             return
 
         default:
@@ -368,6 +401,9 @@ public enum EMFRenderer {
 
         let full = dc.resolvedTransform.concatenating(base)
         let path = CGMutablePath()
+        // The …To consumers mutate the current position; capture its pre-draw
+        // value so an import can rebuild their device geometry (E1).
+        let startPosition = dc.state.currentPosition
 
         switch payload {
         // MARK: Filled shapes — fill with brush, then stroke with pen.
@@ -472,6 +508,13 @@ public enum EMFRenderer {
             // payload. Kept exhaustive-safe rather than trapping (§8).
             break
         }
+
+        // Scene-import capture (E1): rebuild the device-space geometry from the
+        // payload and record the resolved op. No-op when no observer is attached,
+        // so normal rendering is byte-identical.
+        if dc.observer != nil {
+            captureGeometryOp(payload, startPosition: startPosition, dc: dc)
+        }
     }
 
     // MARK: - Path bracket recording
@@ -484,6 +527,8 @@ public enum EMFRenderer {
     /// (polygons, rectangle, ellipse, roundRect, arc, open polylines/beziers)
     /// add their own subpath and do neither.
     private static func recordIntoPath(_ payload: EMFRecordPayload, dc: inout DeviceContext) {
+        // This record contributes geometry to the open bracket (E1 provenance).
+        dc.observer?.noteBracketRecord()
         switch payload {
         // Continue the current figure from the current position.
         case .lineTo(let point):
@@ -595,6 +640,17 @@ public enum EMFRenderer {
         guard let devicePath = dc.consumeCurrentPath(), !devicePath.isEmpty else {
             log.note(.noCurrentPath(record: fill && stroke ? 63 : (fill ? 62 : 64)))
             return
+        }
+        // Scene-import capture (E1): the path bracket is already DEVICE space.
+        // Provenance spans BEGINPATH … this closer.
+        if let observer = dc.observer {
+            observer.append(makeOp(
+                kind: .path,
+                recordIndices: observer.consumePathForDraw(),
+                deviceGeometry: devicePath,
+                fill: fill, stroke: stroke, text: nil, image: nil,
+                payload: nil, dc: dc
+            ))
         }
         // Transform the device-space path to target space (the same space the
         // geometry drawing path uses) once, then paint under the clip.
@@ -844,6 +900,313 @@ public enum EMFRenderer {
         // GDI's floor for the miter limit is 1.
         context.setMiterLimit(max(1, CGFloat(miterLimit)))
         context.setLineDash(phase: 0, lengths: parameters.dash)
+    }
+
+    // MARK: - Scene-import capture (E1)
+    //
+    // These run only when `dc.observer != nil` (an import). They rebuild the
+    // resolved op in DEVICE space from the same payload the drawing used, so a
+    // lifted element carries exactly what was drawn.
+
+    /// Builds a `ResolvedDrawOp` from the current DC state. Fill/stroke flags say
+    /// which halves a primitive paints; the brush/pen are read from the DC.
+    static func makeOp(
+        kind: ResolvedDrawOp.Kind,
+        recordIndices: [Int],
+        deviceGeometry: CGPath,
+        fill: Bool,
+        stroke: Bool,
+        text: LiftedText?,
+        image: LiftedImage?,
+        payload: EMFRecordPayload?,
+        dc: DeviceContext
+    ) -> ResolvedDrawOp {
+        let fillColor: ColorRef?
+        if fill, case .solid(let color) = dc.state.brush { fillColor = color } else { fillColor = nil }
+        let liftedStroke: LiftedStroke?
+        if stroke, case .stroke(let pen) = dc.state.pen {
+            liftedStroke = liftStroke(pen, miterLimit: dc.state.miterLimit)
+        } else {
+            liftedStroke = nil
+        }
+        return ResolvedDrawOp(
+            recordIndices: recordIndices,
+            kind: kind,
+            deviceGeometry: deviceGeometry,
+            deviceTransform: dc.resolvedTransform,
+            clipDeviceGeometry: dc.state.clip.devicePath(),
+            fillColor: fillColor,
+            fillIsEvenOdd: dc.state.polyFillMode != .winding,
+            stroke: liftedStroke,
+            text: text,
+            image: image,
+            replayState: dc.state,
+            replayHeader: dc.header,
+            replayPayload: payload
+        )
+    }
+
+    static func liftStroke(_ pen: ResolvedStroke, miterLimit: UInt32) -> LiftedStroke {
+        let dash: LiftedStroke.Dash
+        switch pen.lineStyle {
+        case .solid: dash = .solid
+        case .dash: dash = .dash
+        case .dot: dash = .dot
+        case .dashDot: dash = .dashDot
+        case .dashDotDot: dash = .dashDotDot
+        case .userStyle(let entries): dash = .userStyle(entries)
+        }
+        return LiftedStroke(
+            color: pen.color,
+            isCosmetic: pen.isCosmetic,
+            width: pen.width,
+            dash: dash,
+            cap: pen.cap,
+            join: pen.join,
+            miterLimit: miterLimit
+        )
+    }
+
+    /// Rebuilds the device-space geometry for a geometry payload and records the
+    /// op. `startPosition` is the pre-draw current position (the …To consumers
+    /// seed from it). Matches the shapes `draw` paints; non-geometry payloads are
+    /// ignored (text/images/direct draws capture elsewhere).
+    private static func captureGeometryOp(
+        _ payload: EMFRecordPayload,
+        startPosition: PointL,
+        dc: DeviceContext
+    ) {
+        guard let observer = dc.observer else { return }
+        let t = dc.resolvedTransform
+        let device = CGMutablePath()
+        let kind: ResolvedDrawOp.Kind
+        var fill = false
+        var stroke = false
+
+        switch payload {
+        case .polygon(let poly):
+            PathBuilder.appendPolygon(poly.points.map(PathBuilder.cgPoint), to: device, transform: t)
+            kind = .polygon; fill = true; stroke = true
+        case .polygon16(let poly):
+            PathBuilder.appendPolygon(poly.points.map(PathBuilder.cgPoint), to: device, transform: t)
+            kind = .polygon; fill = true; stroke = true
+        case .polyPolygon16(let poly):
+            forEachSlice(of: poly) { slice in
+                PathBuilder.appendPolygon(slice.map(PathBuilder.cgPoint), to: device, transform: t)
+            }
+            kind = .polyPolygon; fill = true; stroke = true
+        case .rectangle(let box):
+            device.addRect(PathBuilder.cgRect(box), transform: t)
+            kind = .rectangle; fill = true; stroke = true
+        case .ellipse(let box):
+            device.addEllipse(in: PathBuilder.cgRect(box), transform: t)
+            kind = .ellipse; fill = true; stroke = true
+        case .roundRect(let rr):
+            PathBuilder.appendRoundRect(box: rr.box, corner: rr.corner, to: device, transform: t)
+            kind = .roundRect; fill = true; stroke = true
+        case .pie(let arc):
+            PathBuilder.appendPie(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t)
+            kind = .pie; fill = true; stroke = true
+        case .chord(let arc):
+            PathBuilder.appendChord(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t)
+            kind = .chord; fill = true; stroke = true
+        case .polyline(let poly):
+            PathBuilder.appendPolyline(poly.points.map(PathBuilder.cgPoint), to: device, transform: t)
+            kind = .polyline; stroke = true
+        case .polyline16(let poly):
+            PathBuilder.appendPolyline(poly.points.map(PathBuilder.cgPoint), to: device, transform: t)
+            kind = .polyline; stroke = true
+        case .polyPolyline16(let poly):
+            forEachSlice(of: poly) { slice in
+                PathBuilder.appendPolyline(slice.map(PathBuilder.cgPoint), to: device, transform: t)
+            }
+            kind = .polyPolyline; stroke = true
+        case .polyBezier(let poly):
+            PathBuilder.appendBezier(prefixOfBezier(poly.points.map(PathBuilder.cgPoint), continues: false), to: device, transform: t)
+            kind = .bezier; stroke = true
+        case .polyBezier16(let poly):
+            PathBuilder.appendBezier(prefixOfBezier(poly.points.map(PathBuilder.cgPoint), continues: false), to: device, transform: t)
+            kind = .bezier; stroke = true
+        case .arc(let arc):
+            PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t)
+            kind = .arc; stroke = true
+        case .lineTo(let point):
+            device.move(to: PathBuilder.cgPoint(startPosition), transform: t)
+            device.addLine(to: PathBuilder.cgPoint(point), transform: t)
+            kind = .line; stroke = true
+        case .polylineTo(let poly):
+            captureLineToDevice(device, startPosition: startPosition, points: poly.points.map(PathBuilder.cgPoint), transform: t)
+            kind = .polyline; stroke = true
+        case .polylineTo16(let poly):
+            captureLineToDevice(device, startPosition: startPosition, points: poly.points.map(PathBuilder.cgPoint), transform: t)
+            kind = .polyline; stroke = true
+        case .polyBezierTo(let poly):
+            captureBezierToDevice(device, startPosition: startPosition, points: poly.points.map(PathBuilder.cgPoint), transform: t)
+            kind = .bezier; stroke = true
+        case .polyBezierTo16(let poly):
+            captureBezierToDevice(device, startPosition: startPosition, points: poly.points.map(PathBuilder.cgPoint), transform: t)
+            kind = .bezier; stroke = true
+        default:
+            return
+        }
+
+        observer.append(makeOp(
+            kind: kind,
+            recordIndices: [observer.currentRecordIndex],
+            deviceGeometry: device,
+            fill: fill, stroke: stroke, text: nil, image: nil,
+            payload: payload, dc: dc
+        ))
+    }
+
+    private static func captureLineToDevice(
+        _ device: CGMutablePath, startPosition: PointL, points: [CGPoint], transform t: CGAffineTransform
+    ) {
+        guard !points.isEmpty else { return }
+        device.move(to: PathBuilder.cgPoint(startPosition), transform: t)
+        for point in points { device.addLine(to: point, transform: t) }
+    }
+
+    private static func captureBezierToDevice(
+        _ device: CGMutablePath, startPosition: PointL, points: [CGPoint], transform t: CGAffineTransform
+    ) {
+        let prefix = prefixOfBezier(points, continues: true)
+        guard !prefix.isEmpty else { return }
+        device.move(to: PathBuilder.cgPoint(startPosition), transform: t)
+        PathBuilder.appendBezierTriples(prefix, to: device, transform: t)
+    }
+
+    /// Lifts an EXTTEXTOUTW run to a `LiftedText`. The font family is the
+    /// RESOLVED macOS family (post-substitution), matching what was drawn.
+    static func liftText(_ text: ExtTextPayload, dc: DeviceContext) -> LiftedText {
+        let resolved = dc.state.font
+        let baseFont = resolved?.base ?? FontMapper.systemBaseFont()
+        let family = CTFontCopyFamilyName(baseFont) as String
+        let traits = CTFontGetSymbolicTraits(baseFont)
+        let reference = dc.state.textAlign.updatesCurrentPosition ? dc.state.currentPosition : text.reference
+        return LiftedText(
+            string: text.string,
+            fontFamily: family,
+            logicalHeight: resolved?.logicalHeight ?? 0,
+            bold: traits.contains(.traitBold),
+            italic: traits.contains(.traitItalic),
+            underline: resolved?.underline ?? false,
+            strikeOut: resolved?.strikeOut ?? false,
+            escapementTenths: resolved?.escapementTenths ?? 0,
+            color: dc.state.textColor,
+            referenceLogical: reference,
+            alignRawValue: dc.state.textAlign.rawValue
+        )
+    }
+
+    /// Captures a text op after EXTTEXTOUTW drew. Skips glyph-index runs and
+    /// empty strings (which draw no lift-able text) — they remain passthrough.
+    private static func captureTextOp(_ text: ExtTextPayload, dc: DeviceContext) {
+        guard let observer = dc.observer else { return }
+        // A glyph-index or empty run isn't lift-able to editable text; keep it as
+        // a passthrough op so it still replays (an ETO_OPAQUE background rect).
+        guard !text.options.glyphIndex, !text.string.isEmpty else {
+            capturePassthroughOp(deviceRect: PathBuilder.cgRect(text.rectangle), payload: .extTextOutW(text), dc: dc)
+            return
+        }
+        let t = dc.resolvedTransform
+        let device = CGMutablePath()
+        let rect = PathBuilder.cgRect(text.rectangle)
+        if rect.width > 0, rect.height > 0 {
+            device.addRect(rect, transform: t)
+        }
+        observer.append(makeOp(
+            kind: .text,
+            recordIndices: [observer.currentRecordIndex],
+            deviceGeometry: device,
+            fill: false, stroke: false,
+            text: liftText(text, dc: dc), image: nil,
+            payload: .extTextOutW(text), dc: dc
+        ))
+    }
+
+    /// Captures an image op after a blit drew. `dib` is nil for a sourceless rop
+    /// fill (those stay passthrough). Dest is in LOGICAL units.
+    private static func captureImageOp(
+        destOrigin: PointL, destSize: SizeL, dib: DIB?, payload: EMFRecordPayload, dc: DeviceContext
+    ) {
+        guard let observer = dc.observer, dib != nil else { return }
+        let t = dc.resolvedTransform
+        let device = CGMutablePath()
+        let rect = CGRect(
+            x: CGFloat(destOrigin.x), y: CGFloat(destOrigin.y),
+            width: CGFloat(destSize.cx), height: CGFloat(destSize.cy)
+        )
+        device.addRect(rect.standardized, transform: t)
+        observer.append(makeOp(
+            kind: .image,
+            recordIndices: [observer.currentRecordIndex],
+            deviceGeometry: device,
+            fill: false, stroke: false,
+            text: nil,
+            image: LiftedImage(destOrigin: destOrigin, destSize: destSize, sourceDIB: dib),
+            payload: payload, dc: dc
+        ))
+    }
+
+    /// Captures a passthrough op for a drawn record v1 does not lift to an
+    /// editable element (SETPIXEL, PATBLT, glyph-index text). It carries its
+    /// payload so replay reproduces it exactly.
+    private static func capturePassthroughOp(deviceRect: CGRect, payload: EMFRecordPayload, dc: DeviceContext) {
+        guard let observer = dc.observer else { return }
+        let device = CGMutablePath()
+        if deviceRect.width != 0 || deviceRect.height != 0 {
+            device.addRect(deviceRect.standardized, transform: dc.resolvedTransform)
+        }
+        observer.append(makeOp(
+            kind: .passthrough,
+            recordIndices: [observer.currentRecordIndex],
+            deviceGeometry: device,
+            fill: false, stroke: false, text: nil, image: nil,
+            payload: payload, dc: dc
+        ))
+    }
+
+    // MARK: - Op replay (E1 scene render / passthrough)
+
+    /// Re-runs a captured op's ORIGINAL draw into `context`, so a lifted or
+    /// passthrough element renders pixel-identical to the source. `base` is the
+    /// device→target transform. A no-op observer is never attached here.
+    public static func replay(
+        _ op: ResolvedDrawOp,
+        into context: CGContext,
+        deviceToTarget base: CGAffineTransform,
+        options: RenderOptions = .default
+    ) {
+        var log = EMFRenderLog()
+        var dc = DeviceContext(header: op.replayHeader, fontSubstitutions: options.fontSubstitutions)
+        dc.state = op.replayState
+
+        if let payload = op.replayPayload {
+            playGDIRecord(payload, into: context, dc: &dc, base: base, log: &log)
+            return
+        }
+        // Path op: fill/stroke the captured device geometry under the clip,
+        // exactly as `drawPathCloser` does.
+        let targetPath = CGMutablePath()
+        targetPath.addPath(op.deviceGeometry, transform: base)
+        if op.fillColor != nil, case .solid(let color) = dc.state.brush {
+            context.saveGState()
+            dc.state.clip.apply(to: context, deviceToTarget: base)
+            context.setFillColor(cgColor(color))
+            context.addPath(targetPath)
+            context.fillPath(using: dc.state.polyFillMode == .winding ? .winding : .evenOdd)
+            context.restoreGState()
+        }
+        if op.stroke != nil, case .stroke(let pen) = dc.state.pen {
+            let full = dc.resolvedTransform.concatenating(base)
+            context.saveGState()
+            dc.state.clip.apply(to: context, deviceToTarget: base)
+            applyStrokeParameters(pen, on: context, full: full, base: base, miterLimit: dc.state.miterLimit)
+            context.addPath(targetPath)
+            context.strokePath()
+            context.restoreGState()
+        }
     }
 }
 

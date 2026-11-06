@@ -79,6 +79,12 @@ public enum MetafileRenderer {
         /// (inclusive-inclusive, so right−left+1 × bottom−top+1), or the WMF
         /// program's device canvas. Never smaller than 1×1.
         public let naturalSize: CGSize
+        /// The device-space page rectangle in the file's own coordinates: EMF
+        /// header bounds `(left, top, right−left+1, bottom−top+1)` (y-down,
+        /// inclusive-inclusive), or `(0, 0, canvasW, canvasH)` for WMF. Its
+        /// `size` equals `naturalSize`; its `origin` is the non-zero header
+        /// left/top the scene import needs to rebuild the device→target fit.
+        public let deviceBounds: CGRect
         /// Which rendering path this metafile takes.
         public let kind: Kind
         /// The fate of a WMF's embedded EMF.
@@ -113,20 +119,26 @@ public enum MetafileRenderer {
             self.embeddedEMF = embeddedEMF
             self.hasGDICopy = hasGDICopy
             self.recordKinds = recordKinds
-            self.naturalSize = Prepared.naturalSize(of: content)
+            self.deviceBounds = Prepared.deviceBounds(of: content)
+            self.naturalSize = deviceBounds.size
         }
 
-        /// EMF: the header bounds. WMF: the program canvas. Int64 keeps the
-        /// inclusive-inclusive +1 from overflowing a full-range `rclBounds` (§8).
-        private static func naturalSize(of content: Content) -> CGSize {
+        /// EMF: the header bounds rectangle. WMF: the program canvas at origin
+        /// zero. Int64 keeps the inclusive-inclusive +1 from overflowing a
+        /// full-range `rclBounds` (§8); the size is floored at 1×1.
+        private static func deviceBounds(of content: Content) -> CGRect {
             switch content {
             case .emf(let file):
                 let b = file.header.bounds
                 let width = Int64(b.right) - Int64(b.left) + 1
                 let height = Int64(b.bottom) - Int64(b.top) + 1
-                return CGSize(width: Double(max(1, width)), height: Double(max(1, height)))
+                return CGRect(
+                    x: Double(b.left), y: Double(b.top),
+                    width: Double(max(1, width)), height: Double(max(1, height))
+                )
             case .wmfProgram(let program):
-                return CGSize(
+                return CGRect(
+                    x: 0, y: 0,
                     width: Double(max(1, program.canvasWidth)),
                     height: Double(max(1, program.canvasHeight))
                 )
@@ -319,6 +331,116 @@ public enum MetafileRenderer {
         return render(prepared, into: context, target: target, options: options)
     }
 
+    // MARK: - Scene-import observation (E1)
+
+    /// Plays `prepared` with a `RenderObserver` attached and returns the
+    /// resolved drawing operations plus the record-partition inputs the editor's
+    /// importer needs. This reuses the ONE DC interpreter — it never
+    /// reinterprets records — so the lifted ops are exactly what a render draws.
+    ///
+    /// Playback goes into a throwaway 1×1 context: every captured value is in
+    /// DEVICE space or is DC state, independent of the target size, so the
+    /// pixels are discarded and import does no canvas-sized allocation.
+    ///
+    /// An EMF+ file (EMF+ drawing records present and not forced to GDI) draws
+    /// via EMF+; v1 does not lift EMF+, so `renderPath == .emfPlus` with no ops
+    /// — the importer keeps that content as passthrough.
+    public static func observe(_ prepared: Prepared, options: RenderOptions = .default) -> PlaybackObservation {
+        let observer = RenderObserver()
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
+                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else {
+            switch prepared.content {
+            case .emf(let file):
+                return PlaybackObservation(ops: [], pathConstructionIndices: [], renderPath: .gdi, unitCount: file.records.count, unitRoles: emfUnitRoles(file), unitTypes: file.records.map(\.type))
+            case .wmfProgram(let program):
+                return PlaybackObservation(ops: [], pathConstructionIndices: [], renderPath: .wmf, unitCount: program.payloads.count, unitRoles: program.payloads.map(payloadRole), unitTypes: program.payloads.map(payloadEMRType))
+            }
+        }
+        let target = CGRect(x: 0, y: 0, width: 1, height: 1)
+
+        switch prepared.content {
+        case .emf(let file):
+            let roles = emfUnitRoles(file)
+            // Same EMF+ arbitration as `EMFRenderer.render` ([MS-EMFPLUS]
+            // §1.3.1): if EMF+ drawing records play, the GDI loop never runs.
+            let plus = file.emfPlusStream()
+            let forceGDI = options.emfPlusArbitration == .gdi && (plus.header?.isDual ?? false)
+            if !forceGDI, plus.records.contains(where: \.isDrawing) {
+                return PlaybackObservation(ops: [], pathConstructionIndices: [], renderPath: .emfPlus, unitCount: file.records.count, unitRoles: roles, unitTypes: file.records.map(\.type))
+            }
+            _ = EMFRenderer.render(file, into: context, target: target, options: options, observer: observer)
+            return PlaybackObservation(
+                ops: observer.draws,
+                pathConstructionIndices: observer.pathConstructionIndices,
+                renderPath: .gdi,
+                unitCount: file.records.count,
+                unitRoles: roles,
+                unitTypes: file.records.map(\.type)
+            )
+        case .wmfProgram(let program):
+            _ = renderProgram(program, into: context, target: target, options: options, observer: observer)
+            return PlaybackObservation(
+                ops: observer.draws,
+                pathConstructionIndices: observer.pathConstructionIndices,
+                renderPath: .wmf,
+                unitCount: program.payloads.count,
+                unitRoles: program.payloads.map(payloadRole),
+                unitTypes: program.payloads.map(payloadEMRType)
+            )
+        }
+    }
+
+    /// The EMR type id for a translated WMF unit, used only for passthrough
+    /// reporting: an un-decoded record carries its type, everything else 0.
+    private static func payloadEMRType(_ payload: EMFRecordPayload) -> UInt32 {
+        switch payload {
+        case .unimplemented(let type): return type
+        case .malformed(let type, _): return type
+        default: return 0
+        }
+    }
+
+    /// Per-record coarse roles for an EMF. EMR_HEADER (1) / EMR_EOF (14) are
+    /// structural and EMR_COMMENT (70) is a passthrough comment, decided by type;
+    /// everything else is classified from its decoded payload.
+    private static func emfUnitRoles(_ file: EMFFile) -> [UnitRole] {
+        file.records.indices.map { i in
+            switch file.records[i].type {
+            case 1, 14: return .structural
+            case 70: return .comment
+            default: return payloadRole(file.payload(of: file.records[i]))
+            }
+        }
+    }
+
+    /// Buckets a decoded payload for the record partition. Exhaustive so a new
+    /// payload case forces a decision here.
+    static func payloadRole(_ payload: EMFRecordPayload) -> UnitRole {
+        switch payload {
+        case .setWindowExtEx, .setWindowOrgEx, .setViewportExtEx, .setViewportOrgEx,
+             .setMapMode, .setBkMode, .setPolyFillMode, .setROP2, .saveDC, .restoreDC,
+             .setWorldTransform, .modifyWorldTransform, .setMiterLimit,
+             .intersectClipRect, .excludeClipRect, .createPen, .extCreatePen,
+             .createBrushIndirect, .selectObject, .deleteObject, .beginPath, .endPath,
+             .closeFigure, .selectClipPath, .extSelectClipRgn, .moveToEx,
+             .setTextAlign, .setTextColor, .setBkColor, .extCreateFontIndirectW:
+            return .state
+        case .polyBezier, .polygon, .polyline, .polyBezierTo, .polylineTo,
+             .ellipse, .rectangle, .roundRect, .arc, .lineTo,
+             .polyBezier16, .polygon16, .polyline16, .polyBezierTo16, .polylineTo16,
+             .polyPolyline16, .polyPolygon16, .pie, .chord, .setPixel, .patBlt,
+             .fillPath, .strokeAndFillPath, .strokePath,
+             .extTextOutW, .stretchDIBits, .bitBlt, .stretchBlt, .setDIBitsToDevice:
+            return .drawing
+        case .unimplemented, .malformed:
+            return .unknown
+        }
+    }
+
     // MARK: - WMF program playback
 
     /// Renders a translated WMF program into a fresh white sRGB bitmap sized
@@ -367,12 +489,14 @@ public enum MetafileRenderer {
         _ program: WMFRenderProgram,
         into context: CGContext,
         target: CGRect,
-        options: RenderOptions = .default
+        options: RenderOptions = .default,
+        observer: RenderObserver? = nil
     ) -> EMFRenderLog {
         var log = EMFRenderLog()
         let header = syntheticHeader(width: program.canvasWidth, height: program.canvasHeight)
         let base = EMFRenderer.deviceToTarget(header: header, target: target, log: &log)
         var dc = DeviceContext(header: header, fontSubstitutions: options.fontSubstitutions)
+        dc.observer = observer
 
         context.saveGState()
         defer { context.restoreGState() }
@@ -384,9 +508,13 @@ public enum MetafileRenderer {
             context.setShouldAntialias(false)
         }
 
-        for payload in program.payloads {
-            EMFRenderer.playGDIRecord(payload, into: context, dc: &dc, base: base, log: &log)
+        // Index is into `program.payloads` so an import can map an op to its WMF
+        // playback unit (E1 provenance).
+        for index in program.payloads.indices {
+            observer?.currentRecordIndex = index
+            EMFRenderer.playGDIRecord(program.payloads[index], into: context, dc: &dc, base: base, log: &log)
         }
+        observer?.finalize()
         return log
     }
 
