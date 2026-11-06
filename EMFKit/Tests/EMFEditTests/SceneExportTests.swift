@@ -425,14 +425,20 @@ struct SceneExportTests {
 
     // MARK: - Hostile / typed errors
 
-    @Test func crossContainerExportIsUnsupported() throws {
+    @Test func crossContainerExportRoundTrips() throws {
+        // Cross-container EMF→WMF and WMF→EMF are supported as of slice E1b2c: the
+        // output parses and re-imports (fidelity is covered in the cross-format suite).
         let emf = try SceneImporter.import(data: try Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("gate-p2-house.emf")))
         var edited = emf
         try edited.translate([emf.editableElements[0].id], dx: 1, dy: 1)
-        #expect(throws: SceneExportError.self) { _ = try SceneExporter.export(edited, as: .wmf) }
+        let wmfOut = try SceneExporter.export(edited, as: .wmf)
+        #expect(try WMFFile.parse(wmfOut.data).diagnostics.isEmpty, "EMF→WMF produced WMF diagnostics")
+        #expect((try? SceneImporter.import(data: wmfOut.data)) != nil, "EMF→WMF did not re-import")
 
         let wmf = try SceneImporter.import(data: try Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("gate-wmf-gdi-p2-star.wmf")))
-        #expect(throws: SceneExportError.self) { _ = try SceneExporter.export(wmf, as: .emf) }
+        let emfOut = try SceneExporter.export(wmf, as: .emf)
+        #expect(try EMFFile.parse(emfOut.data).diagnostics.isEmpty, "WMF→EMF produced EMF diagnostics")
+        #expect((try? SceneImporter.import(data: emfOut.data)) != nil, "WMF→EMF did not re-import")
     }
 
     @Test func editingEMFPlusIsSupported() throws {

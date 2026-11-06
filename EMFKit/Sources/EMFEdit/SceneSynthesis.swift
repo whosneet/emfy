@@ -374,6 +374,10 @@ enum SceneSynthesis {
         guard let text = element.text, !text.string.isEmpty else { return [] }
         if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
         if text.string.unicodeScalars.contains(where: { $0.value > 0xFF }) { warnings.append(.textNotLatin1(elementID: element.id)) }
+        // WMF carries only a LOGFONT escapement angle, not a general text matrix, so a
+        // run under a rotating/shearing world transform drops the rotation (the lift
+        // of a WMF-source run maps to an identity transform, so this never fires there).
+        if hasRotation(element.transform) { warnings.append(.textRotationDropped(elementID: element.id)) }
         let scale = averageScale(element.transform)
         let deviceEm = SceneNumeric.int32(abs(Double(text.logicalHeight)) * scale)
         let reference = pointL32(CGPoint(x: text.referenceLogical.x, y: text.referenceLogical.y).applying(element.transform))
@@ -392,7 +396,10 @@ enum SceneSynthesis {
     }
 
     private static func wmfImageBlock(_ element: Element, winOrg: PointL, winExt: SizeL, warnings: inout [ExportWarning]) -> [WMFRecord] {
-        guard let image = element.image, let dib = image.sourceDIB, !isUnsupported(dib) else {
+        // A GDI image carries its source DIB; an EMF+ image (cross-container EMF+→WMF)
+        // carries none, so its pixels are decoded to a BI_RGB DIB for META_STRETCHDIB.
+        guard let image = element.image,
+              let dib = image.sourceDIB ?? SceneImageCoding.dib(for: image), !isUnsupported(dib) else {
             warnings.append(.imageDropped(elementID: element.id)); return []
         }
         if element.style.opacity < 1 { warnings.append(.opacityDropped(elementID: element.id)) }

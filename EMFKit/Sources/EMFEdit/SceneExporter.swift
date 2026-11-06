@@ -52,6 +52,40 @@ public enum ExportWarning: Sendable, Equatable {
     /// fallback could not be paired to the edited elements and is kept, so a
     /// GDI-mode reader may show stale content beneath the edit (slice E1b2a).
     case fallbackMayBeStale
+    /// A cross-container EMF→WMF export scaled the whole drawing down so its
+    /// coordinates fit WMF's signed 16-bit fields ([MS-WMF] §2.2.2.15/.16), at
+    /// some loss of precision (slice E1b2c). Document-level: a wide-extent EMF.
+    case coordinatesScaled
+    /// A text run under a non-axis-aligned world transform (rotation or shear
+    /// beyond a LOGFONT escapement) was written to a GDI/WMF container, which
+    /// carries only an escapement angle, so the general matrix was dropped.
+    case textRotationDropped(elementID: Int)
+    /// An element the target container cannot represent at all — an EMF+-only
+    /// feature (a passthrough/unsupported EMF+ record) or a GDI raster op — was
+    /// dropped from a cross-container export (slice E1b2c). Its content is lost.
+    case contentDropped(elementID: Int)
+}
+
+/// A user-facing grouping of `ExportWarning`s, so the app can show one short list
+/// ("3 shapes approximated", "opacity dropped on 2 images") instead of raw cases.
+public enum ExportWarningCategory: String, Sendable, CaseIterable {
+    /// `opacityDropped` — alpha a GDI/WMF container cannot hold.
+    case opacity
+    /// `gradientFlattened` — a gradient reduced to a solid.
+    case gradient
+    /// `textNotLatin1`, `textRotationDropped` — text the container narrows.
+    case text
+    /// `imageDropped`, `imageRotated` — an image dropped or axis-aligned.
+    case image
+    /// `kindFallback` — a shape re-emitted as an approximating path/polygon.
+    case shapeApproximated
+    /// `coordinatesScaled` — the drawing scaled to fit 16-bit coordinates.
+    case coordinates
+    /// `contentDropped` — an element the container cannot represent at all.
+    case droppedContent
+    /// `embeddedEMFOnly`, `fallbackMayBeStale` — a down-level reader may see
+    /// pre-edit content.
+    case downlevelStale
 }
 
 /// The bytes a `SceneExporter` produced, plus any fidelity warnings.
@@ -65,7 +99,7 @@ public struct ExportResult: Sendable, Equatable {
     }
 }
 
-/// Export tuning. Minimal by design (one field today).
+/// Export tuning.
 public struct ExportOptions: Sendable, Equatable {
     /// Force a GDI-only EMF even when an edit needs a feature GDI cannot express
     /// (sub-1 opacity or a gradient). By default (false) a GDI-only EMF that
@@ -75,17 +109,24 @@ public struct ExportOptions: Sendable, Equatable {
     /// raised. Set true to keep a flat GDI EMF (the E1b1 behaviour) with the
     /// feature flattened and the warning emitted.
     public var forceGDIOnly: Bool
+    /// When an EMF/EMZ scene is exported to WMF/WMZ, embed a complete copy of the
+    /// current scene's EMF export into the WMF (as WMFC escape records, [MS-WMF]
+    /// §2.3.6.25), so a reader that understands it (Emfy included) recovers full
+    /// fidelity while a plain-WMF reader draws the synthesised GDI records. On by
+    /// default (owner decision, docs/v3-plan §11.1); set false for a plain WMF.
+    public var embedEMFInWMF: Bool
 
-    public init(forceGDIOnly: Bool = false) {
+    public init(forceGDIOnly: Bool = false, embedEMFInWMF: Bool = true) {
         self.forceGDIOnly = forceGDIOnly
+        self.embedEMFInWMF = embedEMFInWMF
     }
 }
 
 /// Why an export failed (always typed — never a trap, §8).
 public enum SceneExportError: Error, Sendable, Equatable {
-    /// The format cannot represent this scene in E1b1: a cross-container export
-    /// (EMF scene → WMF, or WMF scene → EMF), or editing an EMF+ file (both land
-    /// in E1b2). Carries a short reason.
+    /// The scene genuinely cannot be written to the requested format (reserved for
+    /// a case neither container can represent). Cross-container EMF↔WMF export is
+    /// supported as of slice E1b2c, so this is no longer thrown for it.
     case unsupported(reason: String)
     /// The retained source bytes no longer parse (should not happen for an
     /// imported scene; defensive).
@@ -134,8 +175,26 @@ public enum SceneExporter {
 
     public static func export(_ scene: Scene, as format: ExportFormat, options: ExportOptions) throws(SceneExportError) -> ExportResult {
         let sourceIsEMF = scene.source.format == .emf
-        guard sourceIsEMF == format.isEMFFamily else {
-            throw .unsupported(reason: "cross-container export (EMF \u{2194} WMF) is not supported in E1b1")
+
+        // Cross-container (EMF scene → WMF, or WMF scene → EMF): full synthesis in
+        // the target container, with a de-duplicated limitations report (slice
+        // E1b2c). Handles unedited and edited scenes alike (an unedited WMF with a
+        // current embedded EMF re-emits that EMF losslessly).
+        if sourceIsEMF != format.isEMFFamily {
+            let result: (Data, [ExportWarning])
+            if sourceIsEMF {
+                do { result = try exportEMFSceneAsWMF(scene, options: options) }
+                catch let error as SceneExportError { throw error }
+                catch let error as WMFWriteError { throw .wmfWriteFailed(error) }
+                catch let error as EMFWriteError { throw .emfWriteFailed(error) }
+                catch { throw .unreadableSource }
+            } else {
+                do { result = try exportWMFSceneAsEMF(scene, options: options) }
+                catch let error as SceneExportError { throw error }
+                catch let error as EMFWriteError { throw .emfWriteFailed(error) }
+                catch { throw .unreadableSource }
+            }
+            return ExportResult(data: finalize(result.0, format), warnings: dedupe(result.1))
         }
 
         // Coverage-based `isEdited` cannot see an EMF+ delete — every EMF+ element's
@@ -210,6 +269,242 @@ public enum SceneExporter {
         if let stroke = element.style.stroke, stroke.color.alpha < 1 { return true }
         if let text = element.text, text.color.alpha < 1 { return true }
         return false
+    }
+
+    // MARK: - Warning de-duplication and summary (slice E1b2c)
+
+    /// Removes duplicate warnings, preserving first-occurrence order — the caller
+    /// gets one complete list it can show the user.
+    static func dedupe(_ warnings: [ExportWarning]) -> [ExportWarning] {
+        var unique: [ExportWarning] = []
+        for warning in warnings where !unique.contains(warning) { unique.append(warning) }
+        return unique
+    }
+
+    /// Groups a warning list into user-facing categories, each with the count of
+    /// distinct warnings it holds — so the app shows one short line per category
+    /// instead of raw cases. Input is de-duplicated first.
+    public static func summarize(_ warnings: [ExportWarning]) -> [ExportWarningCategory: Int] {
+        var counts: [ExportWarningCategory: Int] = [:]
+        for warning in dedupe(warnings) { counts[category(of: warning), default: 0] += 1 }
+        return counts
+    }
+
+    private static func category(of warning: ExportWarning) -> ExportWarningCategory {
+        switch warning {
+        case .opacityDropped: return .opacity
+        case .gradientFlattened: return .gradient
+        case .textNotLatin1, .textRotationDropped: return .text
+        case .imageDropped, .imageRotated: return .image
+        case .kindFallback: return .shapeApproximated
+        case .coordinatesScaled: return .coordinates
+        case .contentDropped: return .droppedContent
+        case .embeddedEMFOnly, .fallbackMayBeStale: return .downlevelStale
+        }
+    }
+
+    // MARK: - Cross-container: EMF scene → WMF (full synthesis, slice E1b2c)
+
+    /// Writes an EMF (or EMF+/dual) scene to a placeable WMF by full synthesis: a
+    /// `WMFDocumentBuilder` program whose placeable BoundingBox is the scene page
+    /// mapped into a 16-bit-safe logical space ([MS-WMF] §2.3.2.3), with every
+    /// visible element drawn through the shared WMF synthesis in z-order. Coordinate
+    /// scale: 1 logical unit == 1 device pixel (Inch 96, matching the device-canvas
+    /// DPI a WMF reader derives) unless the drawing's extent would overflow Int16, in
+    /// which case it is scaled down uniformly (`coordinatesScaled`). The current
+    /// scene's EMF export is embedded by default so a reader that understands it
+    /// recovers full fidelity (`embedEMFInWMF`).
+    private static func exportEMFSceneAsWMF(_ scene: Scene, options: ExportOptions) throws -> (Data, [ExportWarning]) {
+        let map = wmfLogicalMapping(scene)
+        var warnings: [ExportWarning] = []
+        if map.scaled { warnings.append(.coordinatesScaled) }
+
+        var embeddedEMF: Data?
+        if options.embedEMFInWMF {
+            // The CURRENT edited scene's EMF/dual export, not the stale source.
+            embeddedEMF = (try? export(scene, as: .emf)).map(\.data)
+        }
+        let builder = WMFDocumentBuilder(boundingBox: map.bb, unitsPerInch: map.inch, embeddedEMF: embeddedEMF)
+
+        for element in scene.elements where !element.hidden {
+            guard element.kind != .group else { continue }
+            if element.kind == .passthrough {
+                warnings.append(.contentDropped(elementID: element.id)); continue
+            }
+            let mapped = mapElementToWMFLogical(element, map.deviceToLogical)
+            // A fresh slot model per block (each block creates and deletes its own
+            // objects), matching the builder's own lowest-free allocation.
+            var table = SlotTable()
+            let needs = SceneSynthesis.wmfSlotNeeds(for: mapped)
+            let penSlot = needs.pen ? table.allocate() : 0
+            let brushSlot = needs.brush ? table.allocate() : 0
+            let fontSlot = needs.font ? table.allocate() : 0
+            let records = SceneSynthesis.wmfBlock(
+                for: mapped, winOrg: map.winOrg, winExt: map.winExt,
+                penSlot: penSlot, brushSlot: brushSlot, fontSlot: fontSlot, warnings: &warnings)
+            for record in records { try builder.append(record) }
+        }
+        return (try builder.finish(), warnings)
+    }
+
+    /// The device→WMF-logical mapping for a full EMF→WMF synthesis: anchor the page
+    /// min corner at logical origin, scale by `s` (1, or `limit/extent` when the
+    /// drawing would overflow Int16), and derive the placeable BoundingBox/Inch and
+    /// the block window so a WMF reader maps the logical coords back onto a
+    /// device canvas the size of the EMF page.
+    private static func wmfLogicalMapping(_ scene: Scene)
+        -> (deviceToLogical: CGAffineTransform, bb: WMFRect16, inch: UInt16, winOrg: PointL, winExt: SizeL, scaled: Bool) {
+        let page = scene.pageBoundsDevice
+        let anchorX = page.minX.isFinite ? page.minX : 0
+        let anchorY = page.minY.isFinite ? page.minY : 0
+        let w = max(1, page.width.isFinite ? page.width : 1)
+        let h = max(1, page.height.isFinite ? page.height : 1)
+
+        // The coordinate magnitude the records must hold, relative to the anchor.
+        var maxExtent = max(w, h)
+        for element in scene.elements where !element.hidden {
+            let b = element.boundsDevice
+            guard !b.isNull else { continue }
+            for v in [abs(b.minX - anchorX), abs(b.maxX - anchorX), abs(b.minY - anchorY), abs(b.maxY - anchorY)]
+            where v.isFinite { maxExtent = max(maxExtent, v) }
+        }
+        // 30000 leaves headroom under Int16's 32767 for pen widths and rounding.
+        let limit = 30_000.0
+        let s = (maxExtent.isFinite && maxExtent > limit) ? limit / maxExtent : 1.0
+
+        let deviceToLogical = CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: -anchorX * s, ty: -anchorY * s)
+        let bbW = max(1, Int((w * s).rounded()))
+        let bbH = max(1, Int((h * s).rounded()))
+        let bb = WMFRect16(left: 0, top: 0, right: Int16(clamping: bbW), bottom: Int16(clamping: bbH))
+        let inch = UInt16(clamping: max(1, Int((s * 96).rounded())))
+        return (deviceToLogical, bb, inch,
+                PointL(x: 0, y: 0), SizeL(cx: Int32(bbW), cy: Int32(bbH)), s < 1)
+    }
+
+    /// A copy of `element` mapped into WMF-logical space: geometry and image
+    /// destination go through `deviceToLogical`; the element transform is
+    /// post-composed with it, so the synthesis (which reads the transform for pen
+    /// width, font height and the text reference) produces logical records at
+    /// logical sizes. The text reference point stays in its pre-transform space —
+    /// the composed transform now carries it to WMF-logical.
+    private static func mapElementToWMFLogical(_ element: Element, _ deviceToLogical: CGAffineTransform) -> Element {
+        var mapped = element
+        mapped.geometryDevice = element.geometryDevice.applying(deviceToLogical)
+        mapped.transform = element.transform.concatenating(deviceToLogical)
+        if var image = mapped.image {
+            image.destRectDevice = image.destRectDevice.applying(deviceToLogical).standardized
+            if let corners = image.destCornersDevice {
+                image.destCornersDevice = corners.map { $0.applying(deviceToLogical) }
+            }
+            mapped.image = image
+        }
+        return mapped
+    }
+
+    // MARK: - Cross-container: WMF scene → EMF (full synthesis, slice E1b2c)
+
+    /// Writes a WMF (or WMZ) scene to an EMF by full synthesis. The lossless route
+    /// wins when the source WMF embeds a current, parseable EMF (no edits): that EMF
+    /// is re-emitted directly. Otherwise every visible element is synthesised into a
+    /// from-scratch EMF (device-space blocks, an EMR_HEADER whose bounds/frame come
+    /// from the scene page). An edited/new element that needs opacity or a gradient
+    /// upgrades the output to a dual EMF+ file by reusing E1b2b's GDI→dual overlay
+    /// over the synthesised GDI EMF.
+    private static func exportWMFSceneAsEMF(_ scene: Scene, options: ExportOptions) throws -> (Data, [ExportWarning]) {
+        if !isEdited(scene), let emf = losslessEmbeddedEMF(scene) {
+            return (try EMFDocumentWriter.reEmit(try EMFFile.parse(emf), source: emf), [])
+        }
+        let (gdiData, warnings, indexMap) = try synthesizeGDIEMF(scene)
+        // forceGDIOnly keeps the flat GDI EMF (opacity/gradient flattened with a
+        // report); otherwise an edit needing opacity or a gradient upgrades to dual.
+        guard !options.forceGDIOnly, needsEMFPlus(scene) else { return (gdiData, warnings) }
+        let file = try EMFFile.parse(gdiData)
+        let synthetic = makeSyntheticEMFScene(scene, file: file, indexMap: indexMap, source: gdiData)
+        return try overlayGDIAsDual(file, synthetic, source: gdiData)
+    }
+
+    /// The source WMF's embedded EMF ([MS-WMF] §2.3.6.25), when it reassembles into
+    /// a parseable EMF; nil otherwise. Used for the lossless WMF→EMF route.
+    private static func losslessEmbeddedEMF(_ scene: Scene) -> Data? {
+        guard scene.source.format == .wmf || scene.source.format == .placeableWMF,
+              let wmf = try? WMFFile.parse(scene.source.data),
+              case .reassembled(let emf) = WMFEmbeddedEMF.reassemble(wmf),
+              (try? EMFFile.parse(emf)) != nil
+        else { return nil }
+        return emf
+    }
+
+    /// Synthesises a from-scratch GDI EMF from `scene` (every visible element a
+    /// self-contained device-space block), returning the bytes, the fidelity
+    /// warnings, and a map from element id to the 1-based record indices its block
+    /// occupies (for the dual upgrade's synthetic provenance).
+    private static func synthesizeGDIEMF(_ scene: Scene) throws -> (Data, [ExportWarning], [Int: [Int]]) {
+        let metrics = wmfSceneEMFMetrics(scene.pageBoundsDevice)
+        let builder = EMFDocumentBuilder(bounds: metrics.bounds, frame: metrics.frame,
+                                         device: metrics.device, millimeters: metrics.millimeters)
+        var warnings: [ExportWarning] = []
+        var indexMap: [Int: [Int]] = [:]
+        var cursor = 1   // record 0 is the EMR_HEADER
+        for element in scene.elements where !element.hidden {
+            guard element.kind != .group else { continue }
+            if element.kind == .passthrough {
+                warnings.append(.contentDropped(elementID: element.id)); continue
+            }
+            var blockWarnings: [ExportWarning] = []
+            let payloads = SceneSynthesis.emfBlock(for: element, baseHandle: 1, warnings: &blockWarnings)
+            guard !payloads.isEmpty else { continue }
+            var indices: [Int] = []
+            for payload in payloads { try builder.append(payload); indices.append(cursor); cursor += 1 }
+            indexMap[element.id] = indices
+            warnings.append(contentsOf: blockWarnings)
+        }
+        return (try builder.finish(), warnings, indexMap)
+    }
+
+    /// A synthetic EMF scene over the freshly synthesised GDI EMF: each element
+    /// keeps its original style (so an alpha/gradient edit still drives the EMF+
+    /// block) but takes provenance into its synthesised records, marked `edited`
+    /// exactly when it needs EMF+. Fed to `overlayGDIAsDual` so the alpha/gradient
+    /// elements become EMF+ blocks and the rest replay their GDI records in GetDC.
+    private static func makeSyntheticEMFScene(_ original: Scene, file: EMFFile, indexMap: [Int: [Int]], source: Data) -> Scene {
+        var elements: [Element] = []
+        var drawing = Set<Int>()
+        for element in original.elements where !element.hidden {
+            guard let indices = indexMap[element.id], !indices.isEmpty else { continue }
+            var copy = element
+            copy.provenance = Provenance(sourceRecordIndices: indices, edited: elementNeedsEMFPlus(element))
+            elements.append(copy)
+            drawing.formUnion(indices)
+        }
+        var structural = Set<Int>([0])
+        let last = file.records.count - 1
+        if last > 0 { structural.insert(last) }
+        let partition = ScenePartition(structural: structural, state: [], drawing: drawing,
+                                       passthrough: [], fallback: [], unitCount: file.records.count)
+        let src = SceneSource(data: source, format: .emf, wasCompressed: false,
+                              renderPath: .gdi, unitCount: file.records.count)
+        return Scene(pageBoundsDevice: original.pageBoundsDevice,
+                     layers: [Layer(id: 0, name: "synth", elements: elements)],
+                     partition: partition, source: src)
+    }
+
+    /// The EMR_HEADER metrics for a WMF→EMF synthesis: bounds from the scene device
+    /// page (inclusive), and the physical frame / reference millimetres at 96 DPI —
+    /// the DPI a WMF device canvas is built at (WMFTranslator), so the physical size
+    /// matches the source WMF's placeable DPI ([MS-EMF] §2.2.9, [MS-WMF] §2.3.2.3).
+    private static func wmfSceneEMFMetrics(_ page: CGRect) -> (bounds: RectL, frame: RectL, device: SizeL, millimeters: SizeL) {
+        let ox = SceneNumeric.int32(page.minX)
+        let oy = SceneNumeric.int32(page.minY)
+        let w = max(1, SceneNumeric.int32(page.width))
+        let h = max(1, SceneNumeric.int32(page.height))
+        let bounds = RectL(left: ox, top: oy, right: ox &+ w &- 1, bottom: oy &+ h &- 1)
+        let frame = RectL(left: 0, top: 0,
+                          right: SceneNumeric.int32(Double(w) * 2540.0 / 96.0),
+                          bottom: SceneNumeric.int32(Double(h) * 2540.0 / 96.0))
+        let device = SizeL(cx: w, cy: h)
+        let millimeters = SizeL(cx: SceneNumeric.int32(Double(w) * 25.4 / 96.0),
+                                cy: SceneNumeric.int32(Double(h) * 25.4 / 96.0))
+        return (bounds, frame, device, millimeters)
     }
 
     // MARK: - Change detection
