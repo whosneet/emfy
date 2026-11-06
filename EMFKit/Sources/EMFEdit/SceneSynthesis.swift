@@ -42,6 +42,21 @@ enum SceneSynthesis {
     private static let srcCopy: UInt32 = 0x00CC_0020           // SRCCOPY ternary rop
     private static let anisotropic: UInt16 = 8                 // MM_ANISOTROPIC
 
+    // MARK: - Alpha loss (GDI/WMF cannot hold sub-1 alpha)
+
+    /// True when `element` carries alpha a GDI/WMF container cannot express: element
+    /// opacity below 1, or a fill/stroke/text paint colour with alpha below 1 (GDI's
+    /// `ColorRef` and WMF's colours are opaque). Both are flattened to the opaque
+    /// colour with an `opacityDropped` warning. The EMF+ dual route discards this
+    /// warning (it carries the alpha); the GDI-only and WMF routes surface it.
+    static func droppedAlpha(_ element: Element) -> Bool {
+        if element.style.opacity < 1 { return true }
+        if let fill = element.style.fill, fill.color.alpha < 1 { return true }
+        if let stroke = element.style.stroke, stroke.color.alpha < 1 { return true }
+        if let text = element.text, (element.style.fill?.color ?? text.color).alpha < 1 { return true }
+        return false
+    }
+
     // MARK: - EMF element block
 
     /// The device-space EMR block that draws `element`, using object handles
@@ -88,7 +103,7 @@ enum SceneSynthesis {
         else { directDraw = !shape.isEmpty }
         guard fill != nil || stroke != nil || directDraw else { return [] }
         warnings.append(contentsOf: shapeWarnings)
-        if element.style.opacity < 1 { warnings.append(.opacityDropped(elementID: element.id)) }
+        if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
         if let fill, fill.gradient != nil { warnings.append(.gradientFlattened(elementID: element.id)) }
 
         var out = emfReset()
@@ -163,6 +178,7 @@ enum SceneSynthesis {
 
     private static func emfTextBlock(_ element: Element, fontHandle: UInt32, warnings: inout [ExportWarning]) -> [EMFRecordPayload] {
         guard let text = element.text, !text.string.isEmpty else { return [] }
+        if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
         let scale = averageScale(element.transform)
         let deviceEm = SceneNumeric.int32(abs(Double(text.logicalHeight)) * scale)
         let reference = pointL(CGPoint(x: text.referenceLogical.x, y: text.referenceLogical.y).applying(element.transform))
@@ -190,6 +206,10 @@ enum SceneSynthesis {
               let dib = image.sourceDIB ?? SceneImageCoding.dib(for: image), !isUnsupported(dib) else {
             warnings.append(.imageDropped(elementID: element.id)); return []
         }
+        // GDI has no image alpha (STRETCHDIBITS draws opaque), so a sub-1 element
+        // opacity on an image is dropped with a report (not expressible in EMF+ here
+        // either — slice E1b2b keeps the image a GDI draw).
+        if element.style.opacity < 1 { warnings.append(.opacityDropped(elementID: element.id)) }
         // GDI STRETCHDIBITS fills an axis-aligned rect only; a rotated/sheared
         // parallelogram is dropped to its bounding box, with a warning.
         if image.destCornersDevice != nil { warnings.append(.imageRotated(elementID: element.id)) }
@@ -280,7 +300,7 @@ enum SceneSynthesis {
         let fill = element.style.fill
         let stroke = element.style.stroke
         guard fill != nil || stroke != nil else { return [] }
-        if element.style.opacity < 1 { warnings.append(.opacityDropped(elementID: element.id)) }
+        if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
         if let fill, fill.gradient != nil { warnings.append(.gradientFlattened(elementID: element.id)) }
 
         var out = wmfReset(winOrg: winOrg, winExt: winExt)
@@ -352,6 +372,7 @@ enum SceneSynthesis {
 
     private static func wmfTextBlock(_ element: Element, winOrg: PointL, winExt: SizeL, fontSlot: UInt16, warnings: inout [ExportWarning]) -> [WMFRecord] {
         guard let text = element.text, !text.string.isEmpty else { return [] }
+        if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
         if text.string.unicodeScalars.contains(where: { $0.value > 0xFF }) { warnings.append(.textNotLatin1(elementID: element.id)) }
         let scale = averageScale(element.transform)
         let deviceEm = SceneNumeric.int32(abs(Double(text.logicalHeight)) * scale)
@@ -374,6 +395,7 @@ enum SceneSynthesis {
         guard let image = element.image, let dib = image.sourceDIB, !isUnsupported(dib) else {
             warnings.append(.imageDropped(elementID: element.id)); return []
         }
+        if element.style.opacity < 1 { warnings.append(.opacityDropped(elementID: element.id)) }
         if image.destCornersDevice != nil { warnings.append(.imageRotated(elementID: element.id)) }
         let dest = image.destRectDevice.standardized
         var out = wmfReset(winOrg: winOrg, winExt: winExt)
