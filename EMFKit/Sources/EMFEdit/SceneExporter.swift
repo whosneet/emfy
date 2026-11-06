@@ -478,11 +478,21 @@ public enum SceneExporter {
             where v.isFinite { maxExtent = max(maxExtent, v) }
         }
         // 30000 leaves headroom under Int16's 32767 for pen widths and rounding.
-        // Scale the logical grid up to that limit (supersample) so sub-pixel device
-        // coordinates survive the integer rounding, down (s < 1) only when the
-        // drawing would overflow it.
+        // Supersample the logical grid up to that limit by an INTEGER factor `k` so
+        // sub-pixel device coordinates survive integer rounding. An integer factor
+        // keeps the WMF reader's canvas derivation EXACT — bb = k·page, inch = 96·k,
+        // and the reader's `round(bb / inch · 96)` = `round(page)` with the k
+        // cancelling, so the WMF canvas equals the EMF page to the pixel (a fractional
+        // factor's bb/inch double-rounding could shift it by one, breaking a detailed
+        // file's size match). `k` is capped so `inch = 96·k` stays within the UInt16
+        // Inch field (k ≤ 682) — an uncapped k on a tiny page overflowed Inch and
+        // corrupted the derived canvas. When the page itself overflows Int16 (k < 1)
+        // fall back to a fractional downscale `s < 1`, the lossy `coordinatesScaled` case.
         let limit = 30_000.0
-        let s = (maxExtent.isFinite && maxExtent > 0) ? limit / maxExtent : 1.0
+        let kMax = 65_535.0 / 96   // 682: keeps inch = 96·k within the UInt16 Inch field
+        let kFloor = (maxExtent.isFinite && maxExtent > 0) ? floor(limit / maxExtent) : 1
+        let s = kFloor >= 1 ? min(kFloor, kMax.rounded(.down))
+            : (maxExtent.isFinite && maxExtent > 0 ? limit / maxExtent : 1.0)
 
         let deviceToLogical = CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: -anchorX * s, ty: -anchorY * s)
         let bbW = max(1, Int((w * s).rounded()))
