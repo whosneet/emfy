@@ -20,9 +20,13 @@ public enum SceneRenderer {
     /// on white, matching `MetafileRenderer.makeImage`'s sizing. Returns `nil`
     /// only on a bitmap allocation failure.
     public static func makeImage(_ scene: Scene, scale: CGFloat = 1) -> CGImage? {
-        let safeScale = scale.isFinite && scale > 0 ? Double(scale) : 1
-        let width = clampDimension(scene.pageSizeDevice.width * safeScale)
-        let height = clampDimension(scene.pageSizeDevice.height * safeScale)
+        // The SAME canvas-sizing rule the viewer uses (per-side cap then the
+        // 32 Mpx area cap), so the editor canvas is pixel-for-pixel the viewer's
+        // for every file — a `SceneRenderer`-only per-side clamp sized a >32 Mpx
+        // page larger than `MetafileRenderer` (slice E1b2d item 1).
+        let (width, height) = EMFRenderer.canvasPixelSize(
+            deviceWidth: scene.pageSizeDevice.width, deviceHeight: scene.pageSizeDevice.height, scale: scale
+        )
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(
                   data: nil, width: width, height: height, bitsPerComponent: 8,
@@ -131,22 +135,20 @@ public enum SceneRenderer {
     private static func renderEMFPlus(_ scene: Scene, into context: CGContext, target: CGRect, base: CGAffineTransform) {
         guard let prepared = prepareSource(scene) else { return }
         let entries = MetafileRenderer.observe(prepared).plusEntries
-        // In an UNEDITED scene an editable geometry element draws from its value
-        // types — a passing render proves the lift captured the drawing (the E1a2
-        // fidelity proof). In an EDITED scene an unedited element REPLAYS its source
-        // record instead, so it matches the exporter's byte-verbatim re-emit and the
-        // only on-screen change is the edited element (slice E1b2a).
-        let edited = SceneExporter.isEdited(scene)
 
         context.saveGState()
         defer { context.restoreGState() }
 
-        // In an edited scene, consecutive unedited EMF+ elements are drawn in ONE
-        // filtered playback (`batch`) rather than one playback each — a lifted file
-        // can hold thousands of elements, and a per-element replay re-decodes the
-        // whole object table every time. The batch is flushed (its stream indices
-        // drawn in z-order) before any edited/new or GetDC-GDI element, so z-order
-        // is preserved.
+        // Every UNEDITED element REPLAYS its source records, so the editor view
+        // matches the viewer exactly (slice E1b2d items 1–2). Consecutive unedited
+        // EMF+ elements batch into ONE filtered playback (`batch`) rather than one
+        // playback each — a lifted file holds thousands of elements, and a
+        // per-element replay re-decodes the whole object table every time. The batch
+        // is flushed (its stream indices drawn in z-order) before any edited/new or
+        // GetDC-GDI element, so z-order is preserved. Drawing unedited EMF+ geometry
+        // from value types instead (the old E1a2 proof) diverged badly on gradient
+        // and path content; the value-type lift is proven by the EMF+ EDIT oracles,
+        // not this unedited render.
         var batch: Set<Int> = []
         func flush() {
             guard !batch.isEmpty else { return }
@@ -169,22 +171,12 @@ public enum SceneRenderer {
                 continue
             }
             guard element.id >= 0, element.id < entries.count else { continue }
-            let entry = entries[element.id]
-            // Unedited scene: an editable geometry element draws from its value types
-            // (the E1a2 lift proof). Edited scene: it replays, so it matches the
-            // exporter's verbatim re-emit.
-            if !edited, element.kind != .text, element.kind != .image, element.kind != .passthrough,
-               element.style.fill != nil || element.style.stroke != nil, case .plus = entry {
-                drawGeometry(element, into: context, base: base)
-                continue
-            }
-            switch entry {
+            switch entries[element.id] {
             case .gdi(let op):
                 flush()
                 EMFRenderer.replay(op, into: context, deviceToTarget: base)
             case .plus(let op):
-                if edited { batch.insert(op.streamIndex) }
-                else { MetafileRenderer.replayEMFPlus(prepared, streamIndices: [op.streamIndex], into: context, target: target) }
+                batch.insert(op.streamIndex)
             }
         }
         flush()
@@ -377,12 +369,4 @@ public enum SceneRenderer {
         )
     }
 
-    private static func clampDimension(_ requested: Double) -> Int {
-        let cap = Double(EMFRenderer.canvasDimensionCap)
-        guard requested.isFinite else { return EMFRenderer.canvasDimensionCap }
-        let rounded = requested.rounded()
-        if rounded < 1 { return 1 }
-        if rounded > cap { return EMFRenderer.canvasDimensionCap }
-        return Int(rounded)
-    }
 }
