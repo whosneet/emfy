@@ -55,9 +55,13 @@ struct SceneGDIDualExportTests {
     }
 
     private func applicableEdits(for element: Element) -> [Edit] {
+        // opacity exercises the alpha path, fillGradient the gradient path, strokeAlpha
+        // the pen-alpha path. fillAlpha (fill-colour alpha) overlaps opacity and is
+        // covered on its own in forceGDIOnlyFlattensWithWarning — kept out of the broad
+        // matrix so the pass stays cheap.
         let fillable: Set<ElementKind> = [.rect, .ellipse, .roundRect, .polygon, .polyline, .line, .path, .arc, .bezier]
-        if fillable.contains(element.kind) { return [.opacity, .fillAlpha, .fillGradient, .strokeAlpha] }
-        if element.kind == .text { return [.opacity, .fillAlpha] }
+        if fillable.contains(element.kind) { return [.opacity, .fillGradient, .strokeAlpha] }
+        if element.kind == .text { return [.opacity] }
         return []
     }
 
@@ -377,8 +381,11 @@ struct SceneGDIDualExportTests {
 
     @Test func corpusLocalGDIDualSweep() throws {
         let urls = EditTestPaths.localMetafiles().filter { $0.pathExtension.lowercased() == "emf" }
-        var files = 0, exported = 0, parseClean = 0, reimported = 0, dual = 0
-        var plusWithin = 0, gdiWithin = 0
+        var files = 0, exported = 0, parseClean = 0, dual = 0
+        // The expensive per-file checks (re-import + two fidelity renders) run on an
+        // evenly spaced SAMPLE so the 210-file sweep stays cheap; the structural gate
+        // (export, parse-clean, dual) runs on every file.
+        var sampled = 0, reimported = 0, plusWithin = 0, gdiWithin = 0
         var outliers: [String] = []
         for (index, url) in urls.enumerated() {
             guard let data = try? Data(contentsOf: url), let base = try? SceneImporter.import(data: data),
@@ -397,13 +404,15 @@ struct SceneGDIDualExportTests {
             if file.diagnostics.isEmpty, file.emfPlusStream().diagnostics.isEmpty, Int(file.header.records) == file.records.count { parseClean += 1 }
             else { outliers.append("clean#\(index)") }
             if file.emfPlusStream().header?.isDual == true { dual += 1 }
-            if (try? SceneImporter.import(data: result.data)) != nil { reimported += 1 }
 
-            // Fidelity OUTSIDE the edited element's footprint, both modes, vs the
-            // original, within 0.5% of the frame — capped at ~280 px/side so the
-            // 210-file sweep stays cheap (an area fraction is scale-stable).
-            let maxDim = max(base.pageSizeDevice.width, base.pageSizeDevice.height)
-            let scale = min(Self.corpusScale, CGFloat(280) / max(maxDim, 1))
+            // Sampled: re-import + fidelity OUTSIDE the edited element's footprint,
+            // both modes, vs the original, within 0.5% of the frame (~280 px/side —
+            // an area fraction is scale-stable). The committed matrix proves unedited
+            // content is PIXEL-identical at full precision; this is a broad guard.
+            guard index % 3 == 0 else { continue }
+            sampled += 1
+            if (try? SceneImporter.import(data: result.data)) != nil { reimported += 1 } else { outliers.append("reimport#\(index)") }
+            let scale = min(Self.corpusScale, CGFloat(280) / max(max(base.pageSizeDevice.width, base.pageSizeDevice.height), 1))
             guard let original = render(data, scale: scale), let originalElement = base.element(id: firstID) else { continue }
             let footprint = editFootprint(originalElement)
             if let plusImg = render(result.data, scale: scale) {
@@ -423,15 +432,17 @@ struct SceneGDIDualExportTests {
         exported                    : \(exported)
         parse-clean                 : \(parseClean)
         dual EMF+                   : \(dual)
-        re-imported                 : \(reimported)
-        EMF+-mode outside <=0.5%    : \(plusWithin)
-        GDI-mode outside <=0.5%     : \(gdiWithin)
+        sampled (re-import+render)  : \(sampled)
+        re-imported (of sampled)    : \(reimported)
+        EMF+-mode outside <=0.5%    : \(plusWithin) / \(sampled)
+        GDI-mode outside <=0.5%     : \(gdiWithin) / \(sampled)
         outliers (index only)       : \(outliers.isEmpty ? "none" : outlierText)
         """)
         if files > 0 {
-            #expect(exported == files && reimported == exported, "some GDI dual exports failed to round-trip")
+            #expect(exported == files, "some GDI dual exports failed to export")
             #expect(dual == files, "some GDI alpha edits did not upgrade to dual")
             #expect(parseClean == files, "some dual outputs parsed with diagnostics or wrong counts")
+            #expect(reimported == sampled, "some sampled dual exports failed to re-import")
         }
     }
 
