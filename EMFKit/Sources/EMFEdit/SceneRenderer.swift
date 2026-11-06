@@ -1,6 +1,7 @@
 import CoreGraphics
 import EMFParse
 import EMFRender
+import EMFWrite
 import Foundation
 
 /// A simple renderer that draws a `Scene` into a `CGContext` — the fidelity
@@ -54,15 +55,59 @@ public enum SceneRenderer {
         defer { context.restoreGState() }
 
         for element in scene.elements where !element.hidden {
+            // An edited or new (no-provenance) element reflects its edit by
+            // rendering the SAME records the exporter writes (so the on-screen
+            // edit matches the exported file exactly); an unedited element draws
+            // from its value types (geometry) or replays its original op
+            // (text/image/passthrough) for lift fidelity.
+            let isEdit = element.provenance.edited || element.provenance.sourceRecordIndices.isEmpty
             switch element.kind {
-            case .text, .image, .passthrough:
-                let key = element.provenance.sourceRecordIndices.max() ?? -1
-                if let op = replayOps[key] {
-                    EMFRenderer.replay(op, into: context, deviceToTarget: base)
+            case .text, .image:
+                if isEdit {
+                    renderSynthesized(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                } else {
+                    let key = element.provenance.sourceRecordIndices.max() ?? -1
+                    if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base) }
                 }
+            case .passthrough:
+                let key = element.provenance.sourceRecordIndices.max() ?? -1
+                if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base) }
             default:
-                drawGeometry(element, into: context, base: base)
+                if isEdit {
+                    renderSynthesized(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                } else {
+                    drawGeometry(element, into: context, base: base)
+                }
             }
+        }
+    }
+
+    /// Renders one edited/new element by synthesising its device-space EMR block
+    /// (exactly what the exporter writes) into a throwaway single-element EMF and
+    /// playing that into `context` at the current z-moment, so the on-screen edit
+    /// matches the exported file. The element's clip is applied around it (the
+    /// exporter instead relies on the overlay's inherited clip, which the import
+    /// captured as this element's clip). A no-op if the element draws nothing.
+    private static func renderSynthesized(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform) {
+        var warnings: [ExportWarning] = []
+        let payloads = SceneSynthesis.emfBlock(for: element, baseHandle: 1, warnings: &warnings)
+        guard !payloads.isEmpty else { return }
+        let left = Int32(pageBounds.minX.rounded())
+        let top = Int32(pageBounds.minY.rounded())
+        let right = left &+ Int32(max(1, pageBounds.width.rounded())) &- 1
+        let bottom = top &+ Int32(max(1, pageBounds.height.rounded())) &- 1
+        let bounds = RectL(left: left, top: top, right: right, bottom: bottom)
+        let builder = EMFDocumentBuilder(bounds: bounds, frame: bounds, device: SizeL(cx: 0, cy: 0), millimeters: SizeL(cx: 0, cy: 0))
+        do {
+            for payload in payloads { try builder.append(payload) }
+            let data = try builder.finish()
+            guard let file = try? EMFFile.parse(data) else { return }
+            context.saveGState()
+            applyClip(element.clipDevice, base: base, into: context)
+            _ = EMFRenderer.render(file, into: context, target: target)
+            context.restoreGState()
+        } catch {
+            return
         }
     }
 

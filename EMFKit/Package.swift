@@ -53,7 +53,7 @@ let package = Package(
         ),
         .testTarget(
             name: "EMFEditTests",
-            dependencies: ["EMFEdit", "EMFParse", "EMFRender", "EMFWrite"]
+            dependencies: ["EMFEdit", "EMFParse", "WMFParse", "EMFRender", "EMFWrite"]
         ),
     ]
 )

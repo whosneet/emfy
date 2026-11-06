@@ -78,4 +78,21 @@ public struct ScenePath: Sendable, Equatable {
     public var boundingBox: CGRect {
         isEmpty ? .null : cgPath.boundingBoxOfPath
     }
+
+    /// Returns a copy with every point mapped through `t` (used by the editor's
+    /// `translate`/`applyTransform` mutations, which work in device space).
+    public func applying(_ t: CGAffineTransform) -> ScenePath {
+        guard !t.isIdentity else { return self }
+        let mapped = segments.map { segment -> Segment in
+            switch segment {
+            case .move(let p): return .move(p.applying(t))
+            case .line(let p): return .line(p.applying(t))
+            case .quadCurve(let to, let c): return .quadCurve(to: to.applying(t), control: c.applying(t))
+            case .cubicCurve(let to, let c1, let c2):
+                return .cubicCurve(to: to.applying(t), control1: c1.applying(t), control2: c2.applying(t))
+            case .close: return .close
+            }
+        }
+        return ScenePath(segments: mapped)
+    }
 }
