@@ -101,6 +101,10 @@ struct SceneExportTests {
         for url in editableFiles() {
             let data = try Data(contentsOf: url)
             let base = try SceneImporter.import(data: data)
+            // Render the source ONCE per file (the "outside the footprint is unchanged"
+            // check compares against it on every edit — rendering it per edit was the
+            // dominant redundant cost, slice E1b2d item 7).
+            let sourceImg = renderBytes(data, scale: Self.renderScale)
             let editable = base.editableElements
             // First, middle, last editable element (deterministic).
             let picks = Set([0, editable.count / 2, editable.count - 1]).sorted().map { editable[$0].id }
@@ -109,7 +113,7 @@ struct SceneExportTests {
                 guard let element = base.element(id: id) else { continue }
                 for edit in applicableEdits(for: element) {
                     do {
-                        try runEdit(url: url, base: base, id: id, edit: edit, report: &report)
+                        try runEdit(url: url, base: base, sourceImg: sourceImg, id: id, edit: edit, report: &report)
                     } catch {
                         Issue.record("\(url.lastPathComponent) id=\(id) \(edit): threw \(error)")
                     }
@@ -128,7 +132,7 @@ struct SceneExportTests {
         return edits
     }
 
-    private func runEdit(url: URL, base: Scene, id: Int, edit: Edit, report: inout String) throws {
+    private func runEdit(url: URL, base: Scene, sourceImg: CGImage?, id: Int, edit: Edit, report: inout String) throws {
         var scene = base
         let original = try #require(scene.element(id: id))
         let newColor = SceneColor(red: 0.90, green: 0.12, blue: 0.55)
@@ -152,9 +156,10 @@ struct SceneExportTests {
         // (a) the edit is visible on re-import.
         checkEditVisible(url: url, edit: edit, original: original, base: base, reimport: reimport, newColor: newColor, newText: newText)
 
-        // (b) render(exported) matches the edited scene.
-        if let sceneImg = SceneRenderer.makeImage(scene, scale: Self.renderScale),
-           let outImg = renderBytes(result.data, scale: Self.renderScale) {
+        // (b) render(exported) matches the edited scene. The export is rendered ONCE
+        // here and reused by the footprint check below (slice E1b2d item 7).
+        let outImg = renderBytes(result.data, scale: Self.renderScale)
+        if let sceneImg = SceneRenderer.makeImage(scene, scale: Self.renderScale), let outImg {
             let diff = compareImages(sceneImg, outImg, tolerance: Self.tolerance)
             #expect(diff.sameSize, "\(url.lastPathComponent) id=\(id) \(edit): size mismatch")
             #expect(diff.differingFraction <= Self.maxDifferingFraction,
@@ -171,7 +176,7 @@ struct SceneExportTests {
         // the ORIGINAL render — the lossless-overlay guarantee. It holds for EMF
         // (verbatim records) and for WMF (true overlay: verbatim records, or for
         // an embedded-EMF WMF a lossless embedded-EMF overlay).
-        checkOutsideUnchanged(url: url, base: base, original: original, edit: edit, exportedData: result.data)
+        checkOutsideUnchanged(url: url, base: base, original: original, edit: edit, sourceImg: sourceImg, exportImg: outImg)
 
         // (d) byte accounting is clean.
         checkByteAccounting(url: url, scene: scene, data: result.data)
@@ -224,9 +229,8 @@ struct SceneExportTests {
 
     // MARK: - (c) outside the footprint is unchanged
 
-    private func checkOutsideUnchanged(url: URL, base: Scene, original: Element, edit: Edit, exportedData: Data) {
-        guard let srcImg = renderBytes((try? Data(contentsOf: url)) ?? Data(), scale: Self.renderScale),
-              let outImg = renderBytes(exportedData, scale: Self.renderScale),
+    private func checkOutsideUnchanged(url: URL, base: Scene, original: Element, edit: Edit, sourceImg: CGImage?, exportImg: CGImage?) {
+        guard let srcImg = sourceImg, let outImg = exportImg,
               let sp = PixelImage(srcImg), let op = PixelImage(outImg),
               sp.width == op.width, sp.height == op.height
         else { return }

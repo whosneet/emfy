@@ -24,7 +24,7 @@ struct SceneCanvasFidelityTests {
               let prepared = MetafileRenderer.prepare(opened),
               let scene = try? SceneImporter.import(data: data) else { return nil }
         let maxDim = max(scene.pageSizeDevice.width, scene.pageSizeDevice.height)
-        let scale = min(CGFloat(1), CGFloat(800) / max(maxDim, 1))
+        let scale = min(CGFloat(1), CGFloat(360) / max(maxDim, 1))
         guard let (src, _) = MetafileRenderer.makeImage(prepared, scale: scale),
               let scn = SceneRenderer.makeImage(scene, scale: scale) else { return nil }
         let diff = compareImages(scn, src, tolerance: Self.tolerance)

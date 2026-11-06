@@ -67,6 +67,10 @@ struct SceneEMFPlusExportTests {
             let base = try scene(name)
             let editable = base.editableElements
             guard !editable.isEmpty else { continue }
+            // Render the source ONCE per file (default and GDI-arbitration), reused by
+            // every edit's footprint and GDI-mode checks (slice E1b2d item 7).
+            let srcImg = render(base.source.data)
+            let srcGDIImg = render(base.source.data, options: RenderOptions(emfPlusArbitration: .gdi))
             // A dual file's GetDC-window GDI elements can't carry alpha/gradient
             // (GDI is opaque, solid), so the edit set and re-import checks adapt.
             let gdiIDs = gdiElementIDs(base)
@@ -74,7 +78,7 @@ struct SceneEMFPlusExportTests {
             for id in picks {
                 guard let element = base.element(id: id) else { continue }
                 for edit in applicableEdits(for: element, isGDI: gdiIDs.contains(id)) {
-                    try runEdit(name: name, base: base, id: id, edit: edit, report: &report)
+                    try runEdit(name: name, base: base, srcImg: srcImg, srcGDIImg: srcGDIImg, id: id, edit: edit, report: &report)
                 }
             }
         }
@@ -103,7 +107,7 @@ struct SceneEMFPlusExportTests {
         return edits
     }
 
-    private func runEdit(name: String, base: Scene, id: Int, edit: Edit, report: inout String) throws {
+    private func runEdit(name: String, base: Scene, srcImg: CGImage?, srcGDIImg: CGImage?, id: Int, edit: Edit, report: inout String) throws {
         var scene = base
         let original = try #require(scene.element(id: id))
         let opaque = SceneColor(red: 0.90, green: 0.12, blue: 0.55)
@@ -160,12 +164,12 @@ struct SceneEMFPlusExportTests {
         }
 
         // (c) pixels outside the edited element footprint are unchanged from source.
-        checkOutsideUnchanged(name: name, base: base, original: original, edit: edit, exported: result.data)
+        checkOutsideUnchanged(name: name, base: base, original: original, edit: edit, srcImg: srcImg, exported: result.data)
 
         // (d) dual files: the GDI-mode render shows the edit, or a warning was emitted.
         if plus.header?.isDual ?? false {
             let gdi = render(result.data, options: RenderOptions(emfPlusArbitration: .gdi))
-            let srcGDI = render(base.source.data, options: RenderOptions(emfPlusArbitration: .gdi))
+            let srcGDI = srcGDIImg
             let changedInGDI: Bool
             if let gdi, let srcGDI { changedInGDI = compareImages(gdi, srcGDI, tolerance: Self.tolerance).differingFraction > 0.001 }
             else { changedInGDI = false }
@@ -220,8 +224,8 @@ struct SceneEMFPlusExportTests {
         }
     }
 
-    private func checkOutsideUnchanged(name: String, base: Scene, original: Element, edit: Edit, exported: Data) {
-        guard let srcImg = render(base.source.data), let outImg = render(exported),
+    private func checkOutsideUnchanged(name: String, base: Scene, original: Element, edit: Edit, srcImg: CGImage?, exported: Data) {
+        guard let srcImg, let outImg = render(exported),
               let sp = PixelImage(srcImg), let op = PixelImage(outImg), sp.width == op.width, sp.height == op.height else { return }
         var footprint = original.boundsDevice.isNull ? (original.image?.destRectDevice.standardized ?? .null) : original.boundsDevice
         if original.kind == .text {
@@ -745,7 +749,7 @@ struct SceneEMFPlusExportTests {
             // A capped, low scale: this only checks the export renders without
             // trapping, so a quarter-res (or less, for a huge page) buffer suffices.
             let maxDim = max(base.pageSizeDevice.width, base.pageSizeDevice.height)
-            if render(result.data, scale: min(1, CGFloat(1100) / max(maxDim, 1))) != nil { rendered += 1 }
+            if render(result.data, scale: min(1, CGFloat(700) / max(maxDim, 1))) != nil { rendered += 1 }
         }
         print("\n=== corpus-local EMF+ export: \(plusFiles) files, exported \(exported), parse-clean \(parseClean), re-imported \(reimported), rendered \(rendered) ===")
         if plusFiles > 0 { #expect(exported == plusFiles && parseClean == plusFiles && reimported == plusFiles && rendered == plusFiles) }
