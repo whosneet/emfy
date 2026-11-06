@@ -22,6 +22,10 @@ struct SceneEMFPlusExportTests {
         "handmade-emfplus-text.emf",
         "handmade-emfplus-image.emf",
         "handmade-emfplus-dual.emf",
+        // A DUAL file whose two text runs are GetDC-window GDI entries under a
+        // fractional world transform (slice E1b2e): the identity oracle below
+        // exercises `SceneSynthesis.emfTextBlockWorld` on a committed file.
+        "handmade-getdc-text-dual.emf",
     ]
 
     private func scene(_ name: String) throws -> Scene {
@@ -140,12 +144,26 @@ struct SceneEMFPlusExportTests {
         #expect(plus.objectDefinitions().diagnostics.isEmpty, "\(name) id=\(id) \(edit): EMF+ object diagnostics")
 
         // Deleting the SOLE EMF+ drawing element of a dual file leaves no EMF+
-        // drawing record, so the file correctly degrades to its GDI fallback (the
-        // pairing-undetermined case, flagged `fallbackMayBeStale`). The EMF+-mode
-        // assertions below do not apply; the delete is honest and parse-clean.
+        // drawing record, so the file correctly degrades to its GDI fallback. The
+        // EMF+-mode assertions below do not apply; the delete is honest and
+        // parse-clean. Two honest outcomes: either the file's original GDI fallback
+        // could not be paired to the deleted element and is kept, flagged
+        // `fallbackMayBeStale` (a GDI reader may still show the deleted content — the
+        // hand-authored dual fixtures); or the deleted element's paired GDI fallback
+        // was cleanly removed, so the GDI and EMF+ arbitration modes agree and no
+        // warning is needed (the editor-produced `handmade-getdc-text-dual`, whose
+        // fallback is between-comments pairable).
         let degradedToGDI = (plus.header?.isDual ?? false) && !plus.records.contains(where: \.isDrawing)
         if edit == .delete, degradedToGDI {
-            #expect(result.warnings.contains(.fallbackMayBeStale), "\(name): dual degrade without a stale-fallback warning")
+            if !result.warnings.contains(.fallbackMayBeStale) {
+                if let gdi = render(result.data, options: RenderOptions(emfPlusArbitration: .gdi)), let plusImg = render(result.data) {
+                    let diff = compareImages(gdi, plusImg, tolerance: Self.tolerance)
+                    #expect(diff.sameSize && diff.differingFraction <= 0.002,
+                            "\(name): dual degrade without a stale-fallback warning, yet GDI and EMF+ modes differ by \(pct(diff.differingFraction)) — stale GDI content remains unflagged")
+                } else {
+                    Issue.record("\(name): dual degrade render failed")
+                }
+            }
             return
         }
 
@@ -308,6 +326,60 @@ struct SceneEMFPlusExportTests {
             }
         }
         print(report)
+    }
+
+    // MARK: - Edited GetDC-window GDI text (slice E1b2e, committed fixture)
+
+    /// Moving a GetDC-window GDI text run in the committed dual fixture re-emits it
+    /// through `SceneSynthesis.emfTextBlockWorld` (SetWorldTransform + logical
+    /// units), NOT an integer device-space EXTTEXTOUTW. Two things must hold:
+    ///
+    /// 1. The baseline moves by exactly the device translation. The run is drawn
+    ///    under a FRACTIONAL world transform, so a device-space re-emission would
+    ///    quantise the moved baseline; the world-transform re-emit reproduces it to
+    ///    the sub-pixel. After re-import the drawn device point
+    ///    (`referenceLogical.applying(transform)`) is the original + (10,6) ±1 px.
+    /// 2. The run is drawn exactly ONCE. The GetDC text block serves both the EMF+
+    ///    replay and the GDI fallback (one record each mode), so the edited string
+    ///    appears in exactly one EXTTEXTOUTW record — a GDI-arbitration reader draws
+    ///    no duplicate.
+    @Test func editedGetDCTextMovesBaselineWithoutDuplication() throws {
+        let base = try scene("handmade-getdc-text-dual.emf")
+        let text = try #require(base.editableElements.first { $0.kind == .text }, "no text run in the GetDC fixture")
+        // This run really is a GetDC-window GDI entry (not an EMF+ DrawString).
+        #expect(gdiElementIDs(base).contains(text.id), "the edited run is not a GetDC GDI entry")
+        let string = try #require(text.text).string
+        let original = CGPoint(x: text.text!.referenceLogical.x, y: text.text!.referenceLogical.y).applying(text.transform)
+
+        var scene = base
+        try scene.translate([text.id], dx: 10, dy: 6)
+        let result = try SceneExporter.export(scene, as: .emf)
+
+        // Parse-clean dual output.
+        let file = try EMFFile.parse(result.data)
+        #expect(file.diagnostics.isEmpty, "EMF diagnostics: \(file.diagnostics)")
+        #expect(file.emfPlusStream().diagnostics.isEmpty, "EMF+ diagnostics")
+
+        // (2) Exactly one EXTTEXTOUTW draws the edited string.
+        var copies = 0
+        for record in file.records where record.type == 84 {
+            if case .extTextOutW(let payload) = file.payload(of: record), payload.string == string { copies += 1 }
+        }
+        #expect(copies == 1, "edited GetDC text drawn \(copies) times, expected exactly one copy")
+
+        // (1) The re-imported run's drawn device point moved by (10,6) ±1 px.
+        let reimport = try SceneImporter.import(data: result.data)
+        let moved = try #require(reimport.editableElements.first { $0.text?.string == string }, "edited run not found after re-import")
+        let movedDevice = CGPoint(x: moved.text!.referenceLogical.x, y: moved.text!.referenceLogical.y).applying(moved.transform)
+        #expect(abs(movedDevice.x - (original.x + 10)) <= 1 && abs(movedDevice.y - (original.y + 6)) <= 1,
+                "moved baseline \(movedDevice) is not original \(original) + (10,6) within 1 px")
+
+        // The edit carries without an opacity/baseline warning.
+        #expect(!result.warnings.contains(.opacityDropped(elementID: text.id)), "unexpected opacityDropped on a plain text move")
+
+        // GDI-arbitration mode renders (one copy, no trap) and differs from EMF+
+        // mode only where allowed — the render simply must succeed.
+        #expect(render(result.data, options: RenderOptions(emfPlusArbitration: .gdi)) != nil, "GDI-mode render failed")
     }
 
     // MARK: - Insert at bottom / middle / top
