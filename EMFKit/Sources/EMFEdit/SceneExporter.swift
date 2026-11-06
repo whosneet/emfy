@@ -65,6 +65,22 @@ public struct ExportResult: Sendable, Equatable {
     }
 }
 
+/// Export tuning. Minimal by design (one field today).
+public struct ExportOptions: Sendable, Equatable {
+    /// Force a GDI-only EMF even when an edit needs a feature GDI cannot express
+    /// (sub-1 opacity or a gradient). By default (false) a GDI-only EMF that
+    /// gains such a feature is written as a DUAL EMF+ file (slice E1b2b): the
+    /// EMF+ half carries the edit faithfully and a GDI approximation serves
+    /// down-level readers, so NO `opacityDropped`/`gradientFlattened` warning is
+    /// raised. Set true to keep a flat GDI EMF (the E1b1 behaviour) with the
+    /// feature flattened and the warning emitted.
+    public var forceGDIOnly: Bool
+
+    public init(forceGDIOnly: Bool = false) {
+        self.forceGDIOnly = forceGDIOnly
+    }
+}
+
 /// Why an export failed (always typed — never a trap, §8).
 public enum SceneExportError: Error, Sendable, Equatable {
     /// The format cannot represent this scene in E1b1: a cross-container export
@@ -113,6 +129,10 @@ public enum SceneExporter {
     ]
 
     public static func export(_ scene: Scene, as format: ExportFormat) throws(SceneExportError) -> ExportResult {
+        try export(scene, as: format, options: ExportOptions())
+    }
+
+    public static func export(_ scene: Scene, as format: ExportFormat, options: ExportOptions) throws(SceneExportError) -> ExportResult {
         let sourceIsEMF = scene.source.format == .emf
         guard sourceIsEMF == format.isEMFFamily else {
             throw .unsupported(reason: "cross-container export (EMF \u{2194} WMF) is not supported in E1b1")
@@ -140,6 +160,18 @@ public enum SceneExporter {
                 catch { throw .unreadableSource }
                 return ExportResult(data: finalize(result.0, format), warnings: result.1)
             }
+            // A GDI-only EMF whose edit needs opacity or a gradient is upgraded to a
+            // DUAL EMF+ file (slice E1b2b): the EMF+ half carries the edit faithfully,
+            // a GDI approximation serves down-level readers. `forceGDIOnly` keeps the
+            // flat GDI EMF (E1b1), flattening the feature with a warning.
+            if !options.forceGDIOnly, needsEMFPlus(scene) {
+                let result: (Data, [ExportWarning])
+                do { result = try overlayGDIAsDual(file, scene, source: scene.source.data) }
+                catch let error as SceneExportError { throw error }
+                catch let error as EMFWriteError { throw .emfWriteFailed(error) }
+                catch { throw .unreadableSource }
+                return ExportResult(data: finalize(result.0, format), warnings: result.1)
+            }
             let result: (Data, [ExportWarning])
             do { result = try overlayEMF(file, scene, source: scene.source.data) }
             catch { throw .emfWriteFailed(error) }
@@ -147,6 +179,38 @@ public enum SceneExporter {
         }
         let (data, warnings) = try exportEditedWMF(scene)
         return ExportResult(data: finalize(data, format), warnings: warnings)
+    }
+
+    // MARK: - GDI → dual upgrade detection (slice E1b2b)
+
+    /// True when an edited or new element of `scene` needs a feature a GDI (EMF)
+    /// container cannot express — sub-1 opacity, a sub-1 paint alpha, or a gradient
+    /// fill — so the GDI EMF export must upgrade to a dual EMF+ file to carry it
+    /// faithfully ([MS-EMFPLUS] §1.3.1). Only edited/new elements are considered:
+    /// unedited content re-emits its original GDI records verbatim.
+    static func needsEMFPlus(_ scene: Scene) -> Bool {
+        for element in scene.elements where element.provenance.edited || element.provenance.sourceRecordIndices.isEmpty {
+            if elementNeedsEMFPlus(element) { return true }
+        }
+        return false
+    }
+
+    /// Whether one element carries a feature GDI cannot express: element opacity
+    /// below 1, a gradient fill, or a fill/stroke/text colour with alpha below 1.
+    /// An IMAGE is excluded — its opacity is not expressible in the EMF+ image
+    /// synthesis (the renderer applies no ImageAttributes alpha), so upgrading a
+    /// pure image-opacity edit to dual would gain nothing; it stays a GDI export
+    /// with an honest `opacityDropped` report instead.
+    static func elementNeedsEMFPlus(_ element: Element) -> Bool {
+        guard !element.hidden, element.kind != .image else { return false }
+        if element.style.opacity < 1 { return true }
+        if let fill = element.style.fill {
+            if fill.gradient != nil { return true }
+            if fill.color.alpha < 1 { return true }
+        }
+        if let stroke = element.style.stroke, stroke.color.alpha < 1 { return true }
+        if let text = element.text, text.color.alpha < 1 { return true }
+        return false
     }
 
     // MARK: - Change detection
@@ -261,6 +325,168 @@ public enum SceneExporter {
                 body.append([UInt8](try EMFRecordEncoder.encode(payload)))
             }
         }
+    }
+
+    // MARK: - GDI → dual: an edit needs opacity or a gradient (slice E1b2b)
+
+    /// Upgrades an edited GDI-only EMF to a DUAL EMF+ file so an edit GDI cannot
+    /// express — sub-1 opacity or a gradient — is carried faithfully
+    /// ([MS-EMFPLUS] §1.3.1). The output is one EMF container:
+    ///
+    /// - the ORIGINAL header, patched (Bytes/Records/Handles) like `overlayEMF`;
+    /// - an EmfPlusHeader comment with the Dual flag (§2.3.3.3), opening the EMF+
+    ///   stream;
+    /// - the EMF+ half. Every UNEDITED element's original GDI records play verbatim
+    ///   inside an EmfPlusGetDC window (§2.3.3.2, §1.3.1), so an EMF+ reader draws
+    ///   them pixel-for-pixel — the "original GDI as fallback" and "lossless EMF+
+    ///   replay" collapse into the SAME records. Each EDITED/new element is a
+    ///   synthesised EmfPlusSave…Restore block (`SceneEMFPlusSynthesis`, identity
+    ///   world, 1:1-pixel page) emitted AT its z-position; a non-GetDC EMF+ record
+    ///   closes the preceding window, so the block draws in z-order.
+    /// - the GDI half. Each edited/new element's best GDI approximation
+    ///   (`SceneSynthesis`, the opaque/flattened draw) is emitted OUTSIDE any GetDC
+    ///   window right after its EMF+ block — an EMF+ reader skips it (window closed),
+    ///   a GDI-only reader draws it. Unedited GDI records (shared with the EMF+ half)
+    ///   provide the rest, so a GDI reader never draws an element twice and an EMF+
+    ///   reader never draws the GDI approximation.
+    ///
+    /// The edit is carried faithfully, so NO `opacityDropped`/`gradientFlattened`
+    /// warning is raised (the GDI approximation's own such warnings are discarded);
+    /// genuine synthesis limitations (kindFallback, imageDropped, a degenerate
+    /// gradient) still surface from the EMF+ block.
+    private static func overlayGDIAsDual(_ file: EMFFile, _ scene: Scene, source: Data) throws -> (Data, [ExportWarning]) {
+        guard !file.records.isEmpty else { throw SceneExportError.unreadableSource }
+        let bytes = [UInt8](source)
+        var headerBytes = try rawOrThrow(bytes, file.records[0])
+
+        var ownerByIndex: [Int: Element] = [:]
+        for element in scene.elements where !element.provenance.sourceRecordIndices.isEmpty {
+            for index in element.provenance.sourceRecordIndices { ownerByIndex[index] = element }
+        }
+        let content = scene.partition.drawing.union(scene.partition.passthrough)
+        let firstContent = content.min()
+        let baseHandle = maxTableIndex(file.records, bytes) + 1
+        let insertions = planInsertions(scene)
+
+        var warnings: [ExportWarning] = []
+        var body: [[UInt8]] = []
+        // The pending run of framed EMF+ record bytes awaiting a comment flush, and
+        // whether a GetDC window is logically open for the GDI records that follow.
+        var plusRun: [UInt8] = []
+        var windowOpen = false
+        var saveIndex: UInt32 = 0x7F00_0000
+
+        func flushPlus() {
+            guard !plusRun.isEmpty else { return }
+            body.append(contentsOf: splitRecords(EMFPlusCommentWriter.packComments(streamBytes: plusRun)))
+            plusRun.removeAll(keepingCapacity: true)
+        }
+        /// Appends one verbatim GDI record, physically AFTER the pending EMF+ comment
+        /// (flushed first), so a reader sees it inside the window the comment opened.
+        func emitGDIRaw(_ raw: [UInt8]) {
+            flushPlus()
+            body.append(raw)
+        }
+        /// Ensures a GetDC window is open for the verbatim GDI records that follow.
+        func openWindow() {
+            if !windowOpen {
+                plusRun.append(contentsOf: EMFPlusRecordPayload.getDC.framed())
+                windowOpen = true
+            }
+        }
+        /// The EMF+ synthesis of an edited/new element (a Save…Restore block whose
+        /// objects take free slots 0…63; each block is self-contained so slots reset).
+        func emitPlusSynth(_ element: Element) {
+            var nextSlot: UInt8 = 0
+            func allocate() -> UInt8? { guard nextSlot < 64 else { return nil }; let s = nextSlot; nextSlot &+= 1; return s }
+            let idx = saveIndex; saveIndex &+= 1
+            guard let emits = SceneEMFPlusSynthesis.block(for: element, saveIndex: idx, allocate: allocate, warnings: &warnings) else { return }
+            for emit in emits {
+                switch emit {
+                case .record(let payload):
+                    plusRun.append(contentsOf: payload.framed())
+                case .object(let id, let type, let value):
+                    guard let payload = try? EMFPlusObjectEncoder.encode(value) else { continue }
+                    for rec in EMFPlusCommentWriter.objectRecords(objectID: id, objectType: type, payload: payload) {
+                        plusRun.append(contentsOf: rec)
+                    }
+                }
+            }
+        }
+        /// Emits an edited/new element: its EMF+ block (closes the window), then its
+        /// GDI approximation OUTSIDE the window (an EMF+ reader skips it).
+        func emitEdited(_ element: Element) throws(EMFWriteError) {
+            guard !element.hidden else { return }
+            emitPlusSynth(element)
+            windowOpen = false       // a non-GetDC EMF+ record closes the window in the reader
+            flushPlus()              // close the comment so the GDI approximation sits outside it
+            var dropped: [ExportWarning] = []
+            for payload in SceneSynthesis.emfBlock(for: element, baseHandle: baseHandle, warnings: &dropped) {
+                body.append([UInt8](try EMFRecordEncoder.encode(payload)))
+            }
+        }
+
+        // The EMF+ stream opens with the Dual header (§2.3.3.3). DPI is 96 — only
+        // physical-unit EMF+ fonts use it, and GDI-origin text is sized in world
+        // units (scaled by the re-established world transform), so 96 never applies.
+        plusRun.append(contentsOf: EMFPlusRecordPayload
+            .header(dual: true, videoDisplay: true, logicalDpiX: 96, logicalDpiY: 96).framed())
+
+        // Mirror `overlayEMF`'s walk: every record[1…] except EOF; verbatim unedited
+        // content/state inside a GetDC window; an edited element replaced in place by
+        // its dual block; new elements inserted at z; deleted elements dropped. The
+        // source's OWN EMF+ comments are dropped — a GDI-rendered dual file (its EMF+
+        // stream is just header/GetDC/state/EndOfFile around GDI draws) is rebuilt
+        // with our fresh EMF+ stream, so we never duplicate the header or EndOfFile.
+        for i in 1 ..< file.records.count {
+            let record = file.records[i]
+            if record.type == eofType { continue }   // EOF appended last, after EndOfFile
+            let isSourcePlusComment = record.type == emrCommentType && isEMFPlusComment(bytes, record)
+            if i == firstContent {
+                for element in insertions.atStart { try emitEdited(element) }
+            }
+            if isSourcePlusComment {
+                // Replaced by our EMF+ stream — drop it (its GDI draws are re-wrapped).
+            } else if content.contains(i) {
+                if let owner = ownerByIndex[i] {
+                    if owner.provenance.edited {
+                        if i == owner.provenance.sourceRecordIndices.max() { try emitEdited(owner) }
+                    } else {
+                        openWindow()
+                        emitGDIRaw(try rawOrThrow(bytes, record))
+                    }
+                }   // content with no owner → deleted → drop
+            } else {
+                openWindow()
+                emitGDIRaw(try rawOrThrow(bytes, record))   // structural (non-EOF) / state / non-EMF+ comment
+            }
+            if let after = insertions.afterRecord[i] { for element in after { try emitEdited(element) } }
+        }
+        if firstContent == nil { for element in insertions.atStart { try emitEdited(element) } }
+
+        // Close the EMF+ stream (§2.3.3.1), then the terminating EMR_EOF.
+        plusRun.append(contentsOf: EMFPlusRecordPayload.endOfFile.framed())
+        flushPlus()
+        if let last = file.records.last, last.type == eofType {
+            body.append(try rawOrThrow(bytes, last))
+        } else {
+            body.append(canonicalEMFEOF)
+        }
+
+        let bodyTotal = body.reduce(0) { $0 + $1.count }
+        let totalBytes = headerBytes.count + bodyTotal
+        guard totalBytes <= Int(UInt32.max) else { throw EMFWriteError.fileTooLarge(byteLength: totalBytes) }
+        let recordCount = UInt32(clamping: 1 + body.count)
+        let handles = max(file.header.handles, try handleCount(body))
+        patchU32(&headerBytes, 48, UInt32(totalBytes))
+        patchU32(&headerBytes, 52, recordCount)
+        patchU16(&headerBytes, 56, handles)
+
+        var out = [UInt8]()
+        out.reserveCapacity(totalBytes)
+        out.append(contentsOf: headerBytes)
+        for chunk in body { out.append(contentsOf: chunk) }
+        return (Data(out), warnings)
     }
 
     // MARK: - Edited EMF+ (and dual): EMF+ overlay (slice E1b2a)

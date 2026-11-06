@@ -64,7 +64,7 @@ public enum SceneRenderer {
             switch element.kind {
             case .text, .image:
                 if isEdit {
-                    renderSynthesized(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
                 } else {
                     let key = element.provenance.sourceRecordIndices.max() ?? -1
                     if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base) }
@@ -74,11 +74,24 @@ public enum SceneRenderer {
                 if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base) }
             default:
                 if isEdit {
-                    renderSynthesized(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
                 } else {
                     drawGeometry(element, into: context, base: base)
                 }
             }
+        }
+    }
+
+    /// Renders one edited/new element of a GDI/WMF scene, matching how the exporter
+    /// writes it: an element that needs a feature GDI cannot express (sub-1 opacity
+    /// or a gradient) is drawn as EMF+ (the dual-upgrade output, slice E1b2b);
+    /// everything else is drawn as a GDI block. So the on-screen edit matches the
+    /// exported file whether it stayed a flat GDI EMF or upgraded to a dual EMF+.
+    private static func renderEdited(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform) {
+        if SceneExporter.elementNeedsEMFPlus(element) {
+            renderSynthesizedPlus(element, into: context, pageBounds: pageBounds, target: target, base: base)
+        } else {
+            renderSynthesized(element, into: context, pageBounds: pageBounds, target: target, base: base)
         }
     }
 
