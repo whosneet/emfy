@@ -38,10 +38,11 @@ public enum SceneRenderer {
     public static func render(_ scene: Scene, into context: CGContext, target: CGRect) {
         let base = deviceToTarget(pageBounds: scene.pageBoundsDevice, target: target)
 
-        // EMF+ content is one passthrough blob: reproduce it by replaying the
-        // whole source through the one interpreter.
+        // EMF+ content lifts into editable elements (slice E1a2): geometry draws
+        // from its value types; text/image/passthrough replay through the one
+        // interpreter, preserving z-order.
         if scene.source.renderPath == .emfPlus {
-            replaySourceWholeFile(scene, into: context, target: target)
+            renderEMFPlus(scene, into: context, target: target, base: base)
             return
         }
 
@@ -65,6 +66,34 @@ public enum SceneRenderer {
         }
     }
 
+    /// Renders an EMF+ scene: each element draws from its value types (geometry,
+    /// solid and linear-gradient fills with alpha, strokes) or, for text/image/
+    /// passthrough, replays its single source record so z-order is preserved. The
+    /// source is re-observed once to recover each element's lifted op (the scene
+    /// elements are 1:1 with `plusEntries`, in order) — the proof the lift
+    /// captured what was drawn.
+    private static func renderEMFPlus(_ scene: Scene, into context: CGContext, target: CGRect, base: CGAffineTransform) {
+        guard let prepared = prepareSource(scene) else { return }
+        let entries = MetafileRenderer.observe(prepared).plusEntries
+
+        context.saveGState()
+        defer { context.restoreGState() }
+
+        for (element, entry) in zip(scene.elements, entries) where !element.hidden {
+            switch element.kind {
+            case .text, .image, .passthrough:
+                switch entry {
+                case .gdi(let op):
+                    EMFRenderer.replay(op, into: context, deviceToTarget: base)
+                case .plus(let op):
+                    MetafileRenderer.replayEMFPlus(prepared, streamIndices: [op.streamIndex], into: context, target: target)
+                }
+            default:
+                drawGeometry(element, into: context, base: base)
+            }
+        }
+    }
+
     // MARK: - Geometry (value-type render)
 
     private static func drawGeometry(_ element: Element, into context: CGContext, base: CGAffineTransform) {
@@ -76,9 +105,13 @@ public enum SceneRenderer {
         if let fill = element.style.fill {
             context.saveGState()
             applyClip(element.clipDevice, base: base, into: context)
-            context.setFillColor(fill.color.cgColor)
-            context.addPath(targetPath)
-            context.fillPath(using: fill.evenOdd ? .evenOdd : .winding)
+            if let gradient = fill.gradient {
+                drawGradient(gradient, path: targetPath, evenOdd: fill.evenOdd, base: base, into: context)
+            } else {
+                context.setFillColor(fill.color.cgColor)
+                context.addPath(targetPath)
+                context.fillPath(using: fill.evenOdd ? .evenOdd : .winding)
+            }
             context.restoreGState()
         }
         if let stroke = element.style.stroke {
@@ -95,6 +128,32 @@ public enum SceneRenderer {
             context.strokePath()
             context.restoreGState()
         }
+    }
+
+    /// Clips to `targetPath` and draws an EMF+ linear gradient, matching
+    /// `EMFPlusPlayback.fillBrush`: clamp both ends (`drawsBefore/AfterEndLocation`)
+    /// and map the device-space axis to target space via `base`. A degenerate
+    /// gradient (fewer than two stops) falls back to the first stop's solid.
+    private static func drawGradient(_ gradient: SceneGradient, path targetPath: CGPath, evenOdd: Bool, base: CGAffineTransform, into context: CGContext) {
+        guard gradient.stops.count >= 2, let space = CGColorSpace(name: CGColorSpace.sRGB) else {
+            if let first = gradient.stops.first {
+                context.setFillColor(first.color.cgColor)
+                context.addPath(targetPath)
+                context.fillPath(using: evenOdd ? .evenOdd : .winding)
+            }
+            return
+        }
+        let colors = gradient.stops.map(\.color.cgColor) as CFArray
+        let locations = gradient.stops.map { CGFloat(min(max($0.location, 0), 1)) }
+        guard let cgGradient = CGGradient(colorsSpace: space, colors: colors, locations: locations) else { return }
+        context.addPath(targetPath)
+        context.clip(using: evenOdd ? .evenOdd : .winding)
+        context.drawLinearGradient(
+            cgGradient,
+            start: gradient.startDevice.applying(base),
+            end: gradient.endDevice.applying(base),
+            options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
+        )
     }
 
     private static func applyClip(_ clip: ScenePath?, base: CGAffineTransform, into context: CGContext) {
@@ -160,11 +219,6 @@ public enum SceneRenderer {
             if let key = op.recordIndices.max() { map[key] = op }
         }
         return map
-    }
-
-    private static func replaySourceWholeFile(_ scene: Scene, into context: CGContext, target: CGRect) {
-        guard let prepared = prepareSource(scene) else { return }
-        _ = MetafileRenderer.render(prepared, into: context, target: target)
     }
 
     private static func prepareSource(_ scene: Scene) -> MetafileRenderer.Prepared? {

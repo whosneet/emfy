@@ -28,6 +28,16 @@ public struct SceneColor: Sendable, Equatable, Hashable {
         )
     }
 
+    /// From an EMF+ ARGB colour (0…255 → 0…1, alpha carried).
+    public init(_ argb: EMFPlusARGB) {
+        self.init(
+            red: Double(argb.red) / 255,
+            green: Double(argb.green) / 255,
+            blue: Double(argb.blue) / 255,
+            alpha: Double(argb.alpha) / 255
+        )
+    }
+
     /// The nearest opaque `ColorRef` (alpha dropped) — for GDI re-emit (E1b).
     public var colorRef: ColorRef {
         ColorRef(
@@ -42,16 +52,67 @@ public struct SceneColor: Sendable, Equatable, Hashable {
     }
 }
 
-/// A solid fill. v1 lifts solid fills only; EMFRender's solid approximation of
-/// hatch/pattern brushes is lifted as that colour (flagged on the element).
+/// A fill. GDI content lifts a solid colour; EMF+ content lifts a solid colour or
+/// a linear gradient. Hatch/path-gradient/texture brushes are not lifted here —
+/// those ops lift as passthrough. `color` is the representative solid (a
+/// gradient's first stop) used when `gradient` is nil.
 public struct SceneFill: Sendable, Equatable {
     public var color: SceneColor
-    /// Even-odd (GDI ALTERNATE) vs winding (GDI WINDING).
+    /// Even-odd (GDI ALTERNATE / EMF+ Alternate) vs winding fill.
     public var evenOdd: Bool
+    /// An EMF+ linear gradient; nil for a solid fill (GDI or EMF+).
+    public var gradient: SceneGradient?
 
-    public init(color: SceneColor, evenOdd: Bool) {
+    public init(color: SceneColor, evenOdd: Bool, gradient: SceneGradient? = nil) {
         self.color = color
         self.evenOdd = evenOdd
+        self.gradient = gradient
+    }
+
+    /// From an EMF+ lifted fill.
+    public init(_ plus: PlusFill, evenOdd: Bool) {
+        switch plus {
+        case .solid(let argb):
+            self.init(color: SceneColor(argb), evenOdd: evenOdd)
+        case .linearGradient(let g):
+            let representative = g.stops.first.map { SceneColor($0.color) } ?? SceneColor(red: 0, green: 0, blue: 0)
+            self.init(color: representative, evenOdd: evenOdd, gradient: SceneGradient(g))
+        }
+    }
+}
+
+/// An EMF+ linear gradient ([MS-EMFPLUS] §2.2.2.24): colour stops along an axis
+/// whose endpoints are in the scene's DEVICE space (the renderer applies the
+/// device→target fit). Drawn with clamp semantics, matching playback.
+public struct SceneGradient: Sendable, Equatable {
+    public struct Stop: Sendable, Equatable {
+        public var location: Double
+        public var color: SceneColor
+        public init(location: Double, color: SceneColor) {
+            self.location = location
+            self.color = color
+        }
+    }
+    public var stops: [Stop]
+    public var startDevice: CGPoint
+    public var endDevice: CGPoint
+    /// WrapMode tiles rather than clamps — flagged for E1b; the render clamps.
+    public var tilesWrap: Bool
+
+    public init(stops: [Stop], startDevice: CGPoint, endDevice: CGPoint, tilesWrap: Bool) {
+        self.stops = stops
+        self.startDevice = startDevice
+        self.endDevice = endDevice
+        self.tilesWrap = tilesWrap
+    }
+
+    public init(_ plus: PlusGradient) {
+        self.init(
+            stops: plus.stops.map { Stop(location: $0.location, color: SceneColor($0.color)) },
+            startDevice: plus.startDevice,
+            endDevice: plus.endDevice,
+            tilesWrap: plus.tilesWrap
+        )
     }
 }
 
@@ -85,26 +146,45 @@ public struct SceneStroke: Sendable, Equatable {
         self.miterLimit = miterLimit
     }
 
-    /// From EMFRender's lifted stroke.
+    /// From EMFRender's lifted GDI stroke.
     public init(_ lifted: LiftedStroke) {
-        let dash: Dash
-        switch lifted.dash {
-        case .solid: dash = .solid
-        case .dash: dash = .dash
-        case .dot: dash = .dot
-        case .dashDot: dash = .dashDot
-        case .dashDotDot: dash = .dashDotDot
-        case .userStyle(let entries): dash = .userStyle(entries)
-        }
         self.init(
             color: SceneColor(lifted.color),
             isCosmetic: lifted.isCosmetic,
             width: lifted.width,
-            dash: dash,
+            dash: Dash(lifted.dash),
             cap: lifted.cap,
             join: lifted.join,
             miterLimit: Double(lifted.miterLimit)
         )
+    }
+
+    /// From an EMF+ lifted stroke (never cosmetic — EMF+ pens carry a width).
+    public init(_ plus: PlusStroke) {
+        self.init(
+            color: SceneColor(plus.color),
+            isCosmetic: false,
+            width: plus.width,
+            dash: Dash(plus.dash),
+            cap: plus.cap,
+            join: plus.join,
+            miterLimit: plus.miterLimit
+        )
+    }
+}
+
+extension SceneStroke.Dash {
+    /// Maps EMFRender's lifted dash (shared by the GDI and EMF+ pens) to the
+    /// scene dash.
+    init(_ lifted: LiftedStroke.Dash) {
+        switch lifted {
+        case .solid: self = .solid
+        case .dash: self = .dash
+        case .dot: self = .dot
+        case .dashDot: self = .dashDot
+        case .dashDotDot: self = .dashDotDot
+        case .userStyle(let entries): self = .userStyle(entries)
+        }
     }
 }
 
@@ -122,12 +202,20 @@ public struct SceneStyle: Sendable, Equatable {
     }
 }
 
-/// An editable text run. Font family is the RESOLVED macOS family (what was
-/// drawn); the logical height is unscaled so edits stay resolution-independent.
+/// An editable text run. `fontFamily` is the RESOLVED macOS family (what was
+/// drawn); `requestedFamily` is the face the FILE asked for, so the exporter can
+/// re-emit it. GDI runs carry `logicalHeight` (unscaled); EMF+ runs carry
+/// `emSize` + `emSizeUnit` ([MS-EMFPLUS] §2.1.1.32). `isEMFPlus` marks the
+/// source so the renderer replays EMF+ runs and the exporter picks the encoder.
 public struct SceneText: Sendable, Equatable {
     public var string: String
     public var fontFamily: String
+    public var requestedFamily: String
     public var logicalHeight: Int32
+    /// EMF+ em size (0 for GDI content).
+    public var emSize: Double
+    /// EMF+ size unit ([MS-EMFPLUS] §2.1.1.32; 0 for GDI content).
+    public var emSizeUnit: UInt32
     public var bold: Bool
     public var italic: Bool
     public var underline: Bool
@@ -135,14 +223,20 @@ public struct SceneText: Sendable, Equatable {
     /// Baseline rotation, tenths of a degree counterclockwise (lfEscapement).
     public var escapementTenths: Int32
     public var color: SceneColor
-    /// Reference point in LOGICAL units (the run's anchor).
+    /// Reference point in LOGICAL units (GDI); the layout-rect origin in DEVICE
+    /// units for EMF+ content (approximate — EMF+ text renders via replay).
     public var referenceLogical: CGPoint
     public var alignRawValue: UInt32
+    /// True for an EMF+ DrawString run.
+    public var isEMFPlus: Bool
 
     public init(_ lifted: LiftedText) {
         self.string = lifted.string
         self.fontFamily = lifted.fontFamily
+        self.requestedFamily = lifted.requestedFamily
         self.logicalHeight = lifted.logicalHeight
+        self.emSize = 0
+        self.emSizeUnit = 0
         self.bold = lifted.bold
         self.italic = lifted.italic
         self.underline = lifted.underline
@@ -151,6 +245,25 @@ public struct SceneText: Sendable, Equatable {
         self.color = SceneColor(lifted.color)
         self.referenceLogical = CGPoint(x: CGFloat(lifted.referenceLogical.x), y: CGFloat(lifted.referenceLogical.y))
         self.alignRawValue = lifted.alignRawValue
+        self.isEMFPlus = false
+    }
+
+    public init(_ plus: PlusText) {
+        self.string = plus.string
+        self.fontFamily = plus.resolvedFamily
+        self.requestedFamily = plus.requestedFamily
+        self.logicalHeight = 0
+        self.emSize = plus.emSize
+        self.emSizeUnit = plus.sizeUnit
+        self.bold = plus.bold
+        self.italic = plus.italic
+        self.underline = plus.underline
+        self.strikeOut = plus.strikeOut
+        self.escapementTenths = 0
+        self.color = SceneColor(plus.color)
+        self.referenceLogical = plus.layoutRectDevice.origin
+        self.alignRawValue = plus.stringAlignment
+        self.isEMFPlus = true
     }
 }
 
@@ -162,7 +275,14 @@ public struct SceneImage: Sendable, Equatable {
     public var destOriginLogical: CGPoint
     public var destSizeLogical: CGSize
     public var destRectDevice: CGRect
+    /// The source GDI DIB (GDI content); nil for EMF+ images.
     public var sourceDIB: DIB?
+    /// The source EMF+ image object (EMF+ content); nil for GDI images. Holds the
+    /// raw bitmap/metafile bytes so E1b can re-encode it (as compressed PNG).
+    public var emfPlusImage: EMFPlusImage?
+    /// The source crop rectangle in the image's own units (EMF+ content); `.null`
+    /// for GDI images.
+    public var srcRect: CGRect
 
     public init(_ lifted: LiftedImage, deviceTransform: CGAffineTransform) {
         self.destOriginLogical = CGPoint(x: CGFloat(lifted.destOrigin.x), y: CGFloat(lifted.destOrigin.y))
@@ -170,6 +290,18 @@ public struct SceneImage: Sendable, Equatable {
         let logicalRect = CGRect(origin: destOriginLogical, size: destSizeLogical).standardized
         self.destRectDevice = logicalRect.applying(deviceTransform)
         self.sourceDIB = lifted.sourceDIB
+        self.emfPlusImage = nil
+        self.srcRect = .null
+    }
+
+    /// From an EMF+ lifted image: the destination is already in DEVICE space.
+    public init(_ plus: PlusImage) {
+        self.destRectDevice = plus.destRectDevice
+        self.destOriginLogical = plus.destRectDevice.origin
+        self.destSizeLogical = plus.destRectDevice.size
+        self.sourceDIB = nil
+        self.emfPlusImage = plus.image
+        self.srcRect = plus.srcRect
     }
 }
 

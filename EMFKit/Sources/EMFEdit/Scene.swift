@@ -5,7 +5,8 @@ import Foundation
 
 /// Why a record became a passthrough element rather than an editable one.
 public enum PassthroughReason: Sendable, Equatable {
-    /// EMF+ drawing content — v1 renders/exports it unchanged but does not lift it.
+    /// EMF+ drawing content v1 could not lift into an editable element (kept as a
+    /// whole-file blob before slice E1a2; retained for compatibility).
     case emfPlus
     /// An EMR_COMMENT (private or EMF+ wrapper) record.
     case comment
@@ -15,6 +16,15 @@ public enum PassthroughReason: Sendable, Equatable {
     case unknownRecord(type: UInt32)
     /// A malformed record the parser flagged.
     case malformed(type: UInt32)
+    /// An EMF+ fill brush the scene cannot represent faithfully (hatch, path
+    /// gradient, or texture) — replayed, flagged for E1b re-encode.
+    case emfPlusUnsupportedBrush
+    /// An EMF+ record the scene cannot lift editably (EmfPlusClear, a glyph-index
+    /// DrawDriverString, an image effect) — replayed unchanged.
+    case emfPlusUnsupportedRecord(type: UInt16)
+    /// An EMF+ drawing record whose body was undecodable or whose referenced
+    /// object was missing — replayed (draws its best partial output).
+    case emfPlusUndecodable(type: UInt16)
 }
 
 /// The kind of a scene element.
@@ -152,21 +162,26 @@ public struct ScenePartition: Sendable, Equatable {
     public var drawing: Set<Int>
     /// Records owned by passthrough elements.
     public var passthrough: Set<Int>
+    /// GDI records in an EMF+ dual file that the EMF+ engine did NOT play (the GDI
+    /// fallback). They become no element; the E1b exporter regenerates them from
+    /// the edited scene. Always empty for a pure-GDI or WMF scene.
+    public var fallback: Set<Int>
     public var unitCount: Int
 
-    public init(structural: Set<Int>, state: Set<Int>, drawing: Set<Int>, passthrough: Set<Int>, unitCount: Int) {
+    public init(structural: Set<Int>, state: Set<Int>, drawing: Set<Int>, passthrough: Set<Int>, fallback: Set<Int> = [], unitCount: Int) {
         self.structural = structural
         self.state = state
         self.drawing = drawing
         self.passthrough = passthrough
+        self.fallback = fallback
         self.unitCount = unitCount
     }
 
     /// Every unit is in exactly one bucket.
     public var isComplete: Bool {
-        let total = structural.count + state.count + drawing.count + passthrough.count
+        let total = structural.count + state.count + drawing.count + passthrough.count + fallback.count
         guard total == unitCount else { return false }
-        let union = structural.union(state).union(drawing).union(passthrough)
+        let union = structural.union(state).union(drawing).union(passthrough).union(fallback)
         return union.count == unitCount && union == Set(0 ..< unitCount)
     }
 }

@@ -107,6 +107,42 @@ enum EMFPlusPaint {
         return CGColor(srgbRed: mix(a.red, b.red), green: mix(a.green, b.green), blue: mix(a.blue, b.blue), alpha: mix(a.alpha, b.alpha))
     }
 
+    /// The gradient's colour stops as VALUE pairs (location in [0,1], ARGB), the
+    /// same stops `linearGradient` builds its CGGradient from — used by the E1
+    /// scene lift so the scene renderer can rebuild an identical CGGradient
+    /// (slice E1a2). Mirrors `linearGradient`'s blend handling exactly; a
+    /// fewer-than-two-stop result falls back to the plain start→end pair.
+    static func argbStops(_ g: EMFPlusLinearGradientBrush) -> [(location: CGFloat, color: EMFPlusARGB)] {
+        var stops: [(CGFloat, EMFPlusARGB)] = []
+        switch g.blend {
+        case .presetColors(let preset):
+            for (pos, color) in zip(preset.positions, preset.colors) where pos.isFinite {
+                stops.append((CGFloat(pos), color))
+            }
+        case .blendFactors(let arrays):
+            if let factors = arrays.last, !factors.positions.isEmpty {
+                for (pos, factor) in zip(factors.positions, factors.factors) where pos.isFinite && factor.isFinite {
+                    stops.append((CGFloat(pos), lerpARGB(g.startColor, g.endColor, CGFloat(factor))))
+                }
+            }
+        case nil:
+            break
+        }
+        if stops.count < 2 { stops = [(0, g.startColor), (1, g.endColor)] }
+        stops.sort { $0.0 < $1.0 }
+        return stops.map { (min(max($0.0, 0), 1), $0.1) }
+    }
+
+    /// Per-channel ARGB interpolation (rounded to 8-bit), the value-space twin of
+    /// `lerp` for the scene lift; the ≤0.5/255 rounding is well inside tolerance.
+    private static func lerpARGB(_ a: EMFPlusARGB, _ b: EMFPlusARGB, _ factor: CGFloat) -> EMFPlusARGB {
+        let f = min(max(factor, 0), 1)
+        func mix(_ x: UInt8, _ y: UInt8) -> UInt8 {
+            UInt8(min(max((CGFloat(x) + (CGFloat(y) - CGFloat(x)) * f).rounded(), 0), 255))
+        }
+        return EMFPlusARGB(blue: mix(a.blue, b.blue), green: mix(a.green, b.green), red: mix(a.red, b.red), alpha: mix(a.alpha, b.alpha))
+    }
+
     // MARK: - Pen → stroke style
 
     /// Resolves an EmfPlusPen ([MS-EMFPLUS] §2.2.1.7 / §2.2.2.33) into CG stroke

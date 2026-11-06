@@ -105,6 +105,12 @@ public enum UnitRole: Sendable, Equatable {
     case comment
     /// Unimplemented or malformed — passthrough.
     case unknown
+    /// A GDI record present in an EMF+ file but NOT executed by EMF+ playback —
+    /// the GDI FALLBACK of a dual file (outside any GetDC window), or any GDI
+    /// record the EMF+ engine skipped. It becomes no scene element: the E1b
+    /// exporter regenerates the GDI fallback from the edited scene, so a lifted
+    /// EMF+ file accounts for these records without double-drawing them.
+    case fallback
 }
 
 /// The result of observing a prepared metafile's playback: the resolved ops and
@@ -124,15 +130,225 @@ public struct PlaybackObservation: @unchecked Sendable {
     /// Per-unit record-type id (EMF `iType`; a WMF-translated unit's id is the
     /// EMR type for an un-decoded record, else 0). For passthrough reporting.
     public let unitTypes: [UInt32]
+    /// EMF+ playback only: the lifted drawing entries in playback (z) order — one
+    /// per EMF+ drawing record played, plus any GDI draw played inside a GetDC
+    /// window. Empty for GDI/WMF (`ops` carries those). The importer builds one
+    /// element per entry, in this order.
+    public let plusEntries: [PlusEntry]
 
-    public init(ops: [ResolvedDrawOp], pathConstructionIndices: Set<Int>, renderPath: RenderPathTaken, unitCount: Int, unitRoles: [UnitRole], unitTypes: [UInt32]) {
+    public init(ops: [ResolvedDrawOp], pathConstructionIndices: Set<Int>, renderPath: RenderPathTaken, unitCount: Int, unitRoles: [UnitRole], unitTypes: [UInt32], plusEntries: [PlusEntry] = []) {
         self.ops = ops
         self.pathConstructionIndices = pathConstructionIndices
         self.renderPath = renderPath
         self.unitCount = unitCount
         self.unitRoles = unitRoles
         self.unitTypes = unitTypes
+        self.plusEntries = plusEntries
     }
+}
+
+// MARK: - EMF+ lifted content (E1 scene import, slice E1a2)
+//
+// EMF+ drawing records lift into their own value types because the GDI
+// `ResolvedDrawOp` is LOGFONT/ColorRef/DIB-centric: EMF+ carries ARGB with
+// alpha, gradients, EMF+ fonts (family + emSize + unit), and image OBJECTS.
+// Geometry is captured in DEVICE space (world→page applied), the stable space
+// the scene stores; the scene renderer applies the device→target fit later.
+
+/// The fill of a lifted EMF+ drawing op the scene can represent faithfully:
+/// a solid ARGB colour, or a linear gradient. Hatch / path-gradient / texture
+/// brushes are NOT represented here — their ops lift as passthrough.
+public enum PlusFill: Sendable, Equatable {
+    case solid(EMFPlusARGB)
+    case linearGradient(PlusGradient)
+}
+
+/// A lifted EMF+ linear gradient ([MS-EMFPLUS] §2.2.2.24): colour stops and the
+/// gradient axis, the axis endpoints already in DEVICE space (the brush
+/// transform and world→device folded in at capture), so the scene renderer only
+/// applies the device→target fit.
+public struct PlusGradient: Sendable, Equatable {
+    public struct Stop: Sendable, Equatable {
+        public let location: Double
+        public let color: EMFPlusARGB
+        public init(location: Double, color: EMFPlusARGB) {
+            self.location = location
+            self.color = color
+        }
+    }
+    public let stops: [Stop]
+    public let startDevice: CGPoint
+    public let endDevice: CGPoint
+    /// WrapMode is a tiling mode ([MS-EMFPLUS] §2.1.1.33) rather than Clamp — the
+    /// render clamps to the axis, so this only flags the approximation for E1b.
+    public let tilesWrap: Bool
+
+    public init(stops: [Stop], startDevice: CGPoint, endDevice: CGPoint, tilesWrap: Bool) {
+        self.stops = stops
+        self.startDevice = startDevice
+        self.endDevice = endDevice
+        self.tilesWrap = tilesWrap
+    }
+}
+
+/// A lifted EMF+ pen ([MS-EMFPLUS] §2.2.1.7). Colour is the resolved solid (a
+/// non-solid pen brush is approximated to its representative colour, exactly as
+/// playback does). Width is in the pen's world units; the device width is
+/// derived at draw time from the element transform, matching `EMFPlusPaint`.
+public struct PlusStroke: Sendable, Equatable {
+    public let color: EMFPlusARGB
+    public let width: Double
+    public let dash: LiftedStroke.Dash
+    public let cap: CGLineCap
+    public let join: CGLineJoin
+    public let miterLimit: Double
+
+    public init(color: EMFPlusARGB, width: Double, dash: LiftedStroke.Dash, cap: CGLineCap, join: CGLineJoin, miterLimit: Double) {
+        self.color = color
+        self.width = width
+        self.dash = dash
+        self.cap = cap
+        self.join = join
+        self.miterLimit = miterLimit
+    }
+}
+
+/// A lifted EMF+ text run ([MS-EMFPLUS] §2.3.4.14 EmfPlusDrawString). The font is
+/// an EmfPlusFont (family + emSize + unit + style flags), carried alongside the
+/// RESOLVED macOS family so the exporter can re-emit the requested one.
+public struct PlusText: Sendable, Equatable {
+    public let string: String
+    /// The EMF+ font's requested family name.
+    public let requestedFamily: String
+    /// The resolved macOS family (CTFontCopyFamilyName).
+    public let resolvedFamily: String
+    public let emSize: Double
+    /// [MS-EMFPLUS] §2.1.1.32 UnitType of `emSize`.
+    public let sizeUnit: UInt32
+    public let bold: Bool
+    public let italic: Bool
+    public let underline: Bool
+    public let strikeOut: Bool
+    public let color: EMFPlusARGB
+    /// The layout rectangle mapped to DEVICE space.
+    public let layoutRectDevice: CGRect
+    /// StringFormat essentials ([MS-EMFPLUS] §2.2.1.9), 0 when no format object.
+    public let stringAlignment: UInt32
+    public let lineAlignment: UInt32
+    public let stringFormatFlags: UInt32
+
+    public init(string: String, requestedFamily: String, resolvedFamily: String, emSize: Double, sizeUnit: UInt32, bold: Bool, italic: Bool, underline: Bool, strikeOut: Bool, color: EMFPlusARGB, layoutRectDevice: CGRect, stringAlignment: UInt32, lineAlignment: UInt32, stringFormatFlags: UInt32) {
+        self.string = string
+        self.requestedFamily = requestedFamily
+        self.resolvedFamily = resolvedFamily
+        self.emSize = emSize
+        self.sizeUnit = sizeUnit
+        self.bold = bold
+        self.italic = italic
+        self.underline = underline
+        self.strikeOut = strikeOut
+        self.color = color
+        self.layoutRectDevice = layoutRectDevice
+        self.stringAlignment = stringAlignment
+        self.lineAlignment = lineAlignment
+        self.stringFormatFlags = stringFormatFlags
+    }
+}
+
+/// A lifted EMF+ image draw ([MS-EMFPLUS] §2.3.4.8/.9). Carries the decoded
+/// EMF+ image OBJECT (its raw bitmap/metafile bytes within) so E1b can re-encode
+/// it, plus the destination in DEVICE space.
+public struct PlusImage: Sendable, Equatable {
+    public let image: EMFPlusImage
+    /// The source rectangle in the image's own units (SrcRect, [MS-EMFPLUS]
+    /// §2.3.4.8) — the crop the dest is filled from.
+    public let srcRect: CGRect
+    /// SrcUnit ([MS-EMFPLUS] §2.1.1.32), normally Pixel.
+    public let srcUnit: Int32
+    public let destRectDevice: CGRect
+
+    public init(image: EMFPlusImage, srcRect: CGRect, srcUnit: Int32, destRectDevice: CGRect) {
+        self.image = image
+        self.srcRect = srcRect
+        self.srcUnit = srcUnit
+        self.destRectDevice = destRectDevice
+    }
+}
+
+/// Why a drawing record lifted as a `passthrough` op rather than an editable one.
+public enum PlusPassthroughKind: Sendable, Equatable {
+    /// EmfPlusClear — a full-surface fill.
+    case clear
+    /// EmfPlusDrawDriverString — a glyph-index/positioned run.
+    case driverString
+    /// A fill brush (hatch/path-gradient/texture) or a pen the scene cannot
+    /// reproduce exactly, or a missing paint object.
+    case unsupportedBrush
+    /// An undecodable record body or a missing referenced object.
+    case undecodable
+    /// Any other drawing record the scene cannot lift editably.
+    case unsupportedRecord
+}
+
+/// A single resolved EMF+ drawing operation lifted from playback. `@unchecked
+/// Sendable` for the same reason `ResolvedDrawOp` is: its only reference members
+/// are immutable CoreGraphics objects safe to read from any thread once built.
+public struct PlusDrawOp: @unchecked Sendable {
+    /// The logical primitive, or `passthrough` for a drawing record the scene
+    /// cannot represent faithfully (Clear, glyph-index driver string, an
+    /// unsupported brush, an undecodable body) — kept, replayed, never dropped.
+    public enum Kind: Sendable, Equatable {
+        case rectangle, ellipse, polygon, polyline, line, pie, arc, path, bezier, curve
+        case text, image, passthrough
+    }
+    public let kind: Kind
+    /// The EMF+ record type ([MS-EMFPLUS] §2.1.1.1).
+    public let recordType: UInt16
+    /// The `EMFFile.records` index of the EMR_COMMENT container the EMF+ record's
+    /// header starts in — the op's provenance for the record partition.
+    public let commentRecordIndex: Int
+    /// The index into `EMFPlusStream.records` — the scene renderer replays a
+    /// text/image/passthrough op by re-running the file drawing ONLY this index.
+    public let streamIndex: Int
+    /// Resolved geometry in DEVICE space (world→page applied). For text/image the
+    /// device-space footprint (the layout/destination rect).
+    public let deviceGeometry: CGPath
+    /// The world→device transform in effect (EMF+ world × page).
+    public let worldToDevice: CGAffineTransform
+    /// The current clip in DEVICE space, or nil for the whole canvas.
+    public let clipDeviceGeometry: CGPath?
+    public let fill: PlusFill?
+    /// Even-odd (Alternate) vs winding fill rule for a filled op.
+    public let fillEvenOdd: Bool
+    public let stroke: PlusStroke?
+    public let text: PlusText?
+    public let image: PlusImage?
+    /// Set only when `kind == .passthrough`, so the importer carries a precise
+    /// reason code.
+    public let passthroughReason: PlusPassthroughKind?
+
+    public init(kind: Kind, recordType: UInt16, commentRecordIndex: Int, streamIndex: Int, deviceGeometry: CGPath, worldToDevice: CGAffineTransform, clipDeviceGeometry: CGPath?, fill: PlusFill? = nil, fillEvenOdd: Bool = true, stroke: PlusStroke? = nil, text: PlusText? = nil, image: PlusImage? = nil, passthroughReason: PlusPassthroughKind? = nil) {
+        self.kind = kind
+        self.recordType = recordType
+        self.commentRecordIndex = commentRecordIndex
+        self.streamIndex = streamIndex
+        self.deviceGeometry = deviceGeometry
+        self.worldToDevice = worldToDevice
+        self.clipDeviceGeometry = clipDeviceGeometry
+        self.fill = fill
+        self.fillEvenOdd = fillEvenOdd
+        self.stroke = stroke
+        self.text = text
+        self.image = image
+        self.passthroughReason = passthroughReason
+    }
+}
+
+/// One lifted EMF+ playback entry: an EMF+ drawing op, or a GDI op drawn inside a
+/// GetDC window (which becomes an ordinary GDI element).
+public enum PlusEntry: @unchecked Sendable {
+    case gdi(ResolvedDrawOp)
+    case plus(PlusDrawOp)
 }
 
 /// A resolved stroke in a scene-friendly value form (no CoreText/CoreGraphics
@@ -166,6 +382,10 @@ public struct LiftedText: Sendable, Equatable {
     public let string: String
     /// Resolved font family (CTFontCopyFamilyName of the selected font).
     public let fontFamily: String
+    /// The ORIGINAL requested face name (LOGFONT faceName) before substitution, so
+    /// the exporter re-emits the font the file asked for (E1b). Empty for a stock
+    /// font selection.
+    public let requestedFamily: String
     /// Signed logical character/cell height (§2.2.13): < 0 em, > 0 cell, 0 default.
     public let logicalHeight: Int32
     public let bold: Bool
@@ -215,6 +435,19 @@ public final class RenderObserver {
     /// element. The importer classifies these as state.
     public internal(set) var pathConstructionIndices: Set<Int> = []
 
+    // MARK: EMF+ capture (slice E1a2)
+
+    /// True during EMF+ playback: captured GDI ops (GetDC windows) are ALSO
+    /// recorded into `plusEntries` so their playback order is preserved relative
+    /// to the EMF+ ops. False on the pure-GDI loop, which consumes `draws`.
+    var plusMode = false
+    /// The lifted EMF+ playback entries in z-order (EMF+ ops and GetDC GDI ops).
+    public internal(set) var plusEntries: [PlusEntry] = []
+    /// `EMFFile.records` indices of GDI records the EMF+ walk did NOT play (the
+    /// dual-file GDI fallback). The observe step turns these into `.fallback`
+    /// roles so the importer keeps them out of the element list.
+    public internal(set) var emfPlusFallbackGDI: Set<Int> = []
+
     public init() {}
 
     // The index of the record currently being played; set by the playback loop
@@ -230,7 +463,20 @@ public final class RenderObserver {
         drawCount += 1
         guard draws.count < Self.maxDraws else { return }
         draws.append(op)
+        // In EMF+ mode, a GetDC-window GDI draw joins the unified z-ordered list.
+        if plusMode, plusEntries.count < Self.maxDraws { plusEntries.append(.gdi(op)) }
     }
+
+    /// Records one lifted EMF+ drawing op into the unified z-ordered list.
+    func appendPlus(_ op: PlusDrawOp) {
+        drawCount += 1
+        guard plusEntries.count < Self.maxDraws else { return }
+        plusEntries.append(.plus(op))
+    }
+
+    /// Notes a GDI record the EMF+ walk encountered with no GetDC window open —
+    /// the GDI fallback, kept out of the scene element list.
+    func noteFallbackGDI(_ index: Int) { emfPlusFallbackGDI.insert(index) }
 
     // MARK: Path-bracket bookkeeping
 

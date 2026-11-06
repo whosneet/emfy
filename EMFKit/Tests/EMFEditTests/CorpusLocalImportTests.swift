@@ -19,6 +19,8 @@ struct CorpusLocalImportTests {
         var failed = 0
         var totalElements = 0
         var totalPassthrough = 0
+        var emfPlusFiles = 0
+        var emfPlusWithEditable = 0
         var maxMicros: Double = 0
         var sumMicros: Double = 0
         let startResident = residentBytes()
@@ -44,20 +46,26 @@ struct CorpusLocalImportTests {
             parsed += 1
             totalElements += scene.elements.count
             totalPassthrough += scene.elements.filter { $0.kind == .passthrough }.count
+            if scene.source.renderPath == .emfPlus {
+                emfPlusFiles += 1
+                if !scene.editableElements.isEmpty { emfPlusWithEditable += 1 }
+            }
             maxMicros = max(maxMicros, micros)
             sumMicros += micros
             peakResident = max(peakResident, residentBytes())
         }
 
         let peakDeltaMB = Double(peakResident &- startResident) / (1024 * 1024)
+        let passthroughShare = totalElements > 0 ? Double(totalPassthrough) / Double(totalElements) * 100 : 0
         print("""
 
         === E1a corpus-local import (counts only) ===
         files found:      \(files.count)
         parsed:           \(parsed)
         failed to parse:  \(failed)
+        EMF+ files:       \(emfPlusFiles) (with editable elements: \(emfPlusWithEditable))
         total elements:   \(totalElements)
-        passthrough:      \(totalPassthrough)
+        passthrough:      \(totalPassthrough) (\(String(format: "%.1f", passthroughShare))% of elements)
         import time:      max \(String(format: "%.1f", maxMicros / 1000)) ms, total \(String(format: "%.0f", sumMicros / 1000)) ms
         peak resident Δ:  \(String(format: "%.0f", peakDeltaMB)) MB over the batch
         """)

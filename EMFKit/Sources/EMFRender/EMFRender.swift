@@ -50,7 +50,8 @@ public enum EMFRenderer {
         into context: CGContext,
         target: CGRect,
         options: RenderOptions = .default,
-        observer: RenderObserver? = nil
+        observer: RenderObserver? = nil,
+        emfPlusDrawFilter: Set<Int>? = nil
     ) -> EMFRenderLog {
         var log = EMFRenderLog()
         let base = deviceToTarget(header: file.header, target: target, log: &log)
@@ -89,10 +90,16 @@ public enum EMFRenderer {
         // leaves `forceGDI` false, so existing output is byte-identical.
         let forceGDI = options.emfPlusArbitration == .gdi && (plus.header?.isDual ?? false)
         if !forceGDI, plus.records.contains(where: \.isDrawing) {
-            // EMF+ drives output: the import observer (if any) does NOT attach —
-            // v1 lifts EMF+ as passthrough (the import entry records this path),
-            // so no EMF+ sub-record is reported as a GDI op.
-            EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, options: options, log: &log)
+            // EMF+ drives output. When an import observer is attached (slice
+            // E1a2), it rides along: EMF+ drawing records lift into `plusEntries`
+            // and GDI draws inside a GetDC window attach through `dc.observer`.
+            // `emfPlusDrawFilter`, when set, restricts which EMF+ stream indices
+            // draw — the scene renderer's per-element replay. Both are nil on a
+            // normal render, so output stays byte-identical.
+            dc.observer = observer
+            observer?.plusMode = true
+            EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, options: options, log: &log, observer: observer, drawFilter: emfPlusDrawFilter)
+            observer?.finalize()
             return log
         }
 
@@ -1087,6 +1094,7 @@ public enum EMFRenderer {
         return LiftedText(
             string: text.string,
             fontFamily: family,
+            requestedFamily: resolved?.requestedFamily ?? "",
             logicalHeight: resolved?.logicalHeight ?? 0,
             bold: traits.contains(.traitBold),
             italic: traits.contains(.traitItalic),

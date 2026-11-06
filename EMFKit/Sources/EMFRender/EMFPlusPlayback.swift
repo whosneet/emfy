@@ -60,6 +60,20 @@ struct EMFPlusPlayback {
     /// Option 2 (font substitutions): the user table consulted — before the
     /// built-in one — for DrawString/DrawDriverString family resolution.
     let substitutions: [FontSubstitution]
+    /// Scene-import observer (slice E1a2). Nil on every normal render; when set,
+    /// each EMF+ drawing record played is lifted into a `PlusDrawOp` captured in
+    /// DEVICE space. All capture work is gated behind `observer != nil`, so the
+    /// hot path and every committed snapshot stay byte-for-byte unchanged.
+    var observer: RenderObserver?
+    /// When set, ONLY EMF+ drawing records whose stream index is in the set draw
+    /// (the scene renderer replays one element at a time). Non-drawing records
+    /// always execute so the state builds up correctly; GetDC GDI draws are
+    /// suppressed. Nil (the default) draws everything.
+    var drawFilter: Set<Int>?
+    /// The container comment / stream index of the record currently playing,
+    /// stamped into each lifted op's provenance.
+    private var currentCommentIndex = 0
+    private var currentStreamIndex = 0
     private var state = State()
     /// Index-keyed saved states for EmfPlusSave (§2.3.7.5) / EmfPlusRestore (§2.3.7.4).
     private var savedStates: [UInt32: State] = [:]
@@ -105,7 +119,9 @@ struct EMFPlusPlayback {
         dc: inout DeviceContext,
         base: CGAffineTransform,
         options: RenderOptions = .default,
-        log: inout EMFRenderLog
+        log: inout EMFRenderLog,
+        observer: RenderObserver? = nil,
+        drawFilter: Set<Int>? = nil
     ) {
         // Header LogicalDpi drives physical-unit conversion; 0/absent → 96 (§8).
         let rawX = stream.header.map { CGFloat($0.logicalDpiX) } ?? 0
@@ -116,6 +132,8 @@ struct EMFPlusPlayback {
             dpiY: rawY.isFinite && rawY > 0 ? rawY : 96,
             crisp: options.antialiasing == .crisp,
             substitutions: options.fontSubstitutions)
+        player.observer = observer
+        player.drawFilter = drawFilter
         player.walk(file: file, stream: stream, dc: &dc, log: &log)
     }
 
@@ -133,10 +151,12 @@ struct EMFPlusPlayback {
         table.streamByteCeiling = stream.assembledByteCount
 
         // Group the reassembled EMF+ records by the file record (comment) their
-        // header starts in. Records are already in stream order.
-        var byComment: [Int: [EMFPlusRecord]] = [:]
-        for record in stream.records {
-            byComment[record.sourceRecordIndex, default: []].append(record)
+        // header starts in, keeping each record's STREAM INDEX (its position in
+        // `stream.records`) — the anchor the scene import stamps and the scene
+        // renderer replays by. Records are already in stream order.
+        var byComment: [Int: [(streamIndex: Int, record: EMFPlusRecord)]] = [:]
+        for (streamIndex, record) in stream.records.enumerated() {
+            byComment[record.sourceRecordIndex, default: []].append((streamIndex, record))
         }
 
         // A GetDC opens a window in which subsequent GDI records play, until the
@@ -147,11 +167,13 @@ struct EMFPlusPlayback {
             if let plusRecords = byComment[index] {
                 for plusRecord in plusRecords {
                     log.addEMFPlusRecordsPlayed()   // audit M17: observe the walk consuming records
-                    if plusRecord.type == Self.getDC {
+                    currentCommentIndex = index
+                    currentStreamIndex = plusRecord.streamIndex
+                    if plusRecord.record.type == Self.getDC {
                         gdiWindowOpen = true
                     } else {
                         gdiWindowOpen = false
-                        play(plusRecord, log: &log)
+                        play(plusRecord.record, log: &log)
                     }
                 }
                 continue
@@ -166,14 +188,18 @@ struct EMFPlusPlayback {
             if record.type == Self.emrHeader { gdiWindowOpen = false; continue }
             if record.type == Self.emrEOF { continue }
 
+            // A GDI record. Inside a GetDC window it plays (and, during an import,
+            // its draw is captured as an ordinary GDI op). Outside one it is the
+            // dual-file GDI fallback: not played, recorded for the import's
+            // `fallback` role. Under a `drawFilter` (per-element replay) GDI draws
+            // are suppressed — GetDC content replays as its own GDI element.
             if gdiWindowOpen {
-                EMFRenderer.playGDIRecord(
-                    file.payload(of: record),
-                    into: context,
-                    dc: &dc,
-                    base: base,
-                    log: &log
-                )
+                observer?.currentRecordIndex = index
+                if drawFilter == nil {
+                    EMFRenderer.playGDIRecord(file.payload(of: record), into: context, dc: &dc, base: base, log: &log)
+                }
+            } else {
+                observer?.noteFallbackGDI(index)
             }
         }
     }
@@ -230,9 +256,16 @@ struct EMFPlusPlayback {
         case 0x401D, 0x401F, 0x4020, 0x4021, 0x4022, 0x4024:
             break
 
-        // Drawing (§2.3.4).
+        // Drawing (§2.3.4). Under a draw filter only the selected stream indices
+        // paint (per-element replay); the capture (import only) runs for every
+        // drawing record so the scene lifts them all.
         case 0x4009 ... 0x401C, 0x4036:
-            playDrawing(record, flags: flags, log: &log)
+            if drawFilter == nil || drawFilter?.contains(currentStreamIndex) == true {
+                playDrawing(record, flags: flags, log: &log)
+            }
+            if observer != nil {
+                captureDrawing(record, flags: flags)
+            }
 
         // Everything else — MultiFormat, SerializableObject, terminal-server,
         // and any unknown type — is a logged skip (P4/out of scope).
@@ -1434,6 +1467,310 @@ struct EMFPlusPlayback {
         if sBit { return .color(argb(brushId)) }
         guard let brush = table.brush(Int(brushId & 0xFF)) else { return nil }
         return .brush(brush)
+    }
+
+    // MARK: - Scene-import capture (slice E1a2)
+    //
+    // Runs only when `observer != nil` (an import). Each drawing record is
+    // re-read and its DEVICE-space geometry rebuilt with `worldToDevice` (the
+    // same geometry `playDrawing` draws, minus the device→target `base`), then
+    // lifted into a `PlusDrawOp`. A record the scene cannot represent faithfully
+    // — Clear, a glyph-index driver string, an unsupported brush, a missing
+    // object, an undecodable body — lifts as a `passthrough` op: kept, replayed,
+    // never dropped (primer §8).
+
+    private func captureDrawing(_ record: EMFPlusRecord, flags: UInt16) {
+        guard let observer else { return }
+        let sBit = (flags & 0x8000) != 0
+        let cBit = (flags & 0x4000) != 0
+        let objectID = Int(flags & 0x00FF)
+        let wtd = worldToDevice
+        let clip = state.clip.devicePath()
+        var reader = PlusReader(record.data)
+
+        func op(_ kind: PlusDrawOp.Kind, _ geometry: CGPath, fill: PlusFill? = nil, fillEvenOdd: Bool = true, stroke: PlusStroke? = nil, text: PlusText? = nil, image: PlusImage? = nil) -> PlusDrawOp {
+            PlusDrawOp(
+                kind: kind, recordType: record.type,
+                commentRecordIndex: currentCommentIndex, streamIndex: currentStreamIndex,
+                deviceGeometry: geometry, worldToDevice: wtd, clipDeviceGeometry: clip,
+                fill: fill, fillEvenOdd: fillEvenOdd, stroke: stroke, text: text, image: image)
+        }
+        func passthrough(_ reason: PlusPassthroughKind, _ geometry: CGPath = CGMutablePath()) -> PlusDrawOp {
+            PlusDrawOp(
+                kind: .passthrough, recordType: record.type,
+                commentRecordIndex: currentCommentIndex, streamIndex: currentStreamIndex,
+                deviceGeometry: geometry, worldToDevice: wtd, clipDeviceGeometry: clip,
+                passthroughReason: reason)
+        }
+        /// A fill op, editable only when the fill lifts faithfully.
+        func filled(_ kind: PlusDrawOp.Kind, _ geometry: CGPath, sBit: Bool, brushId: UInt32, evenOdd: Bool) -> PlusDrawOp {
+            guard !geometry.isEmpty, let fill = liftFill(sBit: sBit, brushId: brushId) else {
+                return passthrough(.unsupportedBrush, geometry)
+            }
+            return op(kind, geometry, fill: fill, fillEvenOdd: evenOdd)
+        }
+        /// A stroke op, editable only when the pen lifts faithfully.
+        func stroked(_ kind: PlusDrawOp.Kind, _ geometry: CGPath, objectID: Int) -> PlusDrawOp {
+            guard !geometry.isEmpty, let stroke = liftStroke(objectID: objectID) else {
+                return passthrough(.unsupportedBrush, geometry)
+            }
+            return op(kind, geometry, stroke: stroke)
+        }
+
+        let lifted: PlusDrawOp
+        switch record.type {
+        case 0x4009:   // Clear — full-surface fill, replayed.
+            lifted = passthrough(.clear)
+
+        case 0x400A:   // FillRects — winding fills the union (audit M6).
+            guard let brushId = reader.u32(), let count = reader.u32() else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath()
+            for _ in 0 ..< Int(count) { guard let r = reader.rect(compressed: cBit) else { break }; path.addRect(r.standardized, transform: wtd) }
+            lifted = filled(.rectangle, path, sBit: sBit, brushId: brushId, evenOdd: false)
+
+        case 0x400B:   // DrawRects
+            guard let count = reader.u32() else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath()
+            for _ in 0 ..< Int(count) { guard let r = reader.rect(compressed: cBit) else { break }; path.addRect(r.standardized, transform: wtd) }
+            lifted = stroked(.rectangle, path, objectID: objectID)
+
+        case 0x400C:   // FillPolygon
+            guard let brushId = reader.u32(), let count = reader.u32(),
+                  let points = reader.points(count: Int(count), compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendPolygon(points, to: path, transform: wtd)
+            lifted = filled(.polygon, path, sBit: sBit, brushId: brushId, evenOdd: true)
+
+        case 0x400D:   // DrawLines
+            let lBit = (flags & 0x2000) != 0
+            guard let count = reader.u32(), let points = reader.points(count: Int(count), compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendPolyline(points, to: path, transform: wtd, close: lBit)
+            lifted = stroked(lBit ? .polygon : .polyline, path, objectID: objectID)
+
+        case 0x400E:   // FillEllipse
+            guard let brushId = reader.u32(), let rect = reader.rect(compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendEllipse(in: rect.standardized, to: path, transform: wtd)
+            lifted = filled(.ellipse, path, sBit: sBit, brushId: brushId, evenOdd: true)
+
+        case 0x400F:   // DrawEllipse
+            guard let rect = reader.rect(compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendEllipse(in: rect.standardized, to: path, transform: wtd)
+            lifted = stroked(.ellipse, path, objectID: objectID)
+
+        case 0x4010:   // FillPie
+            guard let brushId = reader.u32(), let start = reader.f32(), let sweep = reader.f32(), let rect = reader.rect(compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendArc(rect: rect.standardized, startDegrees: start, sweepDegrees: sweep, pie: true, to: path, transform: wtd)
+            lifted = filled(.pie, path, sBit: sBit, brushId: brushId, evenOdd: true)
+
+        case 0x4011:   // DrawPie
+            guard let start = reader.f32(), let sweep = reader.f32(), let rect = reader.rect(compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendArc(rect: rect.standardized, startDegrees: start, sweepDegrees: sweep, pie: true, to: path, transform: wtd)
+            lifted = stroked(.pie, path, objectID: objectID)
+
+        case 0x4012:   // DrawArc
+            guard let start = reader.f32(), let sweep = reader.f32(), let rect = reader.rect(compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendArc(rect: rect.standardized, startDegrees: start, sweepDegrees: sweep, pie: false, to: path, transform: wtd)
+            lifted = stroked(.arc, path, objectID: objectID)
+
+        case 0x4013:   // FillRegion — winding (audit, matches playback).
+            guard let brushId = reader.u32(), let region = table.region(objectID) else { lifted = passthrough(.undecodable); break }
+            var scratch = EMFRenderLog()
+            let path = EMFPlusGeometry.regionPath(region.root, transform: wtd, recordType: record.type, log: &scratch)
+            lifted = filled(.path, path, sBit: sBit, brushId: brushId, evenOdd: false)
+
+        case 0x4014:   // FillPath
+            guard let brushId = reader.u32(), let plusPath = table.path(objectID) else { lifted = passthrough(.undecodable); break }
+            var scratch = EMFRenderLog(); let path = CGMutablePath()
+            EMFPlusGeometry.appendPath(plusPath, to: path, transform: wtd, recordType: record.type, log: &scratch)
+            lifted = filled(.path, path, sBit: sBit, brushId: brushId, evenOdd: true)
+
+        case 0x4015:   // DrawPath
+            guard let penId = reader.u32(), let plusPath = table.path(objectID) else { lifted = passthrough(.undecodable); break }
+            var scratch = EMFRenderLog(); let path = CGMutablePath()
+            EMFPlusGeometry.appendPath(plusPath, to: path, transform: wtd, recordType: record.type, log: &scratch)
+            lifted = stroked(.path, path, objectID: Int(penId & 0xFF))
+
+        case 0x4016:   // FillClosedCurve — winding flag (0x2000) sets the rule.
+            let winding = (flags & 0x2000) != 0
+            guard let brushId = reader.u32(), let tension = reader.f32(), let count = reader.u32(),
+                  let points = reader.points(count: Int(count), compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendCardinalSpline(points, tension: tension, closed: true, to: path, transform: wtd)
+            lifted = filled(.curve, path, sBit: sBit, brushId: brushId, evenOdd: !winding)
+
+        case 0x4017:   // DrawClosedCurve
+            guard let tension = reader.f32(), let count = reader.u32(), let points = reader.points(count: Int(count), compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendCardinalSpline(points, tension: tension, closed: true, to: path, transform: wtd)
+            lifted = stroked(.curve, path, objectID: objectID)
+
+        case 0x4018:   // DrawCurve
+            guard let tension = reader.f32(), reader.u32() != nil, reader.u32() != nil, let count = reader.u32(),
+                  let points = reader.points(count: Int(count), compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            let path = CGMutablePath(); EMFPlusGeometry.appendCardinalSpline(points, tension: tension, closed: false, to: path, transform: wtd)
+            lifted = stroked(.curve, path, objectID: objectID)
+
+        case 0x4019:   // DrawBeziers
+            guard let count = reader.u32(), let points = reader.points(count: Int(count), compressed: cBit) else { lifted = passthrough(.undecodable); break }
+            var scratch = EMFRenderLog(); let path = CGMutablePath()
+            EMFPlusGeometry.appendBeziers(points, to: path, transform: wtd, recordType: record.type, log: &scratch)
+            lifted = stroked(.bezier, path, objectID: objectID)
+
+        case 0x401A, 0x401B:   // DrawImage / DrawImagePoints
+            if let image = liftImage(record, objectID: objectID, cBit: cBit, points: record.type == 0x401B) {
+                let geometry = CGMutablePath()
+                if !image.destRectDevice.isNull, image.destRectDevice.width != 0 || image.destRectDevice.height != 0 {
+                    geometry.addRect(image.destRectDevice.standardized)
+                }
+                lifted = op(.image, geometry, image: image)
+            } else {
+                lifted = passthrough(.undecodable)
+            }
+
+        case 0x401C:   // DrawString
+            if let text = liftText(record, sBit: sBit, fontID: objectID) {
+                let geometry = CGMutablePath()
+                if text.layoutRectDevice.width != 0 || text.layoutRectDevice.height != 0 {
+                    geometry.addRect(text.layoutRectDevice.standardized)
+                }
+                lifted = op(.text, geometry, text: text)
+            } else {
+                lifted = passthrough(.undecodable)
+            }
+
+        case 0x4036:   // DrawDriverString — glyph-index/positioned run, replayed.
+            lifted = passthrough(.driverString)
+
+        default:
+            lifted = passthrough(.unsupportedRecord)
+        }
+        observer.appendPlus(lifted)
+    }
+
+    /// Lifts a fill brush to a scene-faithful `PlusFill`, or nil when it is a
+    /// hatch/path-gradient/texture brush (the op then lifts as passthrough and
+    /// replays the playback approximation). Mirrors `fillSource`/`fillBrush`.
+    private func liftFill(sBit: Bool, brushId: UInt32) -> PlusFill? {
+        if sBit { return .solid(argb(brushId)) }
+        guard let brush = table.brush(Int(brushId & 0xFF)) else { return nil }
+        switch brush.data {
+        case .solid(let color): return .solid(color)
+        case .linearGradient(let gradient): return liftGradient(gradient)
+        case .hatch, .pathGradient, .texture: return nil
+        }
+    }
+
+    /// Lifts a linear-gradient brush to value-type stops + a DEVICE-space axis
+    /// (brush transform and world→device folded in), matching `fillBrush`'s
+    /// gradient path; a degenerate axis lifts the playback solid fallback.
+    private func liftGradient(_ g: EMFPlusLinearGradientBrush) -> PlusFill {
+        guard let axis = EMFPlusPaint.linearGradientAxis(g, full: worldToDevice) else {
+            return .solid(g.startColor)
+        }
+        let stops = EMFPlusPaint.argbStops(g).map { PlusGradient.Stop(location: Double($0.location), color: $0.color) }
+        return .linearGradient(PlusGradient(
+            stops: stops, startDevice: axis.start, endDevice: axis.end, tilesWrap: Self.wrapModeTiles(g.wrapMode)))
+    }
+
+    /// Lifts an EMF+ pen to a scene-faithful `PlusStroke`, or nil when it carries
+    /// a feature the value-type render cannot reproduce exactly (custom caps,
+    /// compound lines, a custom dash array, a non-basic cap) — the op then lifts
+    /// as passthrough and replays. Colour follows `strokeStyle`: a solid pen
+    /// brush, else its representative solid.
+    private func liftStroke(objectID: Int) -> PlusStroke? {
+        guard let pen = table.pen(objectID) else { return nil }
+        let data = pen.penData
+        if data.customStartCap != nil || data.customEndCap != nil || data.compoundLine != nil || data.dashedLine != nil {
+            return nil
+        }
+        let color: EMFPlusARGB
+        if case .solid(let argb) = pen.brush.data { color = argb }
+        else { color = EMFPlusPaint.representativeColor(pen.brush) ?? EMFPlusARGB(blue: 0, green: 0, red: 0, alpha: 255) }
+
+        let cap: CGLineCap
+        switch data.startCap ?? 0 {
+        case 0: cap = .butt
+        case 1: cap = .square
+        case 2: cap = .round
+        default: return nil
+        }
+        let join: CGLineJoin
+        switch data.join ?? 0 {
+        case 1: join = .bevel
+        case 2: join = .round
+        default: join = .miter
+        }
+        let dash: LiftedStroke.Dash
+        switch data.lineStyle ?? 0 {
+        case 1: dash = .dash
+        case 2: dash = .dot
+        case 3: dash = .dashDot
+        case 4: dash = .dashDotDot
+        default: dash = .solid
+        }
+        let miter: Double
+        if let rawMiter = data.miterLimit { miter = (rawMiter.isFinite && rawMiter > 0) ? Double(max(rawMiter, 1)) : 10 }
+        else { miter = 10 }
+        let width = (Double(data.width).isFinite && data.width > 0) ? Double(data.width) : 0
+        return PlusStroke(color: color, width: width, dash: dash, cap: cap, join: join, miterLimit: miter)
+    }
+
+    /// Lifts a DrawString run, or nil when playback would draw nothing (empty
+    /// string, missing font, or an unresolvable fill) — then the op is passthrough.
+    private func liftText(_ record: EMFPlusRecord, sBit: Bool, fontID: Int) -> PlusText? {
+        guard let decoded = EMFPlusText.decodeString(record.data), !decoded.string.isEmpty,
+              let font = table.font(fontID), let color = textARGB(sBit: sBit, brushId: decoded.brushId) else {
+            return nil
+        }
+        var scratch = EMFRenderLog()
+        let base = FontMapper.resolveFamily(font.familyName, bold: font.isBold, italic: font.isItalic, substitutions: substitutions, log: &scratch)
+        let format = table.stringFormat(Int(decoded.formatId & 0xFF))
+        return PlusText(
+            string: decoded.string, requestedFamily: font.familyName,
+            resolvedFamily: CTFontCopyFamilyName(base) as String,
+            emSize: Double(font.emSize), sizeUnit: font.sizeUnit,
+            bold: font.isBold, italic: font.isItalic, underline: font.isUnderline, strikeOut: font.isStrikeout,
+            color: color, layoutRectDevice: decoded.layoutRect.applying(worldToDevice),
+            stringAlignment: format?.stringAlignment ?? 0, lineAlignment: format?.lineAlign ?? 0,
+            stringFormatFlags: format?.stringFormatFlags ?? 0)
+    }
+
+    /// The text run's resolved ARGB (S-flag colour, or the brush's representative
+    /// colour), nil only when the brush id is unbound with S clear — matching
+    /// `textFillColor`.
+    private func textARGB(sBit: Bool, brushId: UInt32) -> EMFPlusARGB? {
+        if sBit { return argb(brushId) }
+        guard let brush = table.brush(Int(brushId & 0xFF)) else { return nil }
+        switch brush.data {
+        case .solid(let c): return c
+        case .linearGradient(let g): return g.startColor
+        case .hatch(_, let fore, _): return fore
+        case .pathGradient(let g): return g.centerColor
+        case .texture: return EMFPlusARGB(blue: 0, green: 0, red: 0, alpha: 255)
+        }
+    }
+
+    /// Lifts a DrawImage / DrawImagePoints target image + device-space dest, or
+    /// nil when the body is undecodable or no image object is bound (passthrough).
+    private func liftImage(_ record: EMFPlusRecord, objectID: Int, cBit: Bool, points: Bool) -> PlusImage? {
+        var reader = PlusReader(record.data)
+        guard reader.u32() != nil, let srcUnit = reader.i32(), let srcRect = reader.rectF() else { return nil }
+        let destBounds: CGRect
+        if points {
+            guard let count = reader.u32(), let pts = reader.points(count: Int(count), compressed: cBit), pts.count >= 3 else { return nil }
+            // Parallelogram from the three defining corners (fourth extrapolated).
+            let upperLeft = pts[0], upperRight = pts[1], lowerLeft = pts[2]
+            let lowerRight = CGPoint(x: upperRight.x + lowerLeft.x - upperLeft.x, y: upperRight.y + lowerLeft.y - upperLeft.y)
+            let quad = CGMutablePath()
+            quad.move(to: upperLeft, transform: worldToDevice)
+            quad.addLine(to: upperRight, transform: worldToDevice)
+            quad.addLine(to: lowerRight, transform: worldToDevice)
+            quad.addLine(to: lowerLeft, transform: worldToDevice)
+            quad.closeSubpath()
+            destBounds = quad.boundingBoxOfPath
+        } else {
+            guard let dest = reader.rect(compressed: cBit) else { return nil }
+            destBounds = dest.standardized.applying(worldToDevice)
+        }
+        guard let image = table.image(objectID) else { return nil }
+        return PlusImage(image: image, srcRect: srcRect, srcUnit: srcUnit, destRectDevice: destBounds)
     }
 }
 

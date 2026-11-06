@@ -91,6 +91,10 @@ enum FontMapper {
 
         return ResolvedFont(
             base: styled,
+            // The requested face, capped and trimmed exactly as `resolveFamily`
+            // caps it, so the E1 lift carries what the file asked for (S-L5 bound).
+            requestedFamily: String(logFont.faceName.prefix(requestedFamilyLengthLimit))
+                .trimmingCharacters(in: .whitespaces),
             logicalHeight: logFont.height,
             escapementTenths: logFont.escapement,
             underline: logFont.underline != 0,

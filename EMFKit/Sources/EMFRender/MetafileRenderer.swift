@@ -364,13 +364,24 @@ public enum MetafileRenderer {
 
         switch prepared.content {
         case .emf(let file):
-            let roles = emfUnitRoles(file)
             // Same EMF+ arbitration as `EMFRenderer.render` ([MS-EMFPLUS]
             // §1.3.1): if EMF+ drawing records play, the GDI loop never runs.
             let plus = file.emfPlusStream()
             let forceGDI = options.emfPlusArbitration == .gdi && (plus.header?.isDual ?? false)
             if !forceGDI, plus.records.contains(where: \.isDrawing) {
-                return PlaybackObservation(ops: [], pathConstructionIndices: [], renderPath: .emfPlus, unitCount: file.records.count, unitRoles: roles, unitTypes: file.records.map(\.type))
+                // EMF+ drives output: render with the observer so each EMF+ drawing
+                // record lifts into `plusEntries` (slice E1a2). The GDI fallback is
+                // not played — the observer records it as `fallback`.
+                _ = EMFRenderer.render(file, into: context, target: target, options: options, observer: observer)
+                return PlaybackObservation(
+                    ops: [],
+                    pathConstructionIndices: observer.pathConstructionIndices,
+                    renderPath: .emfPlus,
+                    unitCount: file.records.count,
+                    unitRoles: emfPlusUnitRoles(file, fallback: observer.emfPlusFallbackGDI),
+                    unitTypes: file.records.map(\.type),
+                    plusEntries: observer.plusEntries
+                )
             }
             _ = EMFRenderer.render(file, into: context, target: target, options: options, observer: observer)
             return PlaybackObservation(
@@ -378,7 +389,7 @@ public enum MetafileRenderer {
                 pathConstructionIndices: observer.pathConstructionIndices,
                 renderPath: .gdi,
                 unitCount: file.records.count,
-                unitRoles: roles,
+                unitRoles: emfUnitRoles(file),
                 unitTypes: file.records.map(\.type)
             )
         case .wmfProgram(let program):
@@ -392,6 +403,24 @@ public enum MetafileRenderer {
                 unitTypes: program.payloads.map(payloadEMRType)
             )
         }
+    }
+
+    /// Replays ONLY the EMF+ drawing records at `streamIndices` of `prepared`
+    /// into `context`, mapping the metafile's device space onto `target` (slice
+    /// E1a2). The scene renderer uses this to reproduce a lifted EMF+ text/image/
+    /// passthrough element: every EMF+ state/object record executes so the
+    /// transform, clip and object table build up correctly, but only the selected
+    /// stream indices paint, at the exact z-moment the renderer calls this. A
+    /// non-EMF prepared metafile is a no-op (the context is untouched).
+    public static func replayEMFPlus(
+        _ prepared: Prepared,
+        streamIndices: Set<Int>,
+        into context: CGContext,
+        target: CGRect,
+        options: RenderOptions = .default
+    ) {
+        guard case .emf(let file) = prepared.content else { return }
+        _ = EMFRenderer.render(file, into: context, target: target, options: options, emfPlusDrawFilter: streamIndices)
     }
 
     /// The EMR type id for a translated WMF unit, used only for passthrough
@@ -413,6 +442,21 @@ public enum MetafileRenderer {
             case 1, 14: return .structural
             case 70: return .comment
             default: return payloadRole(file.payload(of: file.records[i]))
+            }
+        }
+    }
+
+    /// Per-record coarse roles for an EMF+ file (slice E1a2). Structure records
+    /// are structural, EMR_COMMENT is a comment (EMF+ data — the importer decides
+    /// drawing/state from the lifted ops), a GDI record the walk did not play is
+    /// the `fallback` role, and a GDI record played in a GetDC window is
+    /// classified from its payload.
+    private static func emfPlusUnitRoles(_ file: EMFFile, fallback: Set<Int>) -> [UnitRole] {
+        file.records.indices.map { i in
+            switch file.records[i].type {
+            case 1, 14: return .structural
+            case 70: return .comment
+            default: return fallback.contains(i) ? .fallback : payloadRole(file.payload(of: file.records[i]))
             }
         }
     }

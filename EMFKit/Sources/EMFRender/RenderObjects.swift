@@ -81,6 +81,12 @@ struct ResolvedFont: Equatable, @unchecked Sendable {
     /// The substituted base font at a nominal size (`FontMapper.nominalSize`);
     /// the drawer copies it to the device size at draw time.
     var base: CTFont
+    /// The ORIGINAL requested face name (LOGFONT faceName, capped and trimmed the
+    /// same way resolution caps it). Carried for the E1 scene lift so the exporter
+    /// can re-emit the font the file ASKED for, not the substituted macOS family.
+    /// Costs only a retained string already in hand — no extra work on the render
+    /// hot path.
+    var requestedFamily: String
     /// Signed logical character/cell height (§2.2.13): < 0 em height, > 0 cell
     /// height, 0 → default. Scaled to a device point size by the text drawer.
     var logicalHeight: Int32
@@ -323,6 +329,7 @@ enum StockObjects {
         .font(
             ResolvedFont(
                 base: FontMapper.systemBaseFont(),
+                requestedFamily: "",
                 logicalHeight: 0,
                 escapementTenths: 0,
                 underline: false,

@@ -86,24 +86,7 @@ public enum SceneImporter {
         var pending: [(element: Element, drawKey: Int)] = []
 
         if observation.renderPath == .emfPlus {
-            // EMF+ drove output: v1 keeps the whole GDI shell as one passthrough
-            // blob (replayed verbatim). Only the header/eof are structural.
-            var indices: [Int] = []
-            for i in 0 ..< unitCount {
-                if observation.unitRoles[i] == .structural {
-                    structural.insert(i)
-                } else {
-                    indices.append(i)
-                    passthrough.insert(i)
-                }
-            }
-            if !indices.isEmpty {
-                pending.append((
-                    passthroughElement(indices: indices.sorted(), reason: .emfPlus, geometry: ScenePath(), transform: .identity),
-                    indices.min() ?? 0
-                ))
-            }
-            return finish(pending: pending, structural: structural, state: state, drawing: drawing, passthrough: passthrough, unitCount: unitCount)
+            return buildEMFPlusElements(from: observation)
         }
 
         // GDI / WMF: each op becomes an element; the rest are classified by role.
@@ -140,16 +123,145 @@ public enum SceneImporter {
                 // it verbatim so nothing is dropped.
                 passthrough.insert(i)
                 pending.append((passthroughElement(indices: [i], reason: .rasterOp, geometry: ScenePath(), transform: .identity), i))
+            case .fallback:
+                // Only EMF+ files produce the fallback role (handled separately);
+                // never reached on the GDI/WMF path, but kept exhaustive-safe.
+                state.insert(i)
             }
         }
 
         return finish(pending: pending, structural: structural, state: state, drawing: drawing, passthrough: passthrough, unitCount: unitCount)
     }
 
+    // MARK: - EMF+ element construction (slice E1a2)
+
+    /// Lifts an EMF+ file: each EMF+ drawing record (and each GDI draw inside a
+    /// GetDC window) becomes one element, in playback (z) order. The GDI fallback
+    /// of a dual file goes to the `fallback` bucket — kept out of the element list
+    /// (the E1b exporter regenerates it). EMF+ object/control/clip comments are
+    /// state. Every source record lands in exactly one partition bucket.
+    private static func buildEMFPlusElements(from observation: PlaybackObservation) -> Built {
+        let unitCount = observation.unitCount
+        var structural = Set<Int>()
+        var state = Set<Int>()
+        var drawing = Set<Int>()
+        var passthrough = Set<Int>()
+        var fallback = Set<Int>()
+
+        var pending: [(element: Element, drawKey: Int)] = []
+        // Comment indices owning an editable element vs a passthrough element.
+        var drawComments = Set<Int>()
+        var passthroughComments = Set<Int>()
+
+        for (order, entry) in observation.plusEntries.enumerated() {
+            switch entry {
+            case .gdi(let op):
+                // A GDI draw inside a GetDC window → an ordinary GDI element.
+                if op.kind == .passthrough { passthrough.formUnion(op.recordIndices) }
+                else { drawing.formUnion(op.recordIndices) }
+                pending.append((makeElement(op), order))
+            case .plus(let op):
+                let element = makePlusElement(op)
+                if element.kind == .passthrough { passthroughComments.insert(op.commentRecordIndex) }
+                else { drawComments.insert(op.commentRecordIndex) }
+                pending.append((element, order))
+            }
+        }
+
+        for i in 0 ..< unitCount where !drawing.contains(i) && !passthrough.contains(i) {
+            switch observation.unitRoles[i] {
+            case .structural:
+                structural.insert(i)
+            case .fallback:
+                fallback.insert(i)
+            case .comment:
+                // EMF+ data comment: drawing/passthrough if it SOURCED an element,
+                // else state (object definitions, control, clip, transforms).
+                if drawComments.contains(i) { drawing.insert(i) }
+                else if passthroughComments.contains(i) { passthrough.insert(i) }
+                else { state.insert(i) }
+            case .state, .drawing, .unknown:
+                // A GDI record played in a GetDC window that produced no op — GetDC
+                // GDI state — or any other non-fallback GDI role: state.
+                state.insert(i)
+            }
+        }
+
+        return finish(pending: pending, structural: structural, state: state, drawing: drawing, passthrough: passthrough, fallback: fallback, unitCount: unitCount)
+    }
+
+    private static func makePlusElement(_ op: PlusDrawOp) -> Element {
+        let geometry = ScenePath(op.deviceGeometry)
+        let clip = op.clipDeviceGeometry.map(ScenePath.init)
+        let provenance = Provenance(sourceRecordIndices: [op.commentRecordIndex])
+
+        switch op.kind {
+        case .text:
+            return Element(
+                id: 0, kind: .text, geometryDevice: geometry, transform: op.worldToDevice,
+                style: plusStyle(op), text: op.text.map(SceneText.init),
+                clipDevice: clip, provenance: provenance
+            )
+        case .image:
+            return Element(
+                id: 0, kind: .image, geometryDevice: geometry, transform: op.worldToDevice,
+                image: op.image.map(SceneImage.init),
+                clipDevice: clip, provenance: provenance
+            )
+        case .passthrough:
+            return Element(
+                id: 0, kind: .passthrough, geometryDevice: geometry, transform: op.worldToDevice,
+                clipDevice: clip, provenance: provenance, locked: true,
+                passthroughReason: plusPassthroughReason(op)
+            )
+        default:
+            return Element(
+                id: 0, kind: plusElementKind(op.kind), geometryDevice: geometry, transform: op.worldToDevice,
+                style: plusStyle(op), clipDevice: clip, provenance: provenance
+            )
+        }
+    }
+
+    private static func plusStyle(_ op: PlusDrawOp) -> SceneStyle {
+        SceneStyle(
+            fill: op.fill.map { SceneFill($0, evenOdd: op.fillEvenOdd) },
+            stroke: op.stroke.map(SceneStroke.init),
+            opacity: 1
+        )
+    }
+
+    private static func plusElementKind(_ kind: PlusDrawOp.Kind) -> ElementKind {
+        switch kind {
+        case .rectangle: return .rect
+        case .ellipse: return .ellipse
+        case .polygon: return .polygon
+        case .polyline: return .polyline
+        case .line: return .line
+        case .pie, .arc: return .arc
+        case .path: return .path
+        case .bezier, .curve: return .bezier
+        case .text: return .text
+        case .image: return .image
+        case .passthrough: return .passthrough
+        }
+    }
+
+    private static func plusPassthroughReason(_ op: PlusDrawOp) -> PassthroughReason {
+        switch op.passthroughReason {
+        case .clear, .driverString, .unsupportedRecord, .none:
+            return .emfPlusUnsupportedRecord(type: op.recordType)
+        case .unsupportedBrush:
+            return .emfPlusUnsupportedBrush
+        case .undecodable:
+            return .emfPlusUndecodable(type: op.recordType)
+        }
+    }
+
     /// Sorts elements into playback (z) order and assigns monotonic ids.
     private static func finish(
         pending: [(element: Element, drawKey: Int)],
         structural: Set<Int>, state: Set<Int>, drawing: Set<Int>, passthrough: Set<Int>,
+        fallback: Set<Int> = [],
         unitCount: Int
     ) -> Built {
         let ordered = pending
@@ -169,7 +281,7 @@ public enum SceneImporter {
         }
         return Built(
             elements: elements,
-            partition: ScenePartition(structural: structural, state: state, drawing: drawing, passthrough: passthrough, unitCount: unitCount)
+            partition: ScenePartition(structural: structural, state: state, drawing: drawing, passthrough: passthrough, fallback: fallback, unitCount: unitCount)
         )
     }
 

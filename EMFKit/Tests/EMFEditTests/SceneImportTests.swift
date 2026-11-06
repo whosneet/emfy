@@ -28,14 +28,11 @@ struct SceneImportTests {
             #expect(scene.partition.isComplete, "partition incomplete for \(url.lastPathComponent): \(scene.partition)")
 
             // No file lifts zero editable elements while it has editable drawing
-            // records. A file with no drawing (only state) legitimately has none;
-            // EMF+ drawing is passthrough in v1 (so `drawing` is empty there too).
+            // records. A file with no drawing (only state) legitimately has none.
+            // EMF+ files now lift their drawing records into editable elements too
+            // (slice E1a2), so the `drawing` bucket drives this for every engine.
             #expect(!scene.editableElements.isEmpty || scene.partition.drawing.isEmpty,
                     "\(url.lastPathComponent): lifted zero editable elements despite drawing records")
-            if scene.source.renderPath == .emfPlus {
-                #expect(scene.elements.contains { $0.kind == .passthrough },
-                        "\(url.lastPathComponent): EMF+ file should carry passthrough content")
-            }
 
             report += line(for: url.lastPathComponent, scene: scene)
         }
