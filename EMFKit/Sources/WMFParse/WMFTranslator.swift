@@ -18,11 +18,20 @@ public struct WMFRenderProgram: Sendable, Equatable {
     public let canvasHeight: Int
     /// The translated payload stream, page-setup preamble first.
     public let payloads: [EMFRecordPayload]
+    /// For each payload, the index of the SOURCE `WMFFile.records` record it was
+    /// translated from, or -1 for the synthetic page-setup preamble (which has no
+    /// source record). The editor uses this to map a lifted element's provenance
+    /// back to the source WMF records so an edit re-emits as a true overlay (E1b1).
+    /// Count equals `payloads.count`.
+    public let payloadSourceIndices: [Int]
 
-    public init(canvasWidth: Int, canvasHeight: Int, payloads: [EMFRecordPayload]) {
+    public init(canvasWidth: Int, canvasHeight: Int, payloads: [EMFRecordPayload], payloadSourceIndices: [Int] = []) {
         self.canvasWidth = canvasWidth
         self.canvasHeight = canvasHeight
         self.payloads = payloads
+        self.payloadSourceIndices = payloadSourceIndices.count == payloads.count
+            ? payloadSourceIndices
+            : Array(repeating: -1, count: payloads.count)
     }
 }
 
@@ -145,16 +154,24 @@ public enum WMFTranslator {
     public static func translate(_ file: WMFFile) -> WMFRenderProgram {
         let page = pageSetup(file)
         var payloads = page.preamble
+        // The preamble is synthetic (no source WMF record).
+        var sourceIndices = Array(repeating: -1, count: page.preamble.count)
         var objects = ObjectTable()
 
-        for record in file.records {
+        for (index, record) in file.records.enumerated() {
+            let before = payloads.count
             translate(record, in: file, objects: &objects, into: &payloads)
+            let added = payloads.count - before
+            if added > 0 {
+                sourceIndices.append(contentsOf: repeatElement(index, count: added))
+            }
         }
 
         return WMFRenderProgram(
             canvasWidth: page.canvasWidth,
             canvasHeight: page.canvasHeight,
-            payloads: payloads
+            payloads: payloads,
+            payloadSourceIndices: sourceIndices
         )
     }
 
