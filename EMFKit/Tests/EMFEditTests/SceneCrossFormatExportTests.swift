@@ -31,20 +31,22 @@ struct SceneCrossFormatExportTests {
     /// against the original EMF render. Vector is tight; text and EMF+-only
     /// features are looser (metrics differ across paths; some content flattens).
     private static let emfFixtures: [(name: String, budget: Double)] = [
-        // Vector: measured 1.0–1.9% (device rounding + AA across the two render
-        // paths); budget 2.5%, in the ≤1–2% band with AA headroom.
-        ("gate-p2-house.emf", 0.025),
-        ("gate-p2-star.emf", 0.025),
-        ("gate-p2-triangles.emf", 0.025),
-        ("gate-p3-curves.emf", 0.025),
-        ("gate-p3-shapes.emf", 0.025),
-        ("handmade-strokes-paths.emf", 0.02),
-        ("gate-p4-image.emf", 0.02),
+        // Vector: the supersampled logical grid (slice E1b2d item 3) preserves
+        // sub-pixel device positions, so these rasterise onto the SAME pixels as the
+        // source EMF — measured 0.000–0.044%, down from 1.0–1.9% at the old 1:1 grid.
+        // Budget 0.5%, tight enough to catch a revert of the supersampling.
+        ("gate-p2-house.emf", 0.005),
+        ("gate-p2-star.emf", 0.005),
+        ("gate-p2-triangles.emf", 0.005),
+        ("gate-p3-curves.emf", 0.005),
+        ("gate-p3-shapes.emf", 0.005),
+        ("handmade-strokes-paths.emf", 0.005),
+        ("gate-p4-image.emf", 0.005),
         // Text: Latin runs re-emit as META_EXTTEXTOUT with Dx (slice E1b2c2), so a
-        // GDI run lands in the vector band; a non-Latin-1 (CJK) run is RASTERISED
-        // and resamples, so it is a little looser.
-        ("gate-p4-text.emf", 0.02),
-        ("handmade-cjk-text.emf", 0.04),
+        // GDI run lands with the vector fixtures (measured 0.069%); a non-Latin-1
+        // (CJK) run is RASTERISED and resamples, so it is a little looser (0.449%).
+        ("gate-p4-text.emf", 0.005),
+        ("handmade-cjk-text.emf", 0.015),
         // EMF+ text and a rotated EMF+ image are RASTERISED (an em size / a
         // parallelogram GDI/WMF cannot hold), so they match within the resample.
         ("handmade-emfplus-text.emf", 0.02),

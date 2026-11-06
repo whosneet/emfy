@@ -375,9 +375,10 @@ public enum SceneExporter {
     /// `WMFDocumentBuilder` program whose placeable BoundingBox is the scene page
     /// mapped into a 16-bit-safe logical space ([MS-WMF] §2.3.2.3), with every
     /// visible element drawn through the shared WMF synthesis in z-order. Coordinate
-    /// scale: 1 logical unit == 1 device pixel (Inch 96, matching the device-canvas
-    /// DPI a WMF reader derives) unless the drawing's extent would overflow Int16, in
-    /// which case it is scaled down uniformly (`coordinatesScaled`). The current
+    /// scale: the logical grid is supersampled to its Int16-safe maximum so sub-pixel
+    /// device positions survive integer rounding (`wmfLogicalMapping`); the Inch and
+    /// viewport scale it back onto a device canvas the size of the EMF page. A drawing
+    /// already too large for Int16 is scaled DOWN uniformly (`coordinatesScaled`). The current
     /// scene's EMF export is embedded by default so a reader that understands it
     /// recovers full fidelity (`embedEMFInWMF`).
     private static func exportEMFSceneAsWMF(_ scene: Scene, options: ExportOptions) throws -> (Data, [ExportWarning]) {
@@ -431,10 +432,23 @@ public enum SceneExporter {
     }
 
     /// The device→WMF-logical mapping for a full EMF→WMF synthesis: anchor the page
-    /// min corner at logical origin, scale by `s` (1, or `limit/extent` when the
-    /// drawing would overflow Int16), and derive the placeable BoundingBox/Inch and
-    /// the block window so a WMF reader maps the logical coords back onto a
-    /// device canvas the size of the EMF page.
+    /// min corner at logical origin, scale by `s`, and derive the placeable
+    /// BoundingBox/Inch and the block window so a WMF reader maps the logical coords
+    /// back onto a device canvas the size of the EMF page.
+    ///
+    /// `s = limit / maxExtent` SUPERSAMPLES the integer-only WMF logical grid up to
+    /// its Int16-safe maximum (slice E1b2d item 3): a device coordinate like 10.5
+    /// — which the old 1:1 grid rounded to 11, shifting a thin cosmetic line by a
+    /// whole pixel at render scale — now lands on a fine logical grid (~`s` units per
+    /// device pixel) the viewport maps back with sub-pixel accuracy, so the WMF and
+    /// the source EMF rasterise onto the SAME pixels. This was the real cause of the
+    /// 1–2% vector-fixture residual and the ~48% thin-line outlier (idx 216): integer
+    /// rounding of sub-pixel device coordinates, NOT any systematic offset. The scale
+    /// is Int16-safe because every drawn quantity (geometry, pen width, font height,
+    /// Dx) fits within the page extent, and `maxExtent ≥ page`, so each `× s ≤ limit`;
+    /// `SceneNumeric` saturates the absurd font-larger-than-the-page case. When the
+    /// drawing already overflows Int16 (`maxExtent > limit`) `s < 1` DOWNSCALES, the
+    /// lossy case that keeps the `coordinatesScaled` warning.
     private static func wmfLogicalMapping(_ scene: Scene)
         -> (deviceToLogical: CGAffineTransform, bb: WMFRect16, inch: UInt16, winOrg: PointL, winExt: SizeL, scaled: Bool) {
         let page = scene.pageBoundsDevice
@@ -464,8 +478,11 @@ public enum SceneExporter {
             where v.isFinite { maxExtent = max(maxExtent, v) }
         }
         // 30000 leaves headroom under Int16's 32767 for pen widths and rounding.
+        // Scale the logical grid up to that limit (supersample) so sub-pixel device
+        // coordinates survive the integer rounding, down (s < 1) only when the
+        // drawing would overflow it.
         let limit = 30_000.0
-        let s = (maxExtent.isFinite && maxExtent > limit) ? limit / maxExtent : 1.0
+        let s = (maxExtent.isFinite && maxExtent > 0) ? limit / maxExtent : 1.0
 
         let deviceToLogical = CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: -anchorX * s, ty: -anchorY * s)
         let bbW = max(1, Int((w * s).rounded()))
