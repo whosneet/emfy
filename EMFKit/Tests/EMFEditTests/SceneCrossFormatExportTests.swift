@@ -49,9 +49,11 @@ struct SceneCrossFormatExportTests {
         // parallelogram GDI/WMF cannot hold), so they match within the resample.
         ("handmade-emfplus-text.emf", 0.02),
         ("handmade-emfplus-image.emf", 0.02),
-        // An EMF+ gradient fill flattens to one solid in plain WMF (inherent, with a
-        // `gradientFlattened` warning), a large area diff kept under a wide budget.
-        ("handmade-emfplus-shapes.emf", 0.30),
+        // An EMF+ gradient fill is RASTERISED (stored as an image, `contentRasterized`)
+        // in plain WMF instead of flattened to a solid, and a shape clipped in the
+        // source is clipped in the WMF too (slice E1b2d item 6), so the WMF matches the
+        // EMF+ render within the vector band.
+        ("handmade-emfplus-shapes.emf", 0.02),
         ("handmade-emfplus-dual.emf", 0.02),
     ]
 
@@ -120,6 +122,32 @@ struct SceneCrossFormatExportTests {
             }
         }
         print(report)
+    }
+
+    /// Item 6: an EMF+ gradient fill is RASTERISED (stored as an image,
+    /// `contentRasterized`) in plain WMF, never flattened to a representative solid;
+    /// a solid fill stays vector. The rasterised render matches the EMF+ gradient.
+    @Test func gradientFillRasterisedInPlainWMF() throws {
+        let scene = try importScene("handmade-emfplus-shapes.emf")
+        try #require(scene.elements.contains { $0.style.fill?.gradient != nil }, "fixture lost its gradient element")
+        let plain = try SceneExporter.export(scene, as: .wmf, options: ExportOptions(embedEMFInWMF: false))
+        #expect(plain.warnings.contains { if case .contentRasterized = $0 { return true }; return false },
+                "gradient fill was not rasterised (no contentRasterized warning)")
+        #expect(!plain.warnings.contains { if case .gradientFlattened = $0 { return true }; return false },
+                "gradient fill was flattened to a solid instead of rasterised")
+        // The summary groups the rasterised gradient as "stored as an image".
+        #expect(SceneExporter.summarize(plain.warnings)[.rasterized, default: 0] >= 1,
+                "rasterised gradient not summarised under .rasterized")
+        #expect(try WMFFile.parse(plain.data).diagnostics.isEmpty, "plain WMF had diagnostics")
+        #expect((try? SceneImporter.import(data: plain.data)) != nil, "plain WMF did not re-import")
+        // Fidelity: the plain WMF matches the EMF+ render (gradient as an image, the
+        // clipped band clipped). Measured 0.02%.
+        guard let original = render(scene.source.data), let plainImg = render(plain.data) else {
+            Issue.record("render failed"); return
+        }
+        let diff = compareImages(original, plainImg, tolerance: Self.tolerance)
+        #expect(diff.sameSize && diff.differingFraction <= 0.01,
+                "plain WMF of the gradient fixture \(pct(diff.differingFraction)) over 1%")
     }
 
     // MARK: - WMF → EMF oracle
