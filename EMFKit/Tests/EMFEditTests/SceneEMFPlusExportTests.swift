@@ -788,7 +788,7 @@ struct SceneEMFPlusExportTests {
         // to an integer EMR reference — a sub-pixel shift, documented, not a
         // regression. The floor catches a broad regression without being flaky.
         if files >= 20 {
-            #expect(within05 >= files - 7,
+            #expect(within05 >= files - 5,
                     "corpus-local identity fidelity regressed: only \(within05)/\(files) within 0.5%")
         }
     }
