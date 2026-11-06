@@ -31,6 +31,8 @@ public enum WMFRecordEncoder {
         public static let setTextColor: UInt16 = 0x0209
         public static let setWindowOrg: UInt16 = 0x020B
         public static let setWindowExt: UInt16 = 0x020C
+        public static let setViewportOrg: UInt16 = 0x020D
+        public static let setViewportExt: UInt16 = 0x020E
         public static let lineTo: UInt16 = 0x0213
         public static let moveTo: UInt16 = 0x0214
         public static let excludeClipRect: UInt16 = 0x0415
@@ -89,6 +91,16 @@ public enum WMFRecordEncoder {
             var b = ByteWriter()
             b.appendInt16(try i16(extent.cy)); b.appendInt16(try i16(extent.cx))
             return try frame(Function.setWindowExt, b.bytes)
+        case .setViewportOrg(let origin):
+            // §2.3.5.29: Y then X (reversed).
+            var b = ByteWriter()
+            b.appendInt16(try i16(origin.y)); b.appendInt16(try i16(origin.x))
+            return try frame(Function.setViewportOrg, b.bytes)
+        case .setViewportExt(let extent):
+            // §2.3.5.28: height (cy) then width (cx) (reversed).
+            var b = ByteWriter()
+            b.appendInt16(try i16(extent.cy)); b.appendInt16(try i16(extent.cx))
+            return try frame(Function.setViewportExt, b.bytes)
 
         // MARK: Objects
         case .createPenIndirect(let style, let width, let color):
@@ -177,6 +189,8 @@ public enum WMFRecordEncoder {
         case .setROP2: return Function.setROP2
         case .setWindowOrg: return Function.setWindowOrg
         case .setWindowExt: return Function.setWindowExt
+        case .setViewportOrg: return Function.setViewportOrg
+        case .setViewportExt: return Function.setViewportExt
         case .createPenIndirect: return Function.createPenIndirect
         case .createBrushIndirect: return Function.createBrushIndirect
         case .createFontIndirect: return Function.createFontIndirect

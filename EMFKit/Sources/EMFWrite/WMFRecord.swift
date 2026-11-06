@@ -38,6 +38,10 @@ public enum WMFRecord: Sendable, Equatable {
     case setWindowOrg(PointL)
     /// META_SETWINDOWEXT ([MS-WMF] §2.3.5.30). Stored height then width on disk.
     case setWindowExt(SizeL)
+    /// META_SETVIEWPORTORG ([MS-WMF] §2.3.5.29). Stored Y then X on disk.
+    case setViewportOrg(PointL)
+    /// META_SETVIEWPORTEXT ([MS-WMF] §2.3.5.28). Stored height then width on disk.
+    case setViewportExt(SizeL)
 
     // MARK: Objects (the object table carries no index; slots are positional)
     /// META_CREATEPENINDIRECT ([MS-WMF] §2.3.4.5): a Pen Object (§2.2.1.4).
