@@ -232,12 +232,17 @@ public struct PlusText: Sendable, Equatable {
     public let color: EMFPlusARGB
     /// The layout rectangle mapped to DEVICE space.
     public let layoutRectDevice: CGRect
+    /// The layout rectangle in WORLD (pre-`worldToDevice`) space — the record's own
+    /// LayoutRect before mapping. An editor keeps this so a center/far-aligned or
+    /// wrapped run re-emits with its real extent through the element transform
+    /// ([MS-EMFPLUS] §2.3.4.14).
+    public let layoutRectWorld: CGRect
     /// StringFormat essentials ([MS-EMFPLUS] §2.2.1.9), 0 when no format object.
     public let stringAlignment: UInt32
     public let lineAlignment: UInt32
     public let stringFormatFlags: UInt32
 
-    public init(string: String, requestedFamily: String, resolvedFamily: String, emSize: Double, sizeUnit: UInt32, bold: Bool, italic: Bool, underline: Bool, strikeOut: Bool, color: EMFPlusARGB, layoutRectDevice: CGRect, stringAlignment: UInt32, lineAlignment: UInt32, stringFormatFlags: UInt32) {
+    public init(string: String, requestedFamily: String, resolvedFamily: String, emSize: Double, sizeUnit: UInt32, bold: Bool, italic: Bool, underline: Bool, strikeOut: Bool, color: EMFPlusARGB, layoutRectDevice: CGRect, layoutRectWorld: CGRect, stringAlignment: UInt32, lineAlignment: UInt32, stringFormatFlags: UInt32) {
         self.string = string
         self.requestedFamily = requestedFamily
         self.resolvedFamily = resolvedFamily
@@ -249,6 +254,7 @@ public struct PlusText: Sendable, Equatable {
         self.strikeOut = strikeOut
         self.color = color
         self.layoutRectDevice = layoutRectDevice
+        self.layoutRectWorld = layoutRectWorld
         self.stringAlignment = stringAlignment
         self.lineAlignment = lineAlignment
         self.stringFormatFlags = stringFormatFlags
@@ -406,6 +412,28 @@ public struct LiftedText: Sendable, Equatable {
     public let referenceLogical: PointL
     /// Text-alignment mask ([MS-EMF] §2.3.11.25).
     public let alignRawValue: UInt32
+    /// The EmrText intercharacter-spacing array in LOGICAL units (one entry per
+    /// UTF-16 code unit, [MS-EMF] §2.2.5): the exact per-glyph advances the file
+    /// positioned the run with. Empty when the run carried none or used ETO_PDY
+    /// (x/y pairs) — then the font's natural advances are used. Kept so an editor
+    /// re-emits the condensed/expanded spacing Office and Visio bake into runs.
+    public let advancesLogical: [UInt32]
+
+    public init(string: String, fontFamily: String, requestedFamily: String, logicalHeight: Int32, bold: Bool, italic: Bool, underline: Bool, strikeOut: Bool, escapementTenths: Int32, color: ColorRef, referenceLogical: PointL, alignRawValue: UInt32, advancesLogical: [UInt32] = []) {
+        self.string = string
+        self.fontFamily = fontFamily
+        self.requestedFamily = requestedFamily
+        self.logicalHeight = logicalHeight
+        self.bold = bold
+        self.italic = italic
+        self.underline = underline
+        self.strikeOut = strikeOut
+        self.escapementTenths = escapementTenths
+        self.color = color
+        self.referenceLogical = referenceLogical
+        self.alignRawValue = alignRawValue
+        self.advancesLogical = advancesLogical
+    }
 }
 
 /// A lifted image draw. The source DIB bytes are carried so E1b can re-encode

@@ -1728,6 +1728,7 @@ struct EMFPlusPlayback {
             emSize: Double(font.emSize), sizeUnit: font.sizeUnit,
             bold: font.isBold, italic: font.isItalic, underline: font.isUnderline, strikeOut: font.isStrikeout,
             color: color, layoutRectDevice: decoded.layoutRect.applying(worldToDevice),
+            layoutRectWorld: decoded.layoutRect,
             stringAlignment: format?.stringAlignment ?? 0, lineAlignment: format?.lineAlign ?? 0,
             stringFormatFlags: format?.stringFormatFlags ?? 0)
     }

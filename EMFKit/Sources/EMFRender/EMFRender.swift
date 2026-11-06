@@ -1091,6 +1091,16 @@ public enum EMFRenderer {
         let family = CTFontCopyFamilyName(baseFont) as String
         let traits = CTFontGetSymbolicTraits(baseFont)
         let reference = dc.state.textAlign.updatesCurrentPosition ? dc.state.currentPosition : text.reference
+        // The intercharacter-spacing array, but only the plain (non-ETO_PDY) form
+        // whose one advance per UTF-16 unit the editor can re-emit faithfully
+        // ([MS-EMF] §2.2.5). It is kept only when it matches the string length, so a
+        // malformed/short array is ignored rather than mis-positioning the run.
+        let advances: [UInt32]
+        if let dx = text.dx, !text.options.pdy, dx.count == text.string.utf16.count {
+            advances = dx
+        } else {
+            advances = []
+        }
         return LiftedText(
             string: text.string,
             fontFamily: family,
@@ -1103,7 +1113,8 @@ public enum EMFRenderer {
             escapementTenths: resolved?.escapementTenths ?? 0,
             color: dc.state.textColor,
             referenceLogical: reference,
-            alignRawValue: dc.state.textAlign.rawValue
+            alignRawValue: dc.state.textAlign.rawValue,
+            advancesLogical: advances
         )
     }
 
