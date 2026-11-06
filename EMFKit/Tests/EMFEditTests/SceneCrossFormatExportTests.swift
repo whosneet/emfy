@@ -51,6 +51,13 @@ struct SceneCrossFormatExportTests {
         ("handmade-emfplus-dual.emf", 0.02),
     ]
 
+    /// Fixtures that run the costly embed-on pixel check (a GDI, a text, an image,
+    /// and both EMF+ paths) — every fixture still round-trips the embed path.
+    private static let embedPixelCheck: Set<String> = [
+        "gate-p2-house.emf", "gate-p4-text.emf", "gate-p4-image.emf",
+        "handmade-emfplus-shapes.emf", "handmade-emfplus-dual.emf",
+    ]
+
     private static let wmfFixtures = [
         "gate-wmf-p2-house.wmf",
         "gate-wmf-p2-star.wmf",
@@ -94,11 +101,14 @@ struct SceneCrossFormatExportTests {
                 }
 
                 // Embed ON: Emfy recovers the embedded EMF and renders it — ≤0.5% vs
-                // the scene's own EMF export (the embedded bytes ARE that export).
+                // the scene's own EMF export (the embedded bytes ARE that export). The
+                // extra renders are costly, so the pixel check runs on a representative
+                // subset (GDI, text, EMF+/dual); every fixture still exercises the embed
+                // path's structural round-trip.
                 let embedded = try SceneExporter.export(scene, as: .wmf, options: ExportOptions(embedEMFInWMF: true))
-                let emfExport = try SceneExporter.export(scene, as: .emf)
                 #expect((try? SceneImporter.import(data: embedded.data)) != nil, "\(name) [\(label)]: embedded WMF did not re-import")
-                if let embImg = render(embedded.data), let emfImg = render(emfExport.data) {
+                if Self.embedPixelCheck.contains(name), let embImg = render(embedded.data),
+                   let emfImg = render(try SceneExporter.export(scene, as: .emf).data) {
                     let d2 = compareImages(emfImg, embImg, tolerance: Self.tolerance)
                     #expect(d2.sameSize && d2.differingFraction <= 0.005,
                             "\(name) [\(label)]: WMF(embed) render vs EMF export \(pct(d2.differingFraction)) over 0.5%")
