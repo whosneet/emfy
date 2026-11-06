@@ -180,7 +180,7 @@ enum SceneSynthesis {
         guard let text = element.text, !text.string.isEmpty else { return [] }
         if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
         let scale = averageScale(element.transform)
-        let deviceEm = SceneNumeric.int32(abs(Double(text.logicalHeight)) * scale)
+        let deviceHeight = SceneNumeric.int32(Double(text.logicalHeight) * scale)
         let reference = pointL(CGPoint(x: text.referenceLogical.x, y: text.referenceLogical.y).applying(element.transform))
         let color = (element.style.fill?.color ?? text.color).colorRef
 
@@ -188,7 +188,7 @@ enum SceneSynthesis {
         out.append(.setBkMode(.transparent))
         out.append(.setTextColor(color))
         out.append(.setTextAlign(TextAlign(rawValue: text.alignRawValue)))
-        out.append(.extCreateFontIndirectW(ExtCreateFontPayload(ihFonts: fontHandle, logFont: logFont(for: text, deviceEmHeight: deviceEm), hasExtendedData: false)))
+        out.append(.extCreateFontIndirectW(ExtCreateFontPayload(ihFonts: fontHandle, logFont: logFont(for: text, deviceHeight: deviceHeight), hasExtendedData: false)))
         out.append(.selectObject(.table(index: fontHandle)))
         out.append(.extTextOutW(ExtTextPayload(graphicsMode: 1, exScale: 1, eyScale: 1, reference: reference,
             rectangle: RectL(left: 0, top: 0, right: 0, bottom: 0), string: text.string,
@@ -257,9 +257,9 @@ enum SceneSynthesis {
     /// resets the DC to the page's base window (`winOrg`/`winExt`) but never the
     /// viewport, so the reader's own output frame maps the logical coords to full
     /// scale (see `wmfReset`).
-    static func wmfBlock(for element: Element, winOrg: PointL, winExt: SizeL, penSlot: UInt16, brushSlot: UInt16, fontSlot: UInt16, warnings: inout [ExportWarning]) -> [WMFRecord] {
+    static func wmfBlock(for element: Element, winOrg: PointL, winExt: SizeL, penSlot: UInt16, brushSlot: UInt16, fontSlot: UInt16, emitDx: Bool = false, warnings: inout [ExportWarning]) -> [WMFRecord] {
         switch element.kind {
-        case .text:  return wmfTextBlock(element, winOrg: winOrg, winExt: winExt, fontSlot: fontSlot, warnings: &warnings)
+        case .text:  return wmfTextBlock(element, winOrg: winOrg, winExt: winExt, fontSlot: fontSlot, emitDx: emitDx, warnings: &warnings)
         case .image: return wmfImageBlock(element, winOrg: winOrg, winExt: winExt, warnings: &warnings)
         case .passthrough, .group: return []
         default:     return wmfGeometryBlock(element, winOrg: winOrg, winExt: winExt, penSlot: penSlot, brushSlot: brushSlot, warnings: &warnings)
@@ -370,7 +370,7 @@ enum SceneSynthesis {
         }
     }
 
-    private static func wmfTextBlock(_ element: Element, winOrg: PointL, winExt: SizeL, fontSlot: UInt16, warnings: inout [ExportWarning]) -> [WMFRecord] {
+    private static func wmfTextBlock(_ element: Element, winOrg: PointL, winExt: SizeL, fontSlot: UInt16, emitDx: Bool, warnings: inout [ExportWarning]) -> [WMFRecord] {
         guard let text = element.text, !text.string.isEmpty else { return [] }
         if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
         if text.string.unicodeScalars.contains(where: { $0.value > 0xFF }) { warnings.append(.textNotLatin1(elementID: element.id)) }
@@ -379,16 +379,17 @@ enum SceneSynthesis {
         // of a WMF-source run maps to an identity transform, so this never fires there).
         if hasRotation(element.transform) { warnings.append(.textRotationDropped(elementID: element.id)) }
         let scale = averageScale(element.transform)
-        let deviceEm = SceneNumeric.int32(abs(Double(text.logicalHeight)) * scale)
+        let deviceHeight = SceneNumeric.int32(Double(text.logicalHeight) * scale)
         let reference = pointL32(CGPoint(x: text.referenceLogical.x, y: text.referenceLogical.y).applying(element.transform))
         let color = (element.style.fill?.color ?? text.color).colorRef
         var out = wmfReset(winOrg: winOrg, winExt: winExt)
         out.append(.setBkMode(1))
         out.append(.setTextColor(color))
         out.append(.setTextAlign(UInt16(truncatingIfNeeded: text.alignRawValue)))
-        out.append(.createFontIndirect(logFont(for: text, deviceEmHeight: deviceEm)))
+        out.append(.createFontIndirect(logFont(for: text, deviceHeight: deviceHeight)))
         out.append(.selectObject(index: fontSlot))
-        out.append(.extTextOut(point: reference, rectangle: nil, options: 0, string: text.string, dx: nil))
+        out.append(.extTextOut(point: reference, rectangle: nil, options: 0, string: text.string,
+                               dx: emitDx ? wmfAdvances(text, scale: scale) : nil))
         out.append(.selectObject(index: 0x800D))   // stock SYSTEM_FONT
         out.append(.deleteObject(index: fontSlot))
         out.append(.restoreDC(savedDC: -1))
@@ -536,8 +537,28 @@ enum SceneSynthesis {
         return advances.map { SceneNumeric.uint32(Double($0) * scale) }
     }
 
-    private static func logFont(for text: SceneText, deviceEmHeight: Int32) -> LogFont {
-        LogFont(height: -abs(deviceEmHeight), width: 0, escapement: text.escapementTenths, orientation: text.escapementTenths,
+    /// The META_EXTTEXTOUT Dx advance array ([MS-WMF] §2.3.3.5) in WMF-LOGICAL units
+    /// for the re-emitted run, or nil to use the font's natural advances. The WMF
+    /// String is 8-bit, one byte per character; the lift's advances are one per
+    /// UTF-16 code unit. For a Latin-1 run every scalar is one byte AND one code
+    /// unit, so the counts coincide and each advance maps 1:1 to its character; a
+    /// run that is not all Latin-1 (it would be rasterised instead) or whose array
+    /// no longer matches the (possibly edited) string returns nil. `scale` is the
+    /// element's world→logical scale, the same factor the font height uses, so a
+    /// source-logical advance becomes a WMF-logical one. Clamped to Int16.
+    private static func wmfAdvances(_ text: SceneText, scale: Double) -> [Int16]? {
+        let advances = text.advancesLogical
+        guard !advances.isEmpty, advances.count == text.string.utf16.count,
+              !text.string.unicodeScalars.contains(where: { $0.value > 0xFF }) else { return nil }
+        return advances.map { SceneNumeric.int16(Double($0) * scale) }
+    }
+
+    /// `deviceHeight` is the SIGNED LOGFONT height ([MS-EMF] §2.2.13): negative =
+    /// |height| is the em (character) height, positive = the cell height, 0 =
+    /// default. The lift carries the source sign, so re-emitting it (rather than
+    /// forcing em with `-abs`) reproduces a cell-height run at its true glyph size.
+    private static func logFont(for text: SceneText, deviceHeight: Int32) -> LogFont {
+        LogFont(height: deviceHeight, width: 0, escapement: text.escapementTenths, orientation: text.escapementTenths,
             weight: text.bold ? 700 : 400, italic: text.italic ? 1 : 0, underline: text.underline ? 1 : 0, strikeOut: text.strikeOut ? 1 : 0,
             charSet: 1, outPrecision: 0, clipPrecision: 0, quality: 0, pitchAndFamily: 0,
             faceName: text.requestedFamily.isEmpty ? text.fontFamily : text.requestedFamily)

@@ -20,6 +20,18 @@ enum SceneNumeric {
         return Int32(r)
     }
 
+    /// `v` rounded to `Int16`, saturating: non-finite → 0, below `Int16.min` →
+    /// `Int16.min`, above `Int16.max` → `Int16.max`. For WMF 16-bit fields (a Dx
+    /// advance array, [MS-WMF] §2.3.3.5).
+    static func int16(_ v: some BinaryFloatingPoint) -> Int16 {
+        let d = Double(v)
+        guard d.isFinite else { return 0 }
+        let r = d.rounded()
+        if r >= Double(Int16.max) { return Int16.max }
+        if r <= Double(Int16.min) { return Int16.min }
+        return Int16(r)
+    }
+
     /// `v` rounded to `UInt32`, saturating: non-finite or negative → 0, above
     /// `UInt32.max` → `UInt32.max`.
     static func uint32(_ v: some BinaryFloatingPoint) -> UInt32 {

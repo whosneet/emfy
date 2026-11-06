@@ -341,7 +341,7 @@ public enum SceneExporter {
             let fontSlot = needs.font ? table.allocate() : 0
             let records = SceneSynthesis.wmfBlock(
                 for: mapped, winOrg: map.winOrg, winExt: map.winExt,
-                penSlot: penSlot, brushSlot: brushSlot, fontSlot: fontSlot, warnings: &warnings)
+                penSlot: penSlot, brushSlot: brushSlot, fontSlot: fontSlot, emitDx: true, warnings: &warnings)
             for record in records { try builder.append(record) }
         }
         return (try builder.finish(), warnings)
