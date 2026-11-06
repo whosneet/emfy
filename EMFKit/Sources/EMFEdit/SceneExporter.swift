@@ -265,7 +265,7 @@ public enum SceneExporter {
         let program = WMFTranslator.translate(wmf)
         let srcIndex = program.payloadSourceIndices
         let bytes = [UInt8](scene.source.data)
-        let space = wmfLogicalSpace(program)
+        let windows = wmfWindowTracking(program)
 
         func sources(of payloadIndices: [Int]) -> [Int] {
             payloadIndices.compactMap { $0 >= 0 && $0 < srcIndex.count && srcIndex[$0] >= 0 ? srcIndex[$0] : nil }
@@ -292,7 +292,8 @@ public enum SceneExporter {
             body.append(chunk)
             maxRecordWords = max(maxRecordWords, UInt32(chunk.count / 2))
         }
-        func emitBlocks(_ elements: [Element]) throws(WMFWriteError) {
+        func emitBlocks(_ elements: [Element], window: (PointL, SizeL)) throws(WMFWriteError) {
+            let space = Self.logicalSpace(winOrg: window.0, winExt: window.1, canvasWidth: program.canvasWidth, canvasHeight: program.canvasHeight)
             for element in elements where !element.hidden {
                 for record in try wmfBlockRecords(element, space: space, table: &table, warnings: &warnings) {
                     emit(try WMFRecordEncoder.encode(record))
@@ -302,12 +303,13 @@ public enum SceneExporter {
 
         for (i, record) in wmf.records.enumerated() {
             if record.function == 0x0000 { continue }   // META_EOF — appended last
-            if i == firstContent { try emitBlocks(insertions.atStart) }
+            if i == firstContent { try emitBlocks(insertions.atStart, window: windows.base) }
 
             if contentSources.contains(i) {
                 if let owner = ownerBySource[i] {
                     if owner.provenance.edited {
-                        if i == drawKeyOf[owner.id] { try emitBlocks([owner]) }
+                        // Use the window actually in effect where this element draws.
+                        if i == drawKeyOf[owner.id] { try emitBlocks([owner], window: windows.bySource[i] ?? windows.base) }
                     } else {
                         emit(try wmfRawOrThrow(bytes, record))
                     }
@@ -316,9 +318,9 @@ public enum SceneExporter {
                 emit(try wmfRawOrThrow(bytes, record))
             }
             applyWMFObjectEffect(record, bytes: bytes, table: &table)
-            if let after = insertions.afterRecord[i] { try emitBlocks(after) }
+            if let after = insertions.afterRecord[i] { try emitBlocks(after, window: windows.bySource[i] ?? windows.base) }
         }
-        if firstContent == nil { try emitBlocks(insertions.atStart) }
+        if firstContent == nil { try emitBlocks(insertions.atStart, window: windows.base) }
 
         return (try assembleWMF(source: bytes, wmf: wmf, body: body, maxRecordWords: maxRecordWords,
                                 numberOfObjects: max(wmf.header.numberOfObjects, UInt16(clamping: table.highWater))), warnings)
@@ -428,23 +430,49 @@ public enum SceneExporter {
         var canvasToLogical: CGAffineTransform
     }
 
-    /// Reads the base window org/ext out of the translated program's synthetic
-    /// preamble (payloads with source index -1) — the mapping `pageSetup` built —
-    /// and inverts the window→canvas scale into the canvas→logical affine
-    /// (logical = winOrg + canvas × winExt / canvasSize). Defaults keep the map
-    /// finite for a degenerate window ([MS-WMF] §2.3.5.30, §3.1.4.2).
-    private static func wmfLogicalSpace(_ program: WMFRenderProgram) -> WMFLogicalSpace {
-        let cw = max(1, program.canvasWidth), ch = max(1, program.canvasHeight)
+    /// The WMF logical window in effect, tracked per SOURCE record. `base` is the
+    /// window the synthetic preamble established (payloads with source index -1);
+    /// `bySource[i]` is the window as source record `i` begins to play — after
+    /// every window change (SETWINDOWORG/EXT, OFFSETWINDOWORG, SCALEWINDOWEXT,
+    /// which the translator already lowers to SETWINDOWORGEX/EXTEX) in the records
+    /// before it. E1b1 read only the preamble window, so an edit after a mid-stream
+    /// window change inverted its device geometry with the wrong mapping and landed
+    /// in the wrong place; using the window actually in effect there fixes it
+    /// ([MS-WMF] §2.3.5.30/.31, §3.1.4.2).
+    private static func wmfWindowTracking(_ program: WMFRenderProgram) -> (base: (PointL, SizeL), bySource: [Int: (PointL, SizeL)]) {
         var org = PointL(x: 0, y: 0)
-        var ext = SizeL(cx: Int32(cw), cy: Int32(ch))
-        for (i, payload) in program.payloads.enumerated()
-        where i < program.payloadSourceIndices.count && program.payloadSourceIndices[i] == -1 {
-            switch payload {
-            case .setWindowOrgEx(let o): org = o
-            case .setWindowExtEx(let e): ext = e
-            default: break
+        var ext = SizeL(cx: Int32(max(1, program.canvasWidth)), cy: Int32(max(1, program.canvasHeight)))
+        var base: (PointL, SizeL)?
+        var bySource: [Int: (PointL, SizeL)] = [:]
+        let sources = program.payloadSourceIndices
+        for (i, payload) in program.payloads.enumerated() {
+            let s = i < sources.count ? sources[i] : -1
+            if s < 0 {
+                // Preamble: accumulate to the base window (its last values win).
+                switch payload {
+                case .setWindowOrgEx(let o): org = o
+                case .setWindowExtEx(let e): ext = e
+                default: break
+                }
+            } else {
+                if base == nil { base = (org, ext) }
+                if bySource[s] == nil { bySource[s] = (org, ext) }   // window as record `s` starts
+                switch payload {
+                case .setWindowOrgEx(let o): org = o
+                case .setWindowExtEx(let e): ext = e
+                default: break
+                }
             }
         }
+        return (base ?? (org, ext), bySource)
+    }
+
+    /// Inverts the window→canvas scale into the canvas→logical affine
+    /// (logical = winOrg + canvas × winExt / canvasSize) for a given window.
+    /// Defaults keep the map finite for a degenerate window ([MS-WMF] §2.3.5.30,
+    /// §3.1.4.2).
+    private static func logicalSpace(winOrg org: PointL, winExt ext: SizeL, canvasWidth: Int, canvasHeight: Int) -> WMFLogicalSpace {
+        let cw = max(1, canvasWidth), ch = max(1, canvasHeight)
         let sx = ext.cx == 0 ? 1 : Double(ext.cx) / Double(cw)
         let sy = ext.cy == 0 ? 1 : Double(ext.cy) / Double(ch)
         let canvasToLogical = CGAffineTransform(
