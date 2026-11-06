@@ -92,11 +92,7 @@ public enum SceneRenderer {
         var warnings: [ExportWarning] = []
         let payloads = SceneSynthesis.emfBlock(for: element, baseHandle: 1, warnings: &warnings)
         guard !payloads.isEmpty else { return }
-        let left = Int32(pageBounds.minX.rounded())
-        let top = Int32(pageBounds.minY.rounded())
-        let right = left &+ Int32(max(1, pageBounds.width.rounded())) &- 1
-        let bottom = top &+ Int32(max(1, pageBounds.height.rounded())) &- 1
-        let bounds = RectL(left: left, top: top, right: right, bottom: bottom)
+        let bounds = pageRectL(pageBounds)
         let builder = EMFDocumentBuilder(bounds: bounds, frame: bounds, device: SizeL(cx: 0, cy: 0), millimeters: SizeL(cx: 0, cy: 0))
         do {
             for payload in payloads { try builder.append(payload) }
@@ -111,32 +107,115 @@ public enum SceneRenderer {
         }
     }
 
-    /// Renders an EMF+ scene: each element draws from its value types (geometry,
-    /// solid and linear-gradient fills with alpha, strokes) or, for text/image/
-    /// passthrough, replays its single source record so z-order is preserved. The
-    /// source is re-observed once to recover each element's lifted op (the scene
-    /// elements are 1:1 with `plusEntries`, in order) — the proof the lift
-    /// captured what was drawn.
+    /// Renders an EMF+ scene. An UNEDITED element replays its original playback:
+    /// a geometry element draws from its value types, a text/image/passthrough
+    /// element replays its single source record (so z-order and fidelity hold). An
+    /// EDITED or new element is rendered by the SAME EMF+ synthesis the exporter
+    /// writes — a throwaway one-element EMF+ file played into the context — so the
+    /// on-screen edit matches the exported file exactly (an edited GetDC GDI element
+    /// uses the GDI synthesis instead). The source is re-observed once to recover
+    /// each original element's lifted entry, keyed by its stable id.
     private static func renderEMFPlus(_ scene: Scene, into context: CGContext, target: CGRect, base: CGAffineTransform) {
         guard let prepared = prepareSource(scene) else { return }
         let entries = MetafileRenderer.observe(prepared).plusEntries
+        // In an UNEDITED scene an editable geometry element draws from its value
+        // types — a passing render proves the lift captured the drawing (the E1a2
+        // fidelity proof). In an EDITED scene an unedited element REPLAYS its source
+        // record instead, so it matches the exporter's byte-verbatim re-emit and the
+        // only on-screen change is the edited element (slice E1b2a).
+        let edited = SceneExporter.isEdited(scene)
 
         context.saveGState()
         defer { context.restoreGState() }
 
-        for (element, entry) in zip(scene.elements, entries) where !element.hidden {
-            switch element.kind {
-            case .text, .image, .passthrough:
-                switch entry {
-                case .gdi(let op):
-                    EMFRenderer.replay(op, into: context, deviceToTarget: base)
-                case .plus(let op):
-                    MetafileRenderer.replayEMFPlus(prepared, streamIndices: [op.streamIndex], into: context, target: target)
+        // In an edited scene, consecutive unedited EMF+ elements are drawn in ONE
+        // filtered playback (`batch`) rather than one playback each — a lifted file
+        // can hold thousands of elements, and a per-element replay re-decodes the
+        // whole object table every time. The batch is flushed (its stream indices
+        // drawn in z-order) before any edited/new or GetDC-GDI element, so z-order
+        // is preserved.
+        var batch: Set<Int> = []
+        func flush() {
+            guard !batch.isEmpty else { return }
+            MetafileRenderer.replayEMFPlus(prepared, streamIndices: batch, into: context, target: target)
+            batch.removeAll(keepingCapacity: true)
+        }
+
+        for element in scene.elements where !element.hidden {
+            let isEdit = element.provenance.edited || element.provenance.sourceRecordIndices.isEmpty
+            if isEdit {
+                flush()
+                // An edited GetDC-window GDI element re-emits as GDI; everything else
+                // re-emits as EMF+. Both use the exporter's synthesis, so the render
+                // matches the exported file.
+                if element.id >= 0, element.id < entries.count, case .gdi = entries[element.id] {
+                    renderSynthesized(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                } else {
+                    renderSynthesizedPlus(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
                 }
-            default:
+                continue
+            }
+            guard element.id >= 0, element.id < entries.count else { continue }
+            let entry = entries[element.id]
+            // Unedited scene: an editable geometry element draws from its value types
+            // (the E1a2 lift proof). Edited scene: it replays, so it matches the
+            // exporter's verbatim re-emit.
+            if !edited, element.kind != .text, element.kind != .image, element.kind != .passthrough,
+               element.style.fill != nil || element.style.stroke != nil, case .plus = entry {
                 drawGeometry(element, into: context, base: base)
+                continue
+            }
+            switch entry {
+            case .gdi(let op):
+                flush()
+                EMFRenderer.replay(op, into: context, deviceToTarget: base)
+            case .plus(let op):
+                if edited { batch.insert(op.streamIndex) }
+                else { MetafileRenderer.replayEMFPlus(prepared, streamIndices: [op.streamIndex], into: context, target: target) }
             }
         }
+        flush()
+    }
+
+    /// Renders one edited/new element as EMF+ by synthesising a throwaway
+    /// single-element EMF+ file with the exporter's block (identity world, 1:1-pixel
+    /// page) and playing it under the element's captured clip — the EMF+ twin of
+    /// `renderSynthesized`, so the on-screen edit matches the exported EMF+ file.
+    private static func renderSynthesizedPlus(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform) {
+        var warnings: [ExportWarning] = []
+        var nextSlot: UInt8 = 0
+        func allocate() -> UInt8? { guard nextSlot < 64 else { return nil }; let s = nextSlot; nextSlot += 1; return s }
+        guard let emits = SceneEMFPlusSynthesis.block(for: element, saveIndex: 0x7F00_0000, allocate: allocate, warnings: &warnings),
+              !emits.isEmpty else { return }
+        let bounds = pageRectL(pageBounds)
+        let builder = EMFPlusDualDocumentBuilder(bounds: bounds, frame: bounds, device: SizeL(cx: 0, cy: 0), millimeters: SizeL(cx: 0, cy: 0))
+        do {
+            for emit in emits {
+                switch emit {
+                case .record(let payload): builder.appendPlus(payload)
+                case .object(_, _, let value): _ = try builder.addObject(value)
+                }
+            }
+            let data = try builder.finish()
+            guard let file = try? EMFFile.parse(data) else { return }
+            context.saveGState()
+            applyClip(element.clipDevice, base: base, into: context)
+            _ = EMFRenderer.render(file, into: context, target: target)
+            context.restoreGState()
+        } catch {
+            return
+        }
+    }
+
+    /// The inclusive device-bounds RectL for a throwaway one-element document,
+    /// built with saturating conversions so a hostile page rect (non-finite or
+    /// spanning the full Int32 range) never traps (§8).
+    private static func pageRectL(_ pageBounds: CGRect) -> RectL {
+        let left = SceneNumeric.int32(pageBounds.minX)
+        let top = SceneNumeric.int32(pageBounds.minY)
+        let right = left &+ SceneNumeric.int32(max(1, pageBounds.width)) &- 1
+        let bottom = top &+ SceneNumeric.int32(max(1, pageBounds.height)) &- 1
+        return RectL(left: left, top: top, right: right, bottom: bottom)
     }
 
     // MARK: - Geometry (value-type render)

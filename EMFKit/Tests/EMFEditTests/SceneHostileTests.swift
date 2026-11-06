@@ -49,6 +49,47 @@ struct SceneHostileTests {
         #expect(SceneRenderer.makeImage(scene) != nil)
     }
 
+    @Test func hostileNumericConversionsDoNotTrap() throws {
+        // A page whose bounds span the FULL Int32 range: width/height > Int32.max,
+        // so `Int32(width)` would trap. SceneRenderer.makeImage and every export
+        // format must return (success or a typed error) without trapping (§8).
+        let fullRange = CGRect(
+            x: Double(Int32.min), y: Double(Int32.min),
+            width: Double(Int32.max) - Double(Int32.min),
+            height: Double(Int32.max) - Double(Int32.min))
+
+        var scene = try SceneImporter.import(data: Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("gate-p4-image.emf")))
+        scene.pageBoundsDevice = fullRange
+
+        // An image element with an absurd destination rect (edited, so it is
+        // synthesised — the path with the Double→Int32 conversions).
+        let imageID = try #require(scene.editableElements.first { $0.kind == .image }).id
+        for li in scene.layers.indices {
+            for ei in scene.layers[li].elements.indices where scene.layers[li].elements[ei].id == imageID {
+                scene.layers[li].elements[ei].image?.destRectDevice = CGRect(x: Double(Int32.min), y: 0, width: Double(Int32.max) * 4, height: 10)
+                scene.layers[li].elements[ei].provenance.edited = true
+            }
+        }
+
+        // A new text element with an absurd height (abs(Int32.min) would trap too).
+        let textScene = try SceneImporter.import(data: Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("gate-p4-text.emf")))
+        if let source = textScene.editableElements.first(where: { $0.kind == .text }), var text = source.text {
+            text.logicalHeight = Int32.min
+            scene.insert(
+                Element(id: 90_001, kind: .text, geometryDevice: ScenePath(), transform: source.transform,
+                        text: text, provenance: Provenance(sourceRecordIndices: [])),
+                at: scene.layers[0].elements.count)
+        }
+
+        // A tiny scale keeps the clamped canvas small; the full-range page bounds
+        // still drive the saturating conversions. No trap.
+        _ = SceneRenderer.makeImage(scene, scale: 1e-7)
+        for format in [ExportFormat.emf, .emz, .wmf, .wmz] {
+            // A typed error is fine; a trap is not.
+            _ = try? SceneExporter.export(scene, as: format)
+        }
+    }
+
     // MARK: - Fixtures
 
     private static func lyingPolygonEMF() -> Data {

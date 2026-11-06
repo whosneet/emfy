@@ -1,5 +1,6 @@
 import CoreGraphics
 import EMFParse
+import EMFRender
 import EMFWrite
 import Foundation
 import WMFParse
@@ -33,6 +34,11 @@ public enum ExportWarning: Sendable, Equatable {
     case textNotLatin1(elementID: Int)
     /// An image could not be re-encoded (no retained/supported DIB) and was dropped.
     case imageDropped(elementID: Int)
+    /// A rotated/sheared image destination (a parallelogram) was written to a GDI
+    /// or WMF container, which can only STRETCHDIBITS into an axis-aligned rect, so
+    /// the rotation was dropped to the bounding box. EMF+ keeps it via
+    /// EmfPlusDrawImagePoints.
+    case imageRotated(elementID: Int)
     /// The element's exact kind could not be re-emitted (a rotated rect, or a
     /// kind whose parameters the scene does not retain — ROUNDRECT, ARC/PIE/CHORD,
     /// or a curve in WMF), so it was written as a path bracket / flattened polygon.
@@ -41,6 +47,11 @@ public enum ExportWarning: Sendable, Equatable {
     /// in the re-embedded EMF, but the plain WMF records are unchanged, so a
     /// WMF-only reader shows the ORIGINAL drawing.
     case embeddedEMFOnly
+    /// A DUAL EMF+ file was edited: the EMF+ half carries the edit, and a fresh
+    /// GDI block is added for each edited/new element, but the file's ORIGINAL GDI
+    /// fallback could not be paired to the edited elements and is kept, so a
+    /// GDI-mode reader may show stale content beneath the edit (slice E1b2a).
+    case fallbackMayBeStale
 }
 
 /// The bytes a `SceneExporter` produced, plus any fidelity warnings.
@@ -89,6 +100,10 @@ public enum SceneExporter {
 
     /// EMR_EOF type id ([MS-EMF] §2.1.1).
     private static let eofType: UInt32 = 14
+    /// EMR_COMMENT type id ([MS-EMF] §2.1.1).
+    private static let emrCommentType: UInt32 = 70
+    /// "EMF+" little-endian ([MS-EMF] §2.3.3.4 CommentIdentifier).
+    private static let emfPlusCommentIdentifier: UInt32 = 0x2B46_4D45
     /// The 20-byte canonical EMR_EOF ([MS-EMF] §2.3.4.1): Type 14, Size 20,
     /// nPalEntries 0, offPalEntries 0x10, SizeLast 20 — the terminator GDI writes
     /// and `EMFDocumentWriter.encodeEOF` produces. Appended only when the source
@@ -103,17 +118,28 @@ public enum SceneExporter {
             throw .unsupported(reason: "cross-container export (EMF \u{2194} WMF) is not supported in E1b1")
         }
 
-        if !isEdited(scene) {
+        // Coverage-based `isEdited` cannot see an EMF+ delete — every EMF+ element's
+        // provenance is the shared EMR_COMMENT index, so removing one leaves the
+        // covered set unchanged. An EMF+ EMF scene therefore ALWAYS routes through
+        // the overlay, which re-detects the delete and falls back to a byte-identical
+        // re-emit when nothing actually changed.
+        let emfPlusEMF = format.isEMFFamily && scene.source.format == .emf && scene.source.renderPath == .emfPlus
+        if !isEdited(scene), !emfPlusEMF {
             let data = try reEmitUnchanged(scene)
             return ExportResult(data: finalize(data, format), warnings: [])
         }
 
         if format.isEMFFamily {
-            guard scene.source.renderPath != .emfPlus else {
-                throw .unsupported(reason: "editing an EMF+ file is not supported in E1b1")
-            }
             let file: EMFFile
             do { file = try EMFFile.parse(scene.source.data) } catch { throw .unreadableSource }
+            if scene.source.renderPath == .emfPlus {
+                let result: (Data, [ExportWarning])
+                do { result = try overlayEMFPlus(file, scene, source: scene.source.data) }
+                catch let error as SceneExportError { throw error }
+                catch let error as EMFWriteError { throw .emfWriteFailed(error) }
+                catch { throw .unreadableSource }
+                return ExportResult(data: finalize(result.0, format), warnings: result.1)
+            }
             let result: (Data, [ExportWarning])
             do { result = try overlayEMF(file, scene, source: scene.source.data) }
             catch { throw .emfWriteFailed(error) }
@@ -235,6 +261,269 @@ public enum SceneExporter {
                 body.append([UInt8](try EMFRecordEncoder.encode(payload)))
             }
         }
+    }
+
+    // MARK: - Edited EMF+ (and dual): EMF+ overlay (slice E1b2a)
+
+    /// The EMF+ overlay. The EMF+ record stream is rebuilt: unedited records
+    /// (object/state/control and the drawing records of unedited elements) are
+    /// kept verbatim; a deleted element's drawing record is dropped; an edited
+    /// element's record is replaced in place by a synthesised EmfPlusSave…Restore
+    /// block (identity world, 1:1-pixel page) whose objects take free slots, each
+    /// reused slot's prior definition re-emitted after the block (slot restore);
+    /// new elements insert at their z-position. The stream is re-packed into the
+    /// EMR_COMMENT_EMFPLUS carriers at the positions of the originals; GDI records
+    /// stay in place. In a DUAL file an edited GDI element inside a GetDC window is
+    /// replaced in place by a GDI block, and every edited/new element also gets a
+    /// fresh GDI block right after its EMF+ comment (outside GetDC, so EMF+ readers
+    /// skip it); the original GDI fallback is kept with a `fallbackMayBeStale`
+    /// warning ([MS-EMFPLUS] §1.3.1, §2.3.3/§2.3.5/§2.3.7).
+    private static func overlayEMFPlus(_ file: EMFFile, _ scene: Scene, source: Data) throws -> (Data, [ExportWarning]) {
+        guard !file.records.isEmpty else { throw SceneExportError.unreadableSource }
+        let bytes = [UInt8](source)
+        let plusStream = file.emfPlusStream()
+        let isDual = plusStream.header?.isDual ?? false
+
+        // Re-observe: the lifted entries are 1:1 with the ORIGINAL import, so entry
+        // index == element id. Maps each original element to its EMF+ stream drawing
+        // record (`.plus`) or its GetDC-window GDI record(s) (`.gdi`).
+        guard let opened = try? OpenedMetafile.open(source),
+              let prepared = MetafileRenderer.prepare(opened) else { throw SceneExportError.unreadableSource }
+        let entries = MetafileRenderer.observe(prepared).plusEntries
+        var streamIndexToID: [Int: Int] = [:]
+        var gdiRecordToID: [Int: Int] = [:]
+        for (id, entry) in entries.enumerated() {
+            switch entry {
+            case .plus(let op): streamIndexToID[op.streamIndex] = id
+            case .gdi(let op): for r in op.recordIndices { gdiRecordToID[r] = id }
+            }
+        }
+        var presentByID: [Int: Element] = [:]
+        for element in scene.elements where !element.provenance.sourceRecordIndices.isEmpty {
+            presentByID[element.id] = element
+        }
+        let insertions = planPlusInsertions(scene, entries: entries)
+        let baseHandle = maxTableIndex(file.records, bytes) + 1
+
+        var warnings: [ExportWarning] = []
+        var changed = false
+        var defs = PlusObjectDefs()
+        var saveIndex: UInt32 = 0x7F00_0000
+        var streamByComment: [Int: [UInt8]] = [:]
+        var fallbackByComment: [Int: [[UInt8]]] = [:]
+        var editedOrDeletedComments: Set<Int> = []
+        let sourceComments = Set(plusStream.records.map(\.sourceRecordIndex))
+        let sortedComments = sourceComments.sorted()
+
+        func emitSynth(_ element: Element, comment: Int) {
+            guard !element.hidden else { return }
+            defs.flush()
+            let defined = defs.definedSlots
+            let order = (0 ... 63).map { UInt8($0) }.sorted { a, b in
+                let da = defined.contains(a), db = defined.contains(b)
+                return da != db ? !da : a < b    // undefined slots first (no restore)
+            }
+            var cursor = 0
+            var reused: [UInt8] = []
+            func allocate() -> UInt8? {
+                guard cursor < order.count else { return nil }
+                let slot = order[cursor]; cursor += 1
+                if defined.contains(slot) { reused.append(slot) }
+                return slot
+            }
+            let idx = saveIndex; saveIndex &+= 1
+            guard let emits = SceneEMFPlusSynthesis.block(for: element, saveIndex: idx, allocate: allocate, warnings: &warnings) else { return }
+            var framed: [UInt8] = []
+            for emit in emits {
+                switch emit {
+                case .record(let payload):
+                    framed.append(contentsOf: payload.framed())
+                case .object(let id, let type, let value):
+                    guard let payload = try? EMFPlusObjectEncoder.encode(value) else { continue }
+                    for rec in EMFPlusCommentWriter.objectRecords(objectID: id, objectType: type, payload: payload) {
+                        framed.append(contentsOf: rec)
+                    }
+                }
+            }
+            for slot in reused { for chunk in defs.definition(of: slot) { framed.append(contentsOf: chunk) } }
+            streamByComment[comment, default: []].append(contentsOf: framed)
+            if isDual {
+                var dropped: [ExportWarning] = []
+                var chunks: [[UInt8]] = []
+                for payload in SceneSynthesis.emfBlock(for: element, baseHandle: baseHandle, warnings: &dropped) {
+                    if let encoded = try? EMFRecordEncoder.encode(payload) { chunks.append([UInt8](encoded)) }
+                }
+                fallbackByComment[comment, default: []].append(contentsOf: chunks)
+            }
+        }
+
+        // Pass 1: rebuild the EMF+ record stream, grouped by source comment.
+        let firstDraw = streamIndexToID.keys.min()
+        for streamIndex in plusStream.records.indices {
+            let record = plusStream.records[streamIndex]
+            let comment = record.sourceRecordIndex
+            if streamIndex == firstDraw {
+                for element in insertions.atStart { emitSynth(element, comment: comment); changed = true }
+            }
+            if let id = streamIndexToID[streamIndex] {
+                if let element = presentByID[id] {
+                    if element.provenance.edited {
+                        emitSynth(element, comment: comment); changed = true
+                        editedOrDeletedComments.insert(comment)
+                    } else {
+                        streamByComment[comment, default: []].append(contentsOf: EMFPlusCommentWriter.frame(record))
+                    }
+                } else {
+                    changed = true   // deleted → drop its drawing record
+                    editedOrDeletedComments.insert(comment)
+                }
+            } else {
+                let framed = EMFPlusCommentWriter.frame(record)
+                streamByComment[comment, default: []].append(contentsOf: framed)
+                defs.feed(record: record, framed: framed)
+            }
+            if let news = insertions.afterStream[streamIndex] {
+                for element in news { emitSynth(element, comment: comment); changed = true }
+            }
+        }
+        if firstDraw == nil, !insertions.atStart.isEmpty {
+            let comment = plusStream.records.first?.sourceRecordIndex ?? 1
+            for element in insertions.atStart { emitSynth(element, comment: comment); changed = true }
+        }
+        // GetDC-window GDI elements are not EMF+ stream records, so pass 1 does not
+        // see them: fold their edits/deletions into `changed` before deciding.
+        for id in Set(gdiRecordToID.values) {
+            if let element = presentByID[id] { if element.provenance.edited { changed = true } }
+            else { changed = true }   // a deleted GetDC GDI element
+        }
+        // Pairing rule ([MS-EMFPLUS] §1.3.1): the GDI fallback run paired to an EMF+
+        // element is the one sitting between that element's EMF+ comment and the next
+        // EMF+ comment. For each EDITED/DELETED element, drop its paired fallback (so a
+        // GDI-mode reader does not keep drawing the pre-edit version). Fallback that
+        // sits between NO element's comment and the next is UNPAIRED — its relationship
+        // to the edit can't be determined — so a `fallbackMayBeStale` warning is raised
+        // when any survives, the honest account of a GDI copy the editor can't re-pair.
+        func pairedRange(of comment: Int) -> Range<Int> {
+            comment + 1 ..< (sortedComments.first { $0 > comment } ?? Int.max)
+        }
+        var removedFallback: Set<Int> = []
+        var pairedFallback: Set<Int> = []
+        if isDual {
+            let elementComments = Set(streamIndexToID.keys.map { plusStream.records[$0].sourceRecordIndex })
+            for comment in elementComments {
+                let range = pairedRange(of: comment)
+                pairedFallback.formUnion(scene.partition.fallback.filter { range.contains($0) })
+            }
+            for comment in editedOrDeletedComments {
+                let range = pairedRange(of: comment)
+                removedFallback.formUnion(scene.partition.fallback.filter { range.contains($0) })
+            }
+        }
+        if isDual, changed, !scene.partition.fallback.subtracting(pairedFallback).isEmpty {
+            warnings.append(.fallbackMayBeStale)
+        }
+
+        // Nothing actually changed (coverage-based `isEdited` routes every EMF+ scene
+        // here to catch a delete): re-emit byte-identical, like an unchanged export.
+        guard changed else { return (try EMFDocumentWriter.reEmit(file, source: source), []) }
+
+        // Pass 2: assemble the EMF file (header + re-packed comments + GDI records + EOF).
+        var headerBytes = try rawOrThrow(bytes, file.records[0])
+        var body: [[UInt8]] = []
+        for i in 1 ..< file.records.count {
+            let record = file.records[i]
+            if record.type == Self.emrCommentType {
+                if sourceComments.contains(i) {
+                    if let stream = streamByComment[i], !stream.isEmpty {
+                        body.append(contentsOf: splitRecords(EMFPlusCommentWriter.packComments(streamBytes: stream)))
+                    }
+                    if let fb = fallbackByComment[i] { body.append(contentsOf: fb) }
+                } else if isEMFPlusComment(bytes, record) {
+                    // Continuation-only EMF+ comment: its record was re-framed whole at
+                    // the comment its header started in — emit nothing here.
+                } else {
+                    body.append(try rawOrThrow(bytes, record))   // private (non-EMF+) comment
+                }
+            } else if let id = gdiRecordToID[i] {
+                if let element = presentByID[id] {
+                    if element.provenance.edited {
+                        changed = true
+                        for payload in SceneSynthesis.emfBlock(for: element, baseHandle: baseHandle, warnings: &warnings) {
+                            body.append([UInt8](try EMFRecordEncoder.encode(payload)))
+                        }
+                    } else {
+                        body.append(try rawOrThrow(bytes, record))
+                    }
+                }   // deleted GetDC GDI element → drop
+            } else if removedFallback.contains(i) {
+                // A GDI fallback record paired to an edited/deleted element → drop it,
+                // so a GDI-mode reader does not keep drawing the pre-edit version.
+            } else {
+                body.append(try rawOrThrow(bytes, record))
+            }
+        }
+        if file.records.last?.type != eofType { body.append(canonicalEMFEOF) }
+
+        let bodyTotal = body.reduce(0) { $0 + $1.count }
+        let totalBytes = headerBytes.count + bodyTotal
+        guard totalBytes <= Int(UInt32.max) else { throw EMFWriteError.fileTooLarge(byteLength: totalBytes) }
+        let recordCount = UInt32(clamping: 1 + body.count)
+        let handles = max(file.header.handles, try handleCount(body))
+        patchU32(&headerBytes, 48, UInt32(totalBytes))
+        patchU32(&headerBytes, 52, recordCount)
+        patchU16(&headerBytes, 56, handles)
+
+        var out = [UInt8]()
+        out.reserveCapacity(totalBytes)
+        out.append(contentsOf: headerBytes)
+        for chunk in body { out.append(contentsOf: chunk) }
+        return (Data(out), warnings)
+    }
+
+    /// Splits a concatenation of EMR records (e.g. `packComments` output) into one
+    /// chunk per record, reading each record's `nSize` at offset 4, so the header
+    /// Records field counts every comment the overlay emits.
+    private static func splitRecords(_ concatenated: [UInt8]) -> [[UInt8]] {
+        var out: [[UInt8]] = []
+        var offset = 0
+        while offset + 8 <= concatenated.count {
+            let size = Int(UInt32(concatenated[offset + 4]) | UInt32(concatenated[offset + 5]) << 8
+                | UInt32(concatenated[offset + 6]) << 16 | UInt32(concatenated[offset + 7]) << 24)
+            guard size >= 8, offset + size <= concatenated.count else { break }
+            out.append(Array(concatenated[offset ..< offset + size]))
+            offset += size
+        }
+        return out
+    }
+
+    /// Maps new (no-provenance) EMF+ elements to the EMF+ drawing stream record
+    /// they insert after — the stream record of the previous `.plus` element in
+    /// z-order (or the start of the drawing records for the bottom).
+    private static func planPlusInsertions(_ scene: Scene, entries: [PlusEntry]) -> (atStart: [Element], afterStream: [Int: [Element]]) {
+        var atStart: [Element] = []
+        var afterStream: [Int: [Element]] = [:]
+        var prev: Int?
+        for element in scene.elements {
+            if element.provenance.sourceRecordIndices.isEmpty {
+                if let p = prev { afterStream[p, default: []].append(element) } else { atStart.append(element) }
+            } else if element.id >= 0, element.id < entries.count, case .plus(let op) = entries[element.id] {
+                prev = op.streamIndex
+            }
+        }
+        return (atStart, afterStream)
+    }
+
+    /// True when `record` is an EMR_COMMENT whose 4-byte identifier is "EMF+"
+    /// ([MS-EMF] §2.3.3.4), with a DataSize large enough to carry it.
+    private static func isEMFPlusComment(_ bytes: [UInt8], _ record: EMFRawRecord) -> Bool {
+        let base = record.offset
+        guard record.size >= 16, base >= 0, base + 16 <= bytes.count else { return false }
+        let dataSize = UInt32(bytes[base + 8]) | UInt32(bytes[base + 9]) << 8
+            | UInt32(bytes[base + 10]) << 16 | UInt32(bytes[base + 11]) << 24
+        guard dataSize >= 4 else { return false }
+        let id = UInt32(bytes[base + 12]) | UInt32(bytes[base + 13]) << 8
+            | UInt32(bytes[base + 14]) << 16 | UInt32(bytes[base + 15]) << 24
+        return id == Self.emfPlusCommentIdentifier
     }
 
     // MARK: - Edited WMF
@@ -647,4 +936,57 @@ private struct SlotTable {
         return UInt16(truncatingIfNeeded: slot)
     }
     mutating func free(_ slot: Int) { occupied.remove(slot) }
+}
+
+/// Tracks the current EmfPlusObject definition of each EMF+ object slot as the
+/// overlay re-emits the stream verbatim ([MS-EMFPLUS] §3.1.2 object table): a slot
+/// stays defined until redefined (EMF+ has no delete-object). A synthesised block
+/// that must REUSE a defined slot re-emits that slot's last definition after the
+/// block (slot restore), so later records that read the slot still see the
+/// original object. A definition that spanned several continuation records
+/// ([MS-EMFPLUS] §2.3.5.1) is kept as that run of framed records, re-emitted whole.
+struct PlusObjectDefs {
+    /// EmfPlusObject record type ([MS-EMFPLUS] §2.1.1.1).
+    private static let objectType: UInt16 = 0x4008
+    /// EmfPlusObject continuation flag ([MS-EMFPLUS] §2.3.5.1, bit 15 of Flags):
+    /// set on every chunk of a multi-record object definition.
+    private static let continueFlag: UInt16 = 0x8000
+
+    private var defs: [UInt8: [[UInt8]]] = [:]
+    private var run: (id: UInt8, chunks: [[UInt8]])?
+
+    /// The slots with a current definition (after `flush`).
+    var definedSlots: Set<UInt8> { Set(defs.keys) }
+
+    /// Feeds one kept-verbatim stream record. A COMPLETE definition (an
+    /// EmfPlusObject with the continuation flag clear) replaces the slot's
+    /// definition outright, so two back-to-back complete definitions of one slot
+    /// keep only the last ([MS-EMFPLUS] §2.3.5.1). A CONTINUED definition (the
+    /// flag set) groups its consecutive same-slot chunks into one definition.
+    /// Any non-object record ends an in-progress run.
+    mutating func feed(record: EMFPlusRecord, framed: [UInt8]) {
+        guard record.type == Self.objectType else { flush(); return }
+        let id = UInt8(record.flags & 0x00FF)
+        if record.flags & Self.continueFlag != 0 {
+            // Part of a continued object: accumulate consecutive same-slot chunks.
+            if var current = run, current.id == id {
+                current.chunks.append(framed); run = current
+            } else {
+                flush(); run = (id, [framed])
+            }
+        } else {
+            // A complete single-record definition: it ends any run and REPLACES
+            // the slot's definition (a later complete def wins over an earlier one).
+            flush()
+            defs[id] = [framed]
+        }
+    }
+
+    /// Finalises any in-progress object run into `defs`.
+    mutating func flush() {
+        if let current = run { defs[current.id] = current.chunks; run = nil }
+    }
+
+    /// The framed record bytes that last defined `slot`, empty if undefined.
+    func definition(of slot: UInt8) -> [[UInt8]] { defs[slot] ?? [] }
 }

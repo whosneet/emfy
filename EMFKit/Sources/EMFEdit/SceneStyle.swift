@@ -223,8 +223,14 @@ public struct SceneText: Sendable, Equatable {
     /// Baseline rotation, tenths of a degree counterclockwise (lfEscapement).
     public var escapementTenths: Int32
     public var color: SceneColor
-    /// Reference point in LOGICAL units (GDI); the layout-rect origin in DEVICE
-    /// units for EMF+ content (approximate — EMF+ text renders via replay).
+    /// The text reference point in the element's PRE-transform coordinate space:
+    /// the drawn device point is `referenceLogical.applying(element.transform)`,
+    /// one convention for both engines. GDI content stores the logical reference
+    /// and `transform` is logical→device; EMF+ content stores the run's WORLD-space
+    /// reference (the importer inverts world→device from the lifted device origin)
+    /// and `transform` is the EMF+ world→device. A device-space edit post-composes
+    /// into `transform`, so the drawn point moves/scales/rotates with the edit and
+    /// both the GDI and EMF+ synthesisers re-emit it by drawing through `transform`.
     public var referenceLogical: CGPoint
     public var alignRawValue: UInt32
     /// True for an EMF+ DrawString run.
@@ -275,6 +281,13 @@ public struct SceneImage: Sendable, Equatable {
     public var destOriginLogical: CGPoint
     public var destSizeLogical: CGSize
     public var destRectDevice: CGRect
+    /// The device-space destination as four corners (upper-left, upper-right,
+    /// lower-right, lower-left) when a rotation/shear edit made the placement
+    /// non-axis-aligned; nil means the destination is the axis-aligned
+    /// `destRectDevice` (`destRectDevice` always holds the corners' bounding box).
+    /// EMF+ export writes a parallelogram (EmfPlusDrawImagePoints) when present;
+    /// GDI/WMF export can only axis-align it and warns (`imageRotated`).
+    public var destCornersDevice: [CGPoint]?
     /// The source GDI DIB (GDI content); nil for EMF+ images.
     public var sourceDIB: DIB?
     /// The source EMF+ image object (EMF+ content); nil for GDI images. Holds the
@@ -289,6 +302,7 @@ public struct SceneImage: Sendable, Equatable {
         self.destSizeLogical = CGSize(width: CGFloat(lifted.destSize.cx), height: CGFloat(lifted.destSize.cy))
         let logicalRect = CGRect(origin: destOriginLogical, size: destSizeLogical).standardized
         self.destRectDevice = logicalRect.applying(deviceTransform)
+        self.destCornersDevice = nil
         self.sourceDIB = lifted.sourceDIB
         self.emfPlusImage = nil
         self.srcRect = .null
@@ -299,6 +313,9 @@ public struct SceneImage: Sendable, Equatable {
         self.destRectDevice = plus.destRectDevice
         self.destOriginLogical = plus.destRectDevice.origin
         self.destSizeLogical = plus.destRectDevice.size
+        // A source DrawImagePoints carried a parallelogram; keep it so re-export
+        // re-emits the exact placement rather than its bounding box.
+        self.destCornersDevice = plus.destCornersDevice
         self.sourceDIB = nil
         self.emfPlusImage = plus.image
         self.srcRect = plus.srcRect

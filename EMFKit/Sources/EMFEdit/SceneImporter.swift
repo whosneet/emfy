@@ -197,9 +197,21 @@ public enum SceneImporter {
 
         switch op.kind {
         case .text:
+            // Unify the reference-point convention with GDI text (documented on
+            // `SceneText.referenceLogical`): store the reference in the run's
+            // PRE-transform (world) space, so the drawn device point is
+            // `referenceLogical.applying(transform)` and a device-space edit that
+            // post-composes into `transform` moves/scales/rotates it. The lift
+            // gave the DEVICE layout-rect origin; invert world→device to recover
+            // the world point (keep device when the transform is non-invertible).
+            var text = op.text.map(SceneText.init)
+            if var resolved = text, let inverse = invertible(op.worldToDevice) {
+                resolved.referenceLogical = resolved.referenceLogical.applying(inverse)
+                text = resolved
+            }
             return Element(
                 id: 0, kind: .text, geometryDevice: geometry, transform: op.worldToDevice,
-                style: plusStyle(op), text: op.text.map(SceneText.init),
+                style: plusStyle(op), text: text,
                 clipDevice: clip, provenance: provenance
             )
         case .image:
@@ -220,6 +232,15 @@ public enum SceneImporter {
                 style: plusStyle(op), clipDevice: clip, provenance: provenance
             )
         }
+    }
+
+    /// The inverse of `t` when it is invertible (non-degenerate determinant),
+    /// else nil — `CGAffineTransform.inverted()` silently returns the original for
+    /// a singular matrix, which would corrupt the recovered world point.
+    private static func invertible(_ t: CGAffineTransform) -> CGAffineTransform? {
+        let det = t.a * t.d - t.b * t.c
+        guard det.isFinite, abs(det) > 1e-12 else { return nil }
+        return t.inverted()
     }
 
     private static func plusStyle(_ op: PlusDrawOp) -> SceneStyle {

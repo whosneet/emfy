@@ -164,7 +164,7 @@ enum SceneSynthesis {
     private static func emfTextBlock(_ element: Element, fontHandle: UInt32, warnings: inout [ExportWarning]) -> [EMFRecordPayload] {
         guard let text = element.text, !text.string.isEmpty else { return [] }
         let scale = averageScale(element.transform)
-        let deviceEm = Int32((Double(abs(text.logicalHeight)) * scale).rounded())
+        let deviceEm = SceneNumeric.int32(abs(Double(text.logicalHeight)) * scale)
         let reference = pointL(CGPoint(x: text.referenceLogical.x, y: text.referenceLogical.y).applying(element.transform))
         let color = (element.style.fill?.color ?? text.color).colorRef
 
@@ -184,13 +184,19 @@ enum SceneSynthesis {
     }
 
     private static func emfImageBlock(_ element: Element, warnings: inout [ExportWarning]) -> [EMFRecordPayload] {
-        guard let image = element.image, let dib = image.sourceDIB, !isUnsupported(dib) else {
+        // A GDI image carries its source DIB; an EMF+ image (dual-file GDI fallback)
+        // carries none, so its pixels are decoded to a BI_RGB DIB for STRETCHDIBITS.
+        guard let image = element.image,
+              let dib = image.sourceDIB ?? SceneImageCoding.dib(for: image), !isUnsupported(dib) else {
             warnings.append(.imageDropped(elementID: element.id)); return []
         }
+        // GDI STRETCHDIBITS fills an axis-aligned rect only; a rotated/sheared
+        // parallelogram is dropped to its bounding box, with a warning.
+        if image.destCornersDevice != nil { warnings.append(.imageRotated(elementID: element.id)) }
         let dest = image.destRectDevice.standardized
         var out = emfReset()
         out.append(.stretchDIBits(StretchDIBitsPayload(bounds: rectL(dest), dest: pointL(dest.origin),
-            destSize: SizeL(cx: Int32(dest.width.rounded()), cy: Int32(dest.height.rounded())),
+            destSize: SizeL(cx: SceneNumeric.int32(dest.width), cy: SceneNumeric.int32(dest.height)),
             src: PointL(x: 0, y: 0), srcSize: SizeL(cx: dib.width, cy: abs(dib.height)),
             usageSrc: 0, rasterOperation: srcCopy, dib: dib)))
         out.append(.restoreDC(savedDC: -1))
@@ -284,7 +290,7 @@ enum SceneSynthesis {
         // Create only the objects the element uses (slots the caller reserved);
         // select a STOCK null object for the absent half.
         if let stroke {
-            out.append(.createPenIndirect(style: UInt16(truncatingIfNeeded: dashStyleBits(stroke.dash)), width: stroke.isCosmetic ? 0 : Int32((stroke.width * scale).rounded()), color: stroke.color.colorRef))
+            out.append(.createPenIndirect(style: UInt16(truncatingIfNeeded: dashStyleBits(stroke.dash)), width: stroke.isCosmetic ? 0 : SceneNumeric.int32(stroke.width * scale), color: stroke.color.colorRef))
             out.append(.selectObject(index: penSlot))
         } else {
             out.append(.selectObject(index: 0x8008))   // stock NULL_PEN
@@ -348,7 +354,7 @@ enum SceneSynthesis {
         guard let text = element.text, !text.string.isEmpty else { return [] }
         if text.string.unicodeScalars.contains(where: { $0.value > 0xFF }) { warnings.append(.textNotLatin1(elementID: element.id)) }
         let scale = averageScale(element.transform)
-        let deviceEm = Int32((Double(abs(text.logicalHeight)) * scale).rounded())
+        let deviceEm = SceneNumeric.int32(abs(Double(text.logicalHeight)) * scale)
         let reference = pointL32(CGPoint(x: text.referenceLogical.x, y: text.referenceLogical.y).applying(element.transform))
         let color = (element.style.fill?.color ?? text.color).colorRef
         var out = wmfReset(winOrg: winOrg, winExt: winExt)
@@ -368,11 +374,12 @@ enum SceneSynthesis {
         guard let image = element.image, let dib = image.sourceDIB, !isUnsupported(dib) else {
             warnings.append(.imageDropped(elementID: element.id)); return []
         }
+        if image.destCornersDevice != nil { warnings.append(.imageRotated(elementID: element.id)) }
         let dest = image.destRectDevice.standardized
         var out = wmfReset(winOrg: winOrg, winExt: winExt)
         out.append(.stretchDIB(rop: srcCopy, colorUsage: 0, src: PointL(x: 0, y: 0),
             srcSize: SizeL(cx: dib.width, cy: abs(dib.height)), dest: pointL32(dest.origin),
-            destSize: SizeL(cx: Int32(dest.width.rounded()), cy: Int32(dest.height.rounded())), dib: dib))
+            destSize: SizeL(cx: SceneNumeric.int32(dest.width), cy: SceneNumeric.int32(dest.height)), dib: dib))
         out.append(.restoreDC(savedDC: -1))
         return out
     }
@@ -380,8 +387,9 @@ enum SceneSynthesis {
     // MARK: - Shape recovery helpers
 
     /// The bounding rect if `path` is an axis-aligned rectangle outline (every
-    /// vertex sits on a corner of the bounding box), else nil.
-    private static func axisAlignedRect(_ path: ScenePath) -> CGRect? {
+    /// vertex sits on a corner of the bounding box), else nil. Shared with the
+    /// EMF+ synthesis (`SceneEMFPlusSynthesis`) so both re-emit the same kinds.
+    static func axisAlignedRect(_ path: ScenePath) -> CGRect? {
         var pts: [CGPoint] = []
         for seg in path.segments {
             switch seg {
@@ -403,7 +411,7 @@ enum SceneSynthesis {
     }
 
     /// Subpaths of points if every segment is a move/line/close (no curves), else nil.
-    private static func lineSubpaths(_ path: ScenePath) -> [[CGPoint]]? {
+    static func lineSubpaths(_ path: ScenePath) -> [[CGPoint]]? {
         var subs: [[CGPoint]] = []
         var current: [CGPoint] = []
         for seg in path.segments {
@@ -421,7 +429,7 @@ enum SceneSynthesis {
     }
 
     /// A single-subpath cubic-bezier control sequence [start, c1,c2,e, …], or nil.
-    private static func bezierControlPoints(_ path: ScenePath) -> [CGPoint]? {
+    static func bezierControlPoints(_ path: ScenePath) -> [CGPoint]? {
         var pts: [CGPoint] = []
         var started = false
         var current = CGPoint.zero
@@ -462,7 +470,7 @@ enum SceneSynthesis {
 
     private static func penPayload(_ stroke: SceneStroke, handle: UInt32, scale: Double) -> ExtCreatePenPayload {
         let geometric = stroke.isCosmetic ? 0 : Pen.geometric
-        let width = stroke.isCosmetic ? 0 : UInt32(max(0, (stroke.width * scale).rounded()))
+        let width = stroke.isCosmetic ? 0 : SceneNumeric.uint32(stroke.width * scale)
         let style = geometric | dashStyleBits(stroke.dash) | capBits(stroke.cap) | joinBits(stroke.join)
         let entries: [UInt32] = { if case .userStyle(let e) = stroke.dash { return e } else { return [] } }()
         return ExtCreatePenPayload(ihPen: handle, offBmi: 0, cbBmi: 0, offBits: 0, cbBits: 0,
@@ -500,7 +508,7 @@ enum SceneSynthesis {
 
     // MARK: - Geometry helpers
 
-    private static func flatten(_ path: ScenePath, samples: Int = 48) -> [(points: [CGPoint], closed: Bool)] {
+    static func flatten(_ path: ScenePath, samples: Int = 48) -> [(points: [CGPoint], closed: Bool)] {
         var subpaths: [(points: [CGPoint], closed: Bool)] = []
         var current: [CGPoint] = []
         var cursor = CGPoint.zero
@@ -530,7 +538,7 @@ enum SceneSynthesis {
 
     /// Whether `t` rotates or shears (an ellipse's box can only be re-emitted as
     /// an axis-aligned EMR_ELLIPSE when it does not).
-    private static func hasRotation(_ t: CGAffineTransform) -> Bool {
+    static func hasRotation(_ t: CGAffineTransform) -> Bool {
         let scale = max(averageScale(t), 1e-9)
         return abs(t.b) > 1e-6 * scale || abs(t.c) > 1e-6 * scale
     }
@@ -547,11 +555,5 @@ enum SceneSynthesis {
         let s = r.standardized
         return RectL(left: clampedInt32(s.minX), top: clampedInt32(s.minY), right: clampedInt32(s.maxX), bottom: clampedInt32(s.maxY))
     }
-    private static func clampedInt32(_ v: CGFloat) -> Int32 {
-        guard v.isFinite else { return 0 }
-        let r = v.rounded()
-        if r >= CGFloat(Int32.max) { return Int32.max }
-        if r <= CGFloat(Int32.min) { return Int32.min }
-        return Int32(r)
-    }
+    private static func clampedInt32(_ v: CGFloat) -> Int32 { SceneNumeric.int32(v) }
 }

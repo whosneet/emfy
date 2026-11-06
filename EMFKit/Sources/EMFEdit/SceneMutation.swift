@@ -46,11 +46,41 @@ extension Element {
         // position lives in `geometryDevice`.
         transform = transform.concatenating(t)
         if var img = image {
-            img.destRectDevice = img.destRectDevice.applying(t).standardized
+            // A rotation/shear (or an already-tracked parallelogram) must keep the
+            // true four device corners — standardising to a bounding box would
+            // silently drop the rotation. An axis-aligned edit keeps the fast
+            // bounding-box path. `destRectDevice` always holds the bounding box.
+            if img.destCornersDevice != nil || t.b != 0 || t.c != 0 {
+                let corners = (img.destCornersDevice ?? img.destRectDevice.standardized.cornersTLTRBRBL).map { $0.applying(t) }
+                img.destCornersDevice = corners
+                img.destRectDevice = Element.boundingBox(of: corners)
+            } else {
+                img.destRectDevice = img.destRectDevice.applying(t).standardized
+            }
             image = img
         }
         recomputeBoundsDevice()
         provenance.edited = true
+    }
+
+    /// The axis-aligned bounding box of device-space points (`.null` if empty).
+    static func boundingBox(of points: [CGPoint]) -> CGRect {
+        guard let first = points.first else { return .null }
+        var minX = first.x, minY = first.y, maxX = first.x, maxY = first.y
+        for p in points.dropFirst() {
+            minX = Swift.min(minX, p.x); minY = Swift.min(minY, p.y)
+            maxX = Swift.max(maxX, p.x); maxY = Swift.max(maxY, p.y)
+        }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+}
+
+extension CGRect {
+    /// The rect's four corners in EMF+ DrawImagePoints order: upper-left,
+    /// upper-right, lower-right, lower-left ([MS-EMFPLUS] §2.3.4.9).
+    var cornersTLTRBRBL: [CGPoint] {
+        [CGPoint(x: minX, y: minY), CGPoint(x: maxX, y: minY),
+         CGPoint(x: maxX, y: maxY), CGPoint(x: minX, y: maxY)]
     }
 }
 

@@ -435,12 +435,19 @@ struct SceneExportTests {
         #expect(throws: SceneExportError.self) { _ = try SceneExporter.export(wmf, as: .emf) }
     }
 
-    @Test func editingEMFPlusIsUnsupported() throws {
-        var scene = try SceneImporter.import(data: try Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("handmade-emfplus-shapes.emf")))
-        // Unchanged still re-emits.
+    @Test func editingEMFPlusIsSupported() throws {
+        // Editing an EMF+ file is implemented in slice E1b2a (an EMF+ overlay), so
+        // an unchanged scene still re-emits byte-identically and an edited one
+        // exports and re-imports with the edit visible (full coverage is in
+        // `SceneEMFPlusExportTests`).
+        let scene = try SceneImporter.import(data: try Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("handmade-emfplus-shapes.emf")))
         _ = try SceneExporter.export(scene, as: .emf)
-        try scene.translate([scene.editableElements[0].id], dx: 5, dy: 5)
-        #expect(throws: SceneExportError.self) { _ = try SceneExporter.export(scene, as: .emf) }
+        var edited = scene
+        try edited.translate([scene.editableElements[0].id], dx: 5, dy: 5)
+        let result = try SceneExporter.export(edited, as: .emf)
+        let reimport = try SceneImporter.import(data: result.data)
+        #expect(reimport.editableElements.count == scene.editableElements.count)
+        #expect(try EMFFile.parse(result.data).diagnostics.isEmpty)
     }
 
     @Test func wmfCoordinateOverflowThrowsTypedError() throws {
