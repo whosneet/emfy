@@ -337,9 +337,31 @@ public enum SceneExporter {
         }
     }
 
+    /// True when `element` carries a SOURCE (unedited) gradient fill. WMF has no
+    /// gradient record, so such a shape in a plain-WMF export is RASTERISED (stored as
+    /// an image) rather than flattened to one representative solid (slice E1b2d item
+    /// 6); a solid-fill shape stays vector. Gradients only reach the scene from an
+    /// EMF+ source, so an unedited gradient always lifts from the EMF+ stream the
+    /// rasteriser can replay. An EDITED gradient (one added onto a shape) is NOT
+    /// rasterised — the rasteriser replays the source draw, which does not carry the
+    /// edit — so it keeps the flatten-to-solid path and its `gradientFlattened` report.
+    static func elementHasGradientFill(_ element: Element) -> Bool {
+        guard !element.hidden, element.kind != .group else { return false }
+        guard !element.provenance.edited, !element.provenance.sourceRecordIndices.isEmpty else { return false }
+        return element.style.fill?.gradient != nil
+    }
+
+    /// The EMF→WMF rasterisation predicate: the cross-container cases `shouldRasterize`
+    /// covers, PLUS a gradient fill WMF cannot express vectorially. EMF targets are
+    /// unaffected (EMF+ carries the gradient), so this is WMF-export-only.
+    static func shouldRasterizeForWMF(_ element: Element) -> Bool {
+        shouldRasterize(element) || elementHasGradientFill(element)
+    }
+
     /// The warning raised when `element` is rasterised: a rotated image keeps
     /// `imageRotated` (the rotation was the reason), everything else is the generic
-    /// `contentRasterized` (the element became a bitmap).
+    /// `contentRasterized` (the element became a bitmap — for a gradient fill, the
+    /// "gradient stored as an image" outcome, summarised under `.rasterized`).
     private static func rasterWarning(for element: Element) -> ExportWarning {
         if element.kind == .image, element.image?.destCornersDevice != nil {
             return .imageRotated(elementID: element.id)
@@ -371,12 +393,14 @@ public enum SceneExporter {
         let builder = WMFDocumentBuilder(boundingBox: map.bb, unitsPerInch: map.inch, embeddedEMF: embeddedEMF)
 
         // Observe the source once if any element must be rasterised (passthrough,
-        // non-Latin-1 or EMF+ text, a rotated image).
-        let rasterSource = scene.elements.contains(where: shouldRasterize) ? SceneRasterize.Source.make(scene) : nil
+        // non-Latin-1 or EMF+ text, a rotated image, or a gradient fill WMF cannot
+        // express — item 6). The batched EMF+ page covers exactly those elements.
+        let rasterSource = scene.elements.contains(where: shouldRasterizeForWMF)
+            ? SceneRasterize.Source.make(scene, rasterize: shouldRasterizeForWMF) : nil
 
         for element in scene.elements where !element.hidden {
             guard element.kind != .group else { continue }
-            if shouldRasterize(element) {
+            if shouldRasterizeForWMF(element) {
                 if let source = rasterSource,
                    let raster = SceneRasterize.raster(element, scene: scene, source: source),
                    let dib = SceneImageCoding.dib(from: raster.image) {
@@ -399,7 +423,8 @@ public enum SceneExporter {
             let fontSlot = needs.font ? table.allocate() : 0
             let records = SceneSynthesis.wmfBlock(
                 for: mapped, winOrg: map.winOrg, winExt: map.winExt,
-                penSlot: penSlot, brushSlot: brushSlot, fontSlot: fontSlot, emitDx: true, warnings: &warnings)
+                penSlot: penSlot, brushSlot: brushSlot, fontSlot: fontSlot, emitDx: true,
+                clip: wmfClipRect(mapped.clipDevice), warnings: &warnings)
             for record in records { try builder.append(record) }
         }
         return (try builder.finish(), warnings)
@@ -457,10 +482,29 @@ public enum SceneExporter {
     /// width, font height and the text reference) produces logical records at
     /// logical sizes. The text reference point stays in its pre-transform space —
     /// the composed transform now carries it to WMF-logical.
+    /// The INTERSECTCLIPRECT bounds (WMF-logical) for an element's clip, or nil when
+    /// it has none. The clip's bounding box is exact for the common axis-aligned rect
+    /// clip; for a non-rect clip it bounds the draw to the clip's extent (a strict
+    /// improvement over drawing the full unclipped geometry).
+    private static func wmfClipRect(_ clip: ScenePath?) -> RectL? {
+        guard let clip, !clip.isEmpty else { return nil }
+        let b = clip.boundingBox
+        guard !b.isNull, b.width.isFinite, b.height.isFinite else { return nil }
+        // Clamp to the Int16-safe WMF coordinate range (`wmfLogicalMapping` keeps the
+        // geometry under 30000): an EMF+ "reset clip" is a huge sentinel rect (±10^7)
+        // that never clips the in-range geometry, so clamping it is a no-op clip and
+        // avoids a `coordinateOutOfRange` write failure ([MS-WMF] §2.2.2.15/.16).
+        func clamp(_ v: Double) -> Int32 { Int32(max(-30000, min(30000, v.rounded()))) }
+        let left = clamp(b.minX), top = clamp(b.minY), right = clamp(b.maxX), bottom = clamp(b.maxY)
+        guard right > left, bottom > top else { return nil }
+        return RectL(left: left, top: top, right: right, bottom: bottom)
+    }
+
     private static func mapElementToWMFLogical(_ element: Element, _ deviceToLogical: CGAffineTransform) -> Element {
         var mapped = element
         mapped.geometryDevice = element.geometryDevice.applying(deviceToLogical)
         mapped.transform = element.transform.concatenating(deviceToLogical)
+        if let clip = element.clipDevice { mapped.clipDevice = clip.applying(deviceToLogical) }
         if var image = mapped.image {
             image.destRectDevice = image.destRectDevice.applying(deviceToLogical).standardized
             if let corners = image.destCornersDevice {

@@ -48,7 +48,11 @@ enum SceneRasterize {
 
         /// Observes `scene`'s source once. Nil when the source cannot be opened or
         /// prepared (the caller then drops the element rather than rasterising).
-        static func make(_ scene: Scene) -> Source? {
+        /// `rasterize` is the per-element rasterisation predicate — the batched EMF+
+        /// page covers exactly the elements the caller will rasterise, so an EMF→WMF
+        /// export that also rasterises gradient fills (slice E1b2d item 6) includes
+        /// them in the page.
+        static func make(_ scene: Scene, rasterize: (Element) -> Bool = SceneExporter.shouldRasterize) -> Source? {
             guard let opened = try? OpenedMetafile.open(scene.source.data),
                   let prepared = MetafileRenderer.prepare(opened) else { return nil }
             let observation = MetafileRenderer.observe(prepared)
@@ -59,7 +63,7 @@ enum SceneRasterize {
             var plusPage: PlusPage?
             if observation.renderPath == .emfPlus {
                 var indices = Set<Int>()
-                for element in scene.elements where SceneExporter.shouldRasterize(element) {
+                for element in scene.elements where rasterize(element) {
                     if element.id >= 0, element.id < observation.plusEntries.count,
                        case .plus(let op) = observation.plusEntries[element.id] { indices.insert(op.streamIndex) }
                 }

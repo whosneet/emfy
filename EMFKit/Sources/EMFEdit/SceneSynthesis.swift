@@ -291,13 +291,25 @@ enum SceneSynthesis {
     /// resets the DC to the page's base window (`winOrg`/`winExt`) but never the
     /// viewport, so the reader's own output frame maps the logical coords to full
     /// scale (see `wmfReset`).
-    static func wmfBlock(for element: Element, winOrg: PointL, winExt: SizeL, penSlot: UInt16, brushSlot: UInt16, fontSlot: UInt16, emitDx: Bool = false, warnings: inout [ExportWarning]) -> [WMFRecord] {
+    static func wmfBlock(for element: Element, winOrg: PointL, winExt: SizeL, penSlot: UInt16, brushSlot: UInt16, fontSlot: UInt16, emitDx: Bool = false, clip: RectL? = nil, warnings: inout [ExportWarning]) -> [WMFRecord] {
+        var records: [WMFRecord]
         switch element.kind {
-        case .text:  return wmfTextBlock(element, winOrg: winOrg, winExt: winExt, fontSlot: fontSlot, emitDx: emitDx, warnings: &warnings)
-        case .image: return wmfImageBlock(element, winOrg: winOrg, winExt: winExt, warnings: &warnings)
+        case .text:  records = wmfTextBlock(element, winOrg: winOrg, winExt: winExt, fontSlot: fontSlot, emitDx: emitDx, warnings: &warnings)
+        case .image: records = wmfImageBlock(element, winOrg: winOrg, winExt: winExt, warnings: &warnings)
         case .passthrough, .group: return []
-        default:     return wmfGeometryBlock(element, winOrg: winOrg, winExt: winExt, penSlot: penSlot, brushSlot: brushSlot, warnings: &warnings)
+        default:     records = wmfGeometryBlock(element, winOrg: winOrg, winExt: winExt, penSlot: penSlot, brushSlot: brushSlot, warnings: &warnings)
         }
+        // Cross-format synthesis has no ambient clip state (unlike the verbatim
+        // overlay, where the source's own clip records surround the element), so a
+        // shape clipped in the source must be clipped here too — else its full,
+        // unclipped geometry draws (e.g. a page-wide band clipped to a small rect
+        // paints the whole band). Insert the clip INSIDE the block's window mapping,
+        // right after the wmfReset's SetWindowExt (index 3), so it is scoped by the
+        // block's own SAVEDC/RESTOREDC and uses the same logical coordinates.
+        if let clip, records.count >= 4, case .setWindowExt = records[3] {
+            records.insert(.intersectClipRect(clip), at: 4)
+        }
+        return records
     }
 
     /// How many object slots a WMF block for `element` allocates (so the caller's
