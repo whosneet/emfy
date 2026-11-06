@@ -486,8 +486,15 @@ public enum SceneExporter {
         // factor's bb/inch double-rounding could shift it by one, breaking a detailed
         // file's size match). `k` is capped so `inch = 96·k` stays within the UInt16
         // Inch field (k ≤ 682) — an uncapped k on a tiny page overflowed Inch and
-        // corrupted the derived canvas. When the page itself overflows Int16 (k < 1)
-        // fall back to a fractional downscale `s < 1`, the lossy `coordinatesScaled` case.
+        // corrupted the derived canvas. A lower cap of 15 (Inch ≤ 1440, the DPI common
+        // WMF readers favour) was measured and REJECTED: it lost real fidelity on the
+        // committed fixtures (gate-p4-text 0.323%→1.091%, over the 0.5% budget;
+        // gate-p3-shapes 0.000%→0.140%; gate-p4-image 0.000%→0.118%), because small
+        // text/detail pages need a fine logical grid to keep baselines on-pixel. The
+        // placeable BoundingBox/Inch keep the physical size k-invariant for a correct
+        // reader (verified in LibreOffice), so the larger Inch is interop-safe here.
+        // When the page itself overflows Int16 (k < 1) fall back to a fractional
+        // downscale `s < 1`, the lossy `coordinatesScaled` case.
         let limit = 30_000.0
         let kMax = 65_535.0 / 96   // 682: keeps inch = 96·k within the UInt16 Inch field
         let kFloor = (maxExtent.isFinite && maxExtent > 0) ? floor(limit / maxExtent) : 1
