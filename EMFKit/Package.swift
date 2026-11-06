@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "WMFParse", targets: ["WMFParse"]),
         .library(name: "EMFWrite", targets: ["EMFWrite"]),
         .library(name: "EMFRender", targets: ["EMFRender"]),
+        .library(name: "EMFEdit", targets: ["EMFEdit"]),
         .executable(name: "emfy-dump", targets: ["emfy-dump"]),
     ],
     targets: [
@@ -24,6 +25,10 @@ let package = Package(
         .target(
             name: "EMFRender",
             dependencies: ["EMFParse", "WMFParse"]
+        ),
+        .target(
+            name: "EMFEdit",
+            dependencies: ["EMFParse", "WMFParse", "EMFRender", "EMFWrite"]
         ),
         .executableTarget(
             name: "emfy-dump",
@@ -45,6 +50,10 @@ let package = Package(
             name: "EMFRenderTests",
             dependencies: ["EMFRender", "EMFParse"],
             resources: [.copy("__Baselines__")]
+        ),
+        .testTarget(
+            name: "EMFEditTests",
+            dependencies: ["EMFEdit", "EMFParse", "EMFRender", "EMFWrite"]
         ),
     ]
 )
