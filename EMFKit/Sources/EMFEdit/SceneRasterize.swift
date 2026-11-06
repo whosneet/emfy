@@ -45,6 +45,13 @@ enum SceneRasterize {
         let gdiOpsByKey: [Int: ResolvedDrawOp]
         let plusEntries: [PlusEntry]
         let plusPage: PlusPage?
+        /// Rasterise onto a TRANSPARENT background instead of opaque white. The GDI/
+        /// WMF export wants white (a STRETCHDIBITS blit is opaque — the element sits
+        /// over the page's white), but SVG composites the embedded PNG over the
+        /// VECTOR content already written, so a white background would occlude it; a
+        /// passthrough raster there must carry only its own drawn pixels, the rest
+        /// transparent (slice F2).
+        let transparentBackground: Bool
 
         /// Observes `scene`'s source once. Nil when the source cannot be opened or
         /// prepared (the caller then drops the element rather than rasterising).
@@ -52,7 +59,7 @@ enum SceneRasterize {
         /// page covers exactly the elements the caller will rasterise, so an EMF→WMF
         /// export that also rasterises gradient fills (slice E1b2d item 6) includes
         /// them in the page.
-        static func make(_ scene: Scene, rasterize: (Element) -> Bool = SceneExporter.shouldRasterize) -> Source? {
+        static func make(_ scene: Scene, rasterize: (Element) -> Bool = SceneExporter.shouldRasterize, transparentBackground: Bool = false) -> Source? {
             guard let opened = try? OpenedMetafile.open(scene.source.data),
                   let prepared = MetafileRenderer.prepare(opened) else { return nil }
             let observation = MetafileRenderer.observe(prepared)
@@ -67,10 +74,11 @@ enum SceneRasterize {
                     if element.id >= 0, element.id < observation.plusEntries.count,
                        case .plus(let op) = observation.plusEntries[element.id] { indices.insert(op.streamIndex) }
                 }
-                if !indices.isEmpty { plusPage = renderPlusPage(prepared, page: scene.pageBoundsDevice, streamIndices: indices) }
+                if !indices.isEmpty { plusPage = renderPlusPage(prepared, page: scene.pageBoundsDevice, streamIndices: indices, transparent: transparentBackground) }
             }
             return Source(prepared: prepared, renderPath: observation.renderPath,
-                          gdiOpsByKey: ops, plusEntries: observation.plusEntries, plusPage: plusPage)
+                          gdiOpsByKey: ops, plusEntries: observation.plusEntries, plusPage: plusPage,
+                          transparentBackground: transparentBackground)
         }
     }
 
@@ -84,7 +92,7 @@ enum SceneRasterize {
     /// reports `contentDropped` instead of `contentRasterized`.
     static func raster(_ element: Element, scene: Scene, source: Source) -> Raster? {
         switch locate(element, source) {
-        case .gdi(let op)?: return rasterGDI(element, op: op)
+        case .gdi(let op)?: return rasterGDI(element, op: op, transparent: source.transparentBackground)
         case .plus?: return rasterPlus(element, source: source)
         case nil: return nil
         }
@@ -110,14 +118,14 @@ enum SceneRasterize {
     /// ESTIMATED and the render INK-CROPPED to the drawn glyphs — a text page is
     /// white, so trimming to the non-white box both tightens the image and keeps the
     /// opaque blit from erasing the background around the glyphs.
-    private static func rasterGDI(_ element: Element, op: ResolvedDrawOp) -> Raster? {
+    private static func rasterGDI(_ element: Element, op: ResolvedDrawOp, transparent: Bool = false) -> Raster? {
         let estimated = element.kind == .text && !isUsable(element.boundsDevice)
         var rect = element.boundsDevice
         if estimated { rect = estimatedTextBounds(element) ?? rect }
         guard isUsable(rect) else { return nil }
         rect = rect.insetBy(dx: -2, dy: -2)
         let (width, height) = bitmapSize(rect)
-        guard let context = whiteContext(width, height) else { return nil }
+        guard let context = backgroundContext(width, height, transparent: transparent && !estimated) else { return nil }
         EMFRenderer.replay(op, into: context, deviceToTarget: deviceToTarget(deviceRect: rect, target: CGRect(x: 0, y: 0, width: width, height: height)))
         if estimated {
             guard let ink = inkBounds(context, width: width, height: height) else { return nil }
@@ -156,7 +164,7 @@ enum SceneRasterize {
     /// Renders every rasterised EMF+ stream index into ONE white-backed page bitmap
     /// via a single `replayEMFPlus` pass (the page maps to the bitmap, so each
     /// element lands where it draws). O(stream), independent of the element count.
-    private static func renderPlusPage(_ prepared: MetafileRenderer.Prepared, page: CGRect, streamIndices: Set<Int>) -> PlusPage? {
+    private static func renderPlusPage(_ prepared: MetafileRenderer.Prepared, page: CGRect, streamIndices: Set<Int>, transparent: Bool = false) -> PlusPage? {
         let pw = max(1.0, Double(page.width)), ph = max(1.0, Double(page.height))
         var s = oversample
         s = min(s, Double(maxSide) / max(pw, ph))
@@ -164,7 +172,7 @@ enum SceneRasterize {
         guard s.isFinite, s > 0 else { return nil }
         let width = min(maxSide, max(1, Int((pw * s).rounded())))
         let height = min(maxSide, max(1, Int((ph * s).rounded())))
-        guard let context = whiteContext(width, height) else { return nil }
+        guard let context = backgroundContext(width, height, transparent: transparent) else { return nil }
         MetafileRenderer.replayEMFPlus(prepared, streamIndices: streamIndices, into: context, target: CGRect(x: 0, y: 0, width: width, height: height))
         guard let image = context.makeImage() else { return nil }
         return PlusPage(image: image, pageRect: page, width: width, height: height)
@@ -228,17 +236,22 @@ enum SceneRasterize {
 
     // MARK: - Bitmap helpers
 
-    /// A white-filled premultiplied-sRGB bitmap context. White background because
-    /// STRETCHDIBITS/STRETCHDIB blit opaque (BI_RGB has no alpha): the element is
-    /// composited over the page's white, as a reader shows it.
-    private static func whiteContext(_ width: Int, _ height: Int) -> CGContext? {
+    /// A premultiplied-sRGB bitmap context. The default white background suits a
+    /// STRETCHDIBITS/STRETCHDIB blit (opaque, BI_RGB has no alpha — the element sits
+    /// over the page's white). `transparent` leaves the context cleared so an SVG
+    /// `<image>` composites over the vector content beneath it (slice F2).
+    private static func backgroundContext(_ width: Int, _ height: Int, transparent: Bool = false) -> CGContext? {
         guard width >= 1, height >= 1, let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(
                   data: nil, width: width, height: height, bitsPerComponent: 8,
                   bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
         else { return nil }
-        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        if transparent {
+            context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        } else {
+            context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
         return context
     }
 
