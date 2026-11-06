@@ -197,12 +197,11 @@ public enum SceneExporter {
 
     /// Whether one element carries a feature GDI cannot express: element opacity
     /// below 1, a gradient fill, or a fill/stroke/text colour with alpha below 1.
-    /// An IMAGE is excluded — its opacity is not expressible in the EMF+ image
-    /// synthesis (the renderer applies no ImageAttributes alpha), so upgrading a
-    /// pure image-opacity edit to dual would gain nothing; it stays a GDI export
-    /// with an honest `opacityDropped` report instead.
+    /// An IMAGE's opacity now DOES drive a dual upgrade — slice E1b2c bakes it into
+    /// the EMF+ bitmap's PNG alpha, so the EMF+ half blends while the GDI fallback
+    /// stays opaque with an `opacityDropped` report.
     static func elementNeedsEMFPlus(_ element: Element) -> Bool {
-        guard !element.hidden, element.kind != .image else { return false }
+        guard !element.hidden else { return false }
         if element.style.opacity < 1 { return true }
         if let fill = element.style.fill {
             if fill.gradient != nil { return true }

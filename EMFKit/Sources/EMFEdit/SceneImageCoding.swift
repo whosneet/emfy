@@ -34,12 +34,36 @@ enum SceneImageCoding {
     /// from `image`'s source pixels, or nil when the pixels cannot be decoded or
     /// PNG-encoded. The header `Width`/`Height` are the native pixel dimensions;
     /// `Stride` and `PixelFormat` are 0 (unused for a compressed stream).
-    static func compressedPNGImage(for image: SceneImage) -> EMFPlusImage? {
-        guard let cg = cgImage(for: image), let png = pngData(cg) else { return nil }
+    ///
+    /// A sub-1 `opacity` is baked into the PNG's alpha (slice E1b2c): the element
+    /// opacity on an image needs no ImageAttributes support, so every GDI+ reader
+    /// (LibreOffice included) shows the blend. The GDI fallback cannot carry it and
+    /// reports `opacityDropped` instead.
+    static func compressedPNGImage(for image: SceneImage, opacity: Double = 1) -> EMFPlusImage? {
+        guard let decoded = cgImage(for: image) else { return nil }
+        let cg = opacity < 1 ? (withOpacity(decoded, opacity) ?? decoded) : decoded
+        guard let png = pngData(cg) else { return nil }
         let header = EMFPlusImageBitmapHeader(
             width: Int32(clamping: cg.width), height: Int32(clamping: cg.height),
             stride: 0, pixelFormat: 0, bitmapDataType: 1)
         return EMFPlusImage(version: graphicsVersion, content: .bitmap(header, data: png))
+    }
+
+    /// A copy of `image` with every pixel's alpha multiplied by `opacity` (0…1),
+    /// drawn into a premultiplied sRGB context and read back as straight alpha the
+    /// PNG encoder preserves. Nil on a bitmap allocation failure.
+    static func withOpacity(_ image: CGImage, _ opacity: Double) -> CGImage? {
+        let width = image.width, height = image.height
+        guard width > 0, height > 0, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(
+                  data: nil, width: width, height: height, bitsPerComponent: 8,
+                  bytesPerRow: 0, space: space,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        ctx.setAlpha(CGFloat(min(max(opacity, 0), 1)))
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return ctx.makeImage()
     }
 
     /// A 32-bpp BI_RGB TOP-DOWN BGRA DIB from a scene image's source pixels, for a

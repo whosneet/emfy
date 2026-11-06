@@ -300,20 +300,41 @@ struct SceneGDIDualExportTests {
         return try builder.finish()
     }
 
-    @Test func imageOpacityReportsAndImageSurvivesDual() throws {
+    @Test func imageOpacityBlendsInEMFPlusAndReportsInGDI() throws {
         let base = try SceneImporter.import(data: try gdiImageEMF())
         #expect(base.source.renderPath == .gdi, "built image EMF is not GDI")
         let imageID = try #require(base.editableElements.first(where: { $0.kind == .image })).id
 
-        // A pure image-opacity edit is NOT upgraded (the renderer applies no
-        // ImageAttributes alpha) — it stays a GDI EMF and reports opacityDropped.
+        // A 0.5 image-opacity edit now DRIVES a dual upgrade (slice E1b2c): the EMF+
+        // half bakes the opacity into the bitmap's PNG alpha, so it blends.
         var opacityScene = base
         try opacityScene.setOpacity([imageID], 0.5)
-        #expect(!SceneExporter.elementNeedsEMFPlus(try #require(opacityScene.element(id: imageID))),
-                "image opacity must not drive a dual upgrade")
-        let flat = try SceneExporter.export(opacityScene, as: .emf)
-        #expect(try EMFFile.parse(flat.data).emfPlusStream().records.isEmpty, "image-opacity export unexpectedly emitted EMF+")
-        #expect(flat.warnings.contains(.opacityDropped(elementID: imageID)), "image opacity not reported")
+        #expect(SceneExporter.elementNeedsEMFPlus(try #require(opacityScene.element(id: imageID))),
+                "image opacity must now drive a dual upgrade")
+        let dualOut = try SceneExporter.export(opacityScene, as: .emf)
+        let dualFile = try EMFFile.parse(dualOut.data)
+        #expect(dualFile.diagnostics.isEmpty && dualFile.emfPlusStream().diagnostics.isEmpty, "image-opacity dual: diagnostics")
+        #expect(dualFile.emfPlusStream().header?.isDual == true, "image opacity did not upgrade to dual")
+        #expect(dualFile.emfPlusStream().records.contains { $0.isDrawing }, "image-opacity dual: no EMF+ drawing records")
+        // The dual route carries the opacity — no opacityDropped on the default export.
+        #expect(!dualOut.warnings.contains(.opacityDropped(elementID: imageID)), "image-opacity dual unexpectedly dropped opacity")
+        // Re-import keeps the image (baked-alpha EMF+ bitmap).
+        #expect(try SceneImporter.import(data: dualOut.data).editableElements.contains { $0.kind == .image }, "image lost after opacity dual")
+
+        // The EMF+ render blends the image over white (the 8×8 top half was blue →
+        // a 0.5 alpha over white is a lighter blue, not pure blue).
+        if let plusImg = render(dualOut.data), let px = PixelImage(plusImg) {
+            let r = targetPixelRect(CGRect(x: 60, y: 60, width: 10, height: 10), pageBounds: base.pageBoundsDevice, targetW: px.width, targetH: px.height)
+            let x = min(max(Int(r.midX), 0), px.width - 1), y = min(max(Int(r.midY), 0), px.height - 1)
+            let o = (y * px.width + x) * 4
+            // A 50%-alpha opaque-blue (0,0,255) over white → roughly (128,128,255).
+            #expect(px.pixels[o] > 80 && px.pixels[o + 2] > 200, "image-opacity EMF+ not blended: \((px.pixels[o], px.pixels[o+1], px.pixels[o+2]))")
+        }
+
+        // The GDI-only (forced) output cannot hold the alpha → opacityDropped. (The
+        // WMF cross-container case is asserted in the cross-format export suite.)
+        let flat = try SceneExporter.export(opacityScene, as: .emf, options: ExportOptions(forceGDIOnly: true))
+        #expect(flat.warnings.contains(.opacityDropped(elementID: imageID)), "forced GDI image opacity not reported")
 
         // If a DIFFERENT element forces the dual upgrade, the unedited image is still
         // drawn (via GetDC, lossless) — insert a semi-transparent rect to force dual.

@@ -248,7 +248,11 @@ enum SceneEMFPlusSynthesis {
     // MARK: - Image
 
     private static func imageEmits(_ element: Element, allocate: () -> UInt8?, warnings: inout [ExportWarning]) -> [Emit]? {
-        guard let scImage = element.image, let plus = SceneImageCoding.compressedPNGImage(for: scImage) else {
+        // A sub-1 element opacity is baked into the PNG alpha here, so the EMF+
+        // DrawImage needs no ImageAttributes and every GDI+ reader shows the blend
+        // (slice E1b2c). The GDI fallback cannot hold it and reports opacityDropped.
+        guard let scImage = element.image,
+              let plus = SceneImageCoding.compressedPNGImage(for: scImage, opacity: element.style.opacity) else {
             warnings.append(.imageDropped(elementID: element.id)); return nil
         }
         guard let imageID = allocate() else { return nil }
