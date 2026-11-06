@@ -1134,18 +1134,28 @@ public enum EMFRenderer {
     }
 
     /// Captures an image op after a blit drew. `dib` is nil for a sourceless rop
-    /// fill (those stay passthrough). Dest is in LOGICAL units.
+    /// fill, which lifts as a passthrough op (it painted, but has no image to
+    /// edit). Dest is in LOGICAL units.
     private static func captureImageOp(
         destOrigin: PointL, destSize: SizeL, dib: DIB?, payload: EMFRecordPayload, dc: DeviceContext
     ) {
-        guard let observer = dc.observer, dib != nil else { return }
-        let t = dc.resolvedTransform
-        let device = CGMutablePath()
+        guard let observer = dc.observer else { return }
         let rect = CGRect(
             x: CGFloat(destOrigin.x), y: CGFloat(destOrigin.y),
             width: CGFloat(destSize.cx), height: CGFloat(destSize.cy)
         )
-        device.addRect(rect.standardized, transform: t)
+        // A sourceless blit (dib == nil — a PATCOPY-style BITBLT/STRETCHBLT) draws
+        // no bitmap to lift as an image, but it DID paint the dest rect with the
+        // current brush. Capture it as a passthrough op carrying its payload so the
+        // scene replays the fill; returning here (the old behaviour) silently
+        // dropped it, leaving brush-filled regions blank on re-render. Mirrors
+        // `capturePassthroughOp` for PATBLT.
+        guard let dib else {
+            capturePassthroughOp(deviceRect: rect, payload: payload, dc: dc)
+            return
+        }
+        let device = CGMutablePath()
+        device.addRect(rect.standardized, transform: dc.resolvedTransform)
         observer.append(makeOp(
             kind: .image,
             recordIndices: [observer.currentRecordIndex],
