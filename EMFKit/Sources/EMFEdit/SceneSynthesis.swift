@@ -101,7 +101,18 @@ enum SceneSynthesis {
         let directDraw: Bool
         if let first = shape.first, case .beginPath = first { directDraw = false }
         else { directDraw = !shape.isEmpty }
-        guard fill != nil || stroke != nil || directDraw else { return [] }
+        if fill == nil, stroke == nil, !directDraw {
+            // Would be dropped (a no-paint path bracket has no terminal to re-lift).
+            // A ZERO-AREA invisible element, though, must still round-trip — dropping
+            // it on edit silently loses the element (corpus-local idx 150). Re-emit it
+            // as a degenerate RECTANGLE under NULL_PEN/NULL_BRUSH: it draws nothing
+            // (harmless) but re-imports as an element. (slice E1b2d item 5)
+            let bbox = element.geometryDevice.boundingBox
+            if !bbox.isNull, bbox.width == 0 || bbox.height == 0 {
+                return emfDegenerateRect(bbox)
+            }
+            return []
+        }
         warnings.append(contentsOf: shapeWarnings)
         if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
         if let fill, fill.gradient != nil { warnings.append(.gradientFlattened(elementID: element.id)) }
@@ -120,6 +131,21 @@ enum SceneSynthesis {
         out.append(.selectObject(.stock(.whiteBrush)))
         if stroke != nil { out.append(.deleteObject(.table(index: penHandle))) }
         if fill != nil { out.append(.deleteObject(.table(index: brushHandle))) }
+        out.append(.restoreDC(savedDC: -1))
+        return out
+    }
+
+    /// A degenerate (zero-area) RECTANGLE under NULL_PEN/NULL_BRUSH — the round-trip
+    /// carrier for a zero-area invisible element that would otherwise be dropped on
+    /// edit (item 5). It draws nothing but re-imports as an (invisible) element, so
+    /// an edit never silently loses the element.
+    private static func emfDegenerateRect(_ box: CGRect) -> [EMFRecordPayload] {
+        var out = emfReset()
+        out.append(.selectObject(.stock(.nullPen)))
+        out.append(.selectObject(.stock(.nullBrush)))
+        out.append(.rectangle(box: rectL(box)))
+        out.append(.selectObject(.stock(.blackPen)))
+        out.append(.selectObject(.stock(.whiteBrush)))
         out.append(.restoreDC(savedDC: -1))
         return out
     }
