@@ -195,11 +195,20 @@ extension Scene {
 
     // MARK: Text
 
-    /// Replaces a text run's string.
+    /// Replaces a text run's string. Any layout data captured for the OLD string is
+    /// dropped: the GDI intercharacter advances (one per old code unit — reusing
+    /// them mis-spaces the new run, [MS-EMF] §2.2.5), and, for a LONGER new string,
+    /// an EMF+ run's layout-rect extent (a stale narrow rect would clip or
+    /// mis-align the longer run — collapse it to a point origin, [MS-EMFPLUS]
+    /// §2.3.4.14). A same-or-shorter string keeps the EMF+ extent (its alignment
+    /// still holds and it cannot clip).
     public mutating func setText(_ id: Int, _ string: String) throws(SceneEditError) {
         try requireTextElement(id)
         try mutate([id]) { element in
+            let oldCount = element.text?.string.utf16.count ?? 0
             element.text?.string = string
+            element.text?.advancesLogical = []
+            if string.utf16.count > oldCount { element.text?.layoutReference = .null }
             element.provenance.edited = true
         }
     }

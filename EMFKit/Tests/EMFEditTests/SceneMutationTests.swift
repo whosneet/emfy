@@ -79,6 +79,40 @@ struct SceneMutationTests {
         #expect(text.bold)
     }
 
+    @Test func setTextDropsStaleAdvances() throws {
+        // A GDI text run that carried captured intercharacter advances must drop
+        // them on setText — reusing advances sized for the old string mis-spaces the
+        // new run ([MS-EMF] §2.2.5).
+        let base = try textScene()
+        guard let id = base.editableElements.first(where: { $0.kind == .text && !($0.text?.advancesLogical.isEmpty ?? true) })?.id else { return }
+        var scene = base
+        try scene.setText(id, "W")
+        #expect(scene.element(id: id)?.text?.advancesLogical.isEmpty == true, "setText did not drop the stale advances")
+    }
+
+    @Test func setTextDropsStaleLayoutExtentForLongerString() throws {
+        // An EMF+ run with a real layout extent: a LONGER replacement collapses the
+        // extent to a point origin (a stale narrow rect would clip/mis-align the
+        // longer run, [MS-EMFPLUS] §2.3.4.14); a shorter one keeps it.
+        let base = try SceneImporter.import(data: try Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("handmade-emfplus-text.emf")))
+        guard let id = base.editableElements.first(where: { $0.kind == .text })?.id else { return }
+        var seeded = base
+        for li in seeded.layers.indices {
+            for ei in seeded.layers[li].elements.indices where seeded.layers[li].elements[ei].id == id {
+                seeded.layers[li].elements[ei].text?.string = "Hi"
+                seeded.layers[li].elements[ei].text?.layoutReference = CGRect(x: 0, y: 0, width: 40, height: 20)
+                seeded.layers[li].elements[ei].text?.advancesLogical = [3, 3]
+            }
+        }
+        var longer = seeded
+        try longer.setText(id, "Hello world, a much longer run")
+        #expect(longer.element(id: id)?.text?.layoutReference.isNull == true, "longer setText did not collapse the stale extent")
+        #expect(longer.element(id: id)?.text?.advancesLogical.isEmpty == true, "longer setText did not drop advances")
+        var shorter = seeded
+        try shorter.setText(id, "H")
+        #expect(shorter.element(id: id)?.text?.layoutReference.isNull == false, "shorter setText wrongly collapsed the extent")
+    }
+
     @Test func setTextOnNonTextThrows() throws {
         var scene = try house()
         let id = try #require(scene.editableElements.first { $0.kind != .text }?.id)
