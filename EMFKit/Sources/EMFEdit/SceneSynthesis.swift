@@ -225,6 +225,64 @@ enum SceneSynthesis {
         return out
     }
 
+    /// A text block that PRESERVES the element's world transform instead of baking
+    /// it into integer device coordinates. For a GetDC-window run under a fractional
+    /// world transform, baking the reference to device and rounding it quantises the
+    /// baseline (slice E1b2e item 1); re-establishing the transform (MM_TEXT so the
+    /// map mode is 1:1, then SetWorldTransform) and drawing at the run's own LOGICAL
+    /// reference and font height reproduces the exact device baseline, because GDI
+    /// applies the transform exactly as the source window did — the SAME engine that
+    /// drew the original, so alignment (TA_BASELINE/TA_TOP), the font, and the
+    /// condensed advances all match. Emitted in place inside the GetDC window, so the
+    /// one record serves both the EMF+ GetDC replay and the GDI fallback (one copy in
+    /// each arbitration mode); GM_ADVANCED is inherited from the window the SAVEDC
+    /// nests in, so a spec-correct reader honours the SetWorldTransform
+    /// ([MS-EMF] §2.2.26, §2.3.5.34; §2.2.9 GM_ADVANCED required for world transforms).
+    static func emfTextBlockWorld(for element: Element, fontHandle: UInt32, warnings: inout [ExportWarning]) -> [EMFRecordPayload] {
+        guard let text = element.text, !text.string.isEmpty else { return [] }
+        if droppedAlpha(element) { warnings.append(.opacityDropped(elementID: element.id)) }
+        let color = (element.style.fill?.color ?? text.color).colorRef
+        var out: [EMFRecordPayload] = [
+            .saveDC,
+            .setMapMode(.text),
+            .setWorldTransform(xform(element.transform)),
+            .setWindowOrgEx(origin: PointL(x: 0, y: 0)),
+            .setViewportOrgEx(origin: PointL(x: 0, y: 0)),
+        ]
+        out.append(.setBkMode(.transparent))
+        out.append(.setTextColor(color))
+        out.append(.setTextAlign(TextAlign(rawValue: text.alignRawValue)))
+        // The font height stays the run's SIGNED LOGICAL height; the world transform
+        // scales it to the device size, as the source window did.
+        out.append(.extCreateFontIndirectW(ExtCreateFontPayload(ihFonts: fontHandle, logFont: logFont(for: text, deviceHeight: text.logicalHeight), hasExtendedData: false)))
+        out.append(.selectObject(.table(index: fontHandle)))
+        // GM_ADVANCED (2): the exScale/eyScale are ignored and the world transform
+        // governs the reference and glyphs; the reference and Dx stay in LOGICAL units.
+        out.append(.extTextOutW(ExtTextPayload(graphicsMode: 2, exScale: 1, eyScale: 1, reference: pointL(text.referenceLogical),
+            rectangle: RectL(left: 0, top: 0, right: 0, bottom: 0), string: text.string,
+            options: ExtTextOutOptions(rawValue: 0), dx: logicalAdvances(text))))
+        out.append(.selectObject(.stock(.systemFont)))
+        out.append(.deleteObject(.table(index: fontHandle)))
+        out.append(.restoreDC(savedDC: -1))
+        return out
+    }
+
+    /// The run's intercharacter advances in LOGICAL units (the space
+    /// `emfTextBlockWorld` draws in), or nil to use the font's natural advances when
+    /// the captured array no longer matches the (possibly edited) string.
+    private static func logicalAdvances(_ text: SceneText) -> [UInt32]? {
+        let advances = text.advancesLogical
+        guard !advances.isEmpty, advances.count == text.string.utf16.count else { return nil }
+        return advances
+    }
+
+    /// `element.transform` as an EMR XForm ([MS-EMF] §2.2.28), saturating a
+    /// non-finite edit to the identity so the parse/export path never traps (§8).
+    private static func xform(_ t: CGAffineTransform) -> XForm {
+        guard t.a.isFinite, t.b.isFinite, t.c.isFinite, t.d.isFinite, t.tx.isFinite, t.ty.isFinite else { return identityXForm }
+        return XForm(m11: Float(t.a), m12: Float(t.b), m21: Float(t.c), m22: Float(t.d), dx: Float(t.tx), dy: Float(t.ty))
+    }
+
     private static func emfImageBlock(_ element: Element, warnings: inout [ExportWarning]) -> [EMFRecordPayload] {
         // A GDI image carries its source DIB; an EMF+ image (dual-file GDI fallback)
         // carries none, so its pixels are decoded to a BI_RGB DIB for STRETCHDIBITS.

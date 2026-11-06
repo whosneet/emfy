@@ -786,13 +786,16 @@ struct SceneEMFPlusExportTests {
         let outlierText = outliers.sorted { $0.pct > $1.pct }.prefix(12)
             .map { "#\($0.index)=\(pct($0.pct))" }.joined(separator: ", ")
         print("\n=== corpus-local EMF+ identity-edit fidelity: \(files) files — ≤0.5%: \(within05), ≤2%: \(within2), >2%: \(over2) — outliers: \(outlierText) ===")
-        // A COUNT floor only (the files are confidential, so no file is named): most
-        // EMF+ files re-emit an identity edit within 0.5%, and the few residuals are
-        // GDI text in GetDC windows whose fractional source world transform quantises
-        // to an integer EMR reference — a sub-pixel shift, documented, not a
-        // regression. The floor catches a broad regression without being flaky.
+        // A COUNT floor only (the files are confidential, so no file is named). Since
+        // slice E1b2e item 1 re-emits edited GetDC-window GDI text through a
+        // world-transform block (no device quantisation), all but ONE measured file
+        // re-emit an identity edit within 0.5%; the lone residual is sub-pixel
+        // antialiasing on a ~50×15 px icon, not a baseline shift. The floor is
+        // tightened from the pre-fix `files − 5` to `files − 2` (headroom for that AA
+        // case plus cross-machine drift) so a regression that re-quantises the text is
+        // caught without being flaky.
         if files >= 20 {
-            #expect(within05 >= files - 5,
+            #expect(within05 >= files - 2,
                     "corpus-local identity fidelity regressed: only \(within05)/\(files) within 0.5%")
         }
     }

@@ -1121,7 +1121,18 @@ public enum SceneExporter {
                 if let element = presentByID[id] {
                     if element.provenance.edited {
                         changed = true
-                        for payload in SceneSynthesis.emfBlock(for: element, baseHandle: baseHandle, warnings: &warnings) {
+                        // An edited GetDC-window GDI TEXT run re-emitted as integer
+                        // EXTTEXTOUTW in device space quantises its baseline under the
+                        // window's fractional world transform (slice E1b2e item 1). Draw
+                        // it in place through a world-transform block instead, which the
+                        // GetDC GDI engine renders exactly as the source did (no
+                        // quantisation, alignment honoured); it stays ONE record, so an
+                        // EMF+ reader and a GDI reader each draw exactly one copy. Non-text
+                        // edits keep the device-space block — their vertices re-emit exactly.
+                        let payloads = element.kind == .text
+                            ? SceneSynthesis.emfTextBlockWorld(for: element, fontHandle: baseHandle, warnings: &warnings)
+                            : SceneSynthesis.emfBlock(for: element, baseHandle: baseHandle, warnings: &warnings)
+                        for payload in payloads {
                             body.append([UInt8](try EMFRecordEncoder.encode(payload)))
                         }
                     } else {
