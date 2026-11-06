@@ -64,6 +64,13 @@ public enum ExportWarning: Sendable, Equatable {
     /// feature (a passthrough/unsupported EMF+ record) or a GDI raster op — was
     /// dropped from a cross-container export (slice E1b2c). Its content is lost.
     case contentDropped(elementID: Int)
+    /// An element the target container could not re-synthesise faithfully — a
+    /// passthrough/unsupported EMF+ record, a WMF raster/ROP blit, a non-Latin-1
+    /// text run (WMF strings are 8-bit), or an EMF+ text run — was RASTERISED: it
+    /// was drawn alone into a bitmap at its device bounds and emitted as an image
+    /// record (EMR_STRETCHDIBITS / META_STRETCHDIB) so it still looks right, at the
+    /// cost of editability and a resample (slice E1b2c2).
+    case contentRasterized(elementID: Int)
 }
 
 /// A user-facing grouping of `ExportWarning`s, so the app can show one short list
@@ -83,6 +90,8 @@ public enum ExportWarningCategory: String, Sendable, CaseIterable {
     case coordinates
     /// `contentDropped` — an element the container cannot represent at all.
     case droppedContent
+    /// `contentRasterized` — an element re-emitted as a bitmap to keep its look.
+    case rasterized
     /// `embeddedEMFOnly`, `fallbackMayBeStale` — a down-level reader may see
     /// pre-edit content.
     case downlevelStale
@@ -299,8 +308,43 @@ public enum SceneExporter {
         case .kindFallback: return .shapeApproximated
         case .coordinatesScaled: return .coordinates
         case .contentDropped: return .droppedContent
+        case .contentRasterized: return .rasterized
         case .embeddedEMFOnly, .fallbackMayBeStale: return .downlevelStale
         }
+    }
+
+    // MARK: - Cross-container rasterisation decision (slice E1b2c2)
+
+    /// True when a cross-container export cannot re-synthesise `element` faithfully,
+    /// so it is RASTERISED (drawn alone into a bitmap, emitted as an image record)
+    /// rather than dropped: a passthrough (an unsupported EMF+ record, a WMF raster/
+    /// ROP blit, glyph-index text), a non-Latin-1 text run (WMF strings are 8-bit),
+    /// an EMF+ text run (sized by an em size no GDI/WMF field holds), or a rotated/
+    /// sheared image (a parallelogram a STRETCHDIBITS axis-aligned rect cannot hold).
+    static func shouldRasterize(_ element: Element) -> Bool {
+        guard !element.hidden, element.kind != .group else { return false }
+        switch element.kind {
+        case .passthrough:
+            return true
+        case .text:
+            guard let text = element.text else { return false }
+            if text.isEMFPlus { return true }
+            return text.string.unicodeScalars.contains { $0.value > 0xFF }
+        case .image:
+            return element.image?.destCornersDevice != nil
+        default:
+            return false
+        }
+    }
+
+    /// The warning raised when `element` is rasterised: a rotated image keeps
+    /// `imageRotated` (the rotation was the reason), everything else is the generic
+    /// `contentRasterized` (the element became a bitmap).
+    private static func rasterWarning(for element: Element) -> ExportWarning {
+        if element.kind == .image, element.image?.destCornersDevice != nil {
+            return .imageRotated(elementID: element.id)
+        }
+        return .contentRasterized(elementID: element.id)
     }
 
     // MARK: - Cross-container: EMF scene → WMF (full synthesis, slice E1b2c)
@@ -326,10 +370,24 @@ public enum SceneExporter {
         }
         let builder = WMFDocumentBuilder(boundingBox: map.bb, unitsPerInch: map.inch, embeddedEMF: embeddedEMF)
 
+        // Observe the source once if any element must be rasterised (passthrough,
+        // non-Latin-1 or EMF+ text, a rotated image).
+        let rasterSource = scene.elements.contains(where: shouldRasterize) ? SceneRasterize.Source.make(scene) : nil
+
         for element in scene.elements where !element.hidden {
             guard element.kind != .group else { continue }
-            if element.kind == .passthrough {
-                warnings.append(.contentDropped(elementID: element.id)); continue
+            if shouldRasterize(element) {
+                if let source = rasterSource,
+                   let raster = SceneRasterize.raster(element, scene: scene, source: source),
+                   let dib = SceneImageCoding.dib(from: raster.image) {
+                    let destLogical = raster.deviceRect.applying(map.deviceToLogical)
+                    let records = SceneSynthesis.wmfImageRecords(dib: dib, destLogical: destLogical, winOrg: map.winOrg, winExt: map.winExt)
+                    for record in records { try builder.append(record) }
+                    warnings.append(rasterWarning(for: element))
+                } else {
+                    warnings.append(.contentDropped(elementID: element.id))
+                }
+                continue
             }
             let mapped = mapElementToWMFLogical(element, map.deviceToLogical)
             // A fresh slot model per block (each block creates and deletes its own
@@ -365,7 +423,7 @@ public enum SceneExporter {
         // before the clip), so a shape extending far outside a small clip is still
         // scaled to fit — `boundsDevice` is clip-intersected and would under-measure.
         var maxExtent = max(w, h)
-        for element in scene.elements where !element.hidden && element.kind != .passthrough && element.kind != .group {
+        for element in scene.elements where !element.hidden && element.kind != .group {
             var box = element.geometryDevice.boundingBox
             if let image = element.image {
                 box = box.isNull ? image.destRectDevice : box.union(image.destRectDevice)
@@ -457,10 +515,22 @@ public enum SceneExporter {
         var warnings: [ExportWarning] = []
         var indexMap: [Int: [Int]] = [:]
         var cursor = 1   // record 0 is the EMR_HEADER
+        let rasterSource = scene.elements.contains(where: shouldRasterize) ? SceneRasterize.Source.make(scene) : nil
         for element in scene.elements where !element.hidden {
             guard element.kind != .group else { continue }
-            if element.kind == .passthrough {
-                warnings.append(.contentDropped(elementID: element.id)); continue
+            if shouldRasterize(element) {
+                if let source = rasterSource,
+                   let raster = SceneRasterize.raster(element, scene: scene, source: source),
+                   let dib = SceneImageCoding.dib(from: raster.image) {
+                    let payloads = SceneSynthesis.emfImageRecords(dib: dib, destDevice: raster.deviceRect)
+                    var indices: [Int] = []
+                    for payload in payloads { try builder.append(payload); indices.append(cursor); cursor += 1 }
+                    indexMap[element.id] = indices
+                    warnings.append(rasterWarning(for: element))
+                } else {
+                    warnings.append(.contentDropped(elementID: element.id))
+                }
+                continue
             }
             var blockWarnings: [ExportWarning] = []
             let payloads = SceneSynthesis.emfBlock(for: element, baseHandle: 1, warnings: &blockWarnings)

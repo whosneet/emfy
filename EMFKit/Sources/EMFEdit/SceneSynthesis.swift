@@ -213,7 +213,15 @@ enum SceneSynthesis {
         // GDI STRETCHDIBITS fills an axis-aligned rect only; a rotated/sheared
         // parallelogram is dropped to its bounding box, with a warning.
         if image.destCornersDevice != nil { warnings.append(.imageRotated(elementID: element.id)) }
-        let dest = image.destRectDevice.standardized
+        return emfImageRecords(dib: dib, destDevice: image.destRectDevice)
+    }
+
+    /// A self-contained device-space EMR_STRETCHDIBITS block drawing `dib` into
+    /// `destDevice` (SRCCOPY, [MS-EMF] §2.3.1.7). Shared by `emfImageBlock` and the
+    /// cross-format rasteriser (`SceneRasterize`), which hands a bitmap of one
+    /// element it could not re-synthesise.
+    static func emfImageRecords(dib: DIB, destDevice: CGRect) -> [EMFRecordPayload] {
+        let dest = destDevice.standardized
         var out = emfReset()
         out.append(.stretchDIBits(StretchDIBitsPayload(bounds: rectL(dest), dest: pointL(dest.origin),
             destSize: SizeL(cx: SceneNumeric.int32(dest.width), cy: SceneNumeric.int32(dest.height)),
@@ -405,7 +413,14 @@ enum SceneSynthesis {
         }
         if element.style.opacity < 1 { warnings.append(.opacityDropped(elementID: element.id)) }
         if image.destCornersDevice != nil { warnings.append(.imageRotated(elementID: element.id)) }
-        let dest = image.destRectDevice.standardized
+        return wmfImageRecords(dib: dib, destLogical: image.destRectDevice, winOrg: winOrg, winExt: winExt)
+    }
+
+    /// A self-contained logical-space META_STRETCHDIB block drawing `dib` into
+    /// `destLogical` (SRCCOPY, [MS-WMF] §2.3.1.6). Shared by `wmfImageBlock` and the
+    /// cross-format rasteriser; `destLogical` is already in the WMF's logical space.
+    static func wmfImageRecords(dib: DIB, destLogical: CGRect, winOrg: PointL, winExt: SizeL) -> [WMFRecord] {
+        let dest = destLogical.standardized
         var out = wmfReset(winOrg: winOrg, winExt: winExt)
         out.append(.stretchDIB(rop: srcCopy, colorUsage: 0, src: PointL(x: 0, y: 0),
             srcSize: SizeL(cx: dib.width, cy: abs(dib.height)), dest: pointL32(dest.origin),

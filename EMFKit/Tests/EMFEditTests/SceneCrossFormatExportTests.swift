@@ -40,13 +40,17 @@ struct SceneCrossFormatExportTests {
         ("gate-p3-shapes.emf", 0.025),
         ("handmade-strokes-paths.emf", 0.02),
         ("gate-p4-image.emf", 0.02),
-        // Text: metrics differ between the EMF and WMF render paths — looser.
-        ("gate-p4-text.emf", 0.08),
-        ("handmade-cjk-text.emf", 0.12),
-        ("handmade-emfplus-text.emf", 0.06),
-        // EMF+-only features flatten in WMF (asserted via the warning list elsewhere):
-        // an image re-samples; a gradient fill collapses to one solid (large area diff).
-        ("handmade-emfplus-image.emf", 0.10),
+        // Text: Latin runs re-emit as META_EXTTEXTOUT with Dx (slice E1b2c2), so a
+        // GDI run lands in the vector band; a non-Latin-1 (CJK) run is RASTERISED
+        // and resamples, so it is a little looser.
+        ("gate-p4-text.emf", 0.02),
+        ("handmade-cjk-text.emf", 0.04),
+        // EMF+ text and a rotated EMF+ image are RASTERISED (an em size / a
+        // parallelogram GDI/WMF cannot hold), so they match within the resample.
+        ("handmade-emfplus-text.emf", 0.02),
+        ("handmade-emfplus-image.emf", 0.02),
+        // An EMF+ gradient fill flattens to one solid in plain WMF (inherent, with a
+        // `gradientFlattened` warning), a large area diff kept under a wide budget.
         ("handmade-emfplus-shapes.emf", 0.30),
         ("handmade-emfplus-dual.emf", 0.02),
     ]

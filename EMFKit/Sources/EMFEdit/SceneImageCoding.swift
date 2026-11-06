@@ -74,7 +74,18 @@ enum SceneImageCoding {
     /// would render it upside down).
     static func dib(for image: SceneImage) -> DIB? {
         if let dib = image.sourceDIB, case .pixels = dib.content { return dib }
-        guard let cg = cgImage(for: image), let bgra = bgraTopDown(cg) else { return nil }
+        guard let cg = cgImage(for: image) else { return nil }
+        return dib(from: cg)
+    }
+
+    /// A 32-bpp BI_RGB TOP-DOWN BGRA DIB from an arbitrary `CGImage` — the form a
+    /// STRETCHDIBITS / META_STRETCHDIB record carries. Shared by `dib(for:)` and
+    /// the cross-format rasteriser (`SceneRasterize`), which draws one element into
+    /// a bitmap and emits it as an image. The header height is NEGATIVE (top-down):
+    /// `bgraTopDown`'s row 0 is the drawn image's top, so a positive/bottom-up
+    /// height would render upside down.
+    static func dib(from cg: CGImage) -> DIB? {
+        guard let bgra = bgraTopDown(cg) else { return nil }
         return DIB(
             width: Int32(clamping: cg.width), height: -Int32(clamping: cg.height),
             bitCount: 32, compression: .rgb,
