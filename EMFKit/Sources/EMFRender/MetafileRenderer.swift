@@ -496,11 +496,12 @@ public enum MetafileRenderer {
         options: RenderOptions = .default
     ) -> (CGImage, EMFRenderLog)? {
         // The caller-supplied scale is sanitised (not hostile file data); the
-        // program canvas is already clamped by the translator.
-        let safeScale = scale.isFinite && scale > 0 ? Double(scale) : 1
-        let width = clampDimension(Double(program.canvasWidth) * safeScale)
-        let height = clampDimension(Double(program.canvasHeight) * safeScale)
-        let (w, h) = clampArea(width: width, height: height)
+        // program canvas is already clamped by the translator. The per-side +
+        // area clamp is the shared `EMFRenderer.canvasPixelSize`, so a WMF scene
+        // sizes identically in the viewer and the editor's `SceneRenderer`.
+        let (w, h) = EMFRenderer.canvasPixelSize(
+            deviceWidth: Double(program.canvasWidth), deviceHeight: Double(program.canvasHeight), scale: scale
+        )
 
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(
@@ -627,32 +628,5 @@ public enum MetafileRenderer {
         let h = max(height, 1)
         let overshoot = max(w / maxPageSide, h / maxPageSide, 1)
         return CGSize(width: w / overshoot, height: h / overshoot)
-    }
-
-    // MARK: - Canvas clamps (§8)
-    //
-    // Mirror EMFRenderer.makeImage's caps for the scaled WMF canvas. The
-    // program canvas is already clamped by the translator at scale 1; these
-    // bound the post-scale size.
-
-    private static let canvasDimensionCap = 16_384
-    private static let canvasAreaCap = 32_000_000
-
-    private static func clampDimension(_ requested: Double) -> Int {
-        guard requested.isFinite else { return canvasDimensionCap }
-        let rounded = requested.rounded()
-        if rounded < 1 { return 1 }
-        if rounded > Double(canvasDimensionCap) { return canvasDimensionCap }
-        return Int(rounded)
-    }
-
-    private static func clampArea(width: Int, height: Int) -> (width: Int, height: Int) {
-        let area = width * height
-        guard area > canvasAreaCap else { return (width, height) }
-        let scale = (Double(canvasAreaCap) / Double(area)).squareRoot()
-        return (
-            max(1, Int((Double(width) * scale).rounded(.down))),
-            max(1, Int((Double(height) * scale).rounded(.down)))
-        )
     }
 }

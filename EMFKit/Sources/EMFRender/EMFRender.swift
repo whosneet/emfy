@@ -163,10 +163,11 @@ public enum EMFRenderer {
         let requestedHeight = Double(deviceHeight) * safeScale
         // Per-side clamp first, then the total-area clamp on the result: a
         // header near the per-side cap on both axes (≈268 Mpx) is brought under
-        // the area cap with its aspect ratio preserved.
-        let sideWidth = clampDimension(requestedWidth)
-        let sideHeight = clampDimension(requestedHeight)
-        let (width, height) = clampArea(width: sideWidth, height: sideHeight)
+        // the area cap with its aspect ratio preserved. Routed through the shared
+        // `canvasPixelSize` so the editor's `SceneRenderer` sizes identically.
+        let (width, height) = canvasPixelSize(
+            deviceWidth: Double(deviceWidth), deviceHeight: Double(deviceHeight), scale: scale
+        )
         if Double(width) != requestedWidth || Double(height) != requestedHeight {
             log.note(.canvasClamped(
                 requestedWidth: saturatingInt(requestedWidth),
@@ -249,6 +250,20 @@ public enum EMFRenderer {
     }
 
     // MARK: - Canvas mapping
+
+    /// The bitmap canvas size in pixels for a natural device size at `scale`,
+    /// applying the per-side cap THEN the total-area cap (aspect ratio preserved).
+    /// This is the single canvas-sizing rule shared by every bitmap render path —
+    /// EMF (`makeImage`), the WMF program (`MetafileRenderer`), and the editor's
+    /// `SceneRenderer` — so the editor canvas is identical to the viewer canvas.
+    /// `scale` is sanitised (non-finite or ≤ 0 → 1); the device size is the
+    /// header-bounds / WMF-canvas extent the caller already computed.
+    public static func canvasPixelSize(deviceWidth: Double, deviceHeight: Double, scale: CGFloat) -> (width: Int, height: Int) {
+        let safeScale = scale.isFinite && scale > 0 ? Double(scale) : 1
+        let sideWidth = clampDimension(deviceWidth * safeScale)
+        let sideHeight = clampDimension(deviceHeight * safeScale)
+        return clampArea(width: sideWidth, height: sideHeight)
+    }
 
     /// Rounds and clamps a requested canvas dimension into [1, cap].
     private static func clampDimension(_ requested: Double) -> Int {
