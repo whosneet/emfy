@@ -196,6 +196,40 @@ struct SceneCrossFormatExportTests {
         #expect(summary[.gradient] != nil, "summary missing the gradient category")
     }
 
+    // MARK: - Interop evidence (opt-in; LibreOffice samples off-repo)
+
+    /// Produces the three cross-format interop files and — when `EMFY_INTEROP_DIR`
+    /// is set — writes them (plus their originals) for an external reader to sample.
+    /// Always runs the export + structural checks; the file write is opt-in.
+    @Test func crossFormatInteropEvidence() throws {
+        // (1) EMF → WMF, embed OFF (a plain WMF a down-level reader must draw).
+        let emfBase = try importScene("gate-p2-house.emf")
+        let emfToWMF = try SceneExporter.export(emfBase, as: .wmf, options: ExportOptions(embedEMFInWMF: false))
+        #expect(try WMFFile.parse(emfToWMF.data).diagnostics.isEmpty)
+
+        // (2) WMF → EMF (an EMF a reader must draw).
+        let wmfBase = try importScene("gate-wmf-p2-house.wmf")
+        let wmfToEMF = try SceneExporter.export(wmfBase, as: .emf)
+        #expect(try EMFFile.parse(wmfToEMF.data).diagnostics.isEmpty)
+
+        // (3) A 0.5-opacity image → dual EMF+ (the EMF+ half must blend).
+        var imageScene = try SceneImporter.import(data: try gdiImageEMF())
+        let imageID = try #require(imageScene.editableElements.first { $0.kind == .image }).id
+        try imageScene.setOpacity([imageID], 0.5)
+        let opacityEMF = try SceneExporter.export(imageScene, as: .emf)
+        #expect(try EMFFile.parse(opacityEMF.data).emfPlusStream().header?.isDual == true)
+
+        if let dir = ProcessInfo.processInfo.environment["EMFY_INTEROP_DIR"] {
+            let base = URL(fileURLWithPath: dir)
+            try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+            try emfBase.source.data.write(to: base.appendingPathComponent("emf-to-wmf-original.emf"))
+            try emfToWMF.data.write(to: base.appendingPathComponent("emf-to-wmf.wmf"))
+            try wmfBase.source.data.write(to: base.appendingPathComponent("wmf-to-emf-original.wmf"))
+            try wmfToEMF.data.write(to: base.appendingPathComponent("wmf-to-emf.emf"))
+            try opacityEMF.data.write(to: base.appendingPathComponent("image-opacity-dual.emf"))
+        }
+    }
+
     // MARK: - Helpers
 
     /// Two variants: the scene unedited, and with a benign translate on the first
