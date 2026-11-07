@@ -51,6 +51,11 @@
 		B011000000000000000000F0 /* EmfyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000F0 /* EmfyTests.swift */; };
 		B011000000000000000000F2 /* EMFParse in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000007 /* EMFParse */; };
 		B011000000000000000000F3 /* EMFRender in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000008 /* EMFRender */; };
+		B01100000000000000000F43 /* EMFEdit in Frameworks */ = {isa = PBXBuildFile; productRef = B03000000000000000000009 /* EMFEdit */; };
+		B01100000000000000000F44 /* EMFEdit in Frameworks */ = {isa = PBXBuildFile; productRef = B0300000000000000000000A /* EMFEdit */; };
+		B01100000000000000000F40 /* SVGExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000F40 /* SVGExport.swift */; };
+		B01100000000000000000F41 /* SVGExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000F40 /* SVGExport.swift */; };
+		B01100000000000000000F42 /* SVGExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000F41 /* SVGExportTests.swift */; };
 		B011000000000000000000FA /* RecentEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000072 /* RecentEntry.swift */; };
 		B011000000000000000000FB /* RecentsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000071 /* RecentsStore.swift */; };
 		B011000000000000000000FC /* MetafileLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000077 /* MetafileLoader.swift */; };
@@ -174,6 +179,8 @@
 
 /* Begin PBXFileReference section */
 		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
+		B00100000000000000000F40 /* SVGExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGExport.swift; sourceTree = "<group>"; };
+		B00100000000000000000F41 /* SVGExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGExportTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000137 /* MacViewerPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacViewerPane.swift; sourceTree = "<group>"; };
 		B00100000000000000000138 /* WindowOpenMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowOpenMenu.swift; sourceTree = "<group>"; };
 		B00100000000000000000130 /* EmfyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyApp.swift; sourceTree = "<group>"; };
@@ -287,6 +294,7 @@
 			files = (
 				B01100000000000000000030 /* EMFParse in Frameworks */,
 				B01100000000000000000031 /* EMFRender in Frameworks */,
+				B01100000000000000000F43 /* EMFEdit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -314,6 +322,7 @@
 			files = (
 				B011000000000000000000F2 /* EMFParse in Frameworks */,
 				B011000000000000000000F3 /* EMFRender in Frameworks */,
+				B01100000000000000000F44 /* EMFEdit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -381,6 +390,7 @@
 				B0010000000000000000030B /* CapReductionController.swift */,
 				B00100000000000000000320 /* AppGroup.swift */,
 				B00100000000000000000321 /* SharedRenderSettings.swift */,
+				B00100000000000000000F40 /* SVGExport.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -395,6 +405,7 @@
 				B001000000000000000001F0 /* AuditLogicTests.swift */,
 				B00100000000000000000305 /* SettingsModelTests.swift */,
 				B00100000000000000000340 /* QuickLookSettingsTests.swift */,
+				B00100000000000000000F41 /* SVGExportTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -533,6 +544,7 @@
 			packageProductDependencies = (
 				B03000000000000000000001 /* EMFParse */,
 				B03000000000000000000002 /* EMFRender */,
+				B03000000000000000000009 /* EMFEdit */,
 			);
 			productName = Emfy;
 			productReference = B00200000000000000000001 /* Emfy.app */;
@@ -595,6 +607,7 @@
 			packageProductDependencies = (
 				B03000000000000000000007 /* EMFParse */,
 				B03000000000000000000008 /* EMFRender */,
+				B0300000000000000000000A /* EMFEdit */,
 			);
 			productName = EmfyTests;
 			productReference = B00200000000000000000004 /* EmfyTests.xctest */;
@@ -752,6 +765,7 @@
 				B0110000000000000000030B /* CapReductionController.swift in Sources */,
 				B01100000000000000000400 /* AppGroup.swift in Sources */,
 				B01100000000000000000404 /* SharedRenderSettings.swift in Sources */,
+				B01100000000000000000F40 /* SVGExport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -819,6 +833,8 @@
 				B01100000000000000000403 /* AppGroup.swift in Sources */,
 				B01100000000000000000407 /* SharedRenderSettings.swift in Sources */,
 				B01100000000000000000408 /* QuickLookSettingsTests.swift in Sources */,
+				B01100000000000000000F41 /* SVGExport.swift in Sources */,
+				B01100000000000000000F42 /* SVGExportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1369,6 +1385,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
 			productName = EMFRender;
+		};
+		B03000000000000000000009 /* EMFEdit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFEdit;
+		};
+		B0300000000000000000000A /* EMFEdit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B03100000000000000000001 /* XCLocalSwiftPackageReference "../EMFKit" */;
+			productName = EMFEdit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
