@@ -328,6 +328,13 @@ struct MetafileViewerScreen: View {
             ForEach(ExportMenuOrder.formats(default: settings.defaultExportFormat), id: \.self) { format in
                 shareFormatButton(format, model: model, entry: entry, opts: opts)
             }
+            // SVG is built from the imported scene (F2), so it resolves the file's
+            // bytes rather than the prepared raster the PNG/PDF buttons use.
+            Button {
+                exporter.shareSVG(entry: entry, store: store, baseName: entry.baseName)
+            } label: {
+                Label("Share as SVG", systemImage: "doc.text")
+            }
             Divider()
             Button {
                 exporter.copyImage(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)

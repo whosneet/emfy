@@ -61,6 +61,35 @@ final class MetafileExportController {
         }
     }
 
+    /// Shares the scene as SVG (`SceneImporter` → `SceneSVGExporter`) under
+    /// "<base>.svg". Unlike PNG/PDF, SVG is built from the imported scene, so it
+    /// resolves the original bytes and serialises off-main; the spinner shows past
+    /// ~0.3 s. The fidelity warnings are not surfaced yet — carried to E2 (the brief).
+    func shareSVG(entry: RecentEntry, store: RecentsStore, baseName: String) {
+        runner.cancel()
+        shareOriginalTask?.cancel()
+        isRendering = false
+        shareOriginalTask = Task { @MainActor in
+            let spinner = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.3))
+                if !Task.isCancelled { self.isRendering = true }
+            }
+            defer {
+                spinner.cancel()
+                self.isRendering = false
+            }
+            guard let original = try? await store.resolveData(for: entry) else {
+                if !Task.isCancelled { self.shareError = SVGExport.generateFailure }
+                return
+            }
+            if Task.isCancelled { return }
+            let produced = await Task.detached(priority: .userInitiated) { SVGExport.data(from: original) }.value
+            if Task.isCancelled { return }
+            guard let produced else { self.shareError = SVGExport.generateFailure; return }
+            presentShare(data: produced.data, fileName: "\(baseName).svg", failure: SVGExport.generateFailure)
+        }
+    }
+
     /// Renders `format` and opens the share sheet with "<base name>.<ext>". `scale`
     /// and `background` carry the Export settings into the PNG render (S1a-6).
     func share(
