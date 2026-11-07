@@ -24,11 +24,13 @@ final class MacViewerExporter {
     /// Non-nil presents the "Export Failed" alert.
     var errorMessage: String?
 
-    // Export-to-file state, bound to `MacViewerPane`'s two `fileExporter`s.
+    // Export-to-file state, bound to `MacViewerPane`'s `fileExporter`s.
     var isExportingPNG = false
     var isExportingPDF = false
+    var isExportingSVG = false
     var pngDocument = PNGExportDocument(data: Data())
     var pdfDocument = PDFExportDocument(data: Data())
+    var svgDocument = SVGExportDocument(data: Data())
 
     /// Non-nil presents the share picker (consumed by `MacSharePresenter`).
     var sharePayload: MacSharePayload?
@@ -36,6 +38,8 @@ final class MacViewerExporter {
     @ObservationIgnored private let runner = ExportTaskRunner()
     /// The in-flight "Share File" resolve/stage task, so a repeat tap cancels it.
     @ObservationIgnored private var shareOriginalTask: Task<Void, Never>?
+    /// The in-flight SVG resolve+import+serialise task, so a repeat tap cancels it.
+    @ObservationIgnored private var svgTask: Task<Void, Never>?
     /// The temp directory of the file currently staged for sharing.
     @ObservationIgnored private var tempCleanupURL: URL?
 
@@ -66,6 +70,54 @@ final class MacViewerExporter {
                 }
             }
         )
+    }
+
+    // MARK: - SVG export (F2)
+
+    /// Exports the scene to SVG and opens the `fileExporter` for it. Unlike PNG/PDF,
+    /// SVG is built from the imported scene (`SceneImporter` → `SceneSVGExporter`), so
+    /// it resolves the original bytes and serialises off-main through `runSVG`.
+    func exportSVGToFile(entry: RecentEntry, store: RecentsStore) {
+        runSVG(entry: entry, store: store) { [weak self] data in
+            self?.svgDocument = SVGExportDocument(data: data)
+            self?.isExportingSVG = true
+        }
+    }
+
+    /// Shares the scene as SVG under "<base>.svg".
+    func shareSVG(entry: RecentEntry, store: RecentsStore, baseName: String) {
+        runSVG(entry: entry, store: store) { [weak self] data in
+            self?.presentShare(data: data, fileName: "\(baseName).svg", failure: SVGExport.generateFailure)
+        }
+    }
+
+    /// Resolves the original bytes, imports the scene and serialises SVG off-main,
+    /// then delivers the bytes on the main actor. A spinner shows past ~0.3 s; one SVG
+    /// job at a time, and a repeat tap cancels the prior one. The fidelity warnings on
+    /// the result are not surfaced yet — carried to E2 (see the brief).
+    private func runSVG(entry: RecentEntry, store: RecentsStore, deliver: @escaping @MainActor (Data) -> Void) {
+        runner.cancel()
+        svgTask?.cancel()
+        isRendering = false
+        svgTask = Task { @MainActor in
+            let spinner = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.3))
+                if !Task.isCancelled { self.isRendering = true }
+            }
+            defer {
+                spinner.cancel()
+                self.isRendering = false
+            }
+            guard let original = try? await store.resolveData(for: entry) else {
+                if !Task.isCancelled { self.errorMessage = SVGExport.generateFailure }
+                return
+            }
+            if Task.isCancelled { return }
+            let produced = await Task.detached(priority: .userInitiated) { SVGExport.data(from: original) }.value
+            if Task.isCancelled { return }
+            guard let produced else { self.errorMessage = SVGExport.generateFailure; return }
+            deliver(produced.data)
+        }
     }
 
     // MARK: - Share
@@ -123,6 +175,7 @@ final class MacViewerExporter {
     func cancelOngoing() {
         runner.cancel()
         shareOriginalTask?.cancel()
+        svgTask?.cancel()
         isRendering = false
     }
 

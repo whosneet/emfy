@@ -59,6 +59,14 @@ struct MacViewerPane: View {
             ) { result in
                 handleExport(result, format: "PDF")
             }
+            .fileExporter(
+                isPresented: $exporter.isExportingSVG,
+                document: exporter.svgDocument,
+                contentType: .svg,
+                defaultFilename: entry?.baseName ?? "Metafile"
+            ) { result in
+                handleExport(result, format: "SVG")
+            }
             .alert(
                 "Export Failed",
                 isPresented: Binding(get: { exporter.errorMessage != nil }, set: { if !$0 { exporter.errorMessage = nil } }),
@@ -268,6 +276,11 @@ struct MacViewerPane: View {
             } label: {
                 Label("Share as PDF", systemImage: "doc.richtext")
             }
+            Button {
+                shareSVG()
+            } label: {
+                Label("Share as SVG", systemImage: "doc.text")
+            }
         } label: {
             Label("Share", systemImage: "square.and.arrow.up")
         }
@@ -319,6 +332,18 @@ struct MacViewerPane: View {
         exporter.share(format, prepared: loaded.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background, options: settings.renderOptions)
     }
 
+    /// SVG export/share build from the imported scene, so they take the file's bytes
+    /// (resolved by the exporter) rather than the prepared raster (F2).
+    private func exportSVG() {
+        guard let entry else { return }
+        exporter.exportSVGToFile(entry: entry, store: store)
+    }
+
+    private func shareSVG() {
+        guard let entry else { return }
+        exporter.shareSVG(entry: entry, store: store, baseName: entry.baseName)
+    }
+
     private func shareOriginal() {
         guard let entry else { return }
         exporter.shareOriginal(entry: entry, store: store)
@@ -348,9 +373,11 @@ struct MacViewerPane: View {
             actualSize: { controller.actualSize() },
             exportPNG: { export(.png) },
             exportPDF: { export(.pdf) },
+            exportSVG: { exportSVG() },
             shareFile: { shareOriginal() },
             sharePNG: { share(.png) },
             sharePDF: { share(.pdf) },
+            shareSVG: { shareSVG() },
             copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil
         )
     }

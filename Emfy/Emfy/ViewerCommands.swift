@@ -48,6 +48,8 @@ struct FileMenuCommands: Commands {
                 .disabled(noDocument)
             Button("Export as PDF…") { actions?.exportPDF() }
                 .disabled(noDocument)
+            Button("Export as SVG…") { actions?.exportSVG() }
+                .disabled(noDocument)
 
             Divider()
 
@@ -55,6 +57,7 @@ struct FileMenuCommands: Commands {
                 Button("Share File") { actions?.shareFile() }
                 Button("Share as PNG") { actions?.sharePNG() }
                 Button("Share as PDF") { actions?.sharePDF() }
+                Button("Share as SVG") { actions?.shareSVG() }
             }
             .disabled(noDocument)
         }

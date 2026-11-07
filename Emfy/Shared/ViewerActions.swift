@@ -22,9 +22,11 @@ struct ViewerActions {
     // bottom toolbar's Share menu and its sheets).
     var exportPNG: () -> Void = {}
     var exportPDF: () -> Void = {}
+    var exportSVG: () -> Void = {}
     var shareFile: () -> Void = {}
     var sharePNG: () -> Void = {}
     var sharePDF: () -> Void = {}
+    var shareSVG: () -> Void = {}
 
     /// Copies the current file's privacy-safe diagnostic report to the clipboard
     /// (S1a-6), surfaced in the Mac Help menu. `nil` when no file is shown, so the
