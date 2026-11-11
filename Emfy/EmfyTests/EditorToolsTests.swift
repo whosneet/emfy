@@ -55,7 +55,7 @@ private func lineElement(id: Int, from: CGPoint, to: CGPoint, width: Double = 2)
 }
 
 private func passthroughElement(id: Int, rect: CGRect) -> Element {
-    var e = rectElement(id: id, rect: rect)
+    let e = rectElement(id: id, rect: rect)
     return Element(
         id: id, kind: .passthrough, geometryDevice: e.geometryDevice, transform: e.transform,
         style: e.style, provenance: Provenance(sourceRecordIndices: [id]),
