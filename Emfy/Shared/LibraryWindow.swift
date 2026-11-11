@@ -27,6 +27,9 @@ struct LibraryWindow: View {
 
     @State private var model = LibraryWindowModel()
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    /// Drives the New Drawing presets sheet (E3a): the Mac File ▸ New Drawing… command
+    /// sets it through the focused action; the iPad "+" presents its own copy.
+    @State private var showNewDrawing = false
     /// One toast surface and one removal coordinator per window, injected so the
     /// sidebar, the viewer and the inspector all post to the same surface (C4a H3,
     /// H6/A2, M3).
@@ -177,6 +180,18 @@ struct LibraryWindow: View {
         // launch) show it here. iOS shows it in this active scene (v3-plan §9.1).
         .onOpenURL { url in
             Task { await openExternal(url) }
+        }
+        // New Drawing (E3a): the Mac File menu fires this focused action; every window
+        // publishes it so ⌘N works even in an empty window.
+        .focusedSceneValue(\.newDrawingAction) { showNewDrawing = true }
+        .sheet(isPresented: $showNewDrawing) {
+            NewDrawingSheet { preset in
+                Task {
+                    if let id = await NewDrawing.create(preset, in: store) {
+                        model.selection = id
+                    }
+                }
+            }
         }
         #if os(iOS)
         // A window opened by "Open in New Window" (UIWindowScene.ActivationAction)
@@ -360,6 +375,10 @@ struct ViewerDetail: View {
             let newSession = DocumentSession(entryID: entryID, store: store, options: settings.renderOptions)
             session = newSession
             await newSession.load()
+            // A freshly-created drawing opens straight into the editor (E3a design call 4).
+            if NewDrawing.consumePendingEdit(entryID) {
+                await newSession.beginEditing()
+            }
         }
     }
 }

@@ -13,11 +13,22 @@ struct FileMenuCommands: Commands {
     let store: RecentsStore
     let coordinator: OpenCoordinator
     @FocusedValue(\.viewerActions) private var actions
+    @FocusedValue(\.newDrawingAction) private var newDrawing
     @Environment(\.openWindow) private var openWindow
 
     private var noDocument: Bool { actions?.isDocumentLoaded != true }
 
     var body: some Commands {
+        // New Drawing… (⌘N) opens the presets sheet in the focused window (E3a); New
+        // Window moves to ⇧⌘N, so ⌘N creates a drawing rather than an empty window.
+        CommandGroup(replacing: .newItem) {
+            Button("New Drawing…") { newDrawing?() }
+                .keyboardShortcut("n", modifiers: .command)
+                .disabled(newDrawing == nil)
+            Button("New Window") { openWindow(id: "library") }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+        }
+
         CommandGroup(after: .newItem) {
             Button("Open…") {
                 coordinator.presentOpenPanel(

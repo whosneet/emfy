@@ -46,6 +46,8 @@ struct RegularSidebarList: View {
     #if os(iOS)
     // The shared library sheets, reachable from the iPad regular-width sidebar (H1).
     @State private var activeSheet: RecentsSheet?
+    /// Drives the New Drawing presets sheet from the iPad library "+" (E3a).
+    @State private var showNewDrawing = false
     #endif
 
     var body: some View {
@@ -63,6 +65,13 @@ struct RegularSidebarList: View {
             // The "couldn't open" alert now lives at the window level (C4a M5).
             #if os(iOS)
             .librarySheets($activeSheet, store: store, settings: settings)
+            .sheet(isPresented: $showNewDrawing) {
+                NewDrawingSheet { preset in
+                    Task {
+                        if let id = await NewDrawing.create(preset, in: store) { selection = id }
+                    }
+                }
+            }
             #endif
             // A readable sidebar width so file names aren't truncated to "gat….emf".
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
@@ -129,6 +138,17 @@ struct RegularSidebarList: View {
             #endif
         }
         #if os(iOS)
+        // New Drawing (E3a): the iPad library "+" opens the same presets sheet as the
+        // Mac File ▸ New Drawing… command.
+        ToolbarItem {
+            Button {
+                showNewDrawing = true
+            } label: {
+                Label("New Drawing", systemImage: "plus")
+            }
+            .help("New Drawing")
+            .accessibilityIdentifier("libraryNewDrawing")
+        }
         // The iPad regular-width sidebar reaches Settings/About/What's New/Changelog/
         // Clear Recents through the shared More menu, like the compact grid (C4a H1).
         ToolbarItem {
