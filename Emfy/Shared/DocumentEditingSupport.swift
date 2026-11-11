@@ -109,6 +109,44 @@ final class DocumentEditRegistry {
     }
 }
 
+// MARK: - Window-close decision (E2d)
+
+/// The user's choice in a Mac window-close "unsaved changes" sheet.
+enum WindowCloseChoice: Equatable, Sendable { case save, dontSave, cancel }
+
+/// What a Mac window close must do after the user's choice resolves (E2d). Pure so
+/// the AppKit `windowShouldClose` bridge stays a thin shell over tested logic.
+enum WindowCloseAction: Equatable, Sendable {
+    /// Close the window now (a clean window, "Don't Save", or a "Save…" that finished
+    /// cleanly).
+    case closeNow
+    /// Keep the window open ("Cancel", or a "Save…" that still needs attention — a
+    /// pending WMF confirmation or a failed save).
+    case keepOpen
+}
+
+/// The pure window-close decision logic (E2d). `needsPromptAfterFlush` reuses
+/// `DocumentEditRegistry.needsQuitPrompt` for the single session a Mac library window
+/// hosts, and `outcome` maps the sheet choice (and, for Save…, the post-save state)
+/// to the window action. Unit-tested; the AppKit flow only wires it to NSWindow.
+enum WindowCloseDecision {
+    /// Whether closing must raise the sheet after flushing the session's pending save.
+    static func needsPromptAfterFlush(saveFailed: Bool, wmfPending: Bool, stillDirty: Bool) -> Bool {
+        DocumentEditRegistry.needsQuitPrompt(saveFailed: saveFailed, wmfPending: wmfPending, stillDirty: stillDirty)
+    }
+
+    /// The action for a sheet choice. For `.save`, `stillNeedsPromptAfterSave` is the
+    /// session's post-save state: a WMF confirmation or a failed save keeps the window
+    /// open (the SwiftUI dialog / error toast takes over); a clean save closes it.
+    static func outcome(choice: WindowCloseChoice, stillNeedsPromptAfterSave: Bool) -> WindowCloseAction {
+        switch choice {
+        case .dontSave: return .closeNow
+        case .cancel: return .keepOpen
+        case .save: return stillNeedsPromptAfterSave ? .keepOpen : .closeNow
+        }
+    }
+}
+
 // MARK: - WMF save confirmation
 
 /// The first-save confirmation state for a WMF/WMZ document (design call E2a-5). It

@@ -534,6 +534,11 @@ final class DocumentSession {
 
     /// Cancels any armed autosave, so a DEBUG capture run never writes on its way out.
     func debugCancelAutosave() { autosave.cancel() }
+
+    /// When set, the next save is failed before any bytes reach disk, so the close-sheet
+    /// DEBUG script can reproduce a failed-save window close deterministically (E2d).
+    /// `#if DEBUG` only, proven absent from Release.
+    @ObservationIgnored var debugInjectWriteFailure = false
     #endif
 
     /// Rasterises the edited scene through `SceneRenderer` for the viewer's edit
@@ -584,6 +589,14 @@ final class DocumentSession {
         if editing == .unavailable { editing = .notEditing; return }
         guard editing == .editing else { return }
         await flushPendingSave()
+        endEditingState()
+    }
+
+    /// Discards unsaved edits and leaves edit mode WITHOUT writing to disk — the window-
+    /// close "Don't Save" path (E2d). Unlike `endEditing()`, which flushes first, this
+    /// throws the in-memory edits away so nothing reaches disk.
+    func discardEditsAndStopEditing() {
+        guard editing == .editing else { return }
         endEditingState()
     }
 
@@ -806,6 +819,12 @@ final class DocumentSession {
             snapshotStore.writeIfAbsent(entryID: entryID, data: openedBytes, originalFileName: fileName)
             snapshotTaken = true
         }
+        #if DEBUG
+        if debugInjectWriteFailure {
+            lastSaveError = .writeFailed("debug-injected write failure")
+            return
+        }
+        #endif
         // Record an NSFileVersion on every explicit save and flush, and at most once
         // per hour for idle autosaves, so the version store doesn't bloat (review #4).
         let record = Self.shouldRecordVersion(isAutosave: isAutosave, lastVersionDate: lastVersionDate, now: now())

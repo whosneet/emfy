@@ -92,6 +92,11 @@ struct MacViewerPane: View {
             .background(zoomInEqualsShortcut)
             // Publish this window's actions to the shared menu bar (C3b scope 1).
             .focusedSceneValue(\.viewerActions, viewerActions)
+            // Intercept the window close (red button / ⌘W) to flush and, if needed,
+            // confirm unsaved edits before closing — the window-level equivalent of the
+            // quit prompt (E2d). A clean window closes immediately. Zero-size, installed
+            // on the host NSWindow via an AppKit delegate bridge.
+            .background(WindowCloseGuard(session: session, documentName: entry?.baseName ?? "this file"))
             // A Rendering settings change re-prepares the open file live, keeping the
             // zoom and scroll where practical; render-time options also reach the tiles
             // through the `options` prop above (S1b).
@@ -169,6 +174,11 @@ struct MacViewerPane: View {
         debugLaunchRan = true
         for _ in 0..<80 { if session.loaded != nil { break }; try? await Task.sleep(for: .milliseconds(100)) }
         guard session.loaded != nil else { return }
+        // A scripted end-to-end gate flow (E2d) takes a distinct path.
+        if let script = EditorDebugLaunch.script {
+            await runDebugScript(script)
+            return
+        }
         if EditorDebugLaunch.editOnOpen {
             await session.beginEditing()
             if session.editing == .editing, EditorDebugLaunch.selectText, let tid = session.firstTextElementID() {
@@ -243,6 +253,128 @@ struct MacViewerPane: View {
         // (temp-copy) document dirty, and terminate would raise the unsaved-changes prompt
         // and hang. The screenshot is already written; nothing needs saving.
         exit(0)
+    }
+
+    // MARK: - E2d scripted gate flows
+
+    /// Dispatches an `-EmfyDebugScript` gate flow (E2d). Each flow screenshots then exits
+    /// the process, so a launch is always self-terminating.
+    @MainActor
+    private func runDebugScript(_ script: String) async {
+        guard let base = EditorDebugLaunch.screenshotBase else { Self.logScript("no -EmfyDebugShot base"); exit(1) }
+        switch script {
+        case "edit-save": await runEditSaveScript(base: base)
+        case "plain": await runPlainScript(base: base)
+        case "close-dirty": await runCloseDirtyScript(base: base)
+        default: Self.logScript("unknown script \(script)"); exit(1)
+        }
+    }
+
+    /// `edit-save`: edit mode → select the first element → move it (+40,+30) → recolour it
+    /// vivid purple → screenshot (a) → explicit ⌘S save to the temp copy → exit.
+    @MainActor
+    private func runEditSaveScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("edit-save: begin editing failed"); exit(2) }
+        let ids = session.firstEditableIDs(1)
+        editorModel.selection.replace(with: ids)
+        // The app opens an UNSANDBOXED import copy (a plain path is never security-scoped),
+        // so the save writes to that copy, not the temp file the driver named. Log its
+        // resolved path so the `plain` relaunch can re-open exactly what was persisted.
+        let savedPath = resolvedEntryPath() ?? "?"
+        session.debugTranslate(ids: ids, dx: 40, dy: 30)
+        session.debugSetFill(ids: ids, red: 0.55, green: 0.10, blue: 0.85)   // vivid purple
+        try? await Task.sleep(for: .milliseconds(800))
+        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-a-edited.png")
+        await session.save()
+        try? await Task.sleep(for: .milliseconds(500))
+        session.debugCancelAutosave()
+        Self.logScript("edit-save: savedToPath=\(savedPath) saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil") undoTitle=\(Self.editMenuUndoTitle() ?? "<none>")")
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(session.lastSaveError == nil ? 0 : 3)
+    }
+
+    /// `plain`: open the (already edited) temp copy read-only → screenshot (b) → log the
+    /// re-parse result (the plain viewer loads through MetafileLoader → EMFParse) → exit.
+    @MainActor
+    private func runPlainScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(900))
+        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-b-plain.png")
+        if let loaded = session.loaded {
+            Self.logScript("plain: reparsed OK recordKinds=\(loaded.prepared.recordKinds.count) displaySize=\(loaded.displaySize)")
+        } else {
+            Self.logScript("plain: FAILED to re-parse saved file")
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(session.loaded == nil ? 4 : 0)
+    }
+
+    /// `close-dirty`: edit mode → move the first element → force the next save to fail →
+    /// trigger the real user window-close (performClose) → screenshot the close sheet (c)
+    /// → exit. Nothing is written (the injected failure blocks it).
+    @MainActor
+    private func runCloseDirtyScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("close-dirty: begin editing failed"); exit(2) }
+        let ids = session.firstEditableIDs(1)
+        editorModel.selection.replace(with: ids)
+        session.debugTranslate(ids: ids, dx: 40, dy: 30)
+        session.debugInjectWriteFailure = true   // the flush on close will fail → sheet shows
+        try? await Task.sleep(for: .milliseconds(400))
+        Self.logScript("close-dirty: dirty=\(session.isDirty) undoTitle=\(Self.editMenuUndoTitle() ?? "<none>")")
+        if let window = Self.scriptWindow() { window.performClose(nil) }
+        // Let the flush fail and the sheet fully slide in and lay out before capturing.
+        try? await Task.sleep(for: .milliseconds(3000))
+        _ = EditorDebugScreenshot.captureAllWindows(to: base + "-c-close-sheet.png")
+        _ = EditorDebugScreenshot.captureAttachedSheet(to: base + "-c2-close-alert.png")
+        try? await Task.sleep(for: .milliseconds(200))
+        session.debugCancelAutosave()
+        exit(0)
+    }
+
+    /// The on-disk path the current session reads and writes, by resolving the recents
+    /// entry's bookmark — used to point the `plain` relaunch at exactly what `edit-save`
+    /// persisted (the unsandboxed import copy).
+    @MainActor
+    private func resolvedEntryPath() -> String? {
+        guard let entry = store.entry(id: session.entryID) else { return nil }
+        var stale = false
+        return (try? URL(
+            resolvingBookmarkData: entry.bookmark,
+            options: RecentsStore.bookmarkResolutionOptions,
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        ))?.path
+    }
+
+    /// The host library window (largest visible non-panel), for `performClose`.
+    @MainActor
+    private static func scriptWindow() -> NSWindow? {
+        NSApp.windows
+            .filter { $0.isVisible && !($0 is NSPanel) && ($0.contentView?.bounds.height ?? 0) > 200 }
+            .max { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) }
+    }
+
+    /// The Edit ▸ Undo menu item title, as textual proof of the current undo action name
+    /// (gate screenshot (d)): e.g. "Undo Change Fill" when wired. `nil` when no Edit menu.
+    @MainActor
+    private static func editMenuUndoTitle() -> String? {
+        guard let editMenu = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Edit" || $0.title == "Edit" })?.submenu
+        else { return nil }
+        let item = editMenu.items.first { $0.action == Selector(("undo:")) || $0.title.hasPrefix("Undo") }
+        return item?.title
+    }
+
+    private static func logScript(_ message: String) {
+        FileHandle.standardError.write(Data("EMFY-E2D \(message)\n".utf8))
     }
     #endif
 
@@ -689,5 +821,152 @@ private struct MacZoomPercentLabel: View {
             .accessibilityElement()
             .accessibilityLabel("Zoom")
             .accessibilityValue("\(percent) percent")
+    }
+}
+
+// MARK: - Window-close prompt (E2d)
+
+/// Installs an `NSWindowDelegate` on the library window so the user's window close (the
+/// red button, ⌘W, or File ▸ Close) flushes and, if needed, confirms unsaved edits
+/// before the window closes — the window-level equivalent of the quit prompt (E2d). A
+/// clean window closes immediately. Zero-size and non-drawing; it only observes the
+/// window. Any pre-existing delegate (SwiftUI's) is preserved by forwarding every method
+/// this proxy does not implement.
+private struct WindowCloseGuard: NSViewRepresentable {
+    let session: DocumentSession
+    let documentName: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = GuardView()
+        view.session = session
+        view.documentName = documentName
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let view = nsView as? GuardView else { return }
+        view.session = session
+        view.documentName = documentName
+    }
+
+    private final class GuardView: NSView {
+        var session: DocumentSession?
+        var documentName: String = "this file"
+        private weak var guardedWindow: NSWindow?
+        private var proxy: CloseDelegateProxy?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window, window !== guardedWindow else { return }
+            let proxy = CloseDelegateProxy(
+                previous: window.delegate,
+                session: { [weak self] in self?.session },
+                name: { [weak self] in self?.documentName ?? "this file" }
+            )
+            window.delegate = proxy
+            self.proxy = proxy
+            guardedWindow = window
+        }
+    }
+}
+
+/// The window delegate that runs the unsaved-changes close flow (E2d). It forwards every
+/// `NSWindowDelegate` message it does not implement to the previous delegate, so SwiftUI's
+/// own window behaviour is preserved. `windowShouldClose` defers the real decision to an
+/// async flow and returns `false`; the flow closes the window itself once it decides to.
+private final class CloseDelegateProxy: NSObject, NSWindowDelegate {
+    private let previous: NSWindowDelegate?
+    private let session: () -> DocumentSession?
+    private let name: () -> String
+    private var isClosing = false
+
+    init(previous: NSWindowDelegate?, session: @escaping () -> DocumentSession?, name: @escaping () -> String) {
+        self.previous = previous
+        self.session = session
+        self.name = name
+    }
+
+    // Preserve the previous delegate: claim to respond to its selectors, and forward
+    // any message this proxy does not itself implement (the runtime consults
+    // `forwardingTarget(for:)` only for selectors without an own implementation, so
+    // `windowShouldClose` always runs here).
+    override func responds(to aSelector: Selector!) -> Bool {
+        super.responds(to: aSelector) || (previous?.responds(to: aSelector) ?? false)
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        if previous?.responds(to: aSelector) == true { return previous }
+        return super.forwardingTarget(for: aSelector)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if isClosing { return true }
+        guard let session = session() else { return true }   // no editing session: close
+        let name = name()
+        Task { @MainActor in
+            await self.runCloseFlow(window: sender, session: session, name: name)
+        }
+        return false
+    }
+
+    @MainActor
+    private func runCloseFlow(window: NSWindow, session: DocumentSession, name: String) async {
+        await session.flushPendingSave()
+        // Snapshot the post-flush state before any SwiftUI observer (the error toast)
+        // can clear it; `stillDirty` is the reliable trigger either way.
+        let needsPrompt = WindowCloseDecision.needsPromptAfterFlush(
+            saveFailed: session.lastSaveError != nil,
+            wmfPending: session.pendingWMFConfirmation != nil,
+            stillDirty: session.isDirty
+        )
+        guard needsPrompt else { close(window); return }
+
+        switch await Self.presentSheet(on: window, name: name) {
+        case .cancel:
+            break   // keep the window open
+        case .dontSave:
+            session.discardEditsAndStopEditing()
+            close(window)
+        case .save:
+            await session.save()
+            let still = WindowCloseDecision.needsPromptAfterFlush(
+                saveFailed: session.lastSaveError != nil,
+                wmfPending: session.pendingWMFConfirmation != nil,
+                stillDirty: session.isDirty
+            )
+            // A clean save closes; a pending WMF confirmation or a failed save keeps the
+            // window open, where the existing SwiftUI dialog / error toast takes over.
+            if WindowCloseDecision.outcome(choice: .save, stillNeedsPromptAfterSave: still) == .closeNow {
+                close(window)
+            }
+        }
+    }
+
+    @MainActor
+    private func close(_ window: NSWindow) {
+        isClosing = true
+        window.close()
+    }
+
+    @MainActor
+    private static func presentSheet(on window: NSWindow, name: String) async -> WindowCloseChoice {
+        await withCheckedContinuation { continuation in
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Save changes to “\(name)” before closing?"
+            alert.informativeText = "Your changes will be lost if you don’t save them."
+            alert.addButton(withTitle: "Save…")
+            alert.addButton(withTitle: "Don’t Save")
+            alert.addButton(withTitle: "Cancel")
+            alert.beginSheetModal(for: window) { response in
+                let choice: WindowCloseChoice
+                switch response {
+                case .alertFirstButtonReturn: choice = .save
+                case .alertSecondButtonReturn: choice = .dontSave
+                default: choice = .cancel
+                }
+                continuation.resume(returning: choice)
+            }
+        }
     }
 }

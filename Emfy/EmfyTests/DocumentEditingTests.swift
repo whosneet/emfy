@@ -151,6 +151,25 @@ private func redFill() -> SceneCommand {
         #expect(DocumentEditRegistry.needsQuitPrompt(saveFailed: false, wmfPending: true, stillDirty: false))
         #expect(DocumentEditRegistry.needsQuitPrompt(saveFailed: false, wmfPending: false, stillDirty: true))
     }
+
+    // E2d: the window-close decision reuses needsQuitPrompt after the flush.
+    @Test func windowCloseNeedsPromptMatchesTheQuitCheck() {
+        #expect(!WindowCloseDecision.needsPromptAfterFlush(saveFailed: false, wmfPending: false, stillDirty: false))
+        #expect(WindowCloseDecision.needsPromptAfterFlush(saveFailed: false, wmfPending: false, stillDirty: true))
+        #expect(WindowCloseDecision.needsPromptAfterFlush(saveFailed: true, wmfPending: false, stillDirty: false))
+        #expect(WindowCloseDecision.needsPromptAfterFlush(saveFailed: false, wmfPending: true, stillDirty: false))
+    }
+
+    // E2d: Don't Save always closes; Cancel always keeps open; Save closes only when the
+    // save finished cleanly, and keeps the window open while anything still needs attention.
+    @Test func windowCloseOutcomeMapsEachChoice() {
+        #expect(WindowCloseDecision.outcome(choice: .dontSave, stillNeedsPromptAfterSave: true) == .closeNow)
+        #expect(WindowCloseDecision.outcome(choice: .dontSave, stillNeedsPromptAfterSave: false) == .closeNow)
+        #expect(WindowCloseDecision.outcome(choice: .cancel, stillNeedsPromptAfterSave: false) == .keepOpen)
+        #expect(WindowCloseDecision.outcome(choice: .cancel, stillNeedsPromptAfterSave: true) == .keepOpen)
+        #expect(WindowCloseDecision.outcome(choice: .save, stillNeedsPromptAfterSave: false) == .closeNow)
+        #expect(WindowCloseDecision.outcome(choice: .save, stillNeedsPromptAfterSave: true) == .keepOpen)
+    }
 }
 
 // MARK: - Sandbox-safe writer
@@ -312,6 +331,22 @@ private func redFill() -> SceneCommand {
         session.apply(redFill())
         #expect(session.isDirty)
         #expect(session.editVersion > 0)
+    }
+
+    // E2d: the window-close "Don't Save" path drops edits and leaves edit mode WITHOUT
+    // writing — nothing reaches the write path.
+    @Test func discardEditsAndStopEditingWritesNothing() async {
+        let writeBox = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: writeBox)
+        await session.beginEditing()
+        session.apply(redFill())
+        #expect(session.isDirty)
+
+        session.discardEditsAndStopEditing()
+        #expect(session.editing == .notEditing)
+        #expect(!session.isDirty)
+        #expect(session.editingScene == nil)
+        #expect(writeBox.count == 0)   // no bytes written on discard
     }
 
     @Test func undoViaUndoManagerRestoresSceneAndClearsDirty() async {
