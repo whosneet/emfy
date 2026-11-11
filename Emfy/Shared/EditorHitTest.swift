@@ -31,7 +31,9 @@ enum EditorHitTest {
         let box = deviceRect.standardized
         for layer in scene.layers where !(layer.hidden || layer.locked) {
             for element in layer.elements where isHittable(element) {
-                let bounds = element.boundsDevice
+                // A text run with no device geometry has page-clip `boundsDevice`; use its
+                // tight `selectionBoundsDevice` so a marquee doesn't catch it from anywhere.
+                let bounds = element.selectionBoundsDevice
                 if !bounds.isNull, bounds.standardized.intersects(box) { ids.insert(element.id) }
             }
         }
@@ -45,9 +47,12 @@ enum EditorHitTest {
     }
 
     /// Whether `devicePoint` hits `element`. Text and image elements hit on their
-    /// device-space bounds (`boundsDevice`); a filled path hits on point-in-path
-    /// with the fill's winding rule; a stroked or unfilled/open path hits within the
-    /// stroke tolerance of its outline (`CGPath.copy(strokingWithWidth:)`).
+    /// device-space bounds — `selectionBoundsDevice`, so a text run with no device
+    /// geometry hits on its tight metric box rather than the inherited page clip (which
+    /// would otherwise swallow every click and make shapes beneath it unselectable); a
+    /// filled path hits on point-in-path with the fill's winding rule; a stroked or
+    /// unfilled/open path hits within the stroke tolerance of its outline
+    /// (`CGPath.copy(strokingWithWidth:)`).
     ///
     /// `geometryDevice` is already in device space (see `Scene`/`SceneRenderer`,
     /// which draws it through the device→target fit alone, without `element.transform`),
@@ -55,7 +60,7 @@ enum EditorHitTest {
     static func hits(_ element: Element, devicePoint: CGPoint, strokeToleranceDevice: CGFloat) -> Bool {
         switch element.kind {
         case .text, .image:
-            let bounds = element.boundsDevice
+            let bounds = element.selectionBoundsDevice
             return !bounds.isNull && bounds.standardized.contains(devicePoint)
         default:
             let tolerance = max(strokeHalfWidthDevice(element), strokeToleranceDevice)

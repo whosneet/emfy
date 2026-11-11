@@ -499,3 +499,48 @@ private func passthroughElement(id: Int, rect: CGRect) -> Element {
         #expect(TileRenderSource.ready(source).tileAction == .renderWithSource)
     }
 }
+
+// MARK: - Text-run hit testing (E2c review follow-up)
+
+@Suite struct TextHitTestTests {
+
+    private func textScene() throws -> Scene {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("corpus/gate-p4-text.emf")
+        return try SceneImporter.import(data: Data(contentsOf: url))
+    }
+
+    /// A text run with no device geometry has page-clip `boundsDevice`, which before the
+    /// fix made it hit from anywhere on the page (so it swallowed clicks meant for shapes
+    /// beneath it). Hit testing now uses the run's tight `selectionBoundsDevice`: a click
+    /// on the glyphs hits it, a click well below them does not.
+    @Test func clickOnTheRunHitsItAClickAwayDoesNot() throws {
+        let scene = try textScene()
+        let run = try #require(scene.editableElements.first { $0.kind == .text })
+        let box = run.selectionBoundsDevice
+        let page = scene.pageBoundsDevice
+
+        let inside = CGPoint(x: box.midX, y: box.midY)
+        #expect(EditorHitTest.topmost(in: scene, atDevice: inside, strokeToleranceDevice: 2) == run.id)
+
+        let away = CGPoint(x: box.midX, y: page.maxY - 5)
+        #expect(!box.contains(away))   // guard: the probe really is outside the run
+        #expect(EditorHitTest.topmost(in: scene, atDevice: away, strokeToleranceDevice: 2) != run.id)
+    }
+
+    /// A marquee over the run catches it; a band entirely below it does not (before the
+    /// fix the page-clip bounds intersected every marquee).
+    @Test func marqueeOverTheRunCatchesItABandBelowDoesNot() throws {
+        let scene = try textScene()
+        let run = try #require(scene.editableElements.first { $0.kind == .text })
+        let box = run.selectionBoundsDevice
+
+        let over = box.insetBy(dx: -5, dy: -5)
+        #expect(EditorHitTest.marquee(in: scene, deviceRect: over).contains(run.id))
+
+        let below = CGRect(x: 0, y: box.maxY + 10, width: scene.pageBoundsDevice.width, height: 20)
+        #expect(!below.intersects(box))   // guard
+        #expect(!EditorHitTest.marquee(in: scene, deviceRect: below).contains(run.id))
+    }
+}
