@@ -619,6 +619,9 @@ struct MacViewerPane: View {
     private var toolbarContent: some ToolbarContent {
         if #available(macOS 26, *) {
             ToolbarItem { editButton }
+            if session.editing == .editing {
+                ToolbarItem { shapesMenu }
+            }
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
                 zoomOutButton
@@ -634,6 +637,9 @@ struct MacViewerPane: View {
             // Pre-26 has no ToolbarSpacer: one group keeps the stated order.
             ToolbarItemGroup {
                 editButton
+                if session.editing == .editing {
+                    shapesMenu
+                }
                 zoomOutButton
                 MacZoomPercentLabel(controller: controller)
                 zoomInButton
@@ -642,6 +648,26 @@ struct MacViewerPane: View {
                 infoButton
             }
         }
+    }
+
+    /// The Shapes menu (E3a design call 5), present only in edit mode. Choosing a
+    /// shape arms the creation tool; the canvas then shows a crosshair and a drag (or
+    /// a click) draws it. A tint marks the armed state.
+    private var shapesMenu: some View {
+        Menu {
+            ForEach(ShapeToolKind.allCases) { kind in
+                Button {
+                    editorModel.armedShapeTool = kind
+                } label: {
+                    Label(kind.title, systemImage: kind.systemImage)
+                }
+            }
+        } label: {
+            Label("Shapes", systemImage: "square.on.circle")
+        }
+        .help("Shapes")
+        .symbolVariant(editorModel.armedShapeTool != nil ? .fill : .none)
+        .foregroundStyle(editorModel.armedShapeTool != nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
     }
 
     /// The Edit toggle (design call E2b-1), modelled on Preview's Markup button:
@@ -662,6 +688,7 @@ struct MacViewerPane: View {
     private func toggleEditMode() {
         if session.editing == .editing {
             editorModel.selection.clear()
+            editorModel.armedShapeTool = nil
             Task { await session.endEditing() }
         } else {
             Task {

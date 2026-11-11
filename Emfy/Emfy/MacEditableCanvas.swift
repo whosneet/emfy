@@ -25,6 +25,9 @@ struct MacEditingContainer: View {
             if let scene = session.editingScene {
                 MacEditableCanvas(
                     scene: scene, editorModel: editorModel, controller: controller,
+                    // Reading the armed tool here makes the container observe it, so the
+                    // canvas's cursor refreshes the moment a shape is armed or disarmed.
+                    armedTool: editorModel.armedShapeTool,
                     pageShadow: pageShadow, tilePaint: tilePaint, options: options,
                     apply: { command, key in session.apply(command, coalescing: key) },
                     delete: { ids in session.deleteSelection(ids) },
@@ -72,6 +75,10 @@ struct MacEditableCanvas: NSViewRepresentable {
     let scene: EMFEdit.Scene
     let editorModel: EditorModel
     let controller: MacMetafileZoomController
+    /// The armed shape-creation tool (E3a). Stored so a change re-runs `updateNSView`
+    /// and refreshes the canvas cursor (crosshair when armed); the coordinator reads
+    /// the live value from `editorModel`.
+    var armedTool: ShapeToolKind? = nil
     var pageShadow: Bool = true
     var tilePaint: TilePaint = .plain
     var options: RenderOptions = .default
@@ -298,9 +305,21 @@ struct MacEditableCanvas: NSViewRepresentable {
 
         // MARK: Pointer
 
+        /// Whether a shape-creation tool is currently armed (E3a).
+        var isShapeToolArmed: Bool { parent.editorModel.armedShapeTool != nil }
+
         func mouseDown(at viewPoint: CGPoint, shift: Bool, command: Bool) {
             overlay?.window?.makeFirstResponder(overlay)
             parent.editorModel.rotationReadout = nil
+
+            // 0. An armed shape tool draws a new shape instead of selecting (E3a).
+            if let tool = parent.editorModel.armedShapeTool {
+                var state = DragState(kind: .shape, start: viewPoint, current: viewPoint, baseSelection: selection)
+                state.shapeKind = tool
+                drag = state
+                overlay?.needsDisplay = true
+                return
+            }
 
             // 1. A handle under the cursor starts a resize (or ⌘ = rotate) of the
             //    current selection.
@@ -344,6 +363,12 @@ struct MacEditableCanvas: NSViewRepresentable {
                 var next = state.baseSelection
                 next.replace(with: EditorHitTest.marquee(in: scene, deviceRect: deviceRect))
                 selection = next
+            case .shape:
+                if let kind = state.shapeKind {
+                    drag?.shapePreviewRect = ShapeToolGeometry.sweptRect(
+                        kind: kind, start: state.start, current: viewPoint, shift: shift, fromCentre: option
+                    )
+                }
             case .move, .resize, .rotate:
                 updateLiveTransform(state: state, shift: shift, option: option)
             }
@@ -356,6 +381,8 @@ struct MacEditableCanvas: NSViewRepresentable {
             switch state.kind {
             case .marquee:
                 break   // selection already updated live
+            case .shape:
+                commitShape(state: state, end: viewPoint, shift: shift, option: option)
             case .move, .resize, .rotate:
                 if let (command, key) = committedCommand(state: state, end: viewPoint, shift: shift, option: option) {
                     markDirtyRegion(old: state.startViewBounds ?? selectionViewBounds(),
@@ -363,6 +390,39 @@ struct MacEditableCanvas: NSViewRepresentable {
                     parent.apply(command, key)
                 }
             }
+        }
+
+        /// Commits one `.insert` for a drawn shape: a sweep becomes the swept rect, a
+        /// click becomes the 100 × 100 pt default centred at the click. The new element
+        /// becomes the selection and the tool disarms (Keynote behaviour, design call 5).
+        private func commitShape(state: DragState, end: CGPoint, shift: Bool, option: Bool) {
+            guard let kind = state.shapeKind else { return }
+            let deviceRect: CGRect
+            if ShapeToolGeometry.isDrag(start: state.start, current: end, magnification: magnification) {
+                let viewRect = ShapeToolGeometry.sweptRect(kind: kind, start: state.start, current: end, shift: shift, fromCentre: option)
+                deviceRect = sweptDeviceRect(fromView: viewRect)
+            } else {
+                let centre = mapping.devicePoint(fromView: end)
+                deviceRect = ShapeToolGeometry.defaultRect(
+                    centreDevice: centre, sideDevice: ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints)
+                )
+            }
+            let insertion = ShapeToolInsertion.command(kind: kind, rectDevice: deviceRect, in: scene)
+            parent.apply(insertion.command, nil)
+            var next = EditorSelection()
+            next.replace(with: insertion.id)
+            selection = next
+            parent.editorModel.armedShapeTool = nil
+        }
+
+        /// Maps a view-space swept rect to a DEVICE-space rect, mapping the origin and
+        /// far corner individually so a `.line`'s drag direction (a signed size) survives.
+        private func sweptDeviceRect(fromView viewRect: CGRect) -> CGRect {
+            let originDevice = mapping.devicePoint(fromView: viewRect.origin)
+            let farDevice = mapping.devicePoint(fromView: CGPoint(
+                x: viewRect.origin.x + viewRect.size.width, y: viewRect.origin.y + viewRect.size.height))
+            return CGRect(origin: originDevice,
+                          size: CGSize(width: farDevice.x - originDevice.x, height: farDevice.y - originDevice.y))
         }
 
         /// Invalidate only the region a committed edit touches — the union of the
@@ -476,7 +536,7 @@ struct MacEditableCanvas: NSViewRepresentable {
                 guard let box = state.startViewBounds else { return .identity }
                 let centre = CGPoint(x: box.midX, y: box.midY)
                 return EditorTransform.rotationTransform(center: centre, from: state.start, to: state.current)
-            case .marquee:
+            case .marquee, .shape:
                 return .identity
             }
         }
@@ -511,6 +571,13 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Esc cancels a drag or clears the selection; ⌘A selects all.
         func keyDown(_ event: NSEvent) -> Bool {
             if event.keyCode == 53 {   // Esc
+                // An armed shape tool disarms first (cancelling any in-progress draw).
+                if isShapeToolArmed {
+                    cancelDrag()
+                    parent.editorModel.armedShapeTool = nil
+                    if let overlay { overlay.window?.invalidateCursorRects(for: overlay) }
+                    return true
+                }
                 if drag != nil { cancelDrag() } else if !selection.isEmpty { selection.clear(); overlay?.needsDisplay = true }
                 return true
             }
@@ -541,7 +608,7 @@ struct MacEditableCanvas: NSViewRepresentable {
 
     /// The transient state of a drag.
     fileprivate struct DragState {
-        enum Kind { case marquee, move, resize, rotate }
+        enum Kind { case marquee, move, resize, rotate, shape }
         var kind: Kind
         var start: CGPoint
         var current: CGPoint
@@ -551,6 +618,10 @@ struct MacEditableCanvas: NSViewRepresentable {
         var liveTransform: CGAffineTransform = .identity
         var ghost: CGImage?
         var ghostViewBounds: CGRect?
+        /// The armed shape kind while `kind == .shape`.
+        var shapeKind: ShapeToolKind?
+        /// The constrained preview rect (view space) the overlay draws while sweeping.
+        var shapePreviewRect: CGRect?
     }
 }
 
@@ -789,6 +860,11 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
             context.stroke(rect)
         }
 
+        // Live shape-tool preview (view space, design call 5).
+        if let drag = coordinator.drag, drag.kind == .shape, let kind = drag.shapeKind, let rect = drag.shapePreviewRect {
+            Self.strokeShapePreview(kind: kind, rect: rect, into: context, lineWidth: 1.5 / mag, accent: accent)
+        }
+
         // Per-element selection outlines (thin accent box of each element's bounds).
         let draggingTransform = coordinator.drag.flatMap { $0.kind == .marquee ? nil : $0.liveTransform }
         context.saveGState()
@@ -850,9 +926,45 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
         super.keyDown(with: event)
     }
 
+    /// Strokes (and lightly fills, for closed kinds) the shape-tool preview outline in
+    /// the overlay's view space. `rect` may carry a signed size (a line keeps its drag
+    /// direction); closed kinds use its standardised box.
+    static func strokeShapePreview(kind: ShapeToolKind, rect: CGRect, into context: CGContext, lineWidth: CGFloat, accent: NSColor) {
+        context.setStrokeColor(accent.cgColor)
+        context.setFillColor(accent.withAlphaComponent(0.15).cgColor)
+        context.setLineWidth(lineWidth)
+        let box = rect.standardized
+        switch kind {
+        case .line:
+            context.move(to: rect.origin)
+            context.addLine(to: CGPoint(x: rect.origin.x + rect.size.width, y: rect.origin.y + rect.size.height))
+            context.strokePath()
+        case .rect:
+            context.fill(box); context.stroke(box)
+        case .roundRect:
+            let r = min(ShapeToolGeometry.pointsToDevice(16), min(box.width, box.height) / 2)
+            let path = CGPath(roundedRect: box, cornerWidth: r, cornerHeight: r, transform: nil)
+            context.addPath(path); context.fillPath()
+            context.addPath(path); context.strokePath()
+        case .ellipse:
+            context.fillEllipse(in: box); context.strokeEllipse(in: box)
+        case .triangle:
+            context.move(to: CGPoint(x: box.midX, y: box.maxY))
+            context.addLine(to: CGPoint(x: box.maxX, y: box.minY))
+            context.addLine(to: CGPoint(x: box.minX, y: box.minY))
+            context.closePath()
+            context.drawPath(using: .fillStroke)
+        }
+    }
+
     // MARK: Cursors
 
     override func resetCursorRects() {
+        // An armed shape tool shows a crosshair across the whole canvas (design call 5).
+        if coordinator?.isShapeToolArmed == true {
+            addCursorRect(bounds, cursor: .crosshair)
+            return
+        }
         guard let coordinator, let box = coordinator.selectionViewBounds() else { return }
         let size = MacEditableCanvas.Coordinator.handleHitRadius / magnification
         for handle in ResizeHandle.allCases {
