@@ -16,6 +16,47 @@ import Foundation
 /// the source through `MetafileRenderer`.
 public enum SceneRenderer {
 
+    /// An immutable, concurrency-safe snapshot of a scene's ORIGINAL source —
+    /// the metafile parsed once and its playback observed once — so a tiled
+    /// canvas can render every tile without re-parsing and re-observing the whole
+    /// file each call (slice E2b-3). It derives solely from `scene.source`, which
+    /// edits never change, so one value serves a whole editing session and every
+    /// tile thread concurrently. `Sendable`: `Prepared` is `Sendable`, and the op
+    /// map / EMF+ entries hold only immutable CoreGraphics/CoreText values safe to
+    /// read from any thread once built (same basis as their `@unchecked Sendable`).
+    /// It carries no `CGContext` — each render still draws into its own context.
+    public struct SceneRenderSource: Sendable {
+        let prepared: MetafileRenderer.Prepared
+        /// Replay ops keyed by draw-moment record index — a GDI/WMF text, image or
+        /// passthrough element replays its op from here. Empty for an EMF+ scene.
+        let replayOps: [Int: ResolvedDrawOp]
+        /// Lifted EMF+ entries in z-order (indexed by element id). Empty for GDI/WMF.
+        let plusEntries: [PlusEntry]
+    }
+
+    /// Whether `render` needs a prepared source for this scene — true when it
+    /// replays EMF+ content or GDI/WMF text/image/passthrough ops. A pure-geometry
+    /// scene needs none, so the app can skip the (one-off, expensive) preparation.
+    public static func requiresPreparedSource(_ scene: Scene) -> Bool {
+        scene.source.renderPath == .emfPlus || needsReplay(scene)
+    }
+
+    /// Prepares `scene`'s source once: opens and parses the metafile, observes its
+    /// playback, and keys the lifted ops for replay. Returns `nil` when the source
+    /// cannot be opened or prepared (the renderer then draws what it can from value
+    /// types). Pure and `Sendable`-producing, so a caller can run it off the main
+    /// actor and reuse the result for every tile.
+    public static func prepare(_ scene: Scene) -> SceneRenderSource? {
+        guard let opened = try? OpenedMetafile.open(scene.source.data),
+              let prepared = MetafileRenderer.prepare(opened) else { return nil }
+        let observation = MetafileRenderer.observe(prepared)
+        var ops: [Int: ResolvedDrawOp] = [:]
+        for op in observation.ops {
+            if let key = op.recordIndices.max() { ops[key] = op }
+        }
+        return SceneRenderSource(prepared: prepared, replayOps: ops, plusEntries: observation.plusEntries)
+    }
+
     /// Renders `scene` into a fresh sRGB bitmap sized from the page (× `scale`),
     /// on white, matching `MetafileRenderer.makeImage`'s sizing. Returns `nil`
     /// only on a bitmap allocation failure.
@@ -39,21 +80,37 @@ public enum SceneRenderer {
         return context.makeImage()
     }
 
-    /// Draws `scene` into `context`, mapping its device space onto `target`.
+    /// Draws `scene` into `context`, mapping its device space onto `target`,
+    /// preparing the source internally. Unchanged behaviour: a one-off call (a
+    /// `makeImage`, a test) that does not keep a prepared source around.
     public static func render(_ scene: Scene, into context: CGContext, target: CGRect) {
+        render(scene, into: context, target: target, source: nil)
+    }
+
+    /// Draws `scene` into `context` reusing a `source` prepared once via `prepare`,
+    /// so a tiled canvas renders every tile without re-parsing/re-observing the
+    /// whole file (slice E2b-3). `source` must come from this scene's source (any
+    /// scene sharing the same `scene.source`, e.g. a tile subscene or a ghost
+    /// subset, is valid — the keys are by source-record / element id).
+    public static func render(_ scene: Scene, into context: CGContext, target: CGRect, source: SceneRenderSource) {
+        render(scene, into: context, target: target, source: .some(source))
+    }
+
+    private static func render(_ scene: Scene, into context: CGContext, target: CGRect, source: SceneRenderSource?) {
         let base = deviceToTarget(pageBounds: scene.pageBoundsDevice, target: target)
 
         // EMF+ content lifts into editable elements (slice E1a2): geometry draws
         // from its value types; text/image/passthrough replay through the one
         // interpreter, preserving z-order.
         if scene.source.renderPath == .emfPlus {
-            renderEMFPlus(scene, into: context, target: target, base: base)
+            guard let src = source ?? prepare(scene) else { return }
+            renderEMFPlus(scene, into: context, target: target, base: base, source: src)
             return
         }
 
-        // Ops for the replay elements (text/image/passthrough), re-derived from
-        // the source and keyed by their draw-moment record (max provenance).
-        let replayOps = needsReplay(scene) ? opsByDrawKey(scene) : [:]
+        // Ops for the replay elements (text/image/passthrough), taken from the
+        // prepared source (built once) and keyed by their draw-moment record.
+        let replayOps: [Int: ResolvedDrawOp] = needsReplay(scene) ? (source ?? prepare(scene))?.replayOps ?? [:] : [:]
 
         context.saveGState()
         defer { context.restoreGState() }
@@ -132,9 +189,9 @@ public enum SceneRenderer {
     /// on-screen edit matches the exported file exactly (an edited GetDC GDI element
     /// uses the GDI synthesis instead). The source is re-observed once to recover
     /// each original element's lifted entry, keyed by its stable id.
-    private static func renderEMFPlus(_ scene: Scene, into context: CGContext, target: CGRect, base: CGAffineTransform) {
-        guard let prepared = prepareSource(scene) else { return }
-        let entries = MetafileRenderer.observe(prepared).plusEntries
+    private static func renderEMFPlus(_ scene: Scene, into context: CGContext, target: CGRect, base: CGAffineTransform, source: SceneRenderSource) {
+        let prepared = source.prepared
+        let entries = source.plusEntries
 
         context.saveGState()
         defer { context.restoreGState() }
@@ -336,23 +393,6 @@ public enum SceneRenderer {
 
     private static func needsReplay(_ scene: Scene) -> Bool {
         scene.elements.contains { $0.kind == .text || $0.kind == .image || $0.kind == .passthrough }
-    }
-
-    /// Re-observes the source and keys each op by its draw-moment record index
-    /// (max provenance), the same key the import uses for z-order.
-    private static func opsByDrawKey(_ scene: Scene) -> [Int: ResolvedDrawOp] {
-        guard let prepared = prepareSource(scene) else { return [:] }
-        let observation = MetafileRenderer.observe(prepared)
-        var map: [Int: ResolvedDrawOp] = [:]
-        for op in observation.ops {
-            if let key = op.recordIndices.max() { map[key] = op }
-        }
-        return map
-    }
-
-    private static func prepareSource(_ scene: Scene) -> MetafileRenderer.Prepared? {
-        guard let opened = try? OpenedMetafile.open(scene.source.data) else { return nil }
-        return MetafileRenderer.prepare(opened)
     }
 
     // MARK: - Device→target fit (mirrors EMFRenderer.deviceToTarget)
