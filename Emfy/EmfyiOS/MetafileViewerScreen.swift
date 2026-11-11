@@ -33,6 +33,10 @@ struct MetafileViewerScreen: View {
 
     @State private var controller = MetafileZoomController()
     @State private var exporter = MetafileExportController()
+    @State private var editorModel = EditorModel()
+    #if DEBUG
+    @State private var debugLaunchRan = false
+    #endif
 
     @State private var chromeHidden = false
     @State private var showInspector = false
@@ -99,6 +103,7 @@ struct MetafileViewerScreen: View {
         // ellipsis, like the iPhone title (S1a-5 carry-over c). iPhone keeps the
         // default inline title, which already tail-truncates.
         .toolbar { regularWidthTitle }
+        .toolbar { editToolbarItem }
         .toolbar { bottomBar }
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .navigationBar)
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .bottomBar)
@@ -224,7 +229,27 @@ struct MetafileViewerScreen: View {
             exporter.cancelOngoing()
             Task { await session.flushPendingSave() }
         }
+        #if DEBUG
+        .task { await runDebugLaunchIfNeeded() }
+        #endif
     }
+
+    #if DEBUG
+    /// The E2b screenshot hook (design call E2b-8): once the file loads, enter edit mode
+    /// and pre-select the first N editable elements, so a simulator screenshot shows the
+    /// selection without any touches. The capture itself is `xcrun simctl io screenshot`.
+    @MainActor
+    private func runDebugLaunchIfNeeded() async {
+        guard !debugLaunchRan, EditorDebugLaunch.isActive, EditorDebugLaunch.editOnOpen else { return }
+        debugLaunchRan = true
+        for _ in 0..<80 { if session.loaded != nil { break }; try? await Task.sleep(for: .milliseconds(100)) }
+        guard session.loaded != nil else { return }
+        await session.beginEditing()
+        if session.editing == .editing, EditorDebugLaunch.selectFirst > 0 {
+            editorModel.selection.replace(with: session.firstEditableIDs(EditorDebugLaunch.selectFirst))
+        }
+    }
+    #endif
 
     /// The non-modal "changed on disk" banner (E2a-8, review #6): keep the edits, or
     /// reload and discard them.
@@ -288,14 +313,34 @@ struct MetafileViewerScreen: View {
 
     @ViewBuilder
     private var drawingLayer: some View {
-        // Once edits diverge from the opened version, draw the edited scene from
-        // SceneRenderer (E2a-3, review #6). E2b layers its editing canvas on top.
-        if let pageSize = session.editedPageSize {
-            MetafileEditedSceneView(pageSize: pageSize, scale: displayScale, makeImage: { session.makeEditedSceneImage(scale: $0) })
-                .id(session.editVersion)
-                .ignoresSafeArea()
+        // In edit mode the drawing is fed from the scene through the crisp tiled canvas
+        // with the selection overlay (design calls E2b-1/-2). Read-only viewing keeps
+        // the prepared-model tiled view.
+        if session.editing == .editing {
+            MetafileEditingContainer(
+                session: session, editorModel: editorModel, controller: controller,
+                displayScale: displayScale,
+                tilePaint: ViewerTilePaint.make(
+                    background: settings.pageBackground, darkMode: settings.darkPageMode, isDark: colorScheme == .dark
+                ),
+                options: settings.renderOptions
+            )
+            .ignoresSafeArea()
+            .overlay(alignment: .bottom) { rotationReadout }
         } else {
             readOnlyDrawingLayer
+        }
+    }
+
+    /// The live rotation-angle readout while a two-finger rotation is in flight (E2b-6).
+    @ViewBuilder
+    private var rotationReadout: some View {
+        if let readout = editorModel.rotationReadout {
+            Text(readout)
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .floatingSurface(in: Capsule())
+                .padding(.bottom, 80)
         }
     }
 
@@ -381,6 +426,35 @@ struct MetafileViewerScreen: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: 460)
+            }
+        }
+    }
+
+    /// The Edit / Done nav-bar button (design call E2b-1). iPad (regular width) only;
+    /// the iPhone shows nothing, since light editing is E4. Entering lifts the scene;
+    /// Done clears the selection and flushes any pending save.
+    @ToolbarContentBuilder
+    private var editToolbarItem: some ToolbarContent {
+        if isRegularWidth {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(session.editing == .editing ? "Done" : "Edit") { toggleEditMode() }
+                    .disabled(loaded == nil)
+                    .accessibilityIdentifier("viewerEdit")
+            }
+        }
+    }
+
+    private func toggleEditMode() {
+        if session.editing == .editing {
+            editorModel.selection.clear()
+            Task { await session.endEditing() }
+        } else {
+            Task {
+                await session.beginEditing()
+                if session.editing == .unavailable {
+                    toast.show("This file can’t be edited", systemImage: "pencil.slash")
+                    await session.endEditing()
+                }
             }
         }
     }
@@ -742,35 +816,6 @@ struct MetafileViewerScreen: View {
 
     private var subtitle: String {
         entry?.formatSizeSubtitle ?? ""
-    }
-}
-
-/// Draws an edited scene from `SceneRenderer` (E2a-3, review #6). A minimal
-/// fit-to-view raster for E2a — it renders once per edit version at the backing
-/// resolution; E2b's canvas replaces it with the interactive editing surface.
-private struct MetafileEditedSceneView: View {
-    let pageSize: CGSize
-    let scale: CGFloat
-    let makeImage: (CGFloat) -> CGImage?
-
-    var body: some View {
-        GeometryReader { proxy in
-            if let image = makeImage(editScale(for: proxy.size)) {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                Color(.systemGroupedBackground)
-            }
-        }
-        .background(Color(.systemGroupedBackground))
-    }
-
-    private func editScale(for viewport: CGSize) -> CGFloat {
-        guard pageSize.width > 0, pageSize.height > 0, viewport.width > 0, viewport.height > 0 else { return 1 }
-        let fit = min(viewport.width / pageSize.width, viewport.height / pageSize.height)
-        return min(max(fit * scale, 1), 4)
     }
 }
 

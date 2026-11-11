@@ -44,6 +44,7 @@
 		B01100000000000000000077 /* MetafileLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000077 /* MetafileLoader.swift */; };
 		B01100000000000000000078 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000078 /* AboutView.swift */; platformFilters = (ios, ); };
 		B01100000000000000000082 /* ZoomableMetafileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007B /* ZoomableMetafileView.swift */; platformFilters = (ios, ); };
+		E2B000000000000000000141 /* EditableMetafileCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000140 /* EditableMetafileCanvas.swift */; platformFilters = (ios, ); };
 		B01100000000000000000084 /* MetafileDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007D /* MetafileDiagnostics.swift */; };
 		B01100000000000000000085 /* DuoRegions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000007E /* DuoRegions.swift */; platformFilters = (ios, ); };
 		B011000000000000000000E0 /* ExportTaskRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000E0 /* ExportTaskRunner.swift */; };
@@ -236,6 +237,7 @@
 		B00100000000000000000079 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B0010000000000000000007A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B0010000000000000000007B /* ZoomableMetafileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomableMetafileView.swift; sourceTree = "<group>"; };
+		E2B000000000000000000140 /* EditableMetafileCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditableMetafileCanvas.swift; sourceTree = "<group>"; };
 		B0010000000000000000007D /* MetafileDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetafileDiagnostics.swift; sourceTree = "<group>"; };
 		B0010000000000000000007E /* DuoRegions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuoRegions.swift; sourceTree = "<group>"; };
 		B001000000000000000000E0 /* ExportTaskRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportTaskRunner.swift; sourceTree = "<group>"; };
@@ -530,6 +532,7 @@
 				B00100000000000000000075 /* EmptyRecentsView.swift */,
 				B00100000000000000000076 /* MetafileViewerScreen.swift */,
 				B0010000000000000000007B /* ZoomableMetafileView.swift */,
+				E2B000000000000000000140 /* EditableMetafileCanvas.swift */,
 				B0010000000000000000007E /* DuoRegions.swift */,
 				B00100000000000000000090 /* MetafileExport.swift */,
 				B00100000000000000000091 /* ShareSheet.swift */,
@@ -767,6 +770,7 @@
 				B01100000000000000000076 /* MetafileViewerScreen.swift in Sources */,
 				B01100000000000000000138 /* WindowOpenMenu.swift in Sources */,
 				B01100000000000000000082 /* ZoomableMetafileView.swift in Sources */,
+				E2B000000000000000000141 /* EditableMetafileCanvas.swift in Sources */,
 				B01100000000000000000084 /* MetafileDiagnostics.swift in Sources */,
 				B01100000000000000000085 /* DuoRegions.swift in Sources */,
 				B011000000000000000000E0 /* ExportTaskRunner.swift in Sources */,
