@@ -108,9 +108,16 @@ private struct PageProportionPreview: View {
     }
 }
 
+/// Wraps the "present the New Drawing sheet" action so it can be a focused value
+/// without the closure-comparability warning `@Entry` emits for a bare closure
+/// (the same reason `ViewerActions` is a struct, not a closure).
+struct NewDrawingCommand {
+    var present: () -> Void
+}
+
 extension FocusedValues {
-    /// The focused library window's "present the New Drawing sheet" action, published
-    /// by every window (so File ▸ New Drawing works even in an empty window) and read
-    /// by the Mac File menu. `nil` only when no window is focused.
-    @Entry var newDrawingAction: (() -> Void)?
+    /// The focused library window's New Drawing action, published by every window (so
+    /// File ▸ New Drawing works even in an empty window) and read by the Mac File menu.
+    /// `nil` only when no window is focused.
+    @Entry var newDrawingAction: NewDrawingCommand?
 }

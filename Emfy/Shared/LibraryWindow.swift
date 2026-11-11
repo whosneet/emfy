@@ -209,7 +209,7 @@ struct LibraryWindow: View {
         }
         // New Drawing (E3a): the Mac File menu fires this focused action; every window
         // publishes it so ⌘N works even in an empty window.
-        .focusedSceneValue(\.newDrawingAction) { showNewDrawing = true }
+        .focusedSceneValue(\.newDrawingAction, NewDrawingCommand(present: { showNewDrawing = true }))
         .sheet(isPresented: $showNewDrawing) {
             NewDrawingSheet { preset in
                 Task {

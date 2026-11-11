@@ -22,7 +22,7 @@ struct FileMenuCommands: Commands {
         // New Drawing… (⌘N) opens the presets sheet in the focused window (E3a); New
         // Window moves to ⇧⌘N, so ⌘N creates a drawing rather than an empty window.
         CommandGroup(replacing: .newItem) {
-            Button("New Drawing…") { newDrawing?() }
+            Button("New Drawing…") { newDrawing?.present() }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(newDrawing == nil)
             Button("New Window") { openWindow(id: "library") }
