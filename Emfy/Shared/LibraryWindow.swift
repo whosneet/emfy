@@ -125,7 +125,9 @@ struct LibraryWindow: View {
             // E2b screenshot hook: -EmfyDebugOpen opens a file into this window; the
             // viewer then reads -EmfyDebugEdit / -EmfyDebugSelect to enter edit mode
             // with a selection (design call E2b-8).
-            if model.selection == nil, let path = EditorDebugLaunch.openPath {
+            // Always open a temp-dir COPY, never the tracked file in place (an armed
+            // autosave must never be able to write into corpus/).
+            if model.selection == nil, let path = EditorDebugLaunch.safeCopiedOpenPath() {
                 if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
             }
             #endif

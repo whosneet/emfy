@@ -46,8 +46,37 @@ enum EditorDebugLaunch {
     /// (E2c acceptance screenshot 4).
     static var recolorDelete: Bool { (value(for: "-EmfyDebugRecolorDelete") ?? "NO").uppercased() == "YES" }
 
+    /// `-EmfyDebugAppearance dark|light`: forces THIS app's appearance (never the
+    /// system's) so a capture can show both, in-process. `nil` leaves it unchanged.
+    static var appearance: String? { value(for: "-EmfyDebugAppearance")?.lowercased() }
+
+    /// `-EmfyDebugScrollInspector YES`: scrolls the Format inspector to its Text section
+    /// so a capture shows the font controls (E2c screenshot 2).
+    static var scrollInspectorToText: Bool { (value(for: "-EmfyDebugScrollInspector") ?? "NO").uppercased() == "YES" }
+
     /// Whether the launch hook is driving this run.
     static var isActive: Bool { openPath != nil }
+
+    /// A temp-directory COPY of `openPath`, so a DEBUG run never opens a tracked file
+    /// (e.g. anything under `corpus/`) in place — an armed autosave could otherwise
+    /// write into it. The original is always copied first; if the copy fails the path
+    /// is refused (`nil`), so the run never falls back to opening the original.
+    static func safeCopiedOpenPath() -> String? {
+        guard let path = openPath else { return nil }
+        let source = URL(fileURLWithPath: path)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyDebugOpen-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let destination = directory.appendingPathComponent(source.lastPathComponent.isEmpty ? "debug.emf" : source.lastPathComponent)
+            try FileManager.default.copyItem(at: source, to: destination)
+            // Refuse if, somehow, the copy still resolves inside a corpus directory.
+            guard !destination.path.contains("/corpus/") else { return nil }
+            return destination.path
+        } catch {
+            return nil
+        }
+    }
 
     private static func value(for key: String) -> String? {
         let args = ProcessInfo.processInfo.arguments

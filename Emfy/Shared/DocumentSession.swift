@@ -524,6 +524,9 @@ final class DocumentSession {
         guard !ids.isEmpty else { return }
         apply(.setFill(ids: ids, SceneFill(color: SceneColor(red: red, green: green, blue: blue), evenOdd: false)))
     }
+
+    /// Cancels any armed autosave, so a DEBUG capture run never writes on its way out.
+    func debugCancelAutosave() { autosave.cancel() }
     #endif
 
     /// Rasterises the edited scene through `SceneRenderer` for the viewer's edit

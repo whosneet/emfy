@@ -216,6 +216,8 @@ struct MacViewerPane: View {
     private func captureE2cScreenshot() async {
         guard let base = EditorDebugLaunch.screenshotBase else { return }
         NSApp.activate(ignoringOtherApps: true)   // so a transient popover presents and stays
+        // (The forced appearance is applied at launch, in EmfyAppDelegate, so the SwiftUI
+        // inspector adopts it from the first render.)
         controller.fit()
         try? await Task.sleep(for: .milliseconds(700))
         if EditorDebugLaunch.showInspector { showInspector = true }
@@ -224,16 +226,20 @@ struct MacViewerPane: View {
             session.debugSetFill(ids: ids, red: 0.20, green: 0.55, blue: 0.95)
             if let first = ids.sorted().first { session.deleteSelection([first]) }
         }
-        if EditorDebugLaunch.textEdit, let tid = session.firstTextElementID() {
-            if let string = session.textString(of: tid) {
-                editorModel.selection.replace(with: tid)
-                editorModel.textEdit = TextEditRequest(id: tid, anchor: .center, initialText: string)
-            }
+        if EditorDebugLaunch.textEdit, let tid = session.firstTextElementID(), let string = session.textString(of: tid) {
+            editorModel.selection.replace(with: tid)
+            // A fixed anchor near the first run, so the capture reliably shows the popover
+            // (real double-clicks compute the anchor from the run's reference point).
+            editorModel.textEdit = TextEditRequest(id: tid, anchor: UnitPoint(x: 0.4, y: 0.28), initialText: string)
         }
         try? await Task.sleep(for: .milliseconds(1200))
         _ = EditorDebugScreenshot.captureAllWindows(to: base + "-e2c.png")
+        session.debugCancelAutosave()   // never write on the way out of a capture run
         try? await Task.sleep(for: .milliseconds(200))
-        NSApp.terminate(nil)
+        // exit() rather than NSApp.terminate(): a capture of a recolour+delete leaves the
+        // (temp-copy) document dirty, and terminate would raise the unsaved-changes prompt
+        // and hang. The screenshot is already written; nothing needs saving.
+        exit(0)
     }
     #endif
 

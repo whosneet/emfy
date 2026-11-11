@@ -42,6 +42,12 @@ struct EmfyApp: App {
                 .environment(store)
                 .environment(coordinator)
                 .environment(settings)
+                #if DEBUG
+                // The DEBUG appearance flag drives SwiftUI's colorScheme too (NSApp's
+                // appearance alone only reaches AppKit), so a capture shows the inspector
+                // in the forced appearance. `nil` follows the system, as normal.
+                .preferredColorScheme(EditorDebugLaunch.appearance.map { $0 == "dark" ? .dark : .light })
+                #endif
                 #if os(macOS)
                 // Deliver Finder opens to an existing window instead of spawning a
                 // new one, while still creating a window on a cold launch (v3-plan
@@ -106,6 +112,17 @@ struct EmfyApp: App {
 /// `.terminateLater` so the async flush and the modal run before the reply.
 final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
     enum QuitDecision { case save, discard, cancel }
+
+    #if DEBUG
+    /// Forces THIS app's appearance from the DEBUG flag BEFORE any window renders, so a
+    /// capture's SwiftUI content (the inspector Form) adopts it. Never touches the
+    /// system appearance.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if let name = EditorDebugLaunch.appearance {
+            NSApp.appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
+        }
+    }
+    #endif
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let dirty = DocumentEditRegistry.shared.dirtySessions

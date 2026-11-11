@@ -39,6 +39,10 @@ enum EditorDebugScreenshot {
             let bounds = view.bounds
             guard bounds.width > 0, bounds.height > 0,
                   let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { continue }
+            // Note: `cacheDisplay` renders SwiftUI-hosted content in the light drawing
+            // appearance regardless of the window's appearance (the standard sidebar
+            // renders light in a dark window too), so a faithful DARK capture isn't
+            // possible here; force light via `-EmfyDebugAppearance light` for a clean shot.
             view.cacheDisplay(in: bounds, to: rep)
             let screenRect = window.convertToScreen(view.convert(bounds, to: nil))
             captured.append((screenRect, rep))
