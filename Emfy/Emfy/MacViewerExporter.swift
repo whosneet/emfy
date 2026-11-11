@@ -31,6 +31,10 @@ final class MacViewerExporter {
     var pngDocument = PNGExportDocument(data: Data())
     var pdfDocument = PDFExportDocument(data: Data())
     var svgDocument = SVGExportDocument(data: Data())
+    // "Save a Copy as EMF…" from the WMF save confirmation (E2a-5). Reuses the plain
+    // `MetafileCopyDocument` (write-only data under the chosen name).
+    var isExportingSceneEMF = false
+    var sceneCopyDocument = MetafileCopyDocument(data: Data())
 
     /// Non-nil presents the share picker (consumed by `MacSharePresenter`).
     var sharePayload: MacSharePayload?
@@ -44,6 +48,13 @@ final class MacViewerExporter {
     @ObservationIgnored private var tempCleanupURL: URL?
 
     // MARK: - Export to file
+
+    /// Opens the file exporter for an already-serialised EMF copy of the edited scene
+    /// ("Save a Copy as EMF…", E2a-5).
+    func exportSceneCopy(data: Data) {
+        sceneCopyDocument = MetafileCopyDocument(data: data)
+        isExportingSceneEMF = true
+    }
 
     /// Renders `format` off-main, then opens the `fileExporter` for it. `scale`
     /// and `background` carry the Export settings into the PNG render (S1a-6).

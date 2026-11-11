@@ -28,6 +28,8 @@ struct MacViewerPane: View {
     @State private var controller = MacMetafileZoomController()
     @State private var exporter = MacViewerExporter()
     @State private var showInspector = false
+    @State private var showRevertConfirm = false
+    @State private var showReloadDiscardConfirm = false
 
     private var loaded: LoadedMetafile? { session.loaded }
 
@@ -92,11 +94,109 @@ struct MacViewerPane: View {
             .onChange(of: settings.renderOptions) { _, new in
                 session.applyRenderOptions(new)
             }
-            .onDisappear { exporter.cancelOngoing() }
+            // Editing (E2a): revert confirmation, the WMF first-save limitations
+            // dialog, the "changed on disk" banner, and typed save-failure toasts.
+            .confirmationDialog(
+                "Revert to the version you opened?",
+                isPresented: $showRevertConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Revert", role: .destructive) { Task { await session.revertToOpenedVersion() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This replaces the file on disk with the version Emfy opened and discards your edits. This can’t be undone.")
+            }
+            .confirmationDialog(
+                "Save as WMF?",
+                isPresented: Binding(
+                    get: { session.pendingWMFConfirmation != nil },
+                    set: { if !$0 { session.cancelPendingWMFSave() } }
+                ),
+                titleVisibility: .visible,
+                presenting: session.pendingWMFConfirmation
+            ) { pending in
+                Button("Save Anyway") { Task { await session.confirmPendingWMFSave() } }
+                Button("Save a Copy as EMF…") { saveSceneCopyAsEMF() }
+                Button("Cancel", role: .cancel) { session.cancelPendingWMFSave() }
+            } message: { pending in
+                Text(WMFLimitationWording.message(for: pending))
+            }
+            .fileExporter(
+                isPresented: $exporter.isExportingSceneEMF,
+                document: exporter.sceneCopyDocument,
+                contentType: .data,
+                defaultFilename: (entry?.baseName ?? "Metafile") + ".emf"
+            ) { _ in }
+            .overlay(alignment: .top) {
+                if session.showsExternalChangeBanner {
+                    externalChangeBanner
+                }
+            }
+            .onChange(of: session.lastSaveError != nil) { _, hasError in
+                if hasError, let error = session.lastSaveError {
+                    toast.show(error.message, systemImage: "exclamationmark.triangle")
+                    session.clearSaveError()
+                }
+            }
+            .onDisappear {
+                exporter.cancelOngoing()
+                Task { await session.flushPendingSave() }
+            }
+    }
+
+    /// The non-modal banner shown when the file changed on disk while there were
+    /// unsaved edits (design call E2a-8): keep the edits, or reload and discard them.
+    private var externalChangeBanner: some View {
+        HStack(spacing: 12) {
+            Label("This file changed on disk", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+            Spacer()
+            Button("Keep My Edits") { session.keepMyEdits() }
+            Button("Reload…", role: .destructive) { showReloadDiscardConfirm = true }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(12)
+        .shadow(radius: 4, y: 2)
+        .confirmationDialog(
+            "Reload and discard your edits?",
+            isPresented: $showReloadDiscardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Reload", role: .destructive) { Task { await session.reloadDiscardingEdits() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The on-disk version replaces what’s on screen. Your unsaved edits are lost.")
+        }
+    }
+
+    /// "Save a Copy as EMF…": exports the current scene as EMF and presents a file
+    /// exporter, keeping full fidelity instead of narrowing to WMF.
+    private func saveSceneCopyAsEMF() {
+        guard let data = session.sceneExportData(as: .emf) else {
+            exporter.errorMessage = "Emfy couldn’t prepare an EMF copy of this drawing."
+            return
+        }
+        session.cancelPendingWMFSave()
+        exporter.exportSceneCopy(data: data)
     }
 
     @ViewBuilder
     private var content: some View {
+        // Once edits make the scene dirty, draw the edited scene from `SceneRenderer`
+        // instead of the original prepared model (design call E2a-3). E2b layers its
+        // selection/transform canvas on top of this hook.
+        if let pageSize = session.editedPageSize {
+            MacEditedSceneView(pageSize: pageSize, makeImage: { session.makeEditedSceneImage(scale: $0) })
+                .id(session.editVersion)
+                .ignoresSafeArea()
+        } else {
+            readOnlyContent
+        }
+    }
+
+    @ViewBuilder
+    private var readOnlyContent: some View {
         switch session.state {
         case .idle, .loading:
             ProgressView()
@@ -378,7 +478,9 @@ struct MacViewerPane: View {
             sharePNG: { share(.png) },
             sharePDF: { share(.pdf) },
             shareSVG: { shareSVG() },
-            copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil
+            copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil,
+            save: (session.editing == .editing && session.isDirty) ? { Task { await session.save() } } : nil,
+            revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil
         )
     }
 
@@ -391,6 +493,37 @@ struct MacViewerPane: View {
     /// frame path.
     private var subtitle: String {
         entry?.formatSizeSubtitle ?? ""
+    }
+}
+
+/// Draws an edited `Scene` from `SceneRenderer` (design call E2a-3). A minimal
+/// fit-to-pane raster for E2a — it renders the scene once per edit version at the
+/// pane's backing resolution; E2b's canvas replaces it with the interactive,
+/// zoomable editing surface.
+private struct MacEditedSceneView: View {
+    let pageSize: CGSize
+    let makeImage: (CGFloat) -> CGImage?
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let image = makeImage(editScale(for: proxy.size)) {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Color(nsColor: .underPageBackgroundColor)
+            }
+        }
+        .background(Color(nsColor: .underPageBackgroundColor))
+    }
+
+    /// A render scale that keeps the rasterised scene reasonably sharp for the pane
+    /// without exceeding the renderer's own bitmap cap.
+    private func editScale(for viewport: CGSize) -> CGFloat {
+        guard pageSize.width > 0, pageSize.height > 0, viewport.width > 0, viewport.height > 0 else { return 1 }
+        let fit = min(viewport.width / pageSize.width, viewport.height / pageSize.height)
+        return min(max(fit * 2, 1), 4)   // 2× the fit scale, clamped to a sane range
     }
 }
 

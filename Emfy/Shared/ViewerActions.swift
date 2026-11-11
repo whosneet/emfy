@@ -33,6 +33,12 @@ struct ViewerActions {
     /// menu item reads as disabled.
     var copyDiagnosticReport: (() -> Void)? = nil
 
+    // Editing (E2a): Mac File ▸ Save and Revert to Opened Version. `nil` disables the
+    // menu item — Save is `nil` unless there are unsaved edits; Revert is `nil` unless
+    // an opened-version snapshot exists and the Settings toggle is on.
+    var save: (() -> Void)? = nil
+    var revertToOpenedVersion: (() -> Void)? = nil
+
     // iOS/iPadOS immersive chrome + the Info inspector, surfaced in the iOS View menu
     // (K1). `nil` on the Mac, which has its own View toggles and toolbar.
     var toggleChrome: (() -> Void)? = nil

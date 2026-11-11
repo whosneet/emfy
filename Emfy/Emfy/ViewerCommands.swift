@@ -30,6 +30,16 @@ struct FileMenuCommands: Commands {
             OpenRecentMenu(store: store, coordinator: coordinator)
         }
 
+        // Save in place and Revert to Opened Version (E2a). Save owns ⌘S; both read as
+        // disabled until there are unsaved edits / an opened-version snapshot exists.
+        CommandGroup(replacing: .saveItem) {
+            Button("Save") { actions?.save?() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(actions?.save == nil)
+            Button("Revert to Opened Version") { actions?.revertToOpenedVersion?() }
+                .disabled(actions?.revertToOpenedVersion == nil)
+        }
+
         // Export lives at the standard File ▸ import/export anchor. The Share
         // submenu routes to the same per-window exporter as the toolbar's Share.
         CommandGroup(replacing: .importExport) {
