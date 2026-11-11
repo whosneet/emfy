@@ -90,6 +90,12 @@ final class EmfySettings {
     var showWhatsNewAfterUpdates: Bool {
         didSet { defaults.set(showWhatsNewAfterUpdates, forKey: Keys.showWhatsNewAfterUpdates) }
     }
+    /// Keep a one-time copy of each file as it was opened, so Revert to Opened Version
+    /// works (E2a-7). Default ON. When off, no snapshot is taken and the Revert menu
+    /// item is disabled.
+    var keepOpenedVersionForRevert: Bool {
+        didSet { defaults.set(keepOpenedVersionForRevert, forKey: Keys.keepOpenedVersionForRevert) }
+    }
 
     // MARK: Library extras
 
@@ -209,6 +215,7 @@ final class EmfySettings {
         recentsToKeep = Self.int(defaults, Keys.recentsToKeep, default: .fifty)
         reopenLastFileAtLaunch = Self.bool(defaults, Keys.reopenLastFileAtLaunch, default: true)
         showWhatsNewAfterUpdates = Self.bool(defaults, Keys.showWhatsNewAfterUpdates, default: true)
+        keepOpenedVersionForRevert = Self.bool(defaults, Keys.keepOpenedVersionForRevert, default: true)
         sortRecentsBy = Self.string(defaults, Keys.sortRecentsBy, default: .date)
         recentsLayout = Self.string(defaults, Keys.recentsLayout, default: .grid)
         thumbnailSize = Self.string(defaults, Keys.thumbnailSize, default: .medium)
@@ -314,6 +321,7 @@ final class EmfySettings {
         static let recentsToKeep = "settings.library.recentsToKeep"
         static let reopenLastFileAtLaunch = "settings.library.reopenLastFileAtLaunch"
         static let showWhatsNewAfterUpdates = "settings.library.showWhatsNewAfterUpdates"
+        static let keepOpenedVersionForRevert = "settings.library.keepOpenedVersionForRevert"
         static let sortRecentsBy = "settings.library.sortRecentsBy"
         static let recentsLayout = "settings.library.recentsLayout"
         static let thumbnailSize = "settings.library.thumbnailSize"
