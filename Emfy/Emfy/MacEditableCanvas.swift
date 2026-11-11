@@ -92,6 +92,7 @@ struct MacEditableCanvas: NSViewRepresentable {
         tiled.frame = paper.bounds
         tiled.autoresizingMask = [.width, .height]
         tiled.setPaint(tilePaint)
+        tiled.ensureSourcePrepared()
         paper.addSubview(tiled)
 
         let overlay = EditorOverlayView(frame: paper.bounds)
@@ -119,6 +120,7 @@ struct MacEditableCanvas: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         context.coordinator.tiledView?.setScene(scene)
+        context.coordinator.tiledView?.ensureSourcePrepared()
         context.coordinator.tiledView?.setPaint(tilePaint)
         context.coordinator.tiledView?.setOptions(options)
         scrollView.documentView?.shadow = pageShadow ? MacMetafileScrollView.makePaperShadow() : nil
@@ -523,6 +525,11 @@ private final class TiledSceneView: NSView {
     private let hiddenLock = OSAllocatedUnfairLock<Set<Int>>(initialState: [])
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
     private let optionsLock: OSAllocatedUnfairLock<RenderOptions>
+    /// The source parsed/observed once per editing session (E2b-3). Prepared off
+    /// the main actor in the background when the canvas appears; nil until ready,
+    /// so early tiles fall back to preparing internally per render.
+    private let sourceLock = OSAllocatedUnfairLock<SceneRenderer.SceneRenderSource?>(initialState: nil)
+    private var sourcePrepStarted = false
     private let pageSize: CGSize
 
     init(scene: EMFEdit.Scene, pageSize: CGSize, options: RenderOptions) {
@@ -561,6 +568,25 @@ private final class TiledSceneView: NSView {
     /// 5). Set on the main thread by the coordinator before it applies the edit.
     var pendingDirtyRegion: CGRect?
 
+    /// Prepares the render source once, off the main actor, for a scene that needs
+    /// it (replay/passthrough/EMF+). A pure-geometry scene needs none, so this is a
+    /// no-op there. When the source lands, the whole view redraws so every tile
+    /// starts reusing it (E2b-3).
+    func ensureSourcePrepared() {
+        guard !sourcePrepStarted else { return }
+        let scene = sceneLock.withLock { $0 }
+        guard SceneRenderer.requiresPreparedSource(scene) else { return }
+        sourcePrepStarted = true
+        let lock = sourceLock
+        Task { [weak self] in
+            let prepared = await Task.detached(priority: .userInitiated) { SceneRenderer.prepare(scene) }.value
+            lock.withLock { $0 = prepared }
+            guard let self else { return }
+            self.setNeedsDisplay(self.bounds)
+            self.layer?.setNeedsDisplay()
+        }
+    }
+
     func setScene(_ scene: EMFEdit.Scene) {
         sceneLock.withLock { $0 = scene }
         if let region = pendingDirtyRegion {
@@ -592,6 +618,7 @@ private final class TiledSceneView: NSView {
         let paint = paintLock.withLock { $0 }
         let hidden = hiddenLock.withLock { $0 }
         var scene = sceneLock.withLock { $0 }
+        let source = sourceLock.withLock { $0 }
         let natural = pageSize
         if !hidden.isEmpty { scene = SceneGhostSupport.hiding(ids: hidden, in: scene) }
         // Only the elements that reach this tile are rendered, so a tile's cost is
@@ -599,7 +626,13 @@ private final class TiledSceneView: NSView {
         // tiled view is y-up, matching SceneRenderer's target (flipY: true).
         let tileScene = SceneTileFilter.subscene(scene, viewRect: dirtyRect, target: CGRect(origin: .zero, size: natural), flipY: true)
         TilePainter.paint(paint, into: context, rect: dirtyRect) { ctx in
-            SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural))
+            // Reuse the prepared source so the tile doesn't re-parse the file (E2b-3);
+            // until it's ready, fall back to render preparing internally.
+            if let source {
+                SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural), source: source)
+            } else {
+                SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural))
+            }
         }
     }
 }

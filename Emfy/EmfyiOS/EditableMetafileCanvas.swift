@@ -71,6 +71,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         tiled.frame = paper.bounds
         tiled.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         tiled.setPaint(tilePaint)
+        tiled.ensureSourcePrepared()
         paper.addSubview(tiled)
 
         let overlay = IOSEditorOverlayView(frame: paper.bounds)
@@ -97,6 +98,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     func updateUIView(_ scrollView: UIScrollView, context: Context) {
         context.coordinator.parent = self
         context.coordinator.tiledView?.setScene(scene)
+        context.coordinator.tiledView?.ensureSourcePrepared()
         context.coordinator.tiledView?.setPaint(tilePaint)
         context.coordinator.tiledView?.setOptions(options)
         controller.scrollView = scrollView
@@ -393,6 +395,11 @@ private final class IOSTiledSceneView: UIView {
     private let hiddenLock = OSAllocatedUnfairLock<Set<Int>>(initialState: [])
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
     private let optionsLock: OSAllocatedUnfairLock<RenderOptions>
+    /// The source parsed/observed once per editing session (E2b-3), prepared off
+    /// the main actor; nil until ready, so early tiles fall back to the per-render
+    /// preparation.
+    private let sourceLock = OSAllocatedUnfairLock<SceneRenderer.SceneRenderSource?>(initialState: nil)
+    private var sourcePrepStarted = false
     private let pageSize: CGSize
 
     override class var layerClass: AnyClass { CATiledLayer.self }
@@ -417,6 +424,24 @@ private final class IOSTiledSceneView: UIView {
     /// A view-space region to invalidate on the next `setScene` instead of the whole
     /// view, so a committed edit only repaints the changed tiles (E2b item 5).
     var pendingDirtyRegion: CGRect?
+
+    /// Prepares the render source once, off the main actor, for a scene that needs
+    /// it; a no-op for a pure-geometry scene. On arrival the view redraws so every
+    /// tile reuses it (E2b-3).
+    func ensureSourcePrepared() {
+        guard !sourcePrepStarted else { return }
+        let scene = sceneLock.withLock { $0 }
+        guard SceneRenderer.requiresPreparedSource(scene) else { return }
+        sourcePrepStarted = true
+        let lock = sourceLock
+        Task { [weak self] in
+            let prepared = await Task.detached(priority: .userInitiated) { SceneRenderer.prepare(scene) }.value
+            lock.withLock { $0 = prepared }
+            guard let self else { return }
+            self.setNeedsDisplay()
+            self.tiledLayer.setNeedsDisplay()
+        }
+    }
 
     func setScene(_ scene: EMFEdit.Scene) {
         sceneLock.withLock { $0 = scene }
@@ -447,6 +472,7 @@ private final class IOSTiledSceneView: UIView {
         let paint = paintLock.withLock { $0 }
         let hidden = hiddenLock.withLock { $0 }
         var scene = sceneLock.withLock { $0 }
+        let source = sourceLock.withLock { $0 }
         let natural = pageSize
         if !hidden.isEmpty { scene = SceneGhostSupport.hiding(ids: hidden, in: scene) }
         // Only the elements reaching this tile are rendered (E2b item 5). The iOS tiled
@@ -456,7 +482,13 @@ private final class IOSTiledSceneView: UIView {
         TilePainter.paint(paint, into: context, rect: rect) { ctx in
             ctx.translateBy(x: 0, y: natural.height)
             ctx.scaleBy(x: 1, y: -1)
-            SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural))
+            // Reuse the prepared source so the tile doesn't re-parse the file (E2b-3);
+            // fall back to the internal preparation until it's ready.
+            if let source {
+                SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural), source: source)
+            } else {
+                SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural))
+            }
         }
     }
 }
