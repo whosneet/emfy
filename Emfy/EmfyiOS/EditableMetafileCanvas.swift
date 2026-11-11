@@ -18,13 +18,15 @@ struct MetafileEditingContainer: View {
     var options: RenderOptions = .default
 
     var body: some View {
+        @Bindable var editorModel = editorModel
         let _ = session.editVersion
         Group {
             if let scene = session.editingScene {
                 EditableMetafileCanvas(
                     scene: scene, editorModel: editorModel, controller: controller,
                     displayScale: displayScale, tilePaint: tilePaint, options: options,
-                    apply: { command, key in session.apply(command, coalescing: key) }
+                    apply: { command, key in session.apply(command, coalescing: key) },
+                    delete: { ids in session.deleteSelection(ids) }
                 )
                 .ignoresSafeArea()
             } else {
@@ -33,6 +35,17 @@ struct MetafileEditingContainer: View {
         }
         .onChange(of: session.editVersion) { _, _ in
             if let scene = session.editingScene { editorModel.selection.prune(to: scene) }
+        }
+        // Undo/redo of a delete restores the selection (design call E2c-4).
+        .onAppear { session.selectionRestore = { ids in editorModel.selection.replace(with: ids) } }
+        // The double-tap text-edit popover, anchored to the element (design call E2c-5).
+        .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center)) { request in
+            TextEditPopover(
+                request: request,
+                onCommit: { string in session.apply(.setText(id: request.id, string)) },
+                onCancel: {},
+                onClose: { editorModel.textEdit = nil }
+            )
         }
     }
 }
@@ -52,6 +65,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     var tilePaint: TilePaint = .plain
     var options: RenderOptions = .default
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
+    /// Deletes the given ids as one undoable step (design call E2c-4).
+    let delete: (Set<Int>) -> Void
 
     private var pageSize: CGSize { scene.pageSizeDevice }
 
@@ -213,6 +228,14 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             tap.delegate = self
             overlay.addGestureRecognizer(tap)
 
+            // Double-tap a text element to edit it (design call E2c-5); the single tap
+            // waits for this to fail so a double-tap doesn't also re-select.
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            doubleTap.delegate = self
+            overlay.addGestureRecognizer(doubleTap)
+            tap.require(toFail: doubleTap)
+
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.maximumNumberOfTouches = 1
             pan.delegate = self
@@ -245,7 +268,41 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             let p = g.location(in: overlay)
             let id = hitElement(at: p)
             selection = selection.afterClick(hit: id, additive: false)
+            // Take first responder so a hardware Delete key reaches the overlay's key
+            // commands (design call E2c-4).
+            if !selection.ids.isEmpty { overlay.becomeFirstResponder() }
             overlay.setNeedsDisplay()
+        }
+
+        @objc private func handleDoubleTap(_ g: UITapGestureRecognizer) {
+            guard let overlay else { return }
+            let p = g.location(in: overlay)
+            guard let id = hitElement(at: p),
+                  let element = scene.elements.first(where: { $0.id == id }),
+                  element.kind == .text, let text = element.text else { return }
+            selection = selection.afterClick(hit: id, additive: false)
+            parent.editorModel.textEdit = TextEditRequest(id: id, anchor: anchor(for: element), initialText: text.string)
+            overlay.setNeedsDisplay()
+        }
+
+        /// The element's centre as a fraction of the scroll view's visible viewport, for
+        /// anchoring the text popover near the element.
+        private func anchor(for element: Element) -> UnitPoint {
+            guard let scrollView, let overlay else { return .center }
+            let deviceCentre = CGPoint(x: element.boundsDevice.midX, y: element.boundsDevice.midY)
+            let paperPoint = mapping.viewPoint(fromDevice: deviceCentre)
+            let inScroll = overlay.convert(paperPoint, to: scrollView)
+            let visibleX = inScroll.x - scrollView.contentOffset.x
+            let visibleY = inScroll.y - scrollView.contentOffset.y
+            let size = scrollView.bounds.size
+            guard size.width > 0, size.height > 0 else { return .center }
+            return UnitPoint(x: min(1, max(0, visibleX / size.width)), y: min(1, max(0, visibleY / size.height)))
+        }
+
+        /// Deletes the current selection as one undoable step (design call E2c-4).
+        func deleteSelection() {
+            guard !selection.ids.isEmpty else { return }
+            parent.delete(selection.ids)
         }
 
         @objc private func handlePan(_ g: UIPanGestureRecognizer) {
@@ -502,14 +559,45 @@ private final class IOSTiledSceneView: UIView {
 
 // MARK: - Overlay
 
-private final class IOSEditorOverlayView: UIView {
+private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelegate {
     weak var coordinator: EditableMetafileCanvas.Coordinator?
 
-    override init(frame: CGRect) { super.init(frame: frame); backgroundColor = .clear; isOpaque = false }
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        // Long-press the selection for a Delete action (design call E2c-4, iPad).
+        addInteraction(UIContextMenuInteraction(delegate: self))
+    }
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     private var zoom: CGFloat { coordinator?.zoom ?? 1 }
+
+    // MARK: Hardware keyboard + context menu delete
+
+    override var canBecomeFirstResponder: Bool { true }
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard let coordinator, !coordinator.selection.ids.isEmpty else { return nil }
+        let backspace = UIKeyCommand(input: "\u{8}", modifierFlags: [], action: #selector(deleteCommand))
+        backspace.wantsPriorityOverSystemBehavior = true
+        let forward = UIKeyCommand(input: "\u{7F}", modifierFlags: [], action: #selector(deleteCommand))
+        forward.wantsPriorityOverSystemBehavior = true
+        return [backspace, forward]
+    }
+
+    @objc private func deleteCommand() { coordinator?.deleteSelection() }
+
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        guard let coordinator, let box = coordinator.selectionViewBounds(), box.contains(location) else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let delete = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+                coordinator.deleteSelection()
+            }
+            return UIMenu(children: [delete])
+        }
+    }
 
     override func draw(_ rect: CGRect) {
         guard let coordinator, let context = UIGraphicsGetCurrentContext() else { return }

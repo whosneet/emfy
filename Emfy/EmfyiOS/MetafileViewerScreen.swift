@@ -245,8 +245,14 @@ struct MetafileViewerScreen: View {
         for _ in 0..<80 { if session.loaded != nil { break }; try? await Task.sleep(for: .milliseconds(100)) }
         guard session.loaded != nil else { return }
         await session.beginEditing()
-        if session.editing == .editing, EditorDebugLaunch.selectFirst > 0 {
-            editorModel.selection.replace(with: session.firstEditableIDs(EditorDebugLaunch.selectFirst))
+        if session.editing == .editing {
+            if EditorDebugLaunch.selectText, let tid = session.firstTextElementID() {
+                editorModel.selection.replace(with: tid)
+            } else if EditorDebugLaunch.selectFirst > 0 {
+                editorModel.selection.replace(with: session.firstEditableIDs(EditorDebugLaunch.selectFirst))
+            }
+            // E2c: open the Format inspector for the selection-driven screenshot.
+            if EditorDebugLaunch.showInspector { showInspector = true }
         }
     }
     #endif
@@ -737,6 +743,22 @@ struct MetafileViewerScreen: View {
 
     @ViewBuilder
     private var inspectorContent: some View {
+        // In edit mode with a selection, the Format panel replaces Info (a Format | Info
+        // segmented control switches between them); otherwise Info as today (E2c design
+        // call 1).
+        if session.editing == .editing, !editorModel.selection.isEmpty, loaded != nil, entry != nil {
+            EditorInspectorPanel(session: session, editorModel: editorModel, onClose: { closeInspector() }) {
+                infoInspector
+            }
+            .environment(toast)
+            .environment(settings)
+        } else {
+            infoInspector
+        }
+    }
+
+    @ViewBuilder
+    private var infoInspector: some View {
         if let model = loaded, let entry {
             MetafileInfoView(
                 entry: entry,
