@@ -1,0 +1,447 @@
+import EMFEdit
+import EMFParse
+import EMFRender
+import Foundation
+import Testing
+
+// E2a unit tests for the editable document host: the save-format and WMF-limitation
+// mapping, the autosave debounce, the revert-snapshot store, and the `DocumentSession`
+// editing layer (begin/apply/undo bridge/save/snapshot/revert/external-change). Like
+// DocumentHostTests these compile the shared sources into a hostless logic bundle and
+// inject `resolve`/`writeBytes`, so no window or real file-coordination is needed.
+
+// MARK: - Fixtures
+
+/// A valid EMF carrying one fillable rectangle, so `SceneImporter` lifts exactly one
+/// editable element. Header (88-byte base) + EMR_RECTANGLE (43) + EMR_EOF (14).
+private func editableEMF() -> Data {
+    var d = Data()
+    func u32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+    func i32(_ v: Int32) { u32(UInt32(bitPattern: v)) }
+    func u16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+    // EMR_HEADER
+    u32(1); u32(88)
+    i32(0); i32(0); i32(99); i32(99)          // rclBounds
+    i32(0); i32(0); i32(2117); i32(2117)      // rclFrame
+    u32(0x464D4520)                           // " EMF"
+    u32(0x0001_0000)                          // nVersion
+    u32(88 + 24 + 20)                         // nBytes
+    u32(3)                                    // nRecords
+    u16(1); u16(0)                            // nHandles, sReserved
+    u32(0); u32(0)                            // nDescription, offDescription
+    u32(0)                                    // nPalEntries
+    i32(1920); i32(1080)                      // szlDevice
+    i32(508); i32(286)                        // szlMillimeters
+    // EMR_RECTANGLE (type 43, size 24): rclBox left/top/right/bottom
+    u32(43); u32(24); i32(10); i32(10); i32(90); i32(90)
+    // EMR_EOF
+    u32(14); u32(20); u32(0); u32(16); u32(20)
+    return d
+}
+
+/// Captures the bytes a save wrote, so a test asserts what reached disk.
+private final class WriteBox: @unchecked Sendable {
+    var data: Data?
+    var count = 0
+}
+
+/// A sleep that never returns during a test run, so an injected autosave controller
+/// stays armed but never fires (the explicit-save tests then control every write).
+private let nonFiringSleep: @Sendable (Duration) async -> Void = { _ in
+    try? await Task.sleep(for: .seconds(86_400))
+}
+
+@MainActor
+private func makeEditingSession(
+    bytes: Data,
+    fileName: String = "drawing.emf",
+    snapshotDir: URL? = nil,
+    keepSnapshot: Bool = true,
+    writeBox: WriteBox,
+    autosave: AutosaveController? = nil
+) -> DocumentSession {
+    DocumentSession(
+        entryID: UUID(),
+        resolve: { _ in bytes },
+        writeBytes: { data, _ in writeBox.data = data; writeBox.count += 1 },
+        snapshotStore: snapshotDir.map { RevertSnapshotStore(directory: $0) },
+        keepRevertSnapshot: { keepSnapshot },
+        documentFileName: { fileName },
+        autosave: autosave ?? AutosaveController(sleep: nonFiringSleep)
+    )
+}
+
+private func redFill() -> SceneCommand {
+    .setFill(ids: [0], SceneFill(color: SceneColor(red: 1, green: 0, blue: 0), evenOdd: false))
+}
+
+// MARK: - Pure support types
+
+@Suite struct EditingSupportTests {
+
+    @Test func saveFormatFollowsTheFileExtension() {
+        #expect(EditingSaveFormat.format(fileName: "a.emf", source: .emf) == .emf)
+        #expect(EditingSaveFormat.format(fileName: "a.emz", source: .emf) == .emz)
+        #expect(EditingSaveFormat.format(fileName: "a.wmf", source: .wmf) == .wmf)
+        #expect(EditingSaveFormat.format(fileName: "a.wmz", source: .placeableWMF) == .wmz)
+        // No usable extension: fall back to the scene's own container.
+        #expect(EditingSaveFormat.format(fileName: "noext", source: .emf) == .emf)
+        #expect(EditingSaveFormat.format(fileName: "noext", source: .placeableWMF) == .wmf)
+    }
+
+    @Test func wmfFamilyDetection() {
+        #expect(EditingSaveFormat.isWMFFamily(.wmf))
+        #expect(EditingSaveFormat.isWMFFamily(.wmz))
+        #expect(!EditingSaveFormat.isWMFFamily(.emf))
+        #expect(!EditingSaveFormat.isWMFFamily(.emz))
+    }
+
+    @Test func wmfLimitationMessageListsPresentCategories() {
+        let confirmation = WMFSaveConfirmation(
+            format: .wmf,
+            categories: [.opacity: 2, .gradient: 1],
+            data: Data(),
+            warnings: []
+        )
+        let message = WMFLimitationWording.message(for: confirmation)
+        #expect(message.contains(WMFLimitationWording.text(for: .opacity)))
+        #expect(message.contains(WMFLimitationWording.text(for: .gradient)))
+        #expect(!message.contains(WMFLimitationWording.text(for: .image)))
+    }
+
+    @Test func wmfLimitationMessageAlwaysHasABullet() {
+        let confirmation = WMFSaveConfirmation(format: .wmf, categories: [:], data: Data(), warnings: [])
+        #expect(WMFLimitationWording.message(for: confirmation).contains("•"))
+    }
+
+    @Test func externalChangeShowsBannerOnlyWhileDirty() {
+        #expect(DocumentSession.externalChangeShowsBanner(isEditing: true, isDirty: true))
+        #expect(!DocumentSession.externalChangeShowsBanner(isEditing: true, isDirty: false))
+        #expect(!DocumentSession.externalChangeShowsBanner(isEditing: false, isDirty: true))
+    }
+}
+
+// MARK: - Revert snapshot store
+
+@Suite struct RevertSnapshotStoreTests {
+
+    private func tempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfySnap-\(UUID().uuidString)", isDirectory: true)
+        return dir
+    }
+
+    @Test func writesOnceAndReadsBack() {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RevertSnapshotStore(directory: dir)
+        let id = UUID()
+        #expect(!store.hasSnapshot(for: id))
+        #expect(store.writeIfAbsent(entryID: id, data: Data([1, 2, 3]), originalFileName: "a.emf"))
+        #expect(store.hasSnapshot(for: id))
+        let read = store.read(for: id)
+        #expect(read?.data == Data([1, 2, 3]))
+        #expect(read?.originalFileName == "a.emf")
+    }
+
+    @Test func secondWriteDoesNotReplace() {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RevertSnapshotStore(directory: dir)
+        let id = UUID()
+        #expect(store.writeIfAbsent(entryID: id, data: Data([1]), originalFileName: "a.emf"))
+        #expect(!store.writeIfAbsent(entryID: id, data: Data([9, 9]), originalFileName: "b.emf"))
+        #expect(store.read(for: id)?.data == Data([1]))   // the first snapshot survives
+    }
+
+    @Test func pruneDeletesTheSnapshot() {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RevertSnapshotStore(directory: dir)
+        let id = UUID()
+        store.writeIfAbsent(entryID: id, data: Data([1]), originalFileName: "a.emf")
+        store.prune(entryID: id)
+        #expect(!store.hasSnapshot(for: id))
+    }
+}
+
+// MARK: - Autosave debounce (injected clock)
+
+@MainActor
+@Suite struct AutosaveControllerTests {
+
+    /// The injected clock for the debounce: every scheduled fire parks in `wait()`
+    /// until the test releases them all, so timing is deterministic. `waiterCount`
+    /// lets the test release only once every scheduled task has parked (otherwise a
+    /// task that parks after the release would hang).
+    private final class Gate: @unchecked Sendable {
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private let lock = NSLock()
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                lock.lock(); waiters.append(continuation); lock.unlock()
+            }
+        }
+        func waiterCount() -> Int { lock.lock(); defer { lock.unlock() }; return waiters.count }
+        func releaseAll() {
+            lock.lock(); let pending = waiters; waiters.removeAll(); lock.unlock()
+            for continuation in pending { continuation.resume() }
+        }
+    }
+
+    /// Spins the main actor until `gate` has at least `n` parked fires.
+    private func awaitWaiters(_ gate: Gate, atLeast n: Int) async {
+        while gate.waiterCount() < n { await Task.yield() }
+    }
+
+    @Test func burstOfSchedulesCollapsesToOneFire() async {
+        let gate = Gate()
+        let controller = AutosaveController(sleep: { _ in await gate.wait() })
+        let fires = Counter()
+        controller.schedule { fires.bump() }
+        controller.schedule { fires.bump() }
+        controller.schedule { fires.bump() }   // only this survives; the earlier two cancel
+        // All three tasks park; the two cancelled ones return without firing on release.
+        await awaitWaiters(gate, atLeast: 3)
+        gate.releaseAll()
+        await controller.pendingValueForTesting()
+        #expect(fires.value == 1)
+    }
+
+    @Test func cancelStopsThePendingFire() async {
+        let gate = Gate()
+        let controller = AutosaveController(sleep: { _ in await gate.wait() })
+        let fires = Counter()
+        controller.schedule { fires.bump() }
+        controller.cancel()
+        await awaitWaiters(gate, atLeast: 1)   // the cancelled task still parks
+        gate.releaseAll()                       // …and returns without firing
+        await Task.yield()
+        #expect(fires.value == 0)
+    }
+
+    private final class Counter: @unchecked Sendable {
+        private(set) var value = 0
+        func bump() { value += 1 }
+    }
+}
+
+// MARK: - DocumentSession editing layer
+
+@MainActor
+@Suite struct DocumentEditingTests {
+
+    @Test func beginEditingImportsAnEditableScene() async {
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
+        #expect(session.editing == .notEditing)
+        await session.beginEditing()
+        #expect(session.editing == .editing)
+        #expect(session.history != nil)
+        #expect(!session.isDirty)
+    }
+
+    @Test func fileWithNoLiftableContentOpensReadOnly() async {
+        // A header-only EMF has nothing editable, so editing is unavailable.
+        let session = makeEditingSession(bytes: EmfyTests.minimalEMF(), writeBox: WriteBox())
+        await session.beginEditing()
+        #expect(session.editing == .unavailable)
+    }
+
+    @Test func applyMakesTheDocumentDirty() async {
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
+        await session.beginEditing()
+        session.apply(redFill())
+        #expect(session.isDirty)
+        #expect(session.editVersion > 0)
+    }
+
+    @Test func undoViaUndoManagerRestoresSceneAndClearsDirty() async {
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
+        await session.beginEditing()
+        let original = session.history!.scene
+        session.apply(redFill())
+        #expect(session.isDirty)
+        #expect(session.undoManager.canUndo)
+
+        session.undoManager.undo()
+        #expect(session.history!.scene == original)   // byte-exact restore
+        #expect(!session.isDirty)
+
+        session.undoManager.redo()
+        #expect(session.history!.scene != original)
+        #expect(session.isDirty)
+    }
+
+    @Test func coalescedCommandsAreOneUndoEntry() async {
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
+        await session.beginEditing()
+        let original = session.history!.scene
+        let key = SceneCoalescingKey("drag")
+        session.apply(.setOpacity(ids: [0], 0.9), coalescing: key)
+        session.apply(.setOpacity(ids: [0], 0.7), coalescing: key)
+        session.apply(.setOpacity(ids: [0], 0.5), coalescing: key)
+
+        session.undoManager.undo()
+        #expect(session.history!.scene == original)      // one undo reverses the whole drag
+        #expect(!session.undoManager.canUndo)
+        #expect(!session.isDirty)
+    }
+
+    @Test func saveWritesBytesThatReimportToAnEquivalentScene() async {
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: box)
+        await session.beginEditing()
+        let editableBefore = session.history!.scene.editableElements.count
+        session.apply(redFill())
+        await session.save()
+
+        let written = try! #require(box.data)
+        let reimported = try! SceneImporter.import(data: written)
+        #expect(reimported.editableElements.count == editableBefore)
+        #expect(!session.isDirty)   // clean after save
+    }
+
+    @Test func editThenUndoKeepsTheOriginalBytesVerbatim() async {
+        let original = editableEMF()
+        let session = makeEditingSession(bytes: original, writeBox: WriteBox())
+        await session.beginEditing()
+        session.apply(redFill())
+        session.undoManager.undo()
+        #expect(!session.isDirty)
+        // Re-exporting the undone (unchanged) scene re-emits the source verbatim.
+        #expect(session.sceneExportData(as: .emf) == original)
+    }
+
+    @Test func wmfSavePathSurfacesTheConfirmationState() async {
+        let box = WriteBox()
+        // The .wmf file name routes the save through the WMF container (cross-container).
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: box)
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.save()
+        // First WMF save does not write — it raises the limitations confirmation.
+        #expect(session.pendingWMFConfirmation != nil)
+        #expect(session.pendingWMFConfirmation?.format == .wmf)
+        #expect(box.count == 0)
+
+        await session.confirmPendingWMFSave()
+        #expect(session.pendingWMFConfirmation == nil)
+        #expect(box.count == 1)   // Save Anyway wrote the stashed bytes
+    }
+
+    @Test func firstSaveSnapshotsOnceAndRevertRestores() async {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("EmfyE2a-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let box = WriteBox()
+        let original = editableEMF()
+        let session = makeEditingSession(bytes: original, snapshotDir: dir, writeBox: box)
+        await session.beginEditing()
+        let snapshots = RevertSnapshotStore(directory: dir)
+        let id = session.entryID
+
+        session.apply(redFill())
+        await session.save()
+        #expect(snapshots.hasSnapshot(for: id))
+        #expect(snapshots.read(for: id)?.data == original)   // the opened bytes
+
+        // A second save must not replace the snapshot.
+        session.apply(.setOpacity(ids: [0], 0.5))
+        await session.save()
+        #expect(snapshots.read(for: id)?.data == original)
+
+        await session.revertToOpenedVersion()
+        #expect(box.data == original)                        // original bytes written back
+        #expect(session.editing == .notEditing)
+        #expect(!session.undoManager.canUndo)                // undo cleared
+    }
+
+    @Test func snapshotIsSkippedWhenTheSettingIsOff() async {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("EmfyE2a-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let session = makeEditingSession(bytes: editableEMF(), snapshotDir: dir, keepSnapshot: false, writeBox: WriteBox())
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.save()
+        #expect(!RevertSnapshotStore(directory: dir).hasSnapshot(for: session.entryID))
+    }
+
+    @Test func externalChangeWhileDirtyRaisesBannerAndDoesNotReload() async {
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
+        await session.beginEditing()
+        session.apply(redFill())
+        let installsBefore = session.modelInstallCount
+        session.externalDiskChangeDetected()
+        #expect(session.showsExternalChangeBanner)
+        #expect(session.modelInstallCount == installsBefore)   // no reload
+    }
+
+    @Test func autosaveFiresAfterAnEdit() async {
+        let box = WriteBox()
+        let autosave = AutosaveController(sleep: { _ in })   // immediate
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: box, autosave: autosave)
+        await session.beginEditing()
+        session.apply(redFill())
+        await autosave.pendingValueForTesting()
+        #expect(box.count >= 1)
+        #expect(!session.isDirty)
+    }
+}
+
+// MARK: - Store pruning + real-file round trip
+
+@MainActor
+@Suite struct DocumentEditingStoreTests {
+
+    private func makeStore() -> (RecentsStore, URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyE2aStore-\(UUID().uuidString)", isDirectory: true)
+        let store = RecentsStore(locations: .init(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        ))
+        return (store, dir)
+    }
+
+    @Test func removingARecentsEntryPrunesItsSnapshot() async throws {
+        let (store, dir) = makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let src = dir.appendingPathComponent("doc.emf")
+        try editableEMF().write(to: src)
+        let id = try #require(await store.handleOpenedURL(src))
+
+        let snapshots = RevertSnapshotStore(directory: store.locations.snapshotsDirectory)
+        snapshots.writeIfAbsent(entryID: id, data: editableEMF(), originalFileName: "doc.emf")
+        #expect(snapshots.hasSnapshot(for: id))
+
+        store.remove(id)
+        store.commitPendingRemoval()   // side files are deleted on commit
+        #expect(!snapshots.hasSnapshot(for: id))
+    }
+
+    @Test func corpusEMFRoundTripReparsesCleanly() async throws {
+        let corpus = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("corpus/gate-p2-star.emf")
+        let original = try Data(contentsOf: corpus)
+        let originalRecords = try EMFFile.parse(original).records.count
+
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: original, fileName: "star.emf", writeBox: box)
+        await session.beginEditing()
+        guard session.editing == .editing, let firstID = session.history?.scene.editableElements.first?.id else {
+            Issue.record("corpus EMF produced no editable element")
+            return
+        }
+        session.apply(.setFill(ids: [firstID], SceneFill(color: SceneColor(red: 0.2, green: 0.4, blue: 0.9), evenOdd: false)))
+        await session.save()
+
+        let saved = try #require(box.data)
+        let savedFile = try EMFFile.parse(saved)   // throws on a malformed stream
+        // Report-only figures (surfaced in the handback): sizes and record counts.
+        #expect(savedFile.records.count >= 2)   // at least HEADER … EOF
+        #expect(saved.count > 0)
+        // Round trip is an overlay: unedited records are kept verbatim and the
+        // recoloured element is re-synthesised, so the saved stream is a small
+        // superset of the original (observed: 6592→6784 B, 297→310 records) and
+        // re-parses without error.
+        #expect(savedFile.records.count >= originalRecords)
+    }
+}

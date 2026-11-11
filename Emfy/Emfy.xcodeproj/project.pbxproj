@@ -82,6 +82,7 @@
 		E2A0000000000000000000A2 /* RevertSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000A0 /* RevertSnapshot.swift */; };
 		E2A0000000000000000000B1 /* DocumentEditingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000B0 /* DocumentEditingSupport.swift */; };
 		E2A0000000000000000000B2 /* DocumentEditingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000B0 /* DocumentEditingSupport.swift */; };
+		E2A0000000000000000000C2 /* DocumentEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000C0 /* DocumentEditingTests.swift */; };
 		B01100000000000000000111 /* OpenRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000111 /* OpenRouting.swift */; };
 		B01100000000000000000112 /* ViewerFit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000112 /* ViewerFit.swift */; };
 		B01100000000000000000120 /* DocumentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000110 /* DocumentSession.swift */; };
@@ -230,6 +231,7 @@
 		B00100000000000000000110 /* DocumentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSession.swift; sourceTree = "<group>"; };
 		E2A0000000000000000000A0 /* RevertSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevertSnapshot.swift; sourceTree = "<group>"; };
 		E2A0000000000000000000B0 /* DocumentEditingSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentEditingSupport.swift; sourceTree = "<group>"; };
+		E2A0000000000000000000C0 /* DocumentEditingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentEditingTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000111 /* OpenRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouting.swift; sourceTree = "<group>"; };
 		B00100000000000000000112 /* ViewerFit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerFit.swift; sourceTree = "<group>"; };
 		B00200000000000000000004 /* EmfyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EmfyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -414,6 +416,7 @@
 				B00100000000000000000305 /* SettingsModelTests.swift */,
 				B00100000000000000000340 /* QuickLookSettingsTests.swift */,
 				B00100000000000000000F41 /* SVGExportTests.swift */,
+				E2A0000000000000000000C0 /* DocumentEditingTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -818,6 +821,7 @@
 				B01100000000000000000120 /* DocumentSession.swift in Sources */,
 				E2A0000000000000000000A2 /* RevertSnapshot.swift in Sources */,
 				E2A0000000000000000000B2 /* DocumentEditingSupport.swift in Sources */,
+				E2A0000000000000000000C2 /* DocumentEditingTests.swift in Sources */,
 				B01100000000000000000121 /* OpenRouting.swift in Sources */,
 				B01100000000000000000122 /* ViewerFit.swift in Sources */,
 				B01100000000000000000123 /* DocumentHostTests.swift in Sources */,
