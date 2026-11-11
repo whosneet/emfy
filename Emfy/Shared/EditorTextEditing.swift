@@ -14,9 +14,26 @@ import UIKit
 // popover emit one `setText`; the font controls emit one `setFont`, with the point
 // size converted to the run's logical height (`FontSizeConversion`).
 
-/// The Text section: content, font family, size (pt), Bold and Italic. Shown only
-/// when the selection is exactly one text element.
+/// The Text section (iOS): content, font family, size (pt), Bold and Italic wrapped in
+/// a Form `Section`. The macOS Format panel hosts `TextSectionRows` directly in its
+/// own card instead (see `FormatSections`). Shown only when the selection is exactly
+/// one text element.
 struct TextSection: View {
+    let session: DocumentSession
+    let text: InspectorText
+    /// The element transform, for the point-size ⇄ logical-height conversion.
+    let transform: CGAffineTransform
+
+    var body: some View {
+        Section("Text") {
+            TextSectionRows(session: session, text: text, transform: transform)
+        }
+    }
+}
+
+/// The Text section's controls, without a `Section` wrapper so the macOS Format panel
+/// can place them in its hand-built card (see `FormatSections`).
+struct TextSectionRows: View {
     let session: DocumentSession
     let text: InspectorText
     /// The element transform, for the point-size ⇄ logical-height conversion.
@@ -26,7 +43,7 @@ struct TextSection: View {
     @State private var liveSize: Double = 12
 
     var body: some View {
-        Section("Text") {
+        Group {
             TextField("Text", text: $liveContent, axis: .vertical)
                 .lineLimit(1...4)
                 .onSubmit { commitText() }

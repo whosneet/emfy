@@ -95,36 +95,89 @@ struct FormatSections: View {
         let _ = session.editVersion
         let model = self.model
         ScrollViewReader { proxy in
-            Form {
-                if model.isEmpty {
-                    Section { Text("No Selection").foregroundStyle(.secondary) }
-                } else {
-                    fillSection(model)
-                    strokeSection(model)
-                    opacitySection(model)
-                    if let text = model.text {
-                        TextSection(session: session, text: text, transform: transform(of: text.id))
-                            .id("format.text")
+            sections(model)
+                .onAppear {
+                    syncLiveValues(model)
+                    #if DEBUG
+                    if EditorDebugLaunch.scrollInspectorToText, model.text != nil {
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(500))
+                            proxy.scrollTo("format.text", anchor: .top)
+                        }
                     }
+                    #endif
                 }
-            }
-            #if os(macOS)
-            .formStyle(.grouped)
-            #endif
-            .onAppear {
-                syncLiveValues(model)
-                #if DEBUG
-                if EditorDebugLaunch.scrollInspectorToText, model.text != nil {
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(500))
-                        proxy.scrollTo("format.text", anchor: .top)
-                    }
-                }
-                #endif
-            }
-            .onChange(of: editorModel.selection) { _, _ in syncLiveValues(self.model) }
+                .onChange(of: editorModel.selection) { _, _ in syncLiveValues(self.model) }
         }
     }
+
+    #if os(macOS)
+    // On macOS the Format panel lives in the window's inspector column, whose hosting
+    // view renders in the VibrantDark appearance. SwiftUI's `.formStyle(.grouped)`
+    // section cards resolve OPAQUE WHITE there in Dark Mode (the hosting view is
+    // correctly dark, but the grouped card background does not follow it, and neither
+    // `.listRowBackground` nor `.scrollContentBackground(.hidden)` overrides it). So
+    // the panel is laid out by hand with explicit semantic backgrounds, which DO follow
+    // the window's appearance — no hard-coded light/dark colours. iOS keeps the Form.
+    @ViewBuilder
+    private func sections(_ model: FormatInspectorModel) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if model.isEmpty {
+                    Text("No Selection").foregroundStyle(.secondary)
+                } else {
+                    card("Fill") { fillRows(model) }
+                    card("Stroke") { strokeRows(model) }
+                    card("Opacity") { opacityRows(model) }
+                    if let text = model.text {
+                        card("Text") {
+                            TextSectionRows(session: session, text: text, transform: transform(of: text.id))
+                        }
+                        .id("format.text")
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// One titled section card: an uppercase caption header over a rounded container
+    /// filled with `.controlBackgroundColor`, a semantic colour that follows the
+    /// window's appearance (dark in Dark Mode, light in Light).
+    @ViewBuilder
+    private func card<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.caption).fontWeight(.semibold)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .padding(.leading, 6)
+            VStack(alignment: .leading, spacing: 12) { content() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .foregroundStyle(Color(nsColor: .labelColor))
+                .buttonStyle(.link)
+        }
+    }
+    #else
+    @ViewBuilder
+    private func sections(_ model: FormatInspectorModel) -> some View {
+        Form {
+            if model.isEmpty {
+                Section { Text("No Selection").foregroundStyle(.secondary) }
+            } else {
+                Section("Fill") { fillRows(model) }
+                Section("Stroke") { strokeRows(model) }
+                Section("Opacity") { opacityRows(model) }
+                if let text = model.text {
+                    TextSection(session: session, text: text, transform: transform(of: text.id))
+                        .id("format.text")
+                }
+            }
+        }
+    }
+    #endif
 
     private func transform(of id: Int) -> CGAffineTransform {
         session.editingScene?.elements.first { $0.id == id }?.transform ?? .identity
@@ -140,24 +193,22 @@ struct FormatSections: View {
     // MARK: Fill
 
     @ViewBuilder
-    private func fillSection(_ model: FormatInspectorModel) -> some View {
-        Section("Fill") {
-            switch model.fill {
-            case .gradient:
-                LabeledContent("Fill", value: "Gradient")
-                Button("Replace with Colour") { applyFill(.black, model: model) }
-                noFillButton(model)
-            case .mixed:
-                LabeledContent("Fill", value: "Mixed")
-                ColorPicker("Colour", selection: fillColorBinding(model, current: .gray), supportsOpacity: true)
-                noFillButton(model)
-            case .none:
-                LabeledContent("Fill", value: "None")
-                ColorPicker("Colour", selection: fillColorBinding(model, current: .black), supportsOpacity: true)
-            case .color(let colour):
-                ColorPicker("Colour", selection: fillColorBinding(model, current: Color(colour)), supportsOpacity: true)
-                noFillButton(model)
-            }
+    private func fillRows(_ model: FormatInspectorModel) -> some View {
+        switch model.fill {
+        case .gradient:
+            LabeledContent("Fill", value: "Gradient")
+            Button("Replace with Colour") { applyFill(.black, model: model) }
+            noFillButton(model)
+        case .mixed:
+            LabeledContent("Fill", value: "Mixed")
+            ColorPicker("Colour", selection: fillColorBinding(model, current: .gray), supportsOpacity: true)
+            noFillButton(model)
+        case .none:
+            LabeledContent("Fill", value: "None")
+            ColorPicker("Colour", selection: fillColorBinding(model, current: .black), supportsOpacity: true)
+        case .color(let colour):
+            ColorPicker("Colour", selection: fillColorBinding(model, current: Color(colour)), supportsOpacity: true)
+            noFillButton(model)
         }
     }
 
@@ -190,24 +241,22 @@ struct FormatSections: View {
     // MARK: Stroke
 
     @ViewBuilder
-    private func strokeSection(_ model: FormatInspectorModel) -> some View {
-        Section("Stroke") {
-            switch model.stroke {
-            case .none:
-                LabeledContent("Stroke", value: "None")
-                Button("Add Stroke") {
-                    session.apply(model.strokeCommand(color: SceneColor(red: 0, green: 0, blue: 0), width: max(1, liveStrokeWidth)))
-                }
-            case .mixed:
-                LabeledContent("Stroke", value: "Mixed")
-                strokeEditors(model, colour: .gray)
-            case .uniform(let colour, _, _, let dash):
-                strokeEditors(model, colour: Color(colour))
-                if dash != .solid {
-                    LabeledContent("Dash", value: dashLabel(dash))
-                }
-                Button("Remove Stroke", role: .destructive) { session.apply(model.clearStrokeCommand()) }
+    private func strokeRows(_ model: FormatInspectorModel) -> some View {
+        switch model.stroke {
+        case .none:
+            LabeledContent("Stroke", value: "None")
+            Button("Add Stroke") {
+                session.apply(model.strokeCommand(color: SceneColor(red: 0, green: 0, blue: 0), width: max(1, liveStrokeWidth)))
             }
+        case .mixed:
+            LabeledContent("Stroke", value: "Mixed")
+            strokeEditors(model, colour: .gray)
+        case .uniform(let colour, _, _, let dash):
+            strokeEditors(model, colour: Color(colour))
+            if dash != .solid {
+                LabeledContent("Dash", value: dashLabel(dash))
+            }
+            Button("Remove Stroke", role: .destructive) { session.apply(model.clearStrokeCommand()) }
         }
     }
 
@@ -262,20 +311,18 @@ struct FormatSections: View {
     // MARK: Opacity
 
     @ViewBuilder
-    private func opacitySection(_ model: FormatInspectorModel) -> some View {
-        Section("Opacity") {
-            HStack {
-                Slider(value: Binding(
-                    get: { liveOpacity },
-                    set: { liveOpacity = $0; session.apply(model.opacityCommand($0), coalescing: SceneCoalescingKey("opacity-\(opacityGesture)")) }
-                ), in: 0...1, onEditingChanged: { if !$0 { opacityGesture += 1 } })
-                Text("\(Int((liveOpacity * 100).rounded()))%")
-                    .monospacedDigit()
-                    .frame(width: 44, alignment: .trailing)
-            }
-            if case .mixed = model.opacity {
-                Text("Mixed").font(.caption).foregroundStyle(.secondary)
-            }
+    private func opacityRows(_ model: FormatInspectorModel) -> some View {
+        HStack {
+            Slider(value: Binding(
+                get: { liveOpacity },
+                set: { liveOpacity = $0; session.apply(model.opacityCommand($0), coalescing: SceneCoalescingKey("opacity-\(opacityGesture)")) }
+            ), in: 0...1, onEditingChanged: { if !$0 { opacityGesture += 1 } })
+            Text("\(Int((liveOpacity * 100).rounded()))%")
+                .monospacedDigit()
+                .frame(width: 44, alignment: .trailing)
+        }
+        if case .mixed = model.opacity {
+            Text("Mixed").font(.caption).foregroundStyle(.secondary)
         }
     }
 }
