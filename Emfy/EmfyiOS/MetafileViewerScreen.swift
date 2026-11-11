@@ -78,10 +78,14 @@ struct MetafileViewerScreen: View {
     /// column, so without this the drawing bleeds under it (item 2).
     private let inspectorWidth: CGFloat = 320
 
-    /// Trailing space to keep clear for the inspector overlay — only at regular
-    /// width (iPad), where the inspector is a column; zero for the iPhone sheet.
+    /// Trailing space to keep clear for the inspector overlay — only at regular width
+    /// (iPad) in READ-ONLY viewing, where the overlay sits over the drawing's trailing
+    /// edge. In edit mode the editable canvas fills the width and re-fits when the
+    /// inspector opens/closes (E2c item 4), so no reserved strip — reserving it there
+    /// double-counted the inspector column and left a white gap beside it.
     private var reservedInspectorWidth: CGFloat {
-        (showInspector && isRegularWidth) ? inspectorWidth : 0
+        guard showInspector, isRegularWidth, session.editing != .editing else { return 0 }
+        return inspectorWidth
     }
 
     var body: some View {
@@ -329,7 +333,10 @@ struct MetafileViewerScreen: View {
                 tilePaint: ViewerTilePaint.make(
                     background: settings.pageBackground, darkMode: settings.darkPageMode, isDark: colorScheme == .dark
                 ),
-                options: settings.renderOptions
+                options: settings.renderOptions,
+                // The editable canvas fills the full width (E2c item 4); the drawing is
+                // fitted and centred into the region the inspector overlay leaves clear.
+                trailingInset: (showInspector && isRegularWidth) ? inspectorWidth : 0
             )
             .ignoresSafeArea()
             .overlay(alignment: .bottom) { rotationReadout }

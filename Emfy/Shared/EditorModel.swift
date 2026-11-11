@@ -23,14 +23,15 @@ final class EditorModel {
     var textEdit: TextEditRequest?
 }
 
-/// The state driving the text-edit popover: which text element, where to anchor the
-/// popover within the canvas, and the run's current string. `Identifiable` so a
-/// `.popover(item:)` tracks it.
+/// The state driving the text-edit popover: which text element, the point to anchor the
+/// popover to (a fraction of the editing container's visible area, so the arrow points
+/// at the run), and the run's current string. `Identifiable` so a `.popover(item:)`
+/// tracks it.
 struct TextEditRequest: Equatable, Identifiable {
     /// The text element's id (also the popover's identity).
     let id: Int
-    /// Where to anchor the popover within the canvas, as a fraction of its visible
-    /// area (0…1 in each axis).
+    /// The anchor point as a fraction (0…1 each axis) of the editing container; the
+    /// popover's arrow points here.
     var anchor: UnitPoint
     /// The run's string when the popover opened.
     var initialText: String

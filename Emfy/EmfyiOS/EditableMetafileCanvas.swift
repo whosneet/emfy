@@ -16,6 +16,9 @@ struct MetafileEditingContainer: View {
     var displayScale: CGFloat = 2
     var tilePaint: TilePaint = .plain
     var options: RenderOptions = .default
+    /// Trailing width the inspector overlay occupies, so the drawing fits/centres into
+    /// the clear region while the canvas itself fills the full width (E2c item 4).
+    var trailingInset: CGFloat = 0
 
     var body: some View {
         @Bindable var editorModel = editorModel
@@ -26,7 +29,8 @@ struct MetafileEditingContainer: View {
                     scene: scene, editorModel: editorModel, controller: controller,
                     displayScale: displayScale, tilePaint: tilePaint, options: options,
                     apply: { command, key in session.apply(command, coalescing: key) },
-                    delete: { ids in session.deleteSelection(ids) }
+                    delete: { ids in session.deleteSelection(ids) },
+                    trailingInset: trailingInset
                 )
                 .ignoresSafeArea()
             } else {
@@ -38,8 +42,8 @@ struct MetafileEditingContainer: View {
         }
         // Undo/redo of a delete restores the selection (design call E2c-4).
         .onAppear { session.selectionRestore = { ids in editorModel.selection.replace(with: ids) } }
-        // The double-tap text-edit popover, anchored to the element (design call E2c-5).
-        .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center)) { request in
+        // The double-tap text-edit popover, anchored to the run via a UnitPoint (E2c-5).
+        .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center), arrowEdge: .top) { request in
             TextEditPopover(
                 request: request,
                 onCommit: { string in session.apply(.setText(id: request.id, string)) },
@@ -67,6 +71,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
     /// Deletes the given ids as one undoable step (design call E2c-4).
     let delete: (Set<Int>) -> Void
+    /// Trailing width the inspector overlay occupies (E2c item 4).
+    var trailingInset: CGFloat = 0
 
     private var pageSize: CGSize { scene.pageSizeDevice }
 
@@ -117,6 +123,9 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         context.coordinator.tiledView?.setPaint(tilePaint)
         context.coordinator.tiledView?.setOptions(options)
         controller.scrollView = scrollView
+        // The inspector opening/closing changes the clear region but not the scroll
+        // view's bounds, so re-fit/centre here (the canvas still fills the full width).
+        context.coordinator.configureZoomScales(for: scrollView.bounds.size)
         context.coordinator.overlay?.setNeedsDisplay()
     }
 
@@ -142,6 +151,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         fileprivate weak var overlay: IOSEditorOverlayView?
 
         private var hasSetInitialZoom = false
+        private var lastViewport: CGSize = .zero
+        private var lastTrailingInset: CGFloat = -1
         fileprivate var drag: DragState?
 
         init(_ parent: EditableMetafileCanvas) { self.parent = parent }
@@ -163,7 +174,14 @@ struct EditableMetafileCanvas: UIViewRepresentable {
 
         func configureZoomScales(for viewport: CGSize) {
             guard viewport.width > 0, viewport.height > 0, let scrollView else { return }
-            let fit = ViewerFit.fitScale(content: parent.pageSize, viewport: viewport, insets: .zero, minScale: 0.01, maxScale: 100)
+            // Fit into the region the inspector overlay leaves clear, not the full width,
+            // so the drawing sits beside (not under) the inspector while the canvas fills.
+            let insets = ViewerFit.Insets(top: 0, leading: 0, bottom: 0, trailing: parent.trailingInset)
+            let fit = ViewerFit.fitScale(content: parent.pageSize, viewport: viewport, insets: insets, minScale: 0.01, maxScale: 100)
+            // Re-fit when the viewport changes (the inspector opening/closing changes the
+            // clear region) AND the user hadn't manually zoomed, so the drawing re-centres
+            // instead of being stranded in a corner.
+            let wasFitted = !hasSetInitialZoom || abs(scrollView.zoomScale - parent.controller.fitScale) < 0.001
             scrollView.minimumZoomScale = min(fit, 1)
             scrollView.maximumZoomScale = max(8, fit)
             parent.controller.fitScale = fit
@@ -174,16 +192,26 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                     minScale: scrollView.minimumZoomScale, maxScale: scrollView.maximumZoomScale
                 )
                 centreContent(scrollView)
+            } else if (viewport != lastViewport || parent.trailingInset != lastTrailingInset), wasFitted {
+                scrollView.zoomScale = min(max(fit, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
+                centreContent(scrollView)
+            } else if parent.trailingInset != lastTrailingInset {
+                centreContent(scrollView)   // inset changed but the user had zoomed: re-centre only
             }
+            lastViewport = viewport
+            lastTrailingInset = parent.trailingInset
             if parent.controller.zoom != scrollView.zoomScale { parent.controller.zoom = scrollView.zoomScale }
             overlay?.setNeedsDisplay()
         }
 
         private func centreContent(_ scrollView: UIScrollView) {
             let scaled = parent.pageSize.applying(CGAffineTransform(scaleX: scrollView.zoomScale, y: scrollView.zoomScale))
-            let x = max(0, (scrollView.bounds.width - scaled.width) / 2)
+            // Centre within the region the inspector overlay leaves clear (full width
+            // minus the trailing inset), so the drawing sits beside the inspector.
+            let clearWidth = max(0, scrollView.bounds.width - parent.trailingInset)
+            let x = max(0, (clearWidth - scaled.width) / 2)
             let y = max(0, (scrollView.bounds.height - scaled.height) / 2)
-            scrollView.contentInset = UIEdgeInsets(top: y, left: x, bottom: y, right: x)
+            scrollView.contentInset = UIEdgeInsets(top: y, left: x, bottom: y, right: x + parent.trailingInset)
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { paper }
@@ -279,24 +307,35 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             let p = g.location(in: overlay)
             guard let id = hitElement(at: p),
                   let element = scene.elements.first(where: { $0.id == id }),
+                  element.kind == .text else { return }
+            presentTextEdit(for: id)
+        }
+
+        /// Opens the text-edit popover for a text element, anchored to the run. Shared by
+        /// double-tap and the DEBUG hook.
+        func presentTextEdit(for id: Int) {
+            guard let element = scene.elements.first(where: { $0.id == id }),
                   element.kind == .text, let text = element.text else { return }
             selection = selection.afterClick(hit: id, additive: false)
             parent.editorModel.textEdit = TextEditRequest(id: id, anchor: anchor(for: element), initialText: text.string)
-            overlay.setNeedsDisplay()
+            overlay?.setNeedsDisplay()
         }
 
-        /// The element's centre as a fraction of the scroll view's visible viewport, for
-        /// anchoring the text popover near the element.
+        /// The run's reference point as a fraction of the scroll view's visible viewport,
+        /// so the popover's arrow points at the glyphs. A text element's bounds is the
+        /// inherited page clip (EMFEdit text-bounds limitation), so the reference point
+        /// gives a tight anchor.
         private func anchor(for element: Element) -> UnitPoint {
             guard let scrollView, let overlay else { return .center }
-            let deviceCentre = CGPoint(x: element.boundsDevice.midX, y: element.boundsDevice.midY)
-            let paperPoint = mapping.viewPoint(fromDevice: deviceCentre)
+            let deviceAnchor = CGPoint(x: element.text?.referenceLogical.x ?? element.boundsDevice.midX,
+                                       y: element.text?.referenceLogical.y ?? element.boundsDevice.midY)
+            let paperPoint = mapping.viewPoint(fromDevice: deviceAnchor)
             let inScroll = overlay.convert(paperPoint, to: scrollView)
-            let visibleX = inScroll.x - scrollView.contentOffset.x
-            let visibleY = inScroll.y - scrollView.contentOffset.y
+            let x = inScroll.x - scrollView.contentOffset.x
+            let y = inScroll.y - scrollView.contentOffset.y
             let size = scrollView.bounds.size
             guard size.width > 0, size.height > 0 else { return .center }
-            return UnitPoint(x: min(1, max(0, visibleX / size.width)), y: min(1, max(0, visibleY / size.height)))
+            return UnitPoint(x: min(1, max(0, x / size.width)), y: min(1, max(0, y / size.height)))
         }
 
         /// Deletes the current selection as one undoable step (design call E2c-4).

@@ -41,8 +41,9 @@ struct MacEditingContainer: View {
         }
         // Undo/redo of a delete restores the selection through this hook (design call E2c-4).
         .onAppear { session.selectionRestore = { ids in editorModel.selection.replace(with: ids) } }
-        // The double-click text-edit popover, anchored to the element (design call E2c-5).
-        .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center)) { request in
+        // The double-click text-edit popover, anchored to the run via a UnitPoint so the
+        // arrow points at the glyphs (design call E2c-5).
+        .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center), arrowEdge: .top) { request in
             TextEditPopover(
                 request: request,
                 onCommit: { string in session.apply(.setText(id: request.id, string)) },
@@ -385,23 +386,34 @@ struct MacEditableCanvas: NSViewRepresentable {
         func doubleClick(at viewPoint: CGPoint) {
             guard let id = hitElement(at: viewPoint),
                   let element = scene.elements.first(where: { $0.id == id }),
+                  element.kind == .text else { return }
+            presentTextEdit(for: id)
+        }
+
+        /// Opens the text-edit popover for a text element, anchored to the run. Shared by
+        /// double-click and the DEBUG hook.
+        func presentTextEdit(for id: Int) {
+            guard let element = scene.elements.first(where: { $0.id == id }),
                   element.kind == .text, let text = element.text else { return }
             selection.replace(with: id)
             parent.editorModel.textEdit = TextEditRequest(id: id, anchor: anchor(for: element), initialText: text.string)
             overlay?.needsDisplay = true
         }
 
-        /// The element's centre as a fraction of the scroll view's visible viewport, for
-        /// anchoring the text popover near the element.
+        /// The run's reference point as a fraction of the scroll view's visible viewport,
+        /// so the popover's arrow points at the glyphs. A text element's own bounds is the
+        /// inherited page clip (EMFEdit text-bounds limitation), so the run's reference
+        /// point gives a tight anchor.
         private func anchor(for element: Element) -> UnitPoint {
             guard let scrollView, let overlay else { return .center }
-            let deviceCentre = CGPoint(x: element.boundsDevice.midX, y: element.boundsDevice.midY)
-            let paperPoint = mapping.viewPoint(fromDevice: deviceCentre)
+            let deviceAnchor = CGPoint(x: element.text?.referenceLogical.x ?? element.boundsDevice.midX,
+                                       y: element.text?.referenceLogical.y ?? element.boundsDevice.midY)
+            let paperPoint = mapping.viewPoint(fromDevice: deviceAnchor)
             let clip = scrollView.contentView
             let inClip = overlay.convert(paperPoint, to: clip)
             let bounds = clip.bounds
             guard bounds.width > 0, bounds.height > 0 else { return .center }
-            // The clip view is y-flipped relative to a top-left UnitPoint on macOS.
+            // The clip view is y-up; a UnitPoint is y-down (top-left origin).
             let x = (inClip.x - bounds.minX) / bounds.width
             let y = 1 - (inClip.y - bounds.minY) / bounds.height
             return UnitPoint(x: min(1, max(0, x)), y: min(1, max(0, y)))
