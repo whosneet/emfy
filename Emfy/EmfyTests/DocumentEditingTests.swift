@@ -425,13 +425,53 @@ private func redFill() -> SceneCommand {
     }
 
     @Test func externalChangeWhileDirtyRaisesBannerAndDoesNotReload() async {
+        // A REAL content change while dirty (no save yet, so no written fingerprint;
+        // the loaded fingerprint differs) raises the banner, never a reload.
         let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
         await session.beginEditing()
         session.apply(redFill())
         let installsBefore = session.modelInstallCount
-        session.externalDiskChangeDetected()
+        await session.handleExternalChange()
         #expect(session.showsExternalChangeBanner)
         #expect(session.modelInstallCount == installsBefore)   // no reload
+    }
+
+    @Test func ourOwnSaveDoesNotRaiseTheChangedOnDiskBanner() async {
+        // E2b item 2: the presenter event our own coordinated write triggers must not
+        // raise the banner — the on-disk bytes match what we just wrote.
+        let box = WriteBox()
+        let session = DocumentSession(
+            entryID: UUID(),
+            resolve: { _ in box.data ?? editableEMF() },   // after a save, resolves the written bytes
+            writeBytes: { data, _, _ in box.data = data; box.count += 1 },
+            documentFileName: { "drawing.emf" },
+            autosave: AutosaveController(sleep: nonFiringSleep)
+        )
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.save()
+        #expect(box.data != nil)
+        await session.handleExternalChange()   // the presenter event our write triggered
+        #expect(!session.showsExternalChangeBanner)
+        #expect(session.editing == .editing)   // edit mode survives our own save
+    }
+
+    @Test func sameContentChangeKeepsEditModeAndRaisesNoBanner() async {
+        // E2b item 2: a spurious / attribute-only change (identical content) keeps edit
+        // mode — only a genuine content change ends it.
+        let data = editableEMF()
+        let session = DocumentSession(
+            entryID: UUID(),
+            resolve: { _ in data },
+            documentFileName: { "drawing.emf" },
+            autosave: AutosaveController(sleep: nonFiringSleep)
+        )
+        await session.load()           // sets the loaded-content fingerprint
+        await session.beginEditing()
+        #expect(session.editing == .editing)
+        await session.handleExternalChange()   // resolves identical bytes → ignored
+        #expect(session.editing == .editing)
+        #expect(!session.showsExternalChangeBanner)
     }
 
     @Test func editedSceneSurvivesASave() async {
@@ -456,7 +496,7 @@ private func redFill() -> SceneCommand {
         await session.beginEditing()
         #expect(session.editing == .editing)
         #expect(!session.isDirty)
-        session.externalDiskChangeDetected()
+        await session.handleExternalChange()
         #expect(session.editing == .notEditing)
         #expect(session.history == nil)
         #expect(!session.showsExternalChangeBanner)

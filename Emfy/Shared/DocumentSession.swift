@@ -152,6 +152,11 @@ final class DocumentSession {
     /// throttled to at most one version per hour (review #4).
     @ObservationIgnored private var lastVersionDate: Date?
 
+    /// The fingerprint of the bytes our last coordinated write put on disk, so a
+    /// presenter event our own write triggers is recognised as ours and ignored (E2b
+    /// item 2). `nil` until the first save this session.
+    @ObservationIgnored private var lastWrittenFingerprint: Int?
+
     /// A pending WMF/WMZ first-save confirmation (design call E2a-5); the viewer
     /// presents it. `nil` when none is pending.
     private(set) var pendingWMFConfirmation: WMFSaveConfirmation?
@@ -729,6 +734,10 @@ final class DocumentSession {
             return
         }
         if record { lastVersionDate = now() }
+        // Remember the fingerprint of exactly what we wrote, so the presenter event our
+        // own write triggers (replaceItemAt swaps the inode) is recognised as ours and
+        // never raises the changed-on-disk banner or a reload (E2b item 2).
+        lastWrittenFingerprint = Self.fingerprint(of: data)
         savedScene = scene
         isDirty = false
         lastSaveWarnings = warnings
@@ -845,13 +854,6 @@ final class DocumentSession {
     // MARK: - File-change observation
 
     private func startWatching() {
-        #if DEBUG
-        // During a DEBUG screenshot run, don't watch the file: a spurious presenter
-        // event would drop clean edit mode before the external capture (E2b-8). Checked
-        // via the raw argument so this stays self-contained (the tests target compiles
-        // this file but not the app-only EditorDebugLaunch).
-        if ProcessInfo.processInfo.arguments.contains("-EmfyDebugOpen") { stopWatching(); return }
-        #endif
         guard let url = watchURLProvider(entryID) else { stopWatching(); return }
         if presenter?.presentedItemURL == url { return }
         presenter?.stop()
@@ -874,23 +876,34 @@ final class DocumentSession {
     /// E2a-8). Our own coordinated writes are excluded by the presenter, so a save
     /// never trips this.
     func externalDiskChangeDetected() {
-        if Self.externalChangeShowsBanner(isEditing: editing == .editing, isDirty: isDirty) {
-            showsExternalChangeBanner = true
-            return
-        }
-        // Editing but clean: the opened bytes are about to change under us, so drop the
-        // now-stale edit state (history/savedScene/openedBytes) before reloading — else
-        // the next edit would apply to a stale scene and autosave would overwrite the
-        // external change (review #2). E2b re-enters editing on the reloaded bytes.
-        if editing == .editing {
-            endEditingState()
-        }
         reloadDebounce?.cancel()
         reloadDebounce = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            await self?.reloadNow()
+            guard let self, !Task.isCancelled else { return }
+            await self.handleExternalChange()
         }
+    }
+
+    /// Decides what a presenter event means by COMPARING the on-disk bytes, not by
+    /// trusting the event (E2b item 2). Our own saves (`lastWrittenFingerprint`) and
+    /// attribute-only / no-content changes (`loadedContentFingerprint`) are ignored —
+    /// edit mode survives. Only a genuinely different on-disk content raises the banner
+    /// (while there are unsaved edits) or ends editing and reloads (while clean).
+    /// Exposed for the transition tests.
+    func handleExternalChange() async {
+        let data: Data
+        do { data = try await resolve(entryID) } catch { return }   // transient; keep state
+        let fingerprint = Self.fingerprint(of: data)
+        if fingerprint == lastWrittenFingerprint || fingerprint == loadedContentFingerprint { return }
+        // A real external content change.
+        if editing == .editing {
+            if isDirty { showsExternalChangeBanner = true; return }
+            // Editing but clean: drop the now-stale edit state before reloading, else the
+            // next edit would apply to a stale scene and autosave would overwrite the
+            // external change (review #2). E2b re-enters editing on the reloaded bytes.
+            endEditingState()
+        }
+        await reloadNow()
     }
 }
 
