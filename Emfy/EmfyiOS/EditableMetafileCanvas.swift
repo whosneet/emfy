@@ -280,10 +280,15 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             overlay.addGestureRecognizer(rotate)
         }
 
+        /// Whether a shape-creation tool is armed (E3a).
+        var isShapeToolArmed: Bool { parent.editorModel.armedShapeTool != nil }
+
         /// The pan only begins when it starts on the selection or a handle; otherwise it
-        /// yields to the scroll view so the drawing still pans.
+        /// yields to the scroll view so the drawing still pans. An armed shape tool, though,
+        /// claims the whole canvas so a drag anywhere draws the shape (E3a).
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             if let pan = gestureRecognizer as? UIPanGestureRecognizer, pan.maximumNumberOfTouches == 1, let overlay {
+                if isShapeToolArmed { return true }
                 let p = touch.location(in: overlay)
                 if handle(at: p) != nil { return true }
                 if let box = selectionViewBounds(), box.contains(p) { return true }
@@ -300,6 +305,17 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         @objc private func handleTap(_ g: UITapGestureRecognizer) {
             guard let overlay else { return }
             let p = g.location(in: overlay)
+            // An armed shape tool: a tap (no drag) inserts the 100 × 100 pt default
+            // shape centred at the tap, selects it and disarms (design call 5).
+            if let kind = parent.editorModel.armedShapeTool {
+                let centre = mapping.devicePoint(fromView: p)
+                let rect = ShapeToolGeometry.defaultRect(
+                    centreDevice: centre, sideDevice: ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints))
+                commitShape(kind: kind, rectDevice: rect)
+                overlay.becomeFirstResponder()
+                overlay.setNeedsDisplay()
+                return
+            }
             let id = hitElement(at: p)
             selection = selection.afterClick(hit: id, additive: false)
             // Take first responder so a hardware Delete key reaches the overlay's key
@@ -353,6 +369,11 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         @objc private func handlePan(_ g: UIPanGestureRecognizer) {
             guard let overlay, let scrollView else { return }
             let p = g.location(in: overlay)
+            // An armed shape tool sweeps a new shape instead of moving/resizing (E3a).
+            if let kind = parent.editorModel.armedShapeTool {
+                handleShapePan(g, kind: kind, point: p, overlay: overlay, scrollView: scrollView)
+                return
+            }
             switch g.state {
             case .began:
                 scrollView.isScrollEnabled = false
@@ -403,6 +424,60 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             }
         }
 
+        /// The shape-tool sweep: a one-finger drag draws a live preview; release commits
+        /// one `.insert` (a sweep, or the default shape if the drag was tiny). No Shift/
+        /// Option on touch (design call 5 lists those modifiers for the Mac).
+        private func handleShapePan(_ g: UIPanGestureRecognizer, kind: ShapeToolKind, point p: CGPoint, overlay: IOSEditorOverlayView, scrollView: UIScrollView) {
+            switch g.state {
+            case .began:
+                scrollView.isScrollEnabled = false
+                drag = DragState(kind: .shape, start: p, current: p)
+                drag?.shapeKind = kind
+                overlay.setNeedsDisplay()
+            case .changed:
+                guard let state = drag else { return }
+                drag?.current = p
+                drag?.shapePreviewRect = ShapeToolGeometry.sweptRect(kind: kind, start: state.start, current: p, shift: false, fromCentre: false)
+                overlay.setNeedsDisplay()
+            case .ended:
+                if let state = drag {
+                    let rectDevice: CGRect
+                    if ShapeToolGeometry.isDrag(start: state.start, current: p, magnification: zoom) {
+                        rectDevice = sweptDeviceRect(fromView: ShapeToolGeometry.sweptRect(kind: kind, start: state.start, current: p, shift: false, fromCentre: false))
+                    } else {
+                        let centre = mapping.devicePoint(fromView: p)
+                        rectDevice = ShapeToolGeometry.defaultRect(centreDevice: centre, sideDevice: ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints))
+                    }
+                    drag = nil
+                    commitShape(kind: kind, rectDevice: rectDevice)
+                }
+                scrollView.isScrollEnabled = true
+                overlay.setNeedsDisplay()
+            default:
+                drag = nil
+                scrollView.isScrollEnabled = true
+                overlay.setNeedsDisplay()
+            }
+        }
+
+        /// Commits one `.insert` for a drawn shape, selects it, and disarms the tool.
+        private func commitShape(kind: ShapeToolKind, rectDevice: CGRect) {
+            let insertion = ShapeToolInsertion.command(kind: kind, rectDevice: rectDevice, in: scene)
+            parent.apply(insertion.command, nil)
+            selection = selection.afterClick(hit: insertion.id, additive: false)
+            parent.editorModel.armedShapeTool = nil
+        }
+
+        /// Maps a view-space swept rect to device space, mapping the origin and far
+        /// corner individually so a `.line`'s drag direction survives.
+        private func sweptDeviceRect(fromView viewRect: CGRect) -> CGRect {
+            let originDevice = mapping.devicePoint(fromView: viewRect.origin)
+            let farDevice = mapping.devicePoint(fromView: CGPoint(
+                x: viewRect.origin.x + viewRect.size.width, y: viewRect.origin.y + viewRect.size.height))
+            return CGRect(origin: originDevice,
+                          size: CGSize(width: farDevice.x - originDevice.x, height: farDevice.y - originDevice.y))
+        }
+
         private func liveViewTransform(state: DragState) -> CGAffineTransform {
             switch state.kind {
             case .move:
@@ -414,7 +489,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                     translation: CGVector(dx: state.current.x - state.start.x, dy: state.current.y - state.start.y),
                     aspectLocked: false, fromCenter: false
                 )
-            case .rotate, .marquee:
+            case .rotate, .marquee, .shape:
                 return state.liveTransform
             }
         }
@@ -466,7 +541,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     }
 
     fileprivate struct DragState {
-        enum Kind { case marquee, move, resize, rotate }
+        enum Kind { case marquee, move, resize, rotate, shape }
         var kind: Kind
         var start: CGPoint
         var current: CGPoint
@@ -476,6 +551,10 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         var liveTransform: CGAffineTransform = .identity
         var ghost: CGImage?
         var ghostViewBounds: CGRect?
+        /// The armed shape kind while `kind == .shape`.
+        var shapeKind: ShapeToolKind?
+        /// The constrained preview rect (view space) the overlay draws while sweeping.
+        var shapePreviewRect: CGRect?
     }
 }
 
@@ -649,6 +728,37 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
 
     @objc private func deleteCommand() { coordinator?.deleteSelection() }
 
+    /// Strokes (and lightly fills, for closed kinds) the shape-tool preview outline in
+    /// the overlay's view space (y-down). A line keeps its drag direction; closed kinds
+    /// use the standardised box, with the triangle apex at the top edge.
+    static func strokeShapePreview(kind: ShapeToolKind, rect: CGRect, into context: CGContext, lineWidth: CGFloat, accent: UIColor) {
+        context.setStrokeColor(accent.cgColor)
+        context.setFillColor(accent.withAlphaComponent(0.15).cgColor)
+        context.setLineWidth(lineWidth)
+        let box = rect.standardized
+        switch kind {
+        case .line:
+            context.move(to: rect.origin)
+            context.addLine(to: CGPoint(x: rect.origin.x + rect.size.width, y: rect.origin.y + rect.size.height))
+            context.strokePath()
+        case .rect:
+            context.fill(box); context.stroke(box)
+        case .roundRect:
+            let r = min(ShapeToolGeometry.pointsToDevice(16), min(box.width, box.height) / 2)
+            let path = CGPath(roundedRect: box, cornerWidth: r, cornerHeight: r, transform: nil)
+            context.addPath(path); context.fillPath()
+            context.addPath(path); context.strokePath()
+        case .ellipse:
+            context.fillEllipse(in: box); context.strokeEllipse(in: box)
+        case .triangle:
+            context.move(to: CGPoint(x: box.midX, y: box.minY))
+            context.addLine(to: CGPoint(x: box.maxX, y: box.maxY))
+            context.addLine(to: CGPoint(x: box.minX, y: box.maxY))
+            context.closePath()
+            context.drawPath(using: .fillStroke)
+        }
+    }
+
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
         guard let coordinator, let box = coordinator.selectionViewBounds(), box.contains(location) else { return nil }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
@@ -673,6 +783,11 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
             context.scaleBy(x: 1, y: -1)
             context.draw(ghost, in: CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height))
             context.restoreGState()
+        }
+
+        // Live shape-tool preview (view space, design call 5).
+        if let drag = coordinator.drag, drag.kind == .shape, let kind = drag.shapeKind, let rect = drag.shapePreviewRect {
+            Self.strokeShapePreview(kind: kind, rect: rect, into: context, lineWidth: 1.5 / mag, accent: accent)
         }
 
         let draggingTransform = coordinator.drag.flatMap { $0.kind == .marquee ? nil : $0.liveTransform }

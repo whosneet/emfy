@@ -109,6 +109,7 @@ struct MetafileViewerScreen: View {
         .toolbar { regularWidthTitle }
         .toolbar { editToolbarItem }
         .toolbar { undoRedoToolbar }
+        .toolbar { shapesToolbar }
         .toolbar { bottomBar }
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .navigationBar)
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .bottomBar)
@@ -530,9 +531,33 @@ struct MetafileViewerScreen: View {
     private var undoAvailable: Bool { _ = session.editVersion; return session.undoManager.canUndo }
     private var redoAvailable: Bool { _ = session.editVersion; return session.undoManager.canRedo }
 
+    /// The Shapes menu in edit mode (E3a design call 5): iPad (regular width) only,
+    /// matching the Mac toolbar. Choosing a shape arms the creation tool; the canvas
+    /// then draws it on a drag (or inserts a default on a tap).
+    @ToolbarContentBuilder
+    private var shapesToolbar: some ToolbarContent {
+        if isRegularWidth, session.editing == .editing {
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    ForEach(ShapeToolKind.allCases) { kind in
+                        Button {
+                            editorModel.armedShapeTool = kind
+                        } label: {
+                            Label(kind.title, systemImage: kind.systemImage)
+                        }
+                    }
+                } label: {
+                    Label("Shapes", systemImage: "square.on.circle")
+                }
+                .accessibilityIdentifier("viewerShapes")
+            }
+        }
+    }
+
     private func toggleEditMode() {
         if session.editing == .editing {
             editorModel.selection.clear()
+            editorModel.armedShapeTool = nil
             Task { await session.endEditing() }
         } else {
             Task {
