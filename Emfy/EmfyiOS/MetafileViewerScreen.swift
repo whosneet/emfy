@@ -25,6 +25,7 @@ struct MetafileViewerScreen: View {
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
 
     let session: DocumentSession
     /// Clears the window's selection when the file is removed from Recents.
@@ -38,6 +39,9 @@ struct MetafileViewerScreen: View {
     @State private var bannerDismissed = false
     @State private var pillVisible = false
     @State private var pillHideTask: Task<Void, Never>?
+    // Editing (E2a review #6).
+    @State private var showRevertConfirm = false
+    @State private var showReloadDiscardConfirm = false
 
     private enum Phase {
         case loading
@@ -128,6 +132,37 @@ struct MetafileViewerScreen: View {
         } message: {
             Text("Photos access is restricted on this device, so Emfy can’t save pictures to your photo library.")
         }
+        // Editing (E2a review #6): revert and reload-discard confirmations, the WMF
+        // first-save limitations sheet, and the changed-on-disk banner.
+        .confirmationDialog("Revert to the version you opened?", isPresented: $showRevertConfirm, titleVisibility: .visible) {
+            Button("Revert", role: .destructive) { Task { await session.revertToOpenedVersion() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This replaces the file with the version Emfy opened and discards your edits. This can’t be undone.")
+        }
+        .confirmationDialog("Reload and discard your edits?", isPresented: $showReloadDiscardConfirm, titleVisibility: .visible) {
+            Button("Reload", role: .destructive) { Task { await session.reloadDiscardingEdits() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The on-disk version replaces what’s on screen. Your unsaved edits are lost.")
+        }
+        .confirmationDialog(
+            "Save as WMF?",
+            isPresented: Binding(get: { session.pendingWMFConfirmation != nil }, set: { if !$0 { session.cancelPendingWMFSave() } }),
+            titleVisibility: .visible,
+            presenting: session.pendingWMFConfirmation
+        ) { pending in
+            Button("Save Anyway") { Task { await session.confirmPendingWMFSave() } }
+            Button("Save a Copy as EMF…") { saveSceneCopyAsEMF() }
+            Button("Cancel", role: .cancel) { session.cancelPendingWMFSave() }
+        } message: { pending in
+            Text(WMFLimitationWording.message(for: pending))
+        }
+        .overlay(alignment: .top) {
+            if session.showsExternalChangeBanner {
+                externalChangeBanner
+            }
+        }
         .overlay {
             if exporter.isRendering {
                 ExportProgressOverlay { exporter.cancelExport() }
@@ -167,10 +202,60 @@ struct MetafileViewerScreen: View {
         .onChange(of: settings.renderOptions) { _, new in
             session.applyRenderOptions(new)
         }
+        // Typed save-failure and saved-with-limitations toasts (E2a-9 / E2a-5, review #6).
+        .onChange(of: session.lastSaveError != nil) { _, hasError in
+            if hasError, let error = session.lastSaveError {
+                toast.show(error.message, systemImage: "exclamationmark.triangle")
+                session.clearSaveError()
+            }
+        }
+        .onChange(of: session.pendingSaveNotice != nil) { _, hasNotice in
+            if hasNotice, let notice = session.pendingSaveNotice {
+                toast.show(WMFLimitationWording.savedSummary(notice.categories), systemImage: "checkmark.circle")
+                session.clearSaveNotice()
+            }
+        }
+        // Autosave-flush unsaved edits when the scene backgrounds (E2a-6, review #6).
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { Task { await session.flushPendingSave() } }
+        }
         .onDisappear {
             pillHideTask?.cancel()
             exporter.cancelOngoing()
+            Task { await session.flushPendingSave() }
         }
+    }
+
+    /// The non-modal "changed on disk" banner (E2a-8, review #6): keep the edits, or
+    /// reload and discard them.
+    private var externalChangeBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                .foregroundStyle(.orange)
+            Text("This file changed on disk")
+                .font(.callout)
+            Spacer(minLength: 8)
+            Button("Keep") { session.keepMyEdits() }
+                .font(.callout.weight(.semibold))
+            Button("Reload", role: .destructive) { showReloadDiscardConfirm = true }
+                .font(.callout.weight(.semibold))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .floatingSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
+    /// "Save a Copy as EMF…": exports the scene as EMF and shares it, keeping full
+    /// fidelity instead of narrowing to WMF (E2a-5 review #6).
+    private func saveSceneCopyAsEMF() {
+        session.cancelPendingWMFSave()
+        guard let data = session.sceneExportData(as: .emf) else {
+            exporter.shareError = "Emfy couldn’t prepare an EMF copy of this drawing."
+            return
+        }
+        exporter.shareSceneCopy(data: data, baseName: entry?.baseName ?? "Drawing")
     }
 
     // Computed bindings keep share/export state on the `@Observable` controller.
@@ -203,6 +288,19 @@ struct MetafileViewerScreen: View {
 
     @ViewBuilder
     private var drawingLayer: some View {
+        // Once edits diverge from the opened version, draw the edited scene from
+        // SceneRenderer (E2a-3, review #6). E2b layers its editing canvas on top.
+        if let pageSize = session.editedPageSize {
+            MetafileEditedSceneView(pageSize: pageSize, scale: displayScale, makeImage: { session.makeEditedSceneImage(scale: $0) })
+                .id(session.editVersion)
+                .ignoresSafeArea()
+        } else {
+            readOnlyDrawingLayer
+        }
+    }
+
+    @ViewBuilder
+    private var readOnlyDrawingLayer: some View {
         switch phase {
         case .loading:
             ProgressView()
@@ -359,6 +457,16 @@ struct MetafileViewerScreen: View {
                 Label("Copy Diagnostic Report", systemImage: "doc.on.clipboard")
             }
             .accessibilityIdentifier("copyDiagnosticReport")
+            // Revert to Opened Version — only once a snapshot exists and the Settings
+            // toggle is on (E2a-7, review #6).
+            if session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert {
+                Divider()
+                Button(role: .destructive) {
+                    showRevertConfirm = true
+                } label: {
+                    Label("Revert to Opened Version", systemImage: "arrow.uturn.backward")
+                }
+            }
         }
     }
 
@@ -634,6 +742,35 @@ struct MetafileViewerScreen: View {
 
     private var subtitle: String {
         entry?.formatSizeSubtitle ?? ""
+    }
+}
+
+/// Draws an edited scene from `SceneRenderer` (E2a-3, review #6). A minimal
+/// fit-to-view raster for E2a — it renders once per edit version at the backing
+/// resolution; E2b's canvas replaces it with the interactive editing surface.
+private struct MetafileEditedSceneView: View {
+    let pageSize: CGSize
+    let scale: CGFloat
+    let makeImage: (CGFloat) -> CGImage?
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let image = makeImage(editScale(for: proxy.size)) {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Color(.systemGroupedBackground)
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private func editScale(for viewport: CGSize) -> CGFloat {
+        guard pageSize.width > 0, pageSize.height > 0, viewport.width > 0, viewport.height > 0 else { return 1 }
+        let fit = min(viewport.width / pageSize.width, viewport.height / pageSize.height)
+        return min(max(fit * scale, 1), 4)
     }
 }
 

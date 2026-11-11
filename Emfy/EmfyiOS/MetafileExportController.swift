@@ -185,6 +185,12 @@ final class MetafileExportController {
         isRendering = false
     }
 
+    /// Presents the share sheet for an already-serialised EMF copy of the edited scene
+    /// ("Save a Copy as EMF…", E2a-5 review #6), under "<base>.emf".
+    func shareSceneCopy(data: Data, baseName: String) {
+        presentShare(data: data, fileName: "\(baseName).emf", failure: "Emfy couldn’t prepare an EMF copy of this drawing.")
+    }
+
     // MARK: - Helpers
 
     private func presentShare(data: Data, fileName: String, failure: String) {
