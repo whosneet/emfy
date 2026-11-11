@@ -132,7 +132,12 @@ struct LibraryWindow: View {
             // autosave must never be able to write into corpus/). A scripted gate flow
             // (E2d) opens its own temp copy directly, so a second launch can re-open the
             // edited file; both paths refuse anything under corpus/.
-            if model.selection == nil, let path = EditorDebugLaunch.scriptOpenPath() ?? EditorDebugLaunch.safeCopiedOpenPath() {
+            // A scripted gate flow always opens its own script file (overriding any
+            // restored selection, whose stale bookmark could otherwise hang the run);
+            // the plain -EmfyDebugOpen path only fills an empty window.
+            if let path = EditorDebugLaunch.scriptOpenPath() {
+                if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
+            } else if model.selection == nil, let path = EditorDebugLaunch.safeCopiedOpenPath() {
                 if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
             }
             #endif
@@ -150,6 +155,27 @@ struct LibraryWindow: View {
             }
             #endif
         }
+        #if DEBUG && os(macOS)
+        // E3a screenshot (a): open the New Drawing sheet at launch, capture it, quit.
+        .task {
+            guard EditorDebugLaunch.newDrawingSheet, let base = EditorDebugLaunch.screenshotBase else { return }
+            try? await Task.sleep(for: .milliseconds(700))
+            showNewDrawing = true
+            try? await Task.sleep(for: .milliseconds(1400))
+            _ = EditorDebugScreenshot.captureAllWindows(to: base + "-a-new-drawing.png")
+            try? await Task.sleep(for: .milliseconds(200))
+            exit(0)
+        }
+        #endif
+        #if DEBUG && os(iOS)
+        // E3a screenshot (e): present the New Drawing sheet at launch for a simulator
+        // capture (the run stays alive; `simctl io screenshot` grabs it).
+        .task {
+            guard EditorDebugLaunch.newDrawingSheet else { return }
+            try? await Task.sleep(for: .milliseconds(900))
+            showNewDrawing = true
+        }
+        #endif
         .onAppear { toastCenter.reduceMotion = reduceMotion }
         .onChange(of: reduceMotion) { _, newValue in toastCenter.reduceMotion = newValue }
         // Reconcile selection when the shown entry is removed — here or in another

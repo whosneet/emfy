@@ -69,6 +69,10 @@ enum EditorDebugLaunch {
     /// so a capture shows the font controls (E2c screenshot 2).
     static var scrollInspectorToText: Bool { (value(for: "-EmfyDebugScrollInspector") ?? "NO").uppercased() == "YES" }
 
+    /// `-EmfyDebugNewDrawingSheet YES`: open the New Drawing presets sheet at launch and
+    /// capture it (E3a screenshot a), then quit. Needs `-EmfyDebugShot <base>`.
+    static var newDrawingSheet: Bool { (value(for: "-EmfyDebugNewDrawingSheet") ?? "NO").uppercased() == "YES" }
+
     /// Whether the launch hook is driving this run.
     static var isActive: Bool { openPath != nil || script != nil }
 

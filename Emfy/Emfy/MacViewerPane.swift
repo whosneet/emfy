@@ -267,6 +267,7 @@ struct MacViewerPane: View {
         case "plain": await runPlainScript(base: base)
         case "close-dirty": await runCloseDirtyScript(base: base)
         case "undo-redo": await runUndoRedoScript(base: base)
+        case "new-shapes": await runNewShapesScript(base: base)
         default: Self.logScript("unknown script \(script)"); exit(1)
         }
     }
@@ -339,6 +340,38 @@ struct MacViewerPane: View {
         try? await Task.sleep(for: .milliseconds(500))
         session.debugCancelAutosave()
         Self.logScript("edit-save: savedToPath=\(savedPath) saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil") undoTitle=\(Self.editMenuUndoTitle() ?? "<none>")")
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(session.lastSaveError == nil ? 0 : 3)
+    }
+
+    /// `new-shapes` (E3a): the opened file is a blank A4 drawing → edit mode (an empty
+    /// scene is now editable) → insert one of each shape kind through the tool's own code
+    /// path → select the last → screenshot (b) → explicit save → exit. A `plain` relaunch
+    /// on the same file proves the shapes persisted (screenshot c).
+    @MainActor
+    private func runNewShapesScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("new-shapes: begin editing failed"); exit(2) }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        let kinds: [ShapeToolKind] = [.rect, .roundRect, .ellipse, .line, .triangle]
+        let w = page.width * 0.14
+        let h = page.height * 0.22
+        var lastID: Int?
+        for (i, kind) in kinds.enumerated() {
+            let x = page.width * 0.06 + CGFloat(i) * (page.width * 0.88 - w) / CGFloat(kinds.count - 1)
+            lastID = session.debugInsertShape(kind, rectDevice: CGRect(x: x, y: page.height * 0.38, width: w, height: h))
+        }
+        if let lastID { editorModel.selection.replace(with: lastID) }
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(1000))
+        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-b-shapes.png")
+        await session.save()
+        try? await Task.sleep(for: .milliseconds(500))
+        session.debugCancelAutosave()
+        Self.logScript("new-shapes: savedPath=\(resolvedEntryPath() ?? "?") saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil") elements=\(session.editingScene?.editableElements.count ?? -1)")
         try? await Task.sleep(for: .milliseconds(200))
         exit(session.lastSaveError == nil ? 0 : 3)
     }

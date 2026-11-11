@@ -532,6 +532,15 @@ final class DocumentSession {
         apply(.setFill(ids: ids, nil))
     }
 
+    /// Inserts a shape through the SAME code path the tool uses (`ShapeToolInsertion` →
+    /// `apply(.insert)`), returning its new id, for the E3a `new-shapes` screenshot script.
+    func debugInsertShape(_ kind: ShapeToolKind, rectDevice: CGRect) -> Int? {
+        guard editing == .editing, let scene = editingScene else { return nil }
+        let insertion = ShapeToolInsertion.command(kind: kind, rectDevice: rectDevice, in: scene)
+        apply(insertion.command)
+        return insertion.id
+    }
+
     /// Cancels any armed autosave, so a DEBUG capture run never writes on its way out.
     func debugCancelAutosave() { autosave.cancel() }
 

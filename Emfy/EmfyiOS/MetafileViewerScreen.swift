@@ -251,6 +251,7 @@ struct MetafileViewerScreen: View {
         for _ in 0..<80 { if session.loaded != nil { break }; try? await Task.sleep(for: .milliseconds(100)) }
         guard session.loaded != nil else { return }
         if EditorDebugLaunch.script == "undo-redo" { await runUndoRedoScript(); return }
+        if EditorDebugLaunch.script == "new-shapes" { await runNewShapesScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -292,6 +293,26 @@ struct MetafileViewerScreen: View {
         session.debugCancelAutosave()
         try? await Task.sleep(for: .milliseconds(300))
         exit(0)
+    }
+
+    /// iPad new-shapes proof (E3a): the opened blank drawing → edit mode → insert shapes
+    /// through the tool's own code path → select the last → stay on screen so a simulator
+    /// screenshot captures the drawn, selected shape (does NOT exit, unlike the Mac script).
+    @MainActor
+    private func runNewShapesScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios new-shapes: begin editing failed"); return }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        let kinds: [ShapeToolKind] = [.rect, .ellipse, .triangle]
+        let w = page.width * 0.16, h = page.height * 0.24
+        var lastID: Int?
+        for (i, kind) in kinds.enumerated() {
+            let x = page.width * 0.1 + CGFloat(i) * (page.width * 0.8 - w) / CGFloat(kinds.count - 1)
+            lastID = session.debugInsertShape(kind, rectDevice: CGRect(x: x, y: page.height * 0.38, width: w, height: h))
+        }
+        if let lastID { editorModel.selection.replace(with: lastID) }
+        session.debugCancelAutosave()
+        Self.logScript("ios new-shapes: elements=\(session.editingScene?.editableElements.count ?? -1) selected=\(lastID ?? -1)")
     }
 
     /// Permission-free in-process capture of the key window (toolbar included), written to
