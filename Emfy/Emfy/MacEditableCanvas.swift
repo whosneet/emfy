@@ -27,7 +27,10 @@ struct MacEditingContainer: View {
                     scene: scene, editorModel: editorModel, controller: controller,
                     pageShadow: pageShadow, tilePaint: tilePaint, options: options,
                     apply: { command, key in session.apply(command, coalescing: key) },
-                    delete: { ids in session.deleteSelection(ids) }
+                    delete: { ids in session.deleteSelection(ids) },
+                    // The scene's undo manager, handled by the overlay as first responder so
+                    // Edit ▸ Undo/Redo and ⌘Z/⇧⌘Z reach SceneHistory (E2d).
+                    sceneUndoManager: session.undoManager
                 )
                 .ignoresSafeArea()
             } else {
@@ -76,6 +79,8 @@ struct MacEditableCanvas: NSViewRepresentable {
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
     /// Deletes the given ids as one undoable step (design call E2c-4).
     let delete: (Set<Int>) -> Void
+    /// The scene's undo manager, handled by the overlay as first responder (E2d).
+    let sceneUndoManager: UndoManager
 
     private var pageSize: CGSize { scene.pageSizeDevice }
 
@@ -114,6 +119,7 @@ struct MacEditableCanvas: NSViewRepresentable {
         let overlay = EditorOverlayView(frame: paper.bounds)
         overlay.autoresizingMask = [.width, .height]
         overlay.coordinator = context.coordinator
+        overlay.sceneUndoManager = sceneUndoManager
         paper.addSubview(overlay)
 
         scrollView.documentView = paper
@@ -714,14 +720,45 @@ private final class TiledSceneView: NSView {
 /// outlines, the eight handles, the marquee and the live ghost, and routes pointer
 /// and keyboard events to the coordinator. Handles are drawn at a constant screen
 /// size by dividing by the magnification.
-private final class EditorOverlayView: NSView {
+private final class EditorOverlayView: NSView, NSMenuItemValidation {
     weak var coordinator: MacEditableCanvas.Coordinator?
+
+    /// The scene's undo manager. As first responder in edit mode this view handles the
+    /// Edit ▸ Undo/Redo items (and ⌘Z/⇧⌘Z), so they drive `SceneHistory` directly through
+    /// the responder chain — not the window's cached undo manager, which SwiftUI owns and
+    /// never routes here (E2d).
+    var sceneUndoManager: UndoManager?
 
     override var isFlipped: Bool { false }
     override var acceptsFirstResponder: Bool { true }
     override var isOpaque: Bool { false }
 
     override func becomeFirstResponder() -> Bool { true }
+
+    // MARK: Undo / redo (first-responder handler for the Edit menu + ⌘Z/⇧⌘Z)
+
+    override var undoManager: UndoManager? { sceneUndoManager ?? super.undoManager }
+
+    @objc func undo(_ sender: Any?) { sceneUndoManager?.undo() }
+    @objc func redo(_ sender: Any?) { sceneUndoManager?.redo() }
+
+    /// Enables the Undo/Redo menu items when the scene history allows, and sets their
+    /// titles to the step name ("Undo Change Fill", "Redo Move") — the responder-chain
+    /// equivalent of NSWindow's automatic undo-menu titling (NSMenuItemValidation).
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(undo(_:)):
+            if let manager = sceneUndoManager { item.title = manager.undoMenuItemTitle }
+            return sceneUndoManager?.canUndo ?? false
+        case #selector(redo(_:)):
+            if let manager = sceneUndoManager { item.title = manager.redoMenuItemTitle }
+            return sceneUndoManager?.canRedo ?? false
+        default:
+            // Only reached for actions this view implements (undo:/redo:); other items
+            // are validated against their own targets, not this one.
+            return true
+        }
+    }
 
     private var magnification: CGFloat { coordinator?.magnification ?? 1 }
 

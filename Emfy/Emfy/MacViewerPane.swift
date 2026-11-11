@@ -266,8 +266,54 @@ struct MacViewerPane: View {
         case "edit-save": await runEditSaveScript(base: base)
         case "plain": await runPlainScript(base: base)
         case "close-dirty": await runCloseDirtyScript(base: base)
+        case "undo-redo": await runUndoRedoScript(base: base)
         default: Self.logScript("unknown script \(script)"); exit(1)
         }
+    }
+
+    /// `undo-redo`: edit mode → select the first element → Change Fill (purple) → fire the
+    /// REAL Edit ▸ Undo menu item (update + performActionForItem) and assert the scene
+    /// reverted → screenshot → fire the real Redo item and assert it re-applies → exit.
+    @MainActor
+    private func runUndoRedoScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        Self.scriptWindow()?.makeKeyAndOrderFront(nil)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(500))
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("undo-redo: begin editing failed"); exit(2) }
+        let ids = session.firstEditableIDs(1)
+        editorModel.selection.replace(with: ids)
+        session.debugSetFill(ids: ids, red: 0.55, green: 0.10, blue: 0.85)   // a Change Fill edit
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(600))
+        Self.logScript("undo-redo: afterEdit matchesOpened=\(session.debugSceneMatchesOpened())")
+        // The REAL Mac menu path: fire Edit ▸ Undo / Redo from NSApp.mainMenu.
+        let undo = Self.fireEditMenuItem(titlePrefix: "Undo")
+        try? await Task.sleep(for: .milliseconds(600))
+        Self.logScript("undo-redo: undoMenuTitle=\"\(undo.title)\" fired=\(undo.fired) afterUndo matchesOpened=\(session.debugSceneMatchesOpened())")
+        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-undo.png")
+        let redo = Self.fireEditMenuItem(titlePrefix: "Redo")
+        try? await Task.sleep(for: .milliseconds(600))
+        Self.logScript("undo-redo: redoMenuTitle=\"\(redo.title)\" fired=\(redo.fired) afterRedo matchesOpened=\(session.debugSceneMatchesOpened())")
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(0)
+    }
+
+    /// Fires a real Edit-menu item by title prefix ("Undo"/"Redo") through AppKit:
+    /// `menu.update()` refreshes titles and enablement, then `performActionForItem` sends
+    /// the item's action. Returns the validated title and whether it fired (was enabled).
+    @MainActor
+    private static func fireEditMenuItem(titlePrefix: String) -> (title: String, fired: Bool) {
+        guard let editMenu = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Edit" || $0.title == "Edit" })?.submenu
+        else { return ("<no edit menu>", false) }
+        editMenu.update()   // run NSMenuValidation so the titles/enablement refresh
+        guard let index = editMenu.items.firstIndex(where: { $0.title.hasPrefix(titlePrefix) }) else { return ("<no item>", false) }
+        let item = editMenu.items[index]
+        guard item.isEnabled else { return (item.title, false) }
+        editMenu.performActionForItem(at: index)
+        return (item.title, true)
     }
 
     /// `edit-save`: edit mode → select the first element → move it (+40,+30) → recolour it
@@ -907,6 +953,16 @@ private final class CloseDelegateProxy: NSObject, NSWindowDelegate {
             await self.runCloseFlow(window: sender, session: session, name: name)
         }
         return false
+    }
+
+    /// Routes Edit ▸ Undo/Redo and ⌘Z/⇧⌘Z to the shown session's `SceneHistory` by making
+    /// its `UndoManager` the window's, so the menu titles read "Undo Change Fill" etc. and
+    /// invoking them reverses the scene edit (E2d). While a text field / field editor is
+    /// first responder it returns nil, so the field keeps its own field-editor undo; with
+    /// no session it returns nil (the window's default manager applies).
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
+        if window.firstResponder is NSText { return nil }
+        return session()?.undoManager
     }
 
     @MainActor

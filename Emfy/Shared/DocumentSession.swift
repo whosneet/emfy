@@ -539,6 +539,11 @@ final class DocumentSession {
     /// DEBUG script can reproduce a failed-save window close deterministically (E2d).
     /// `#if DEBUG` only, proven absent from Release.
     @ObservationIgnored var debugInjectWriteFailure = false
+
+    /// Whether the edited scene currently equals the opened scene — the undo/redo gate
+    /// script's "did it revert?" signal (E2d). True before any edit and after undoing
+    /// back to the opened version; false while an edit stands.
+    func debugSceneMatchesOpened() -> Bool { history?.scene == openedScene }
     #endif
 
     /// Rasterises the edited scene through `SceneRenderer` for the viewer's edit
