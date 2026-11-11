@@ -156,13 +156,15 @@ struct LibraryWindow: View {
             #endif
         }
         #if DEBUG && os(macOS)
-        // E3a screenshot (a): open the New Drawing sheet at launch, capture it, quit.
+        // E3a screenshot (a): open the New Drawing sheet at launch and capture the SHEET
+        // itself via its layer tree (not captureAllWindows, which composites the parent
+        // window behind it), then quit.
         .task {
             guard EditorDebugLaunch.newDrawingSheet, let base = EditorDebugLaunch.screenshotBase else { return }
             try? await Task.sleep(for: .milliseconds(700))
             showNewDrawing = true
             try? await Task.sleep(for: .milliseconds(1400))
-            _ = EditorDebugScreenshot.captureAllWindows(to: base + "-a-new-drawing.png")
+            _ = EditorDebugScreenshot.captureAttachedSheetView(to: base + "-a-new-drawing.png")
             try? await Task.sleep(for: .milliseconds(200))
             exit(0)
         }

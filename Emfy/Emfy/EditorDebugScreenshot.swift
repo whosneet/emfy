@@ -87,6 +87,25 @@ enum EditorDebugScreenshot {
         return (try? data.write(to: URL(fileURLWithPath: path))) != nil
     }
 
+    /// Captures the library window's attached sheet via `cacheDisplay` of its content
+    /// view. For a SwiftUI `.sheet` (ordinary hosted views, unlike a vibrant NSAlert)
+    /// this renders faithfully AND upright — the layer-tree render used for the NSAlert
+    /// close prompt comes out vertically flipped for SwiftUI content — and, unlike
+    /// `captureAllWindows`, it never composites the parent window behind the sheet.
+    @MainActor
+    @discardableResult
+    static func captureAttachedSheetView(to path: String) -> Bool {
+        guard let sheet = libraryWindow()?.attachedSheet, let view = sheet.contentView else { return false }
+        view.layoutSubtreeIfNeeded()
+        sheet.displayIfNeeded()
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0,
+              let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return false }
+        view.cacheDisplay(in: bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
     /// The main library window: the largest visible non-panel window. With the
     /// What's New popup suppressed during a debug run, this is unambiguous.
     @MainActor
