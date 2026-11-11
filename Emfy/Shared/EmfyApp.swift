@@ -20,6 +20,10 @@ struct EmfyApp: App {
     @State private var coordinator = OpenCoordinator.shared
     // The S1a settings store, injected into every window on both platforms.
     @State private var settings = EmfySettings.shared
+    #if os(macOS)
+    // Flush and, if needed, confirm unsaved edits before quitting (E2a-9, review #7).
+    @NSApplicationDelegateAdaptor(EmfyAppDelegate.self) private var appDelegate
+    #endif
 
     init() {
         // Sync the settings-driven cap and Private mode into the shared store before
@@ -93,6 +97,61 @@ struct EmfyApp: App {
         #endif
     }
 }
+
+#if os(macOS)
+/// Handles quit with unsaved edits (E2a-9, review #7): flushes every editing session,
+/// and if any couldn't save cleanly (a failed save, a pending WMF confirmation, or
+/// still dirty) asks Save… / Discard / Cancel before terminating. Uses
+/// `.terminateLater` so the async flush and the modal run before the reply.
+final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
+    enum QuitDecision { case save, discard, cancel }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let dirty = DocumentEditRegistry.shared.dirtySessions
+        guard !dirty.isEmpty else { return .terminateNow }
+        Task { @MainActor in
+            var mustPrompt = false
+            for session in dirty {
+                await session.flushPendingSave()
+                if DocumentEditRegistry.needsQuitPrompt(
+                    saveFailed: session.lastSaveError != nil,
+                    wmfPending: session.pendingWMFConfirmation != nil,
+                    stillDirty: session.isDirty
+                ) {
+                    mustPrompt = true
+                }
+            }
+            guard mustPrompt else {
+                NSApp.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            // Only "Discard" quits; "Save…" and "Cancel" keep the app open so the user
+            // can finish the save (including any WMF confirmation) in its window.
+            let decision = Self.promptUnsavedQuit(count: dirty.count)
+            NSApp.reply(toApplicationShouldTerminate: decision == .discard)
+        }
+        return .terminateLater
+    }
+
+    @MainActor
+    private static func promptUnsavedQuit(count: Int) -> QuitDecision {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = count == 1
+            ? "You have unsaved changes."
+            : "You have unsaved changes in \(count) windows."
+        alert.informativeText = "Emfy couldn’t save every change automatically. Save them before quitting?"
+        alert.addButton(withTitle: "Save…")
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .save
+        case .alertSecondButtonReturn: return .discard
+        default: return .cancel
+        }
+    }
+}
+#endif
 
 /// The per-window root. On iOS DEBUG builds it still hosts the Quick Look probe
 /// surfaces (I4 gates b/c) when launched with their environment flags; otherwise,

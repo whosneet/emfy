@@ -138,6 +138,14 @@ struct MacViewerPane: View {
                     session.clearSaveError()
                 }
             }
+            // A non-WMF explicit save that lost fidelity surfaces a one-line toast
+            // naming the simplified areas (E2a-5, review #5).
+            .onChange(of: session.pendingSaveNotice != nil) { _, hasNotice in
+                if hasNotice, let notice = session.pendingSaveNotice {
+                    toast.show(WMFLimitationWording.savedSummary(notice.categories), systemImage: "checkmark.circle")
+                    session.clearSaveNotice()
+                }
+            }
             .onDisappear {
                 exporter.cancelOngoing()
                 Task { await session.flushPendingSave() }
@@ -488,11 +496,12 @@ struct MacViewerPane: View {
         store.entry(id: session.entryID)
     }
 
-    /// Format · size for the navigation subtitle, via the shared helper (G6). Reads
-    /// the entry (which changes on load), never the zoom, so it stays off the per-
-    /// frame path.
+    /// Format · size for the navigation subtitle, via the shared helper (G6), with an
+    /// "Edited" marker while there are unsaved edits (E2a-9, review #7). Reads the
+    /// entry and the dirty flag, never the zoom, so it stays off the per-frame path.
     private var subtitle: String {
-        entry?.formatSizeSubtitle ?? ""
+        let base = entry?.formatSizeSubtitle ?? ""
+        return session.isDirty ? (base.isEmpty ? "Edited" : "\(base) — Edited") : base
     }
 }
 
