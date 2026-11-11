@@ -58,6 +58,7 @@ struct EmfyApp: App {
             SidebarCommands()
             InspectorCommands()
             FileMenuCommands(store: store, coordinator: coordinator)
+            EditMenuCommands()
             ViewMenuCommands()
             EmfyCommands()
         }
@@ -171,6 +172,9 @@ private struct RootView: View {
             // (S1a-5). The decision and the once-per-launch guard are shared; the
             // first library window to appear claims the presentation.
             .onAppear {
+                #if DEBUG
+                if EditorDebugLaunch.isActive { return }   // keep the screenshot window alone
+                #endif
                 if WhatsNewPresenter.claimLaunchPresentation(enabled: settings.showWhatsNewAfterUpdates) {
                     openWindow(id: "whats-new")
                 }

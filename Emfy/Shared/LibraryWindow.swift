@@ -122,6 +122,12 @@ struct LibraryWindow: View {
             if let files = ProcessInfo.processInfo.environment["EMFY_SEED_FILES"], !files.isEmpty {
                 await store.seedReceivedFilesForUITesting(paths: files.split(separator: ":").map(String.init))
             }
+            // E2b screenshot hook: -EmfyDebugOpen opens a file into this window; the
+            // viewer then reads -EmfyDebugEdit / -EmfyDebugSelect to enter edit mode
+            // with a selection (design call E2b-8).
+            if model.selection == nil, let path = EditorDebugLaunch.openPath {
+                if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
+            }
             #endif
             applyInitialSelection()
             #if os(iOS)

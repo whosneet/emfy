@@ -101,6 +101,25 @@ struct ViewMenuCommands: Commands {
     }
 }
 
+/// The Edit menu's selection commands (E2b, design call 7), present only while a
+/// document is in edit mode. Select All owns ⌘A; Deselect owns ⇧⌘A. Both read as
+/// disabled (`nil` action) when not editing / nothing is selected.
+struct EditMenuCommands: Commands {
+    @FocusedValue(\.viewerActions) private var actions
+
+    var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            Divider()
+            Button("Select All") { actions?.selectAllElements?() }
+                .keyboardShortcut("a", modifiers: .command)
+                .disabled(actions?.selectAllElements == nil)
+            Button("Deselect All") { actions?.deselectElements?() }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .disabled(actions?.deselectElements == nil)
+        }
+    }
+}
+
 /// The Open Recent submenu, built from the store's recent files (the newest ten),
 /// plus Clear Menu. A `View` inside the File `CommandGroup`; reading `store.entries`
 /// here makes the menu track the store through Observation.

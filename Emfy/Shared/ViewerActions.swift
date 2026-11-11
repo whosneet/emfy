@@ -39,6 +39,12 @@ struct ViewerActions {
     var save: (() -> Void)? = nil
     var revertToOpenedVersion: (() -> Void)? = nil
 
+    // Editing (E2b): Mac Edit ▸ Select All / Deselect, present only while editing.
+    // Select All is `nil` unless in edit mode; Deselect is `nil` unless something is
+    // selected.
+    var selectAllElements: (() -> Void)? = nil
+    var deselectElements: (() -> Void)? = nil
+
     // iOS/iPadOS immersive chrome + the Info inspector, surfaced in the iOS View menu
     // (K1). `nil` on the Mac, which has its own View toggles and toolbar.
     var toggleChrome: (() -> Void)? = nil

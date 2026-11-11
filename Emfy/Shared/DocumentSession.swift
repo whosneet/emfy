@@ -469,6 +469,39 @@ final class DocumentSession {
     /// E2a-3). `nil` while read-only / unedited.
     var editedPageSize: CGSize? { editedScene?.pageSizeDevice }
 
+    /// The scene currently being edited, whether or not it has diverged from the
+    /// opened version — the editor canvas draws and hit-tests against this (design
+    /// call E2b-2). `nil` while read-only. Read after an `editVersion` change, since
+    /// `history` itself is `@ObservationIgnored`.
+    var editingScene: Scene? {
+        guard editing == .editing else { return nil }
+        return history?.scene
+    }
+
+    /// The first `n` editable element ids in z-order — the DEBUG screenshot hook's
+    /// pre-selection (design call E2b-8).
+    func firstEditableIDs(_ count: Int) -> Set<Int> {
+        guard count > 0, let scene = editingScene else { return [] }
+        return Set(scene.editableElements.prefix(count).map(\.id))
+    }
+
+    /// Every editable element id (⌘A Select All). Exposed as a plain id set so the
+    /// Mac pane can select all without importing EMFEdit.
+    func allEditableIDs() -> Set<Int> {
+        guard let scene = editingScene else { return [] }
+        return Set(scene.editableElements.map(\.id))
+    }
+
+    #if DEBUG
+    /// Translates the given elements (device units) through the normal mutation path,
+    /// so the screenshot hook can prove a committed transform re-renders the canvas
+    /// without constructing a `SceneCommand` in the EMFEdit-free pane.
+    func debugTranslate(ids: Set<Int>, dx: Double, dy: Double) {
+        guard !ids.isEmpty else { return }
+        apply(.translate(ids: ids, dx: dx, dy: dy))
+    }
+    #endif
+
     /// Rasterises the edited scene through `SceneRenderer` for the viewer's edit
     /// preview. Exposed here (rather than importing EMFEdit into the Mac pane, where
     /// `ExportFormat` would clash with the app's own) so the pane stays EMFEdit-free.
@@ -507,6 +540,17 @@ final class DocumentSession {
         editVersion &+= 1
         editing = .editing
         DocumentEditRegistry.shared.register(self)
+    }
+
+    /// Leaves edit mode (design call E2b-1): flushes any pending save, then discards the
+    /// in-memory edit state so the viewer falls back to read-only. A no-op when already
+    /// read-only; a file that opened `.unavailable` is reset to `.notEditing` so the Edit
+    /// toggle reads as off and can be retried.
+    func endEditing() async {
+        if editing == .unavailable { editing = .notEditing; return }
+        guard editing == .editing else { return }
+        await flushPendingSave()
+        endEditingState()
     }
 
     /// The single mutation path for the scene (design call E2a-2). Applies `command`

@@ -85,6 +85,9 @@
 		E2A0000000000000000000C2 /* DocumentEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000C0 /* DocumentEditingTests.swift */; };
 		E2B0000000000000000000E1 /* EditorToolsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000E0 /* EditorToolsTests.swift */; };
 		E2B000000000000000000101 /* EditorDebugLaunch.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000100 /* EditorDebugLaunch.swift */; };
+		E2B0000000000000000000F1 /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000F0 /* EditorModel.swift */; };
+		E2B000000000000000000111 /* EditorGhost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000110 /* EditorGhost.swift */; };
+		E2B000000000000000000121 /* MacEditableCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000120 /* MacEditableCanvas.swift */; platformFilters = (macos, ); };
 		E2B000000000000000000131 /* EditorDebugScreenshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000130 /* EditorDebugScreenshot.swift */; platformFilters = (macos, ); };
 		E2B0000000000000000000A1 /* EditorCanvasMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000A0 /* EditorCanvasMapping.swift */; };
 		E2B0000000000000000000A2 /* EditorCanvasMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000A0 /* EditorCanvasMapping.swift */; };
@@ -249,6 +252,9 @@
 		E2B0000000000000000000D0 /* EditorTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTransform.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000E0 /* EditorToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorToolsTests.swift; sourceTree = "<group>"; };
 		E2B000000000000000000100 /* EditorDebugLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDebugLaunch.swift; sourceTree = "<group>"; };
+		E2B0000000000000000000F0 /* EditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorModel.swift; sourceTree = "<group>"; };
+		E2B000000000000000000110 /* EditorGhost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorGhost.swift; sourceTree = "<group>"; };
+		E2B000000000000000000120 /* MacEditableCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEditableCanvas.swift; sourceTree = "<group>"; };
 		E2B000000000000000000130 /* EditorDebugScreenshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDebugScreenshot.swift; sourceTree = "<group>"; };
 		B00100000000000000000111 /* OpenRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouting.swift; sourceTree = "<group>"; };
 		B00100000000000000000112 /* ViewerFit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerFit.swift; sourceTree = "<group>"; };
@@ -424,6 +430,8 @@
 				E2B0000000000000000000C0 /* EditorSelection.swift */,
 				E2B0000000000000000000D0 /* EditorTransform.swift */,
 				E2B000000000000000000100 /* EditorDebugLaunch.swift */,
+				E2B0000000000000000000F0 /* EditorModel.swift */,
+				E2B000000000000000000110 /* EditorGhost.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -450,6 +458,7 @@
 			children = (
 				B00100000000000000000137 /* MacViewerPane.swift */,
 				B00100000000000000000141 /* MacMetafileScrollView.swift */,
+				E2B000000000000000000120 /* MacEditableCanvas.swift */,
 				E2B000000000000000000130 /* EditorDebugScreenshot.swift */,
 				B00100000000000000000154 /* ViewerCommands.swift */,
 				B00100000000000000000155 /* MacViewerExporter.swift */,
@@ -777,6 +786,9 @@
 				E2B0000000000000000000C1 /* EditorSelection.swift in Sources */,
 				E2B0000000000000000000D1 /* EditorTransform.swift in Sources */,
 				E2B000000000000000000101 /* EditorDebugLaunch.swift in Sources */,
+				E2B0000000000000000000F1 /* EditorModel.swift in Sources */,
+				E2B000000000000000000111 /* EditorGhost.swift in Sources */,
+				E2B000000000000000000121 /* MacEditableCanvas.swift in Sources */,
 				E2B000000000000000000131 /* EditorDebugScreenshot.swift in Sources */,
 				B01100000000000000000111 /* OpenRouting.swift in Sources */,
 				B01100000000000000000112 /* ViewerFit.swift in Sources */,

@@ -25,6 +25,8 @@ final class MacMetafileZoomController {
     func actualSize() { apply(1) }
     func zoomIn() { apply(ZoomMath.stepIn(from: currentMagnification)) }
     func zoomOut() { apply(ZoomMath.stepOut(from: currentMagnification)) }
+    /// Sets an explicit magnification (used by the DEBUG screenshot hook to reach 400%).
+    func setZoom(_ value: CGFloat) { apply(value) }
 
     /// The scroll view's live magnification, or the mirrored value before it is set.
     private var currentMagnification: CGFloat { scrollView?.magnification ?? zoom }

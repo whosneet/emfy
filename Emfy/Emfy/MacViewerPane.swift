@@ -27,9 +27,13 @@ struct MacViewerPane: View {
 
     @State private var controller = MacMetafileZoomController()
     @State private var exporter = MacViewerExporter()
+    @State private var editorModel = EditorModel()
     @State private var showInspector = false
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
+    #if DEBUG
+    @State private var debugLaunchRan = false
+    #endif
 
     private var loaded: LoadedMetafile? { session.loaded }
 
@@ -150,7 +154,52 @@ struct MacViewerPane: View {
                 exporter.cancelOngoing()
                 Task { await session.flushPendingSave() }
             }
+            #if DEBUG
+            .task { await runDebugLaunchIfNeeded() }
+            #endif
     }
+
+    #if DEBUG
+    /// The E2b screenshot hook (design call E2b-8): once the file loads, optionally
+    /// enter edit mode, pre-select the first N editable elements, and — when a
+    /// screenshot base path is given — capture the window at fit and at 400% and quit.
+    @MainActor
+    private func runDebugLaunchIfNeeded() async {
+        guard !debugLaunchRan, EditorDebugLaunch.isActive else { return }
+        debugLaunchRan = true
+        for _ in 0..<80 { if session.loaded != nil { break }; try? await Task.sleep(for: .milliseconds(100)) }
+        guard session.loaded != nil else { return }
+        if EditorDebugLaunch.editOnOpen {
+            await session.beginEditing()
+            if session.editing == .editing, EditorDebugLaunch.selectFirst > 0 {
+                editorModel.selection.replace(with: session.firstEditableIDs(EditorDebugLaunch.selectFirst))
+            }
+        }
+        guard let base = EditorDebugLaunch.screenshotBase else { return }
+        try? await Task.sleep(for: .milliseconds(1200))
+        // Required captures: edit mode with the multi-selection + handles, at fit and 400%.
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(800))
+        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-fit.png")
+        controller.setZoom(4.0)
+        try? await Task.sleep(for: .milliseconds(800))
+        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-400.png")
+        // Supplementary: prove one committed transform re-renders the canvas (the
+        // selection moves). Re-assert editing first, since a spurious file-presenter
+        // event can drop clean edit mode (E2a).
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        if session.editing != .editing {
+            await session.beginEditing()
+            editorModel.selection.replace(with: session.firstEditableIDs(EditorDebugLaunch.selectFirst))
+        }
+        session.debugTranslate(ids: editorModel.selection.ids, dx: 220, dy: 160)
+        try? await Task.sleep(for: .milliseconds(900))
+        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-moved.png")
+        try? await Task.sleep(for: .milliseconds(200))
+        NSApp.terminate(nil)
+    }
+    #endif
 
     /// The non-modal banner shown when the file changed on disk while there were
     /// unsaved edits (design call E2a-8): keep the edits, or reload and discard them.
@@ -191,15 +240,34 @@ struct MacViewerPane: View {
 
     @ViewBuilder
     private var content: some View {
-        // Once edits make the scene dirty, draw the edited scene from `SceneRenderer`
-        // instead of the original prepared model (design call E2a-3). E2b layers its
-        // selection/transform canvas on top of this hook.
-        if let pageSize = session.editedPageSize {
-            MacEditedSceneView(pageSize: pageSize, makeImage: { session.makeEditedSceneImage(scale: $0) })
-                .id(session.editVersion)
-                .ignoresSafeArea()
+        // In edit mode the drawing is fed from the scene (so what's on screen is what's
+        // selectable), through the crisp tiled canvas with the selection overlay on top
+        // (design calls E2b-1/-2). Read-only viewing keeps the prepared-model tiled view.
+        if session.editing == .editing {
+            MacEditingContainer(
+                session: session, editorModel: editorModel, controller: controller,
+                pageShadow: settings.pageShadow,
+                tilePaint: ViewerTilePaint.make(
+                    background: settings.pageBackground, darkMode: settings.darkPageMode, isDark: colorScheme == .dark
+                ),
+                options: settings.renderOptions
+            )
+            .ignoresSafeArea()
+            .overlay(alignment: .bottom) { rotationReadout }
         } else {
             readOnlyContent
+        }
+    }
+
+    /// The live rotation-angle readout while a rotation drag is in flight (E2b-6).
+    @ViewBuilder
+    private var rotationReadout: some View {
+        if let readout = editorModel.rotationReadout {
+            Text(readout)
+                .font(.system(.body, design: .rounded).monospacedDigit())
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.bottom, 24)
         }
     }
 
@@ -313,6 +381,8 @@ struct MacViewerPane: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         if #available(macOS 26, *) {
+            ToolbarItem { editButton }
+            ToolbarSpacer(.fixed)
             ToolbarItemGroup {
                 zoomOutButton
                 MacZoomPercentLabel(controller: controller)
@@ -326,12 +396,43 @@ struct MacViewerPane: View {
         } else {
             // Pre-26 has no ToolbarSpacer: one group keeps the stated order.
             ToolbarItemGroup {
+                editButton
                 zoomOutButton
                 MacZoomPercentLabel(controller: controller)
                 zoomInButton
                 fitButton
                 shareMenu
                 infoButton
+            }
+        }
+    }
+
+    /// The Edit toggle (design call E2b-1), modelled on Preview's Markup button:
+    /// entering lifts the scene and shows the selection canvas; leaving clears the
+    /// selection and flushes any pending save. A tint marks the active state.
+    private var editButton: some View {
+        Button {
+            toggleEditMode()
+        } label: {
+            Label("Edit", systemImage: "pencil.tip.crop.circle")
+        }
+        .disabled(loaded == nil)
+        .help("Edit")
+        .symbolVariant(session.editing == .editing ? .fill : .none)
+        .foregroundStyle(session.editing == .editing ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+    }
+
+    private func toggleEditMode() {
+        if session.editing == .editing {
+            editorModel.selection.clear()
+            Task { await session.endEditing() }
+        } else {
+            Task {
+                await session.beginEditing()
+                if session.editing == .unavailable {
+                    toast.show("This file can’t be edited", systemImage: "pencil.slash")
+                    await session.endEditing()   // reset to not-editing so the toggle reads off
+                }
             }
         }
     }
@@ -488,8 +589,15 @@ struct MacViewerPane: View {
             shareSVG: { shareSVG() },
             copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil,
             save: (session.editing == .editing && session.isDirty) ? { Task { await session.save() } } : nil,
-            revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil
+            revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil,
+            selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,
+            deselectElements: (session.editing == .editing && !editorModel.selection.isEmpty) ? { editorModel.selection.clear() } : nil
         )
+    }
+
+    /// ⌘A: select every editable element (design call E2b-4).
+    private func selectAllElements() {
+        editorModel.selection.replace(with: session.allEditableIDs())
     }
 
     private var entry: RecentEntry? {
@@ -502,37 +610,6 @@ struct MacViewerPane: View {
     private var subtitle: String {
         let base = entry?.formatSizeSubtitle ?? ""
         return session.isDirty ? (base.isEmpty ? "Edited" : "\(base) — Edited") : base
-    }
-}
-
-/// Draws an edited `Scene` from `SceneRenderer` (design call E2a-3). A minimal
-/// fit-to-pane raster for E2a — it renders the scene once per edit version at the
-/// pane's backing resolution; E2b's canvas replaces it with the interactive,
-/// zoomable editing surface.
-private struct MacEditedSceneView: View {
-    let pageSize: CGSize
-    let makeImage: (CGFloat) -> CGImage?
-
-    var body: some View {
-        GeometryReader { proxy in
-            if let image = makeImage(editScale(for: proxy.size)) {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                Color(nsColor: .underPageBackgroundColor)
-            }
-        }
-        .background(Color(nsColor: .underPageBackgroundColor))
-    }
-
-    /// A render scale that keeps the rasterised scene reasonably sharp for the pane
-    /// without exceeding the renderer's own bitmap cap.
-    private func editScale(for viewport: CGSize) -> CGFloat {
-        guard pageSize.width > 0, pageSize.height > 0, viewport.width > 0, viewport.height > 0 else { return 1 }
-        let fit = min(viewport.width / pageSize.width, viewport.height / pageSize.height)
-        return min(max(fit * 2, 1), 4)   // 2× the fit scale, clamped to a sane range
     }
 }
 
