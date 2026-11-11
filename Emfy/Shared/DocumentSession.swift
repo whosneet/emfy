@@ -1,3 +1,5 @@
+import CoreGraphics
+import EMFEdit
 import EMFRender
 import Foundation
 
@@ -84,10 +86,63 @@ final class DocumentSession {
     @ObservationIgnored private var loadGeneration = 0
     @ObservationIgnored private var reloadDebounce: Task<Void, Never>?
 
-    /// The editor's undo stack (v3-plan §11.2). Present now, exercised when the
-    /// editor lands; read-only playback never registers an undo action, so this
-    /// stays empty in C3a.
+    /// The editor's undo stack (v3-plan §11.2). Bridged to the editing layer below:
+    /// each applied `SceneCommand` registers one `UndoManager` action, so the system
+    /// Edit ▸ Undo/Redo menus and the iPad gestures drive `SceneHistory`. Empty while
+    /// read-only (no `beginEditing`).
     let undoManager = UndoManager()
+
+    // MARK: - Editing layer (E2a)
+
+    /// Whether the document can be edited. Viewing is unaffected by `.unavailable`
+    /// (an import failure or a file with no liftable content opens read-only).
+    enum EditingAvailability: Equatable, Sendable {
+        case notEditing
+        case unavailable
+        case editing
+    }
+    private(set) var editing: EditingAvailability = .notEditing
+
+    /// The edit history, present only while `editing == .editing`. `@ObservationIgnored`
+    /// because the viewer re-renders from `editVersion` (reading the scene value on
+    /// every observation would copy the whole scene); the view model reads it through
+    /// `editedScene` after an `editVersion` change.
+    @ObservationIgnored private(set) var history: SceneHistory?
+
+    /// Bumped on every scene mutation (apply/undo/redo), so the viewer's content id
+    /// changes and it re-renders the edited scene (design call E2a-3). Observed.
+    private(set) var editVersion = 0
+
+    /// Whether there are unsaved edits relative to the last save (or the opened file).
+    private(set) var isDirty = false
+
+    /// The baseline the dirty flag recomputes against — the last saved scene, or the
+    /// opened scene before any save.
+    @ObservationIgnored private var savedScene: Scene?
+
+    /// The opened bytes, captured at `beginEditing`, for the one-time revert snapshot.
+    @ObservationIgnored private var openedBytes: Data?
+
+    /// An external disk change arrived while there were unsaved edits (design call
+    /// E2a-8): the viewer shows the "changed on disk" banner and the file is NOT
+    /// reloaded until the user chooses.
+    private(set) var showsExternalChangeBanner = false
+
+    /// The warnings from the most recent successful save, for the warnings UI
+    /// (design call E2a-5). Empty when the last save was clean.
+    private(set) var lastSaveWarnings: [ExportWarning] = []
+
+    /// A pending WMF/WMZ first-save confirmation (design call E2a-5); the viewer
+    /// presents it. `nil` when none is pending.
+    private(set) var pendingWMFConfirmation: WMFSaveConfirmation?
+    @ObservationIgnored private var wmfSaveConfirmed = false
+
+    /// Whether the one-time revert snapshot has been taken this session.
+    @ObservationIgnored private var snapshotTaken = false
+
+    /// The most recent save failure, toasted by the viewer then cleared (design call
+    /// E2a-9).
+    private(set) var lastSaveError: DocumentSaveError?
 
     // MARK: - Injected dependencies
 
@@ -111,6 +166,27 @@ final class DocumentSession {
 
     @ObservationIgnored private var presenter: DocumentFilePresenter?
 
+    // MARK: - Injected editing dependencies (E2a)
+
+    /// Lifts the opened bytes into an editable `Scene` (off the main actor). Returns
+    /// `nil` when the file has no liftable content.
+    private let importScene: @Sendable (Data) -> Scene?
+    /// Writes the serialised document to disk, excluding the session's own presenter
+    /// so the write never triggers a self-reload. The store-bound default resolves the
+    /// entry's URL and writes through `NSFileCoordinator`; the default here throws, so
+    /// a session with no destination fails typed rather than silently.
+    private let writeBytes: @MainActor (_ data: Data, _ presenter: DocumentFilePresenter?) async throws -> Void
+    /// The one-time opened-version snapshot store, or `nil` when revert snapshots are
+    /// unavailable (e.g. a hostless test that doesn't exercise them).
+    private let snapshotStore: RevertSnapshotStore?
+    /// Whether to keep the opened version for Revert — the Settings toggle (design
+    /// call E2a-7). Read at save time so turning it off takes effect immediately.
+    private let keepRevertSnapshot: @MainActor () -> Bool
+    /// The document's current file name (for the save format and the snapshot name).
+    /// `nil` means there is no save destination.
+    private let documentFileName: @MainActor () -> String?
+    private let autosave: AutosaveController
+
     // MARK: - Init
 
     init(
@@ -118,13 +194,25 @@ final class DocumentSession {
         resolve: @escaping @MainActor (UUID) async throws -> Data,
         parse: @escaping @Sendable (Data, RenderOptions) -> LoadedMetafile? = { try? MetafileLoader.load($0, options: $1) },
         watchURLProvider: @escaping @MainActor (UUID) -> URL? = { _ in nil },
-        options: RenderOptions = .default
+        options: RenderOptions = .default,
+        importScene: @escaping @Sendable (Data) -> Scene? = { try? SceneImporter.import(data: $0) },
+        writeBytes: @escaping @MainActor (_ data: Data, _ presenter: DocumentFilePresenter?) async throws -> Void = { _, _ in throw DocumentSaveError.noDestination },
+        snapshotStore: RevertSnapshotStore? = nil,
+        keepRevertSnapshot: @escaping @MainActor () -> Bool = { true },
+        documentFileName: @escaping @MainActor () -> String? = { nil },
+        autosave: AutosaveController = AutosaveController()
     ) {
         self.entryID = entryID
         self.resolve = resolve
         self.parse = parse
         self.watchURLProvider = watchURLProvider
         self.renderOptions = options
+        self.importScene = importScene
+        self.writeBytes = writeBytes
+        self.snapshotStore = snapshotStore
+        self.keepRevertSnapshot = keepRevertSnapshot
+        self.documentFileName = documentFileName
+        self.autosave = autosave
     }
 
     /// The window-facing initialiser: binds resolution, parsing, and the watch URL
@@ -149,8 +237,39 @@ final class DocumentSession {
                     bookmarkDataIsStale: &isStale
                 )
             },
-            options: options
+            options: options,
+            writeBytes: { [weak store] data, presenter in
+                guard let store, let entry = store.entry(id: entryID) else {
+                    throw DocumentSaveError.noDestination
+                }
+                try await Self.writeThroughBookmark(data, bookmark: entry.bookmark, presenter: presenter)
+            },
+            snapshotStore: RevertSnapshotStore(directory: store.locations.snapshotsDirectory),
+            keepRevertSnapshot: { EmfySettings.shared.keepOpenedVersionForRevert },
+            documentFileName: { [weak store] in store?.entry(id: entryID)?.displayName }
         )
+    }
+
+    /// Resolves an entry's bookmark to its URL (taking the macOS security scope) and
+    /// writes `data` there through the coordinated writer, off the main actor. The
+    /// security scope is released as soon as the write returns.
+    private static func writeThroughBookmark(
+        _ data: Data,
+        bookmark: Data,
+        presenter: DocumentFilePresenter?
+    ) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            var isStale = false
+            let url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: RecentsStore.bookmarkResolutionOptions,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            try CoordinatedDocumentWriter.write(data, to: url, presenter: presenter, recordVersion: true)
+        }.value
     }
 
     deinit {
@@ -309,6 +428,304 @@ final class DocumentSession {
         return .unavailable
     }
 
+    // MARK: - Editing: begin, mutate, undo bridge (E2a)
+
+    /// The scene the viewer should draw once editing has made the document dirty, or
+    /// `nil` while read-only / clean. Read after an `editVersion` change.
+    var editedScene: Scene? {
+        guard editing == .editing, isDirty else { return nil }
+        return history?.scene
+    }
+
+    /// The edited scene's page size, so the viewer can size its render (design call
+    /// E2a-3). `nil` while read-only / clean.
+    var editedPageSize: CGSize? { editedScene?.pageSizeDevice }
+
+    /// Rasterises the edited scene through `SceneRenderer` for the viewer's edit
+    /// preview. Exposed here (rather than importing EMFEdit into the Mac pane, where
+    /// `ExportFormat` would clash with the app's own) so the pane stays EMFEdit-free.
+    func makeEditedSceneImage(scale: CGFloat) -> CGImage? {
+        guard let scene = editedScene else { return nil }
+        return SceneRenderer.makeImage(scene, scale: scale)
+    }
+
+    /// Enters edit mode: imports the opened bytes into an editable `Scene` off the main
+    /// actor. An import failure, or a file with no liftable content, leaves the
+    /// document read-only (`.unavailable`) and viewing untouched (design call E2a-1).
+    /// E2b's canvas calls this; it is idempotent.
+    func beginEditing() async {
+        guard editing == .notEditing else { return }
+        let data: Data
+        do {
+            data = try await resolve(entryID)
+        } catch {
+            editing = .unavailable
+            return
+        }
+        let importScene = self.importScene
+        let scene = await Task.detached(priority: .userInitiated) { importScene(data) }.value
+        guard let scene, !scene.editableElements.isEmpty else {
+            editing = .unavailable
+            return
+        }
+        undoManager.removeAllActions()
+        undoManager.groupsByEvent = false   // one group per recorded step, deterministically
+        history = SceneHistory(scene: scene)
+        savedScene = scene
+        openedBytes = data
+        isDirty = false
+        editVersion &+= 1
+        editing = .editing
+    }
+
+    /// The single mutation path for the scene (design call E2a-2). Applies `command`
+    /// through `SceneHistory`, bridges one `UndoManager` action per recorded step
+    /// (coalesced edits share the step they merged into, so a drag is one undo), marks
+    /// the document dirty, and arms the autosave. A refused command leaves the scene
+    /// and the undo stack untouched. AI edits will route through here too.
+    func apply(_ command: SceneCommand, coalescing key: SceneCoalescingKey? = nil) {
+        guard editing == .editing, var updated = history else { return }
+        let beforeSteps = updated.undoCount
+        do {
+            try updated.apply(command, coalescing: key)
+        } catch {
+            return   // SceneEditError: nothing changed
+        }
+        history = updated
+        // A merge (coalescing into the top step) adds no new UndoManager entry — the
+        // step's existing registration already reverses the merged result.
+        if updated.undoCount > beforeSteps {
+            registerSystemUndo(name: updated.undoActionName ?? command.actionName)
+        }
+        afterMutation(markDirty: true)
+    }
+
+    /// Registers one forward undo action with the system `UndoManager`, wrapped in its
+    /// own group so each recorded step is exactly one Edit ▸ Undo entry.
+    private func registerSystemUndo(name: SceneActionName) {
+        undoManager.beginUndoGrouping()
+        undoManager.registerUndo(withTarget: self) { session in MainActor.assumeIsolated { session.systemUndo() } }
+        undoManager.setActionName(Self.undoDisplayName(name))
+        undoManager.endUndoGrouping()
+    }
+
+    /// Reverses one step and registers its redo. Invoked by the system Edit ▸ Undo
+    /// (and iPad gestures) through the registered action.
+    func systemUndo() {
+        guard var updated = history, updated.canUndo else { return }
+        let name = updated.undoActionName ?? .move
+        updated.undo()
+        history = updated
+        undoManager.registerUndo(withTarget: self) { session in MainActor.assumeIsolated { session.systemRedo() } }
+        undoManager.setActionName(Self.undoDisplayName(name))
+        afterMutation(markDirty: nil)
+    }
+
+    /// Re-applies one step and registers its undo. Invoked by Edit ▸ Redo.
+    func systemRedo() {
+        guard var updated = history, updated.canRedo else { return }
+        let name = updated.redoActionName ?? .move
+        updated.redo()
+        history = updated
+        undoManager.registerUndo(withTarget: self) { session in MainActor.assumeIsolated { session.systemUndo() } }
+        undoManager.setActionName(Self.undoDisplayName(name))
+        afterMutation(markDirty: nil)
+    }
+
+    /// Updates the re-render signal and the dirty flag. `markDirty == true` is the
+    /// cheap edit hot path; `nil` recomputes against the saved baseline (O(scene),
+    /// used by the infrequent undo/redo) so undoing back to the saved state clears
+    /// dirty and redoing re-sets it. Arms the autosave whenever the document is dirty.
+    private func afterMutation(markDirty: Bool?) {
+        editVersion &+= 1
+        if let markDirty {
+            isDirty = markDirty
+        } else {
+            isDirty = history?.scene != savedScene
+        }
+        if isDirty {
+            autosave.schedule { [weak self] in await self?.performSave(isAutosave: true) }
+        }
+    }
+
+    /// A plain-English Edit-menu name for a step (the model never hard-codes display
+    /// text; this is the app-side mapping of `SceneActionName`).
+    static func undoDisplayName(_ name: SceneActionName) -> String {
+        switch name {
+        case .move: return "Move"
+        case .transform: return "Transform"
+        case .delete: return "Delete"
+        case .insert: return "Insert"
+        case .changeFill: return "Change Fill"
+        case .changeStroke: return "Change Stroke"
+        case .changeOpacity: return "Change Opacity"
+        case .changeText: return "Edit Text"
+        case .changeFont: return "Change Font"
+        case .group(let key): return key
+        }
+    }
+
+    // MARK: - Editing: save in place (E2a-4, E2a-5)
+
+    /// An explicit save (Mac File ▸ Save, ⌘S). No-op when read-only or clean.
+    func save() async {
+        await performSave(isAutosave: false)
+    }
+
+    /// Exports the current scene in the file's own format and writes it in place. The
+    /// first save of a WMF/WMZ document raises the limitations confirmation instead of
+    /// writing (design call E2a-5); an autosave never pops that confirmation — it
+    /// leaves a WMF dirty until an explicit save or close confirms once.
+    private func performSave(isAutosave: Bool) async {
+        guard editing == .editing, let current = history else { return }
+        guard isDirty else { return }
+        guard let fileName = documentFileName() else { lastSaveError = .noDestination; return }
+        let format = EditingSaveFormat.format(fileName: fileName, source: current.scene.source.format)
+
+        let result: ExportResult
+        do {
+            // `SceneExporter.export` is a typed throw of `SceneExportError`.
+            result = try SceneExporter.export(current.scene, as: format)
+        } catch {
+            lastSaveError = .exportFailed(String(describing: error))
+            return
+        }
+
+        if EditingSaveFormat.isWMFFamily(format), !wmfSaveConfirmed {
+            if isAutosave { return }   // never confirm from a silent autosave
+            pendingWMFConfirmation = WMFSaveConfirmation(
+                format: format,
+                categories: SceneExporter.summarize(result.warnings),
+                data: result.data,
+                warnings: result.warnings
+            )
+            return
+        }
+
+        await commitWrite(data: result.data, warnings: result.warnings, fileName: fileName, scene: current.scene)
+    }
+
+    /// Confirms the pending WMF/WMZ save ("Save Anyway"): writes the stashed bytes and
+    /// marks the session confirmed, so later saves in this session write without asking.
+    func confirmPendingWMFSave() async {
+        guard let pending = pendingWMFConfirmation, let fileName = documentFileName() else { return }
+        wmfSaveConfirmed = true
+        pendingWMFConfirmation = nil
+        await commitWrite(data: pending.data, warnings: pending.warnings, fileName: fileName, scene: history?.scene)
+    }
+
+    /// Dismisses the pending WMF/WMZ confirmation without writing (Cancel). The
+    /// document stays dirty.
+    func cancelPendingWMFSave() {
+        pendingWMFConfirmation = nil
+    }
+
+    /// Exports the current scene in `format` without writing to disk — for "Save a
+    /// Copy as EMF…" (the third WMF-confirmation action), which the viewer routes to a
+    /// file exporter.
+    func sceneExportData(as format: EMFEdit.ExportFormat) -> Data? {
+        guard let scene = history?.scene else { return nil }
+        return (try? SceneExporter.export(scene, as: format))?.data
+    }
+
+    /// Takes the one-time revert snapshot (first save, when the toggle is on), then
+    /// writes the bytes in place through the coordinated writer, updates the saved
+    /// baseline and the warnings, and clears dirty. A write failure is typed and left
+    /// for the viewer to toast.
+    private func commitWrite(data: Data, warnings: [ExportWarning], fileName: String, scene: Scene?) async {
+        if !snapshotTaken, keepRevertSnapshot(), let snapshotStore, let openedBytes {
+            snapshotStore.writeIfAbsent(entryID: entryID, data: openedBytes, originalFileName: fileName)
+            snapshotTaken = true
+        }
+        do {
+            try await writeBytes(data, presenter)
+        } catch let error as DocumentSaveError {
+            lastSaveError = error
+            return
+        } catch {
+            lastSaveError = .writeFailed(String(describing: error))
+            return
+        }
+        savedScene = scene
+        isDirty = false
+        lastSaveWarnings = warnings
+        lastSaveError = nil
+        autosave.cancel()
+    }
+
+    /// Clears the last save error after the viewer has toasted it (so the same error
+    /// isn't shown twice).
+    func clearSaveError() { lastSaveError = nil }
+
+    /// Flushes any pending edit to disk now — called on window close, app background
+    /// and quit (design call E2a-6). A no-op when clean or read-only.
+    func flushPendingSave() async {
+        autosave.cancel()
+        guard editing == .editing, isDirty else { return }
+        await performSave(isAutosave: true)
+    }
+
+    // MARK: - Editing: revert (E2a-7)
+
+    /// Whether Revert to Opened Version is available (an opened-version snapshot exists).
+    var canRevertToOpenedVersion: Bool {
+        snapshotStore?.hasSnapshot(for: entryID) ?? false
+    }
+
+    /// Restores the opened bytes through the same coordinated write, clears the edit
+    /// state and undo, and reloads the document (design call E2a-7). Behind a
+    /// confirmation in the UI.
+    func revertToOpenedVersion() async {
+        guard let snapshotStore, let snapshot = snapshotStore.read(for: entryID) else { return }
+        do {
+            try await writeBytes(snapshot.data, presenter)
+        } catch let error as DocumentSaveError {
+            lastSaveError = error
+            return
+        } catch {
+            lastSaveError = .writeFailed(String(describing: error))
+            return
+        }
+        endEditingState()
+        await load()
+    }
+
+    /// Discards the in-memory edit state (used by revert and by "Reload" on the
+    /// external-change banner).
+    private func endEditingState() {
+        autosave.cancel()
+        undoManager.removeAllActions()
+        history = nil
+        savedScene = nil
+        openedBytes = nil
+        isDirty = false
+        wmfSaveConfirmed = false
+        snapshotTaken = false
+        pendingWMFConfirmation = nil
+        showsExternalChangeBanner = false
+        editVersion &+= 1
+        editing = .notEditing
+    }
+
+    // MARK: - Editing: external change banner (E2a-8)
+
+    /// Keeps the in-memory edits and dismisses the "changed on disk" banner.
+    func keepMyEdits() {
+        showsExternalChangeBanner = false
+    }
+
+    /// Discards unsaved edits and reloads the on-disk version (behind a confirmation).
+    func reloadDiscardingEdits() async {
+        endEditingState()
+        await reloadNow()
+    }
+
+    /// Whether an external disk change should raise the banner rather than reload: only
+    /// when there are unsaved edits (design call E2a-8). Pure, for the transition tests.
+    nonisolated static func externalChangeShowsBanner(isEditing: Bool, isDirty: Bool) -> Bool {
+        isEditing && isDirty
+    }
+
     // MARK: - File-change observation
 
     private func startWatching() {
@@ -316,7 +733,7 @@ final class DocumentSession {
         if presenter?.presentedItemURL == url { return }
         presenter?.stop()
         let presenter = DocumentFilePresenter(url: url) { [weak self] in
-            Task { @MainActor in self?.reloadFromDiskChange() }
+            Task { @MainActor in self?.externalDiskChangeDetected() }
         }
         presenter.start()
         self.presenter = presenter
@@ -329,9 +746,15 @@ final class DocumentSession {
 
     /// An external disk change: debounced (~300 ms) and generation-guarded, so a
     /// burst of `presentedItemDidChange` callbacks runs one keep-loaded reload and
-    /// the newest wins (M4). When the editor lands this gains a dirty-state check
-    /// before clobbering unsaved edits (v3-plan §11.2 hook).
-    private func reloadFromDiskChange() {
+    /// the newest wins (M4). With unsaved edits it never clobbers them — it raises the
+    /// "changed on disk" banner instead and leaves the choice to the user (design call
+    /// E2a-8). Our own coordinated writes are excluded by the presenter, so a save
+    /// never trips this.
+    func externalDiskChangeDetected() {
+        if Self.externalChangeShowsBanner(isEditing: editing == .editing, isDirty: isDirty) {
+            showsExternalChangeBanner = true
+            return
+        }
         reloadDebounce?.cancel()
         reloadDebounce = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
