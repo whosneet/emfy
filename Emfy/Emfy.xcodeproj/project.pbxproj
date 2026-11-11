@@ -83,6 +83,7 @@
 		E2A0000000000000000000B1 /* DocumentEditingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000B0 /* DocumentEditingSupport.swift */; };
 		E2A0000000000000000000B2 /* DocumentEditingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000B0 /* DocumentEditingSupport.swift */; };
 		E2A0000000000000000000C2 /* DocumentEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000C0 /* DocumentEditingTests.swift */; };
+		E2B0000000000000000000E1 /* EditorToolsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000E0 /* EditorToolsTests.swift */; };
 		E2B0000000000000000000A1 /* EditorCanvasMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000A0 /* EditorCanvasMapping.swift */; };
 		E2B0000000000000000000A2 /* EditorCanvasMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000A0 /* EditorCanvasMapping.swift */; };
 		E2B0000000000000000000B1 /* EditorHitTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000B0 /* EditorHitTest.swift */; };
@@ -244,6 +245,7 @@
 		E2B0000000000000000000B0 /* EditorHitTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorHitTest.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000C0 /* EditorSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSelection.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000D0 /* EditorTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTransform.swift; sourceTree = "<group>"; };
+		E2B0000000000000000000E0 /* EditorToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorToolsTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000111 /* OpenRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouting.swift; sourceTree = "<group>"; };
 		B00100000000000000000112 /* ViewerFit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerFit.swift; sourceTree = "<group>"; };
 		B00200000000000000000004 /* EmfyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EmfyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -433,6 +435,7 @@
 				B00100000000000000000340 /* QuickLookSettingsTests.swift */,
 				B00100000000000000000F41 /* SVGExportTests.swift */,
 				E2A0000000000000000000C0 /* DocumentEditingTests.swift */,
+				E2B0000000000000000000E0 /* EditorToolsTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -846,6 +849,7 @@
 				E2B0000000000000000000B2 /* EditorHitTest.swift in Sources */,
 				E2B0000000000000000000C2 /* EditorSelection.swift in Sources */,
 				E2B0000000000000000000D2 /* EditorTransform.swift in Sources */,
+				E2B0000000000000000000E1 /* EditorToolsTests.swift in Sources */,
 				B01100000000000000000121 /* OpenRouting.swift in Sources */,
 				B01100000000000000000122 /* ViewerFit.swift in Sources */,
 				B01100000000000000000123 /* DocumentHostTests.swift in Sources */,
