@@ -226,6 +226,25 @@ private func passthroughElement(id: Int, rect: CGRect) -> Element {
         #expect(selection.ids == [1])
     }
 
+    @Test func selectionUnionBoundsAreMappingIndependent() throws {
+        // Item 4: the device-space union is the same whatever the overlay's y-flip; the
+        // flipped and non-flipped view rects cover the same on-screen region.
+        let scene = makeScene([
+            rectElement(id: 1, rect: CGRect(x: 10, y: 10, width: 20, height: 20)),
+            rectElement(id: 2, rect: CGRect(x: 60, y: 70, width: 20, height: 10)),
+        ])
+        let selection = EditorSelection([1, 2])
+        let deviceBox = try #require(selection.boundsDevice(in: scene))
+        #expect(deviceBox == CGRect(x: 10, y: 10, width: 70, height: 70))
+        let page = scene.pageBoundsDevice
+        let target = CGRect(x: 0, y: 0, width: 200, height: 200)
+        let flipped = EditorCanvasMapping(pageBoundsDevice: page, target: target, flipY: true).viewRect(fromDevice: deviceBox)
+        let straight = EditorCanvasMapping(pageBoundsDevice: page, target: target, flipY: false).viewRect(fromDevice: deviceBox)
+        #expect(abs(flipped.width - straight.width) < 1e-6)
+        #expect(abs(flipped.height - straight.height) < 1e-6)
+        #expect(abs(flipped.minX - straight.minX) < 1e-6)   // x is unaffected by the y-flip
+    }
+
     @Test func boundingBoxIsTheUnionOfSelectedBounds() {
         let scene = makeScene([
             rectElement(id: 1, rect: CGRect(x: 0, y: 0, width: 20, height: 20)),
@@ -307,6 +326,71 @@ private func passthroughElement(id: Int, rect: CGRect) -> Element {
         let fixed = center.applying(t)
         #expect(abs(fixed.x - 50) < 1e-6)
         #expect(abs(fixed.y - 50) < 1e-6)
+    }
+}
+
+// MARK: - Move leaves no residue (item 1 regression)
+
+@Suite struct EditorMoveRenderTests {
+
+    private func samplePixel(_ image: CGImage, px: Int, py: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+        let w = image.width, h = image.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let ctx = CGContext(data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let row = max(0, min(h - 1, h - 1 - py))   // the bitmap is bottom-origin; py is top-origin
+        let i = (row * w + max(0, min(w - 1, px))) * 4
+        return (data[i], data[i + 1], data[i + 2])
+    }
+
+    /// A valid EMF with ONE solid-filled, border-less rectangle, so the import lifts a
+    /// single element that re-synthesises correctly when edited.
+    private func solidRectEMF(left: Int32, top: Int32, right: Int32, bottom: Int32, color: UInt32) -> Data {
+        var body = Data()
+        func w32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { body.append(contentsOf: $0) } }
+        func rec(_ type: UInt32, _ payload: [UInt32]) {
+            w32(type); w32(UInt32(8 + payload.count * 4)); payload.forEach(w32)
+        }
+        rec(37, [0x8000_0008])                                   // SELECTOBJECT NULL_PEN
+        rec(39, [1, 0, color, 0])                                // CREATEBRUSHINDIRECT ih=1, solid
+        rec(37, [1])                                             // SELECTOBJECT brush 1
+        rec(43, [UInt32(bitPattern: left), UInt32(bitPattern: top), UInt32(bitPattern: right), UInt32(bitPattern: bottom)])
+        rec(14, [0, 16, 20])                                     // EOF
+        var d = Data()
+        func h32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        func hi(_ v: Int32) { h32(UInt32(bitPattern: v)) }
+        func h16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        h32(1); h32(88)
+        hi(0); hi(0); hi(99); hi(99)
+        hi(0); hi(0); hi(2117); hi(2117)
+        h32(0x464D_4520); h32(0x0001_0000); h32(88 + UInt32(body.count)); h32(6)
+        h16(8); h16(0); h32(0); h32(0); h32(0)
+        hi(1920); hi(1080); hi(508); hi(286)
+        d.append(body)
+        return d
+    }
+
+    @Test func movingAnElementLeavesTheVacatedAreaBackground() throws {
+        // One solid rect at device (20,20)-(70,60). After moving it +30,+30, the ORIGINAL
+        // centre must render as background — no residue left behind — and the element must
+        // still render somewhere (it moved, it didn't vanish). This is the item-1
+        // regression: the "leftover frame" was a decomposed fixture selected in part, not
+        // a render fault, so a clean single element leaves the vacated area blank.
+        let scene = try SceneImporter.import(data: solidRectEMF(left: 20, top: 20, right: 70, bottom: 60, color: 0x0000_00FF))
+        let id = try #require(scene.editableElements.first?.id)
+        var moved = scene
+        try moved.translate([id], dx: 30, dy: 30)
+        let after = try #require(SceneRenderer.makeImage(moved, scale: 1))
+        let sx = CGFloat(after.width) / 100, sy = CGFloat(after.height) / 100
+        let vacated = samplePixel(after, px: Int(45 * sx), py: Int(40 * sy))   // original centre
+        var painted = 0
+        for py in 0..<after.height { for px in 0..<after.width {
+            let p = samplePixel(after, px: px, py: py)
+            if p.r < 200 || p.g < 200 || p.b < 200 { painted += 1 }
+        } }
+        #expect(vacated.r > 240 && vacated.g > 240 && vacated.b > 240)   // vacated = background (no residue)
+        #expect(painted > 1000)                                          // the element still renders (didn't vanish)
     }
 }
 
