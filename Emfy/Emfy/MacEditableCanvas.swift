@@ -525,10 +525,10 @@ private final class TiledSceneView: NSView {
     private let hiddenLock = OSAllocatedUnfairLock<Set<Int>>(initialState: [])
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
     private let optionsLock: OSAllocatedUnfairLock<RenderOptions>
-    /// The source parsed/observed once per editing session (E2b-3). Prepared off
-    /// the main actor in the background when the canvas appears; nil until ready,
-    /// so early tiles fall back to preparing internally per render.
-    private let sourceLock = OSAllocatedUnfairLock<SceneRenderer.SceneRenderSource?>(initialState: nil)
+    /// The source lifecycle (E2b-3): the source is prepared once, off the main
+    /// actor, when the canvas appears. While it is `.preparing`, tiles paint only
+    /// the page background rather than each preparing the whole file internally.
+    private let sourceStateLock = OSAllocatedUnfairLock<TileRenderSource>(initialState: .notNeeded)
     private var sourcePrepStarted = false
     private let pageSize: CGSize
 
@@ -575,12 +575,13 @@ private final class TiledSceneView: NSView {
     func ensureSourcePrepared() {
         guard !sourcePrepStarted else { return }
         let scene = sceneLock.withLock { $0 }
-        guard SceneRenderer.requiresPreparedSource(scene) else { return }
+        guard SceneRenderer.requiresPreparedSource(scene) else { return }   // stays .notNeeded
         sourcePrepStarted = true
-        let lock = sourceLock
+        sourceStateLock.withLock { $0 = .preparing }
+        let lock = sourceStateLock
         Task { [weak self] in
             let prepared = await Task.detached(priority: .userInitiated) { SceneRenderer.prepare(scene) }.value
-            lock.withLock { $0 = prepared }
+            lock.withLock { $0 = prepared.map { .ready($0) } ?? .failed }
             guard let self else { return }
             self.setNeedsDisplay(self.bounds)
             self.layer?.setNeedsDisplay()
@@ -617,20 +618,26 @@ private final class TiledSceneView: NSView {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let paint = paintLock.withLock { $0 }
         let hidden = hiddenLock.withLock { $0 }
-        var scene = sceneLock.withLock { $0 }
-        let source = sourceLock.withLock { $0 }
+        let state = sourceStateLock.withLock { $0 }
         let natural = pageSize
+        // While a needed source is still preparing, paint only the page background —
+        // never prepare per tile (that would run one full-file parse per visible tile
+        // on the tiled layer's threads). The redraw on arrival paints the ink (E2b-3).
+        if state.tileAction == .backgroundOnly {
+            TilePainter.paint(paint, into: context, rect: dirtyRect) { _ in }
+            return
+        }
+        var scene = sceneLock.withLock { $0 }
         if !hidden.isEmpty { scene = SceneGhostSupport.hiding(ids: hidden, in: scene) }
         // Only the elements that reach this tile are rendered, so a tile's cost is
         // bounded by its own content rather than the whole scene (E2b item 5). The Mac
         // tiled view is y-up, matching SceneRenderer's target (flipY: true).
         let tileScene = SceneTileFilter.subscene(scene, viewRect: dirtyRect, target: CGRect(origin: .zero, size: natural), flipY: true)
         TilePainter.paint(paint, into: context, rect: dirtyRect) { ctx in
-            // Reuse the prepared source so the tile doesn't re-parse the file (E2b-3);
-            // until it's ready, fall back to render preparing internally.
-            if let source {
+            // Reuse the prepared source so the tile doesn't re-parse the file (E2b-3).
+            if case .ready(let source) = state {
                 SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural), source: source)
-            } else {
+            } else {   // .notNeeded (pure geometry) or .failed (prepare returned nil)
                 SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural))
             }
         }

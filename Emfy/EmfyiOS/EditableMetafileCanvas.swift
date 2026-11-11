@@ -395,10 +395,10 @@ private final class IOSTiledSceneView: UIView {
     private let hiddenLock = OSAllocatedUnfairLock<Set<Int>>(initialState: [])
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
     private let optionsLock: OSAllocatedUnfairLock<RenderOptions>
-    /// The source parsed/observed once per editing session (E2b-3), prepared off
-    /// the main actor; nil until ready, so early tiles fall back to the per-render
-    /// preparation.
-    private let sourceLock = OSAllocatedUnfairLock<SceneRenderer.SceneRenderSource?>(initialState: nil)
+    /// The source lifecycle (E2b-3): prepared once, off the main actor, when the
+    /// canvas appears. While `.preparing`, tiles paint only the page background
+    /// rather than each preparing the whole file internally.
+    private let sourceStateLock = OSAllocatedUnfairLock<TileRenderSource>(initialState: .notNeeded)
     private var sourcePrepStarted = false
     private let pageSize: CGSize
 
@@ -431,12 +431,13 @@ private final class IOSTiledSceneView: UIView {
     func ensureSourcePrepared() {
         guard !sourcePrepStarted else { return }
         let scene = sceneLock.withLock { $0 }
-        guard SceneRenderer.requiresPreparedSource(scene) else { return }
+        guard SceneRenderer.requiresPreparedSource(scene) else { return }   // stays .notNeeded
         sourcePrepStarted = true
-        let lock = sourceLock
+        sourceStateLock.withLock { $0 = .preparing }
+        let lock = sourceStateLock
         Task { [weak self] in
             let prepared = await Task.detached(priority: .userInitiated) { SceneRenderer.prepare(scene) }.value
-            lock.withLock { $0 = prepared }
+            lock.withLock { $0 = prepared.map { .ready($0) } ?? .failed }
             guard let self else { return }
             self.setNeedsDisplay()
             self.tiledLayer.setNeedsDisplay()
@@ -471,9 +472,16 @@ private final class IOSTiledSceneView: UIView {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let paint = paintLock.withLock { $0 }
         let hidden = hiddenLock.withLock { $0 }
-        var scene = sceneLock.withLock { $0 }
-        let source = sourceLock.withLock { $0 }
+        let state = sourceStateLock.withLock { $0 }
         let natural = pageSize
+        // While a needed source is still preparing, paint only the page background —
+        // never prepare per tile (one full-file parse per visible tile on the tiled
+        // layer's threads). The redraw on arrival paints the ink (E2b-3).
+        if state.tileAction == .backgroundOnly {
+            TilePainter.paint(paint, into: context, rect: rect) { _ in }
+            return
+        }
+        var scene = sceneLock.withLock { $0 }
         if !hidden.isEmpty { scene = SceneGhostSupport.hiding(ids: hidden, in: scene) }
         // Only the elements reaching this tile are rendered (E2b item 5). The iOS tiled
         // view is y-down (flipY: false); the UIKit flip below is applied when drawing,
@@ -482,11 +490,10 @@ private final class IOSTiledSceneView: UIView {
         TilePainter.paint(paint, into: context, rect: rect) { ctx in
             ctx.translateBy(x: 0, y: natural.height)
             ctx.scaleBy(x: 1, y: -1)
-            // Reuse the prepared source so the tile doesn't re-parse the file (E2b-3);
-            // fall back to the internal preparation until it's ready.
-            if let source {
+            // Reuse the prepared source so the tile doesn't re-parse the file (E2b-3).
+            if case .ready(let source) = state {
                 SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural), source: source)
-            } else {
+            } else {   // .notNeeded (pure geometry) or .failed (prepare returned nil)
                 SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural))
             }
         }

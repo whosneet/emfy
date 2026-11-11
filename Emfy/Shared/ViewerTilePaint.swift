@@ -1,5 +1,35 @@
 import CoreGraphics
+import EMFEdit
 import EMFRender
+
+/// The render-source lifecycle of a tiled EDITOR canvas (E2b-3 correction). The
+/// source is parsed/observed once, off the main actor, when the canvas appears.
+/// While a NEEDED source is still preparing, a tile must paint only the page
+/// background — NOT fall back to a per-render internal prepare, which would run
+/// one full-file parse per visible tile on `CATiledLayer`'s concurrent threads
+/// (≈20 parallel 15 MB parses on entering edit mode). The one internal-prepare
+/// fallback is kept only for a genuinely unpreparable file (`prepare` returned
+/// nil), where that prepare fails fast.
+enum TileRenderSource {
+    /// Pure-geometry scene: no source needed, render straight from value types.
+    case notNeeded
+    /// A needed source is being prepared in the background.
+    case preparing
+    /// The prepared source, reused by every tile.
+    case ready(SceneRenderer.SceneRenderSource)
+    /// `prepare` returned nil (unparseable source); render without one.
+    case failed
+
+    /// What a tile's `draw` should do in this state. Pure, so it is unit-tested.
+    enum TileAction: Equatable { case renderWithSource, renderWithoutSource, backgroundOnly }
+    var tileAction: TileAction {
+        switch self {
+        case .ready: .renderWithSource
+        case .notNeeded, .failed: .renderWithoutSource
+        case .preparing: .backgroundOnly
+        }
+    }
+}
 
 /// How a viewer tile is painted (S1a-4b): the page fill behind the drawing
 /// (Page background) and the dark-mode treatment over it (Page in Dark Mode).

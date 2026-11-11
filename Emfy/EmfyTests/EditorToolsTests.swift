@@ -464,3 +464,38 @@ private func passthroughElement(id: Int, rect: CGRect) -> Element {
         #expect(abs(moved.height - expected.height) < 0.5)
     }
 }
+
+// MARK: - Tiled-canvas render-source state (E2b-3 correction)
+
+@Suite struct TileRenderSourceTests {
+
+    private func editableEMF() -> Data {
+        var d = Data()
+        func u32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        func i32(_ v: Int32) { u32(UInt32(bitPattern: v)) }
+        func u16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { d.append(contentsOf: $0) } }
+        u32(1); u32(88)
+        i32(0); i32(0); i32(99); i32(99)
+        i32(0); i32(0); i32(2117); i32(2117)
+        u32(0x464D4520); u32(0x0001_0000); u32(88 + 24 + 20); u32(3)
+        u16(1); u16(0); u32(0); u32(0); u32(0)
+        i32(1920); i32(1080); i32(508); i32(286)
+        u32(43); u32(24); i32(10); i32(10); i32(90); i32(90)
+        u32(14); u32(20); u32(0); u32(16); u32(20)
+        return d
+    }
+
+    /// The pure draw-decision the tiled canvas makes for each source state: a
+    /// preparing source paints only the page background (NO per-tile prepare); a
+    /// ready source renders with it; a not-needed (pure-geometry) or failed source
+    /// renders without one.
+    @Test func tileActionPerState() throws {
+        #expect(TileRenderSource.notNeeded.tileAction == .renderWithoutSource)
+        #expect(TileRenderSource.preparing.tileAction == .backgroundOnly)
+        #expect(TileRenderSource.failed.tileAction == .renderWithoutSource)
+
+        let scene = try SceneImporter.import(data: editableEMF())
+        let source = try #require(SceneRenderer.prepare(scene))
+        #expect(TileRenderSource.ready(source).tileAction == .renderWithSource)
+    }
+}
