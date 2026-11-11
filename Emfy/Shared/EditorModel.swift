@@ -21,6 +21,12 @@ final class EditorModel {
     /// (Mac) or double-taps (iPad) a text element, read by the editing container to
     /// present a popover anchored to the element. `nil` when none is open.
     var textEdit: TextEditRequest?
+
+    /// The armed shape-creation tool, or `nil` for the normal select/transform tool
+    /// (E3a design call 5). Choosing a shape from the Shapes menu arms it; the canvas
+    /// shows a crosshair, a drag draws it, and committing one disarms the tool
+    /// (Keynote behaviour). Observed so the toolbar reflects the armed state.
+    var armedShapeTool: ShapeToolKind?
 }
 
 /// The state driving the text-edit popover: which text element, the point to anchor the

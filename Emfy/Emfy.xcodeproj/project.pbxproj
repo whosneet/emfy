@@ -84,6 +84,7 @@
 		E2A0000000000000000000B1 /* DocumentEditingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000B0 /* DocumentEditingSupport.swift */; };
 		E2A0000000000000000000B2 /* DocumentEditingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000B0 /* DocumentEditingSupport.swift */; };
 		E2A0000000000000000000C2 /* DocumentEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A0000000000000000000C0 /* DocumentEditingTests.swift */; };
+		E3A0000000000000000000D1 /* E3ShapeToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000D0 /* E3ShapeToolTests.swift */; };
 		E2B0000000000000000000E1 /* EditorToolsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000E0 /* EditorToolsTests.swift */; };
 		E2B000000000000000000101 /* EditorDebugLaunch.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000100 /* EditorDebugLaunch.swift */; };
 		E2B000000000000000000151 /* SceneTileFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000150 /* SceneTileFilter.swift */; };
@@ -93,6 +94,11 @@
 		E2C0000000000000000000C1 /* EditorTextEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000C0 /* EditorTextEditing.swift */; };
 		E2C0000000000000000000D1 /* FormatInspectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000D0 /* FormatInspectorTests.swift */; };
 		E2B0000000000000000000F1 /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000F0 /* EditorModel.swift */; };
+		E3A0000000000000000000A1 /* NewDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000A0 /* NewDrawing.swift */; };
+		E3A0000000000000000000B1 /* ShapeTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000B0 /* ShapeTool.swift */; };
+		E3A0000000000000000000C1 /* NewDrawingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000C0 /* NewDrawingSheet.swift */; };
+		E3A0000000000000000000A2 /* NewDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000A0 /* NewDrawing.swift */; };
+		E3A0000000000000000000B2 /* ShapeTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000B0 /* ShapeTool.swift */; };
 		E2B000000000000000000111 /* EditorGhost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000110 /* EditorGhost.swift */; };
 		E2B000000000000000000121 /* MacEditableCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000120 /* MacEditableCanvas.swift */; platformFilters = (macos, ); };
 		E2B000000000000000000131 /* EditorDebugScreenshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000130 /* EditorDebugScreenshot.swift */; platformFilters = (macos, ); };
@@ -254,6 +260,7 @@
 		E2A0000000000000000000A0 /* RevertSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevertSnapshot.swift; sourceTree = "<group>"; };
 		E2A0000000000000000000B0 /* DocumentEditingSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentEditingSupport.swift; sourceTree = "<group>"; };
 		E2A0000000000000000000C0 /* DocumentEditingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentEditingTests.swift; sourceTree = "<group>"; };
+		E3A0000000000000000000D0 /* E3ShapeToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E3ShapeToolTests.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000A0 /* EditorCanvasMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorCanvasMapping.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000B0 /* EditorHitTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorHitTest.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000C0 /* EditorSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSelection.swift; sourceTree = "<group>"; };
@@ -266,6 +273,9 @@
 		E2C0000000000000000000C0 /* EditorTextEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTextEditing.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000D0 /* FormatInspectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatInspectorTests.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000F0 /* EditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorModel.swift; sourceTree = "<group>"; };
+		E3A0000000000000000000A0 /* NewDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewDrawing.swift; sourceTree = "<group>"; };
+		E3A0000000000000000000B0 /* ShapeTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeTool.swift; sourceTree = "<group>"; };
+		E3A0000000000000000000C0 /* NewDrawingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewDrawingSheet.swift; sourceTree = "<group>"; };
 		E2B000000000000000000110 /* EditorGhost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorGhost.swift; sourceTree = "<group>"; };
 		E2B000000000000000000120 /* MacEditableCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEditableCanvas.swift; sourceTree = "<group>"; };
 		E2B000000000000000000130 /* EditorDebugScreenshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDebugScreenshot.swift; sourceTree = "<group>"; };
@@ -444,6 +454,9 @@
 				E2B0000000000000000000D0 /* EditorTransform.swift */,
 				E2B000000000000000000100 /* EditorDebugLaunch.swift */,
 				E2B0000000000000000000F0 /* EditorModel.swift */,
+				E3A0000000000000000000A0 /* NewDrawing.swift */,
+				E3A0000000000000000000B0 /* ShapeTool.swift */,
+				E3A0000000000000000000C0 /* NewDrawingSheet.swift */,
 				E2B000000000000000000110 /* EditorGhost.swift */,
 				E2B000000000000000000150 /* SceneTileFilter.swift */,
 				E2C0000000000000000000A0 /* FormatInspectorModel.swift */,
@@ -465,6 +478,7 @@
 				B00100000000000000000340 /* QuickLookSettingsTests.swift */,
 				B00100000000000000000F41 /* SVGExportTests.swift */,
 				E2A0000000000000000000C0 /* DocumentEditingTests.swift */,
+				E3A0000000000000000000D0 /* E3ShapeToolTests.swift */,
 				E2B0000000000000000000E0 /* EditorToolsTests.swift */,
 				E2C0000000000000000000D0 /* FormatInspectorTests.swift */,
 			);
@@ -807,6 +821,9 @@
 				E2B0000000000000000000D1 /* EditorTransform.swift in Sources */,
 				E2B000000000000000000101 /* EditorDebugLaunch.swift in Sources */,
 				E2B0000000000000000000F1 /* EditorModel.swift in Sources */,
+				E3A0000000000000000000A1 /* NewDrawing.swift in Sources */,
+				E3A0000000000000000000B1 /* ShapeTool.swift in Sources */,
+				E3A0000000000000000000C1 /* NewDrawingSheet.swift in Sources */,
 				E2B000000000000000000111 /* EditorGhost.swift in Sources */,
 				E2B000000000000000000151 /* SceneTileFilter.swift in Sources */,
 				E2C0000000000000000000A1 /* FormatInspectorModel.swift in Sources */,
@@ -889,6 +906,7 @@
 				E2A0000000000000000000A2 /* RevertSnapshot.swift in Sources */,
 				E2A0000000000000000000B2 /* DocumentEditingSupport.swift in Sources */,
 				E2A0000000000000000000C2 /* DocumentEditingTests.swift in Sources */,
+				E3A0000000000000000000D1 /* E3ShapeToolTests.swift in Sources */,
 				E2B0000000000000000000A2 /* EditorCanvasMapping.swift in Sources */,
 				E2B0000000000000000000B2 /* EditorHitTest.swift in Sources */,
 				E2B0000000000000000000C2 /* EditorSelection.swift in Sources */,
@@ -922,6 +940,8 @@
 				B0110000000000000000031B /* CapReductionController.swift in Sources */,
 				B01100000000000000000403 /* AppGroup.swift in Sources */,
 				B01100000000000000000407 /* SharedRenderSettings.swift in Sources */,
+				E3A0000000000000000000A2 /* NewDrawing.swift in Sources */,
+				E3A0000000000000000000B2 /* ShapeTool.swift in Sources */,
 				B01100000000000000000408 /* QuickLookSettingsTests.swift in Sources */,
 				B01100000000000000000F41 /* SVGExport.swift in Sources */,
 				B01100000000000000000F42 /* SVGExportTests.swift in Sources */,
