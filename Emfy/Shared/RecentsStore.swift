@@ -667,7 +667,9 @@ final class RecentsStore {
         }
     }
 
-    /// Deletes an entry's cached thumbnail PNG and its imported copy (§b).
+    /// Deletes an entry's cached thumbnail PNG, its imported copy (§b), and its
+    /// one-time revert snapshot (E2a-7), so removing or evicting an entry leaves no
+    /// orphaned side files.
     private func removeSideFiles(for entry: RecentEntry) {
         if let name = entry.thumbnailFileName {
             try? FileManager.default.removeItem(at: locations.thumbnailsDirectory.appendingPathComponent(name))
@@ -678,6 +680,9 @@ final class RecentsStore {
             try? FileManager.default.removeItem(at: locations.importedDirectory.appendingPathComponent(name))
             try? FileManager.default.removeItem(at: locations.privateImportedDirectory.appendingPathComponent(name))
         }
+        try? FileManager.default.removeItem(
+            at: locations.snapshotsDirectory.appendingPathComponent(entry.id.uuidString, isDirectory: true)
+        )
     }
 
     /// Deletes the disk side files a `prepareAdd` wrote — the thumbnail PNG and the
@@ -1089,6 +1094,9 @@ final class RecentsStore {
         var corruptStoreURL: URL { supportDirectory.appendingPathComponent("recents.corrupt.json") }
         var importedDirectory: URL { supportDirectory.appendingPathComponent("Imported", isDirectory: true) }
         var thumbnailsDirectory: URL { cachesDirectory.appendingPathComponent("EmfyThumbnails", isDirectory: true) }
+        /// Where the one-time "opened version" revert snapshots live, one subfolder per
+        /// entry id (E2a-7). Pruned with the entry (`removeSideFiles`).
+        var snapshotsDirectory: URL { supportDirectory.appendingPathComponent("Snapshots", isDirectory: true) }
 
         static var standard: Locations {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
