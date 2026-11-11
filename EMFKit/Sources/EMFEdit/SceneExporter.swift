@@ -726,9 +726,17 @@ public enum SceneExporter {
 
         // Mirror reEmit: re-emit every record[1…] (the EOF keeps its position);
         // drop deleted elements, replace edited ones, insert new ones at z.
+        // A contentless source (a blank document: header + EOF only) has no
+        // first-content anchor, so the new elements insert right BEFORE the EOF —
+        // never after the terminator, which would make the parser stop short of
+        // them (E3a new-document path).
+        var startInserted = false
         for i in 1 ..< file.records.count {
             let record = file.records[i]
-            if i == firstContent { try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings) }
+            if i == firstContent || (firstContent == nil && !startInserted && record.type == eofType) {
+                try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings)
+                startInserted = true
+            }
 
             if content.contains(i) {
                 if let owner = ownerByIndex[i] {
@@ -745,7 +753,9 @@ public enum SceneExporter {
             }
             if let after = insertions.afterRecord[i] { try appendEMFBlocks(after, baseHandle, &body, &warnings) }
         }
-        if firstContent == nil { try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings) }
+        // A contentless source with no EOF record at all: insert before the
+        // canonical EOF the guarantee below appends.
+        if firstContent == nil, !startInserted { try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings) }
 
         // Guarantee a terminating EMR_EOF. The lossless overlay keeps the source's
         // own EOF record in place (it is structural, re-emitted verbatim above), but
