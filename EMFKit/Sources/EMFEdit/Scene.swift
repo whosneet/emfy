@@ -225,4 +225,58 @@ public struct Scene: Sendable, Equatable {
         for element in elements { counts[element.kind, default: 0] += 1 }
         return counts
     }
+
+    // MARK: - Physical resolution (E3a)
+
+    /// Device units per typographic point (1/72 inch) for this page, so a new shape or
+    /// stroke sized in points comes out at the right PHYSICAL size on ANY document —
+    /// not a fixed screen DPI. Derived from the source's own device↔physical mapping,
+    /// the same basis `pageBoundsDevice` lives in: for EMF, the header's rclBounds
+    /// (device units) against rclFrame (0.01 mm) ([MS-EMF] §2.3.4.2 / §2.2.9); for a
+    /// placeable WMF, the metafile's logical-units-per-inch ([MS-WMF] §2.3.2.3). A plain
+    /// WMF carries no physical reference, so it falls back to 96 DPI.
+    public var deviceUnitsPerPoint: CGFloat { (deviceUnitsPerInch ?? 96) / 72 }
+
+    /// Device units per inch for the source page, or nil when the source carries no
+    /// physical reference.
+    public var deviceUnitsPerInch: CGFloat? {
+        switch source.format {
+        case .emf: return Scene.emfDeviceUnitsPerInch(source.data)
+        case .placeableWMF: return Scene.placeableWMFUnitsPerInch(source.data)
+        case .wmf: return nil
+        }
+    }
+
+    /// Reads rclBounds (device units) and rclFrame (0.01 mm) from an EMR_HEADER and
+    /// returns the average of the X and Y device-units-per-inch, or nil when the header
+    /// is too short or the frame is degenerate (§8: a bounds-checked little-endian read,
+    /// never a trap). [MS-EMF] §2.3.4.2: rclBounds at offset 8, rclFrame at offset 24.
+    static func emfDeviceUnitsPerInch(_ data: Data) -> CGFloat? {
+        guard data.count >= 40 else { return nil }
+        func i32(_ offset: Int) -> Int32 {
+            let b = data.startIndex + offset
+            return Int32(bitPattern:
+                UInt32(data[b]) | (UInt32(data[b + 1]) << 8) | (UInt32(data[b + 2]) << 16) | (UInt32(data[b + 3]) << 24))
+        }
+        // Inclusive-inclusive bounds → +1; frame is in 0.01 mm → /100 for mm.
+        let deviceW = Double(Int64(i32(16)) - Int64(i32(8)) + 1)
+        let deviceH = Double(Int64(i32(20)) - Int64(i32(12)) + 1)
+        let frameWmm = Double(Int64(i32(32)) - Int64(i32(24))) / 100
+        let frameHmm = Double(Int64(i32(36)) - Int64(i32(28))) / 100
+        guard deviceW > 0, deviceH > 0, frameWmm > 0, frameHmm > 0 else { return nil }
+        let perInchX = deviceW / frameWmm * 25.4
+        let perInchY = deviceH / frameHmm * 25.4
+        let perInch = (perInchX + perInchY) / 2
+        return perInch.isFinite && perInch > 0 ? CGFloat(perInch) : nil
+    }
+
+    /// Reads the Inch field of a placeable WMF header ([MS-WMF] §2.3.2.3: Key(4),
+    /// HWmf(2), BoundingBox(8), Inch(2) at offset 14) — the logical units per inch — or
+    /// nil when it is absent/zero. Bounds-checked little-endian read.
+    static func placeableWMFUnitsPerInch(_ data: Data) -> CGFloat? {
+        guard data.count >= 16 else { return nil }
+        let b = data.startIndex + 14
+        let inch = UInt16(data[b]) | (UInt16(data[b + 1]) << 8)
+        return inch > 0 ? CGFloat(inch) : nil
+    }
 }

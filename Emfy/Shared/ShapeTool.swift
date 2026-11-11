@@ -66,15 +66,13 @@ enum ShapeToolGeometry {
     /// (100 × 100 pt, design call 5).
     static let defaultSidePoints: CGFloat = 100
 
-    /// Points → device units at the from-scratch authoring resolution (96 DPI): a
-    /// point is 1/72 inch, so a 2 pt line or a 100 pt box maps to the page's device
-    /// units "correctly" for a document authored by `SceneFactory`.
-    static func pointsToDevice(_ points: CGFloat) -> CGFloat {
-        points * CGFloat(SceneFactory.dotsPerInch) / 72
+    /// Points → device units using the DOCUMENT's own resolution (a point is 1/72 inch;
+    /// `deviceUnitsPerPoint` comes from `Scene.deviceUnitsPerPoint`), so a 2 pt line or a
+    /// 100 pt box is the right PHYSICAL size whether the page is a 96 DPI new drawing or
+    /// a higher-DPI imported EMF (E3a review 1).
+    static func pointsToDevice(_ points: CGFloat, deviceUnitsPerPoint: CGFloat) -> CGFloat {
+        points * deviceUnitsPerPoint
     }
-
-    /// The default line width in device units for a new line (2 pt, design call 5).
-    static var defaultLineWidthDevice: Double { Double(pointsToDevice(2)) }
 
     /// The rectangle a drag sweeps, honouring Shift (a square — equal width and
     /// height) and Option (drawn from the centre, so `start` is the midpoint). The
@@ -137,10 +135,11 @@ enum ShapeToolInsertion {
     /// element goes at the top of the z-order in the first (top) editable layer.
     static func command(kind: ShapeToolKind, rectDevice: CGRect, in scene: Scene) -> (command: SceneCommand, id: Int) {
         let id = SceneFactory.nextElementID(in: scene)
+        let perPoint = scene.deviceUnitsPerPoint
         let style = kind.isClosed
             ? SceneFactory.defaultShapeStyle
-            : SceneFactory.defaultLineStyle(widthDevice: ShapeToolGeometry.defaultLineWidthDevice)
-        let cornerRadius: CGFloat = kind == .roundRect ? ShapeToolGeometry.pointsToDevice(16) : 0
+            : SceneFactory.defaultLineStyle(widthDevice: Double(ShapeToolGeometry.pointsToDevice(2, deviceUnitsPerPoint: perPoint)))
+        let cornerRadius: CGFloat = kind == .roundRect ? ShapeToolGeometry.pointsToDevice(16, deviceUnitsPerPoint: perPoint) : 0
         let element = SceneFactory.makeShape(
             kind: kind.elementKind, rectDevice: rectDevice, style: style, id: id, cornerRadiusDevice: cornerRadius
         )

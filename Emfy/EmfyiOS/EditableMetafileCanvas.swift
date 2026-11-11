@@ -309,8 +309,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             // shape centred at the tap, selects it and disarms (design call 5).
             if let kind = parent.editorModel.armedShapeTool {
                 let centre = mapping.devicePoint(fromView: p)
-                let rect = ShapeToolGeometry.defaultRect(
-                    centreDevice: centre, sideDevice: ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints))
+                let side = ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints, deviceUnitsPerPoint: scene.deviceUnitsPerPoint)
+                let rect = ShapeToolGeometry.defaultRect(centreDevice: centre, sideDevice: side)
                 commitShape(kind: kind, rectDevice: rect)
                 overlay.becomeFirstResponder()
                 overlay.setNeedsDisplay()
@@ -446,7 +446,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                         rectDevice = sweptDeviceRect(fromView: ShapeToolGeometry.sweptRect(kind: kind, start: state.start, current: p, shift: false, fromCentre: false))
                     } else {
                         let centre = mapping.devicePoint(fromView: p)
-                        rectDevice = ShapeToolGeometry.defaultRect(centreDevice: centre, sideDevice: ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints))
+                        let side = ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints, deviceUnitsPerPoint: scene.deviceUnitsPerPoint)
+                        rectDevice = ShapeToolGeometry.defaultRect(centreDevice: centre, sideDevice: side)
                     }
                     drag = nil
                     commitShape(kind: kind, rectDevice: rectDevice)
@@ -731,7 +732,7 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
     /// Strokes (and lightly fills, for closed kinds) the shape-tool preview outline in
     /// the overlay's view space (y-down). A line keeps its drag direction; closed kinds
     /// use the standardised box, with the triangle apex at the top edge.
-    static func strokeShapePreview(kind: ShapeToolKind, rect: CGRect, into context: CGContext, lineWidth: CGFloat, accent: UIColor) {
+    static func strokeShapePreview(kind: ShapeToolKind, rect: CGRect, into context: CGContext, lineWidth: CGFloat, accent: UIColor, cornerRadius: CGFloat) {
         context.setStrokeColor(accent.cgColor)
         context.setFillColor(accent.withAlphaComponent(0.15).cgColor)
         context.setLineWidth(lineWidth)
@@ -744,7 +745,7 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
         case .rect:
             context.fill(box); context.stroke(box)
         case .roundRect:
-            let r = min(ShapeToolGeometry.pointsToDevice(16), min(box.width, box.height) / 2)
+            let r = min(cornerRadius, min(box.width, box.height) / 2)
             let path = CGPath(roundedRect: box, cornerWidth: r, cornerHeight: r, transform: nil)
             context.addPath(path); context.fillPath()
             context.addPath(path); context.strokePath()
@@ -787,7 +788,8 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
 
         // Live shape-tool preview (view space, design call 5).
         if let drag = coordinator.drag, drag.kind == .shape, let kind = drag.shapeKind, let rect = drag.shapePreviewRect {
-            Self.strokeShapePreview(kind: kind, rect: rect, into: context, lineWidth: 1.5 / mag, accent: accent)
+            let cornerRadius = ShapeToolGeometry.pointsToDevice(16, deviceUnitsPerPoint: coordinator.scene.deviceUnitsPerPoint)
+            Self.strokeShapePreview(kind: kind, rect: rect, into: context, lineWidth: 1.5 / mag, accent: accent, cornerRadius: cornerRadius)
         }
 
         let draggingTransform = coordinator.drag.flatMap { $0.kind == .marquee ? nil : $0.liveTransform }

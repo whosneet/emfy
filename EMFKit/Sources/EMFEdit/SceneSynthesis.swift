@@ -179,10 +179,21 @@ enum SceneSynthesis {
                 return [.polyBezier(PolyPointsPayload(bounds: rectL(path.boundingBox), points: pts.map(pointL)))]
             }
             return emfPathBracket(element, kindFallback: true, warnings: &warnings)
+        case .roundRect:
+            // Re-emit EMR_ROUNDRECT when the geometry is an axis-aligned rounded
+            // rectangle (the corner radius is recovered from the path, so both a
+            // tool-made and a re-imported round rect round-trip as a round rect —
+            // [MS-EMF] §2.3.5.35; the Corner SizeL is the rounding ELLIPSE size, i.e.
+            // twice the radius). A rotated one falls back to a path bracket.
+            if !hasRotation(element.transform), let rr = roundRectBoxAndRadius(path) {
+                let diameter = SceneNumeric.int32(rr.radius * 2)
+                return [.roundRect(RoundRectPayload(box: rectL(rr.box), corner: SizeL(cx: diameter, cy: diameter)))]
+            }
+            return emfPathBracket(element, kindFallback: true, warnings: &warnings)
         case .path:
             return emfPathBracket(element, kindFallback: false, warnings: &warnings)
         default:
-            // roundRect, arc/pie/chord — parameters not retained by the scene.
+            // arc/pie/chord — parameters not retained by the scene.
             return emfPathBracket(element, kindFallback: true, warnings: &warnings)
         }
     }
@@ -549,6 +560,41 @@ enum SceneSynthesis {
             if !(onX && onY) { return nil }
         }
         return box
+    }
+
+    /// The bounding box and corner radius of `path` when it is an axis-aligned rounded
+    /// rectangle (a `CGPath.addRoundedRect`, which `SceneFactory.makeShape` and
+    /// EMFRender's EMR_ROUNDRECT lift both produce), else nil. The radius is recovered
+    /// from the segment anchor points: each straight edge is inset from the box by the
+    /// radius, so a top-edge anchor's x gives the x radius and a left-edge anchor's y the
+    /// y radius; the insets must be symmetric on all four sides. Shared so a tool-made
+    /// and a re-imported round rect both re-emit EMR_ROUNDRECT (no `kindFallback`).
+    static func roundRectBoxAndRadius(_ path: ScenePath) -> (box: CGRect, radius: CGFloat)? {
+        let box = path.boundingBox
+        guard !box.isNull, box.width > 0, box.height > 0 else { return nil }
+        var anchors: [CGPoint] = []
+        var hasCurve = false
+        for seg in path.segments {
+            switch seg {
+            case .move(let p), .line(let p): anchors.append(p)
+            case .quadCurve(let to, _), .cubicCurve(let to, _, _): anchors.append(to); hasCurve = true
+            case .close: continue
+            }
+        }
+        // A rounded rect has four corner arcs (curves) and eight edge anchors.
+        guard hasCurve, anchors.count >= 8 else { return nil }
+        let tol = max(box.width, box.height) * 1e-3 + 0.5
+        let topXs = anchors.filter { abs($0.y - box.minY) <= tol }.map(\.x)
+        let leftYs = anchors.filter { abs($0.x - box.minX) <= tol }.map(\.y)
+        guard let minTopX = topXs.min(), let maxTopX = topXs.max(),
+              let minLeftY = leftYs.min(), let maxLeftY = leftYs.max() else { return nil }
+        let rx = minTopX - box.minX
+        let ry = minLeftY - box.minY
+        guard rx > 0.5, ry > 0.5,
+              abs((box.maxX - maxTopX) - rx) <= tol,       // symmetric left/right inset
+              abs((box.maxY - maxLeftY) - ry) <= tol       // symmetric top/bottom inset
+        else { return nil }
+        return (box, (rx + ry) / 2)
     }
 
     /// Subpaths of points if every segment is a move/line/close (no curves), else nil.

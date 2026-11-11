@@ -99,17 +99,22 @@ struct SceneFactoryTests {
         #expect(!isBlank(image))
     }
 
-    @Test func roundRectReimportsAsPathButRenders() throws {
+    @Test(arguments: [EMFEdit.ExportFormat.emf, .emz])
+    func roundRectRoundTripsAsRoundRectWithRadius(format: EMFEdit.ExportFormat) throws {
         var scene = try a4Landscape()
+        let radius: CGFloat = 40
         let shape = SceneFactory.makeShape(kind: .roundRect, rectDevice: CGRect(x: 100, y: 100, width: 400, height: 250),
-                                           style: SceneFactory.defaultShapeStyle, id: 0, cornerRadiusDevice: 40)
+                                           style: SceneFactory.defaultShapeStyle, id: 0, cornerRadiusDevice: radius)
         scene.insert(shape, at: 0)
-        let exported = try SceneExporter.export(scene, as: .emf)
+        let exported = try SceneExporter.export(scene, as: format)
+        // EMR_ROUNDRECT carries the corner, so no kind-fallback warning.
+        #expect(!exported.warnings.contains { if case .kindFallback = $0 { return true }; return false })
         let reimported = try SceneImporter.import(data: exported.data)
-        // A GDI RECTANGLE has no corner radius, so the round rect re-emits as a path
-        // bracket and re-imports as a path — still one editable, rendering element.
         let element = try #require(reimported.editableElements.first)
-        #expect(element.kind == .path)
+        #expect(element.kind == .roundRect)   // kind preserved, not downgraded to a path
+        // The radius survives: recover it from the re-imported geometry.
+        let recovered = try #require(SceneSynthesis.roundRectBoxAndRadius(element.geometryDevice))
+        #expect(abs(recovered.radius - radius) <= 1.5)
     }
 
     @Test(arguments: [ElementKind.rect, .ellipse, .line, .polygon])
@@ -155,6 +160,33 @@ struct SceneFactoryTests {
         let subs = try #require(SceneSynthesis.lineSubpaths(shape.geometryDevice))
         #expect(subs.count == 1)
         #expect(subs[0].count == 3)
+    }
+
+    // MARK: - Physical resolution (review 1)
+
+    @Test func blankDocumentResolutionIs96DPI() throws {
+        let scene = try a4Landscape()
+        let dpi = try #require(scene.deviceUnitsPerInch)
+        #expect(abs(dpi - 96) < 0.5)                       // authored at 96 DPI
+        #expect(abs(scene.deviceUnitsPerPoint - 96.0 / 72) < 0.01)
+    }
+
+    @Test func corpusResolutionMatchesTheHeaderRatio() throws {
+        // A real EMF: Scene.deviceUnitsPerInch must equal the header's own device-vs-
+        // physical ratio (bounds vs frame), whatever its DPI — so shapes are sized
+        // physically on an imported drawing, not at a fixed 96 DPI.
+        let url = EditTestPaths.corpusDirectory.appendingPathComponent("gate-p2-house.emf")
+        let data = try Data(contentsOf: url)
+        let scene = try SceneImporter.import(data: data)
+        let file = try EMFFile.parse(data)
+        let b = file.header.bounds, f = file.header.frame
+        let devW = Double(Int64(b.right) - Int64(b.left) + 1)
+        let frameWmm = Double(Int64(f.right) - Int64(f.left)) / 100
+        let expectedDPIx = devW / frameWmm * 25.4
+        let dpi = try #require(scene.deviceUnitsPerInch)
+        // Within the X/Y averaging and rounding; the header ratio drives it.
+        #expect(abs(dpi - expectedDPIx) < max(2, expectedDPIx * 0.05))
+        #expect(scene.deviceUnitsPerPoint > 0)
     }
 
     // MARK: - Unique ids

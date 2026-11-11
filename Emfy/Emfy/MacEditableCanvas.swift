@@ -403,9 +403,8 @@ struct MacEditableCanvas: NSViewRepresentable {
                 deviceRect = sweptDeviceRect(fromView: viewRect)
             } else {
                 let centre = mapping.devicePoint(fromView: end)
-                deviceRect = ShapeToolGeometry.defaultRect(
-                    centreDevice: centre, sideDevice: ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints)
-                )
+                let side = ShapeToolGeometry.pointsToDevice(ShapeToolGeometry.defaultSidePoints, deviceUnitsPerPoint: scene.deviceUnitsPerPoint)
+                deviceRect = ShapeToolGeometry.defaultRect(centreDevice: centre, sideDevice: side)
             }
             let insertion = ShapeToolInsertion.command(kind: kind, rectDevice: deviceRect, in: scene)
             parent.apply(insertion.command, nil)
@@ -862,7 +861,8 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
 
         // Live shape-tool preview (view space, design call 5).
         if let drag = coordinator.drag, drag.kind == .shape, let kind = drag.shapeKind, let rect = drag.shapePreviewRect {
-            Self.strokeShapePreview(kind: kind, rect: rect, into: context, lineWidth: 1.5 / mag, accent: accent)
+            let cornerRadius = ShapeToolGeometry.pointsToDevice(16, deviceUnitsPerPoint: coordinator.scene.deviceUnitsPerPoint)
+            Self.strokeShapePreview(kind: kind, rect: rect, into: context, lineWidth: 1.5 / mag, accent: accent, cornerRadius: cornerRadius)
         }
 
         // Per-element selection outlines (thin accent box of each element's bounds).
@@ -929,7 +929,7 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
     /// Strokes (and lightly fills, for closed kinds) the shape-tool preview outline in
     /// the overlay's view space. `rect` may carry a signed size (a line keeps its drag
     /// direction); closed kinds use its standardised box.
-    static func strokeShapePreview(kind: ShapeToolKind, rect: CGRect, into context: CGContext, lineWidth: CGFloat, accent: NSColor) {
+    static func strokeShapePreview(kind: ShapeToolKind, rect: CGRect, into context: CGContext, lineWidth: CGFloat, accent: NSColor, cornerRadius: CGFloat) {
         context.setStrokeColor(accent.cgColor)
         context.setFillColor(accent.withAlphaComponent(0.15).cgColor)
         context.setLineWidth(lineWidth)
@@ -942,7 +942,7 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
         case .rect:
             context.fill(box); context.stroke(box)
         case .roundRect:
-            let r = min(ShapeToolGeometry.pointsToDevice(16), min(box.width, box.height) / 2)
+            let r = min(cornerRadius, min(box.width, box.height) / 2)
             let path = CGPath(roundedRect: box, cornerWidth: r, cornerHeight: r, transform: nil)
             context.addPath(path); context.fillPath()
             context.addPath(path); context.strokePath()

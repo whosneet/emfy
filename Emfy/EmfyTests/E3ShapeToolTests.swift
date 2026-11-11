@@ -58,10 +58,11 @@ import Testing
         #expect(ShapeToolGeometry.isDrag(start: .zero, current: CGPoint(x: 40, y: 0), magnification: 1))
     }
 
-    @Test func pointsToDeviceUses96DPI() {
-        // 72 pt == 1 inch == 96 device units at the authoring resolution.
-        #expect(abs(ShapeToolGeometry.pointsToDevice(72) - 96) < 0.001)
-        #expect(abs(ShapeToolGeometry.defaultLineWidthDevice - 2 * 96.0 / 72) < 0.001)
+    @Test func pointsToDeviceScalesByDocumentResolution() {
+        // 1 device unit per point → 100 pt = 100 device units.
+        #expect(ShapeToolGeometry.pointsToDevice(100, deviceUnitsPerPoint: 1) == 100)
+        // At 96 DPI (1.333 device units per point) a 72 pt length is 96 device units.
+        #expect(abs(ShapeToolGeometry.pointsToDevice(72, deviceUnitsPerPoint: 96.0 / 72) - 96) < 0.001)
     }
 }
 
