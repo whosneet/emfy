@@ -61,7 +61,9 @@ public enum SceneCommand: Sendable, Equatable {
     case insert(element: Element, at: Int)
     case translate(ids: Set<Int>, dx: Double, dy: Double)
     case applyTransform(ids: Set<Int>, CGAffineTransform)
-    case setFill(ids: Set<Int>, SceneFill)
+    /// Sets the fill of the named elements; `nil` clears it (no fill → NULL_BRUSH on
+    /// GDI, no EMF+ fill, `fill="none"` on SVG), the Fill ▸ None action (E2c).
+    case setFill(ids: Set<Int>, SceneFill?)
     case setStroke(ids: Set<Int>, SceneStroke?)
     case setOpacity(ids: Set<Int>, Double)
     case setText(id: Int, String)

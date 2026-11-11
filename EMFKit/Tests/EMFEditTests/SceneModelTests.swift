@@ -101,6 +101,33 @@ struct SceneModelTests {
         }
     }
 
+    // MARK: - Fill ▸ None (clear fill, E2c)
+
+    @Test func clearingFillSetsItNilAndUndoRestoresIt() throws {
+        let scene = try SceneImporter.import(data: Self.redRectangleEMF())
+        let id = try #require(scene.editableElements.first { $0.style.fill != nil }?.id)
+        var history = SceneHistory(scene: scene)
+        let original = history.scene
+        try history.apply(.setFill(ids: [id], nil))
+        #expect(history.scene.element(id: id)?.style.fill == nil)
+        #expect(history.scene.element(id: id)?.provenance.edited == true)
+        history.undo()
+        #expect(history.scene == original)   // byte-exact restore of the fill
+    }
+
+    /// Clearing a shape's fill survives a save and re-import in each container: on
+    /// export a nil fill writes NULL_BRUSH (GDI/WMF) / no EMF+ fill, so the re-imported
+    /// element carries no fill.
+    @Test(arguments: [ExportFormat.emf, ExportFormat.emz, ExportFormat.wmf])
+    func clearedFillSurvivesRoundTrip(_ format: ExportFormat) throws {
+        var scene = try SceneImporter.import(data: Self.redRectangleEMF())
+        let id = try #require(scene.editableElements.first { $0.style.fill != nil }?.id)
+        try scene.setFill([id], nil)
+        let exported = try SceneExporter.export(scene, as: format)
+        let reimported = try SceneImporter.import(data: exported.data)
+        #expect(reimported.editableElements.allSatisfy { $0.style.fill == nil })
+    }
+
     // MARK: - Fixture builder
 
     private static func redRectangleEMF() -> Data {

@@ -164,13 +164,15 @@ extension Scene {
 
     // MARK: Paint
 
-    /// Sets the fill of the named elements. For a text run the fill colour is the
-    /// text colour (a run's "paint" is its colour), so the change renders and
-    /// round-trips; `style.fill` is also recorded for shape elements.
-    public mutating func setFill(_ ids: Set<Int>, _ fill: SceneFill) throws(SceneEditError) {
+    /// Sets (or clears, with `nil`) the fill of the named elements. For a text run a
+    /// non-nil fill colour is also the text colour (a run's "paint" is its colour), so
+    /// the change renders and round-trips; a `nil` fill leaves the text colour as-is
+    /// (clearing a run's fill is a no-op for its glyphs). `style.fill` is recorded for
+    /// shape elements, where `nil` means no fill (NULL_BRUSH on export).
+    public mutating func setFill(_ ids: Set<Int>, _ fill: SceneFill?) throws(SceneEditError) {
         try mutate(ids) { element in
             element.style.fill = fill
-            if element.text != nil { element.text?.color = fill.color }
+            if let fill, element.text != nil { element.text?.color = fill.color }
             element.provenance.edited = true
         }
     }
