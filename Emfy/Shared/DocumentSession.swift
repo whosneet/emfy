@@ -569,7 +569,14 @@ final class DocumentSession {
         }
         let importScene = self.importScene
         let scene = await Task.detached(priority: .userInitiated) { importScene(data) }.value
-        guard let scene, !scene.editableElements.isEmpty else {
+        guard let scene else {
+            editing = .unavailable
+            return
+        }
+        // Refuse editing only when the scene HAS content but none of it is editable
+        // (a file Emfy can view but not represent editably). A truly empty scene — a
+        // new/blank document with zero elements — is editable (E3a design call 2).
+        if !scene.elements.isEmpty, scene.editableElements.isEmpty {
             editing = .unavailable
             return
         }

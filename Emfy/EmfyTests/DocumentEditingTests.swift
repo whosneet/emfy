@@ -1,3 +1,4 @@
+import CoreGraphics
 import EMFEdit
 import EMFParse
 import EMFRender
@@ -73,6 +74,36 @@ private func makeEditingSession(
 
 private func redFill() -> SceneCommand {
     .setFill(ids: [0], SceneFill(color: SceneColor(red: 1, green: 0, blue: 0), evenOdd: false))
+}
+
+/// A session whose scene import is injected directly, so the empty-scene editing
+/// rule (E3a design call 2) is tested without hand-building EMF bytes. The resolve
+/// succeeds so `beginEditing` reaches the injected import.
+@MainActor
+private func makeSceneSession(scene: Scene?) -> DocumentSession {
+    DocumentSession(
+        entryID: UUID(),
+        resolve: { _ in Data([0x01]) },
+        importScene: { _ in scene },
+        documentFileName: { "drawing.emf" },
+        autosave: AutosaveController(sleep: nonFiringSleep)
+    )
+}
+
+/// A scene with one passthrough (verbatim, non-editable) element and no editable
+/// elements — content Emfy can view but not edit.
+private func passthroughOnlyScene() -> Scene {
+    let element = Element(
+        id: 0, kind: .passthrough, geometryDevice: ScenePath(), transform: .identity,
+        provenance: Provenance(sourceRecordIndices: [1]), locked: true, passthroughReason: .comment
+    )
+    let layer = Layer(id: 0, name: "Imported", elements: [element])
+    let partition = ScenePartition(structural: [0, 2], state: [], drawing: [], passthrough: [1], unitCount: 3)
+    let source = SceneSource(data: Data(), format: .emf, wasCompressed: false, renderPath: .gdi, unitCount: 3)
+    return Scene(
+        pageBoundsDevice: CGRect(x: 0, y: 0, width: 100, height: 100),
+        layers: [layer], partition: partition, source: source
+    )
 }
 
 // MARK: - Pure support types
@@ -318,9 +349,29 @@ private func redFill() -> SceneCommand {
         #expect(!session.isDirty)
     }
 
-    @Test func fileWithNoLiftableContentOpensReadOnly() async {
-        // A header-only EMF has nothing editable, so editing is unavailable.
-        let session = makeEditingSession(bytes: EmfyTests.minimalEMF(), writeBox: WriteBox())
+    // E3a design call 2: a truly empty scene (0 elements) — a new/blank document —
+    // is editable; only a scene with content but NONE of it editable opens read-only.
+
+    @Test func emptySceneIsEditable() async {
+        // A real blank document imports to a scene with zero elements.
+        let scene = try? SceneImporter.import(data: SceneFactory.blankDocument(pageSizeMillimetres: CGSize(width: 297, height: 210)))
+        let session = makeSceneSession(scene: scene)
+        await session.beginEditing()
+        #expect(session.editing == .editing)
+        #expect(session.history?.scene.elements.isEmpty == true)
+    }
+
+    @Test func contentButNoneEditableOpensReadOnly() async {
+        // A scene with content, all of it passthrough (verbatim, non-editable): the
+        // viewer shows it, but there is nothing to edit, so editing is unavailable.
+        let session = makeSceneSession(scene: passthroughOnlyScene())
+        await session.beginEditing()
+        #expect(session.editing == .unavailable)
+    }
+
+    @Test func importFailureOpensReadOnly() async {
+        // An unliftable file (import returns nil) stays read-only.
+        let session = makeSceneSession(scene: nil)
         await session.beginEditing()
         #expect(session.editing == .unavailable)
     }
