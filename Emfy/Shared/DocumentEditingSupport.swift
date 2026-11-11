@@ -1,5 +1,6 @@
 import EMFEdit
 import Foundation
+import os
 
 /// Supporting value types and small services for the editable document host (E2a):
 /// the save-format mapping, the autosave debounce, the coordinated file writer, the
@@ -59,6 +60,55 @@ enum DocumentSaveError: Error, Equatable, Sendable {
     }
 }
 
+// MARK: - Saved-with-limitations notice
+
+/// A notice that a non-WMF explicit save lost some fidelity (review #5), surfaced
+/// as a toast. Carries the grouped warning categories so the toast can name the
+/// affected areas.
+struct SaveNotice: Equatable, Sendable {
+    let categories: [ExportWarningCategory: Int]
+}
+
+// MARK: - Active-editing registry (quit/close flush)
+
+/// Tracks the live document sessions that are in edit mode, so the app can flush and
+/// prompt for unsaved edits on quit (and, on iOS, on scene background). Holds weak
+/// references, so a closed window's session is dropped automatically (review #7).
+@MainActor
+final class DocumentEditRegistry {
+    static let shared = DocumentEditRegistry()
+
+    private final class Box {
+        weak var session: DocumentSession?
+        init(_ session: DocumentSession) { self.session = session }
+    }
+    private var boxes: [ObjectIdentifier: Box] = [:]
+
+    func register(_ session: DocumentSession) {
+        boxes[ObjectIdentifier(session)] = Box(session)
+    }
+    func unregister(_ session: DocumentSession) {
+        boxes[ObjectIdentifier(session)] = nil
+    }
+
+    /// The still-live registered sessions, pruning any that have been deallocated.
+    var activeSessions: [DocumentSession] {
+        boxes = boxes.filter { $0.value.session != nil }
+        return boxes.values.compactMap(\.session)
+    }
+
+    /// Sessions with unsaved edits right now.
+    var dirtySessions: [DocumentSession] {
+        activeSessions.filter { $0.editing == .editing && $0.isDirty }
+    }
+
+    /// Whether quitting/closing must prompt after a flush: a save failed, a WMF
+    /// confirmation is pending, or the document is still dirty (review #7). Pure.
+    nonisolated static func needsQuitPrompt(saveFailed: Bool, wmfPending: Bool, stillDirty: Bool) -> Bool {
+        saveFailed || wmfPending || stillDirty
+    }
+}
+
 // MARK: - WMF save confirmation
 
 /// The first-save confirmation state for a WMF/WMZ document (design call E2a-5). It
@@ -85,6 +135,32 @@ enum WMFLimitationWording {
         }
         if lines.count == 1 { lines.append("• some modern features may be approximated") }
         return lines.joined(separator: "\n")
+    }
+
+    /// A one-line toast summary for any save (WMF or EMF) that lost fidelity (review
+    /// #5): "Saved — some features were simplified: transparency, text." Empty
+    /// categories give a plain confirmation.
+    static func savedSummary(_ categories: [ExportWarningCategory: Int]) -> String {
+        let areas = ExportWarningCategory.allCases
+            .filter { (categories[$0] ?? 0) > 0 }
+            .map { area(for: $0) }
+        guard !areas.isEmpty else { return "Saved." }
+        return "Saved — some features were simplified: " + areas.joined(separator: ", ") + "."
+    }
+
+    /// A short noun for a warning category, for the one-line summary.
+    static func area(for category: ExportWarningCategory) -> String {
+        switch category {
+        case .opacity: return "transparency"
+        case .gradient: return "gradients"
+        case .text: return "text"
+        case .image: return "images"
+        case .shapeApproximated: return "shapes"
+        case .coordinates: return "scale"
+        case .droppedContent: return "dropped content"
+        case .rasterized: return "rasterised content"
+        case .downlevelStale: return "older-reader fidelity"
+        }
     }
 
     static func text(for category: ExportWarningCategory) -> String {
@@ -154,10 +230,22 @@ final class AutosaveController {
 /// Writes an edited document back to disk through `NSFileCoordinator`, excluding the
 /// session's own presenter so our write does not trigger a self-reload (design call
 /// E2a-4). On macOS it records an `NSFileVersion` of the current bytes before the
-/// overwrite, so the system versions browser works; a location that cannot hold a
-/// version (a sandbox scope, a network volume) is skipped silently (design call
-/// E2a-6). The write is atomic.
+/// overwrite when asked (throttled by the caller, review #4); a location that cannot
+/// hold a version is skipped silently.
+///
+/// The write is **sandbox-safe** (review #3). `Data.write(.atomic)` stages its temp
+/// file as a sibling in the destination's parent directory, which a file-only
+/// security scope may forbid. Instead, per Apple's "safe save" guidance, it stages
+/// into an `.itemReplacementDirectory` (a system-provided temp alongside the volume)
+/// and swaps it in with `FileManager.replaceItemAt`, which the scope allows for a
+/// user-selected file. A direct non-atomic write is used only as a permission-error
+/// fallback, and the path taken is logged.
 enum CoordinatedDocumentWriter {
+    private static let log = Logger(subsystem: "com.avneetsingh.emfy", category: "save")
+
+    /// How the bytes reached disk, for logging and the test seam.
+    enum WriteMethod: String, Sendable { case replacement, directFallback }
+
     static func write(
         _ data: Data,
         to url: URL,
@@ -175,12 +263,52 @@ enum CoordinatedDocumentWriter {
             }
             #endif
             do {
-                try data.write(to: writeURL, options: .atomic)
+                let method = try safeWrite(data, to: writeURL)
+                log.debug("save wrote via \(method.rawValue, privacy: .public)")
             } catch {
                 thrown = error
             }
         }
         if let coordinationError { throw coordinationError }
         if let thrown { throw thrown }
+    }
+
+    /// Stages `data` in an item-replacement directory and swaps it into `url`
+    /// (`replaceItemAt`), falling back to a direct non-atomic write only on a
+    /// permission error. Returns the method used. Testable with any writable `url`.
+    @discardableResult
+    static func safeWrite(_ data: Data, to url: URL) throws -> WriteMethod {
+        let fm = FileManager.default
+        do {
+            let tempDir = try fm.url(
+                for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: url, create: true
+            )
+            defer { try? fm.removeItem(at: tempDir) }
+            let tempURL = tempDir.appendingPathComponent(url.lastPathComponent.isEmpty ? "metafile" : url.lastPathComponent)
+            try data.write(to: tempURL)   // non-atomic, into our own temp directory
+            if fm.fileExists(atPath: url.path) {
+                _ = try fm.replaceItemAt(url, withItemAt: tempURL)
+            } else {
+                try fm.moveItem(at: tempURL, to: url)   // first write: no existing item to replace
+            }
+            return .replacement
+        } catch {
+            // Only a permission failure justifies the direct fallback; anything else
+            // (out of space, read-only volume) is a real error the caller must see.
+            guard isPermissionError(error) else { throw error }
+            try data.write(to: url, options: [])
+            return .directFallback
+        }
+    }
+
+    private static func isPermissionError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain {
+            return nsError.code == CocoaError.fileWriteNoPermission.rawValue
+        }
+        if nsError.domain == NSPOSIXErrorDomain {
+            return nsError.code == Int(EACCES) || nsError.code == Int(EPERM)
+        }
+        return false
     }
 }

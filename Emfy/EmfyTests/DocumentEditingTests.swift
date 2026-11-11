@@ -63,7 +63,7 @@ private func makeEditingSession(
     DocumentSession(
         entryID: UUID(),
         resolve: { _ in bytes },
-        writeBytes: { data, _ in writeBox.data = data; writeBox.count += 1 },
+        writeBytes: { data, _, _ in writeBox.data = data; writeBox.count += 1 },
         snapshotStore: snapshotDir.map { RevertSnapshotStore(directory: $0) },
         keepRevertSnapshot: { keepSnapshot },
         documentFileName: { fileName },
@@ -118,6 +118,68 @@ private func redFill() -> SceneCommand {
         #expect(DocumentSession.externalChangeShowsBanner(isEditing: true, isDirty: true))
         #expect(!DocumentSession.externalChangeShowsBanner(isEditing: true, isDirty: false))
         #expect(!DocumentSession.externalChangeShowsBanner(isEditing: false, isDirty: true))
+    }
+
+    @Test func versionIsRecordedOnExplicitSaveAndThrottledForAutosave() {
+        let base = Date(timeIntervalSinceReferenceDate: 100_000)
+        // Explicit saves always record.
+        #expect(DocumentSession.shouldRecordVersion(isAutosave: false, lastVersionDate: nil, now: base))
+        #expect(DocumentSession.shouldRecordVersion(isAutosave: false, lastVersionDate: base, now: base))
+        // Autosave: first time records; then only after the throttle (1 h) elapses.
+        #expect(DocumentSession.shouldRecordVersion(isAutosave: true, lastVersionDate: nil, now: base))
+        #expect(!DocumentSession.shouldRecordVersion(isAutosave: true, lastVersionDate: base, now: base.addingTimeInterval(1800)))
+        #expect(DocumentSession.shouldRecordVersion(isAutosave: true, lastVersionDate: base, now: base.addingTimeInterval(7200)))
+    }
+
+    @Test func saveNoticeOnlyForExplicitSaveWithWarnings() {
+        let warnings: [ExportWarning] = [.contentRasterized(elementID: 1), .coordinatesScaled]
+        #expect(DocumentSession.saveNotice(isAutosave: false, warnings: warnings) != nil)
+        #expect(DocumentSession.saveNotice(isAutosave: true, warnings: warnings) == nil)
+        #expect(DocumentSession.saveNotice(isAutosave: false, warnings: []) == nil)
+    }
+
+    @Test func savedSummaryNamesTheAffectedAreas() {
+        let summary = WMFLimitationWording.savedSummary([.opacity: 1, .text: 2])
+        #expect(summary.contains("transparency"))
+        #expect(summary.contains("text"))
+        #expect(WMFLimitationWording.savedSummary([:]) == "Saved.")
+    }
+
+    @Test func needsQuitPromptWhenASaveCannotComplete() {
+        #expect(!DocumentEditRegistry.needsQuitPrompt(saveFailed: false, wmfPending: false, stillDirty: false))
+        #expect(DocumentEditRegistry.needsQuitPrompt(saveFailed: true, wmfPending: false, stillDirty: false))
+        #expect(DocumentEditRegistry.needsQuitPrompt(saveFailed: false, wmfPending: true, stillDirty: false))
+        #expect(DocumentEditRegistry.needsQuitPrompt(saveFailed: false, wmfPending: false, stillDirty: true))
+    }
+}
+
+// MARK: - Sandbox-safe writer
+
+@Suite struct CoordinatedWriterTests {
+
+    private func tempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("EmfyWrite-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func safeWriteCreatesANewFile() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("new.emf")
+        let method = try CoordinatedDocumentWriter.safeWrite(Data([1, 2, 3]), to: url)
+        #expect(method == .replacement)
+        #expect(try Data(contentsOf: url) == Data([1, 2, 3]))
+    }
+
+    @Test func safeWriteReplacesAnExistingFileAndLeavesNoSibling() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("doc.emf")
+        try Data([0]).write(to: url)
+        _ = try CoordinatedDocumentWriter.safeWrite(Data([9, 9, 9, 9]), to: url)
+        #expect(try Data(contentsOf: url) == Data([9, 9, 9, 9]))
+        // No stray replacement temp left beside the destination.
+        let siblings = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        #expect(siblings == ["doc.emf"])
     }
 }
 
@@ -370,6 +432,43 @@ private func redFill() -> SceneCommand {
         session.externalDiskChangeDetected()
         #expect(session.showsExternalChangeBanner)
         #expect(session.modelInstallCount == installsBefore)   // no reload
+    }
+
+    @Test func editedSceneSurvivesASave() async {
+        // Review #1: after a save the document is clean, but the viewer must keep
+        // drawing the edited scene rather than falling back to the original.
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
+        await session.beginEditing()
+        #expect(session.editedScene == nil)   // unedited: tiled path
+        session.apply(redFill())
+        await session.save()
+        #expect(!session.isDirty)
+        #expect(session.editedScene != nil)   // still showing the edits
+        // Undoing all the way back to the opened scene returns to the tiled path.
+        session.undoManager.undo()
+        #expect(session.editedScene == nil)
+    }
+
+    @Test func externalChangeWhileEditingButCleanDropsStaleEditState() async {
+        // Review #2: an external change while editing-and-clean must not keep stale
+        // history/openedBytes around for the next edit to clobber.
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
+        await session.beginEditing()
+        #expect(session.editing == .editing)
+        #expect(!session.isDirty)
+        session.externalDiskChangeDetected()
+        #expect(session.editing == .notEditing)
+        #expect(session.history == nil)
+        #expect(!session.showsExternalChangeBanner)
+    }
+
+    @Test func registryTracksDirtyEditingSessions() async {
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: WriteBox())
+        await session.beginEditing()
+        session.apply(redFill())
+        #expect(DocumentEditRegistry.shared.dirtySessions.contains { $0 === session })
+        DocumentEditRegistry.shared.unregister(session)
+        #expect(!DocumentEditRegistry.shared.activeSessions.contains { $0 === session })
     }
 
     @Test func autosaveFiresAfterAnEdit() async {

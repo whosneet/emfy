@@ -116,9 +116,20 @@ final class DocumentSession {
     /// Whether there are unsaved edits relative to the last save (or the opened file).
     private(set) var isDirty = false
 
+    /// Whether the scene differs from the opened version at all (saved OR unsaved
+    /// edits). Drives the viewer's "draw the edited scene" decision, so a saved-then-
+    /// clean document still shows the edits rather than falling back to the original
+    /// prepared model (review #1). Set true on the cheap edit path; recomputed against
+    /// the opened scene on the infrequent undo/redo. Observed.
+    private(set) var hasDivergedFromOpened = false
+
     /// The baseline the dirty flag recomputes against — the last saved scene, or the
     /// opened scene before any save.
     @ObservationIgnored private var savedScene: Scene?
+
+    /// The scene exactly as opened, so undo/redo can tell whether the document still
+    /// differs from it (review #1).
+    @ObservationIgnored private var openedScene: Scene?
 
     /// The opened bytes, captured at `beginEditing`, for the one-time revert snapshot.
     @ObservationIgnored private var openedBytes: Data?
@@ -131,6 +142,15 @@ final class DocumentSession {
     /// The warnings from the most recent successful save, for the warnings UI
     /// (design call E2a-5). Empty when the last save was clean.
     private(set) var lastSaveWarnings: [ExportWarning] = []
+
+    /// A pending "saved with limitations" notice for a non-WMF explicit save that
+    /// produced warnings (review #5). Set only on an explicit save; the viewer toasts
+    /// then clears it. `nil` for a clean or autosaved save.
+    private(set) var pendingSaveNotice: SaveNotice?
+
+    /// When the last `NSFileVersion` was recorded this session, so idle autosaves are
+    /// throttled to at most one version per hour (review #4).
+    @ObservationIgnored private var lastVersionDate: Date?
 
     /// A pending WMF/WMZ first-save confirmation (design call E2a-5); the viewer
     /// presents it. `nil` when none is pending.
@@ -175,7 +195,7 @@ final class DocumentSession {
     /// so the write never triggers a self-reload. The store-bound default resolves the
     /// entry's URL and writes through `NSFileCoordinator`; the default here throws, so
     /// a session with no destination fails typed rather than silently.
-    private let writeBytes: @MainActor (_ data: Data, _ presenter: DocumentFilePresenter?) async throws -> Void
+    private let writeBytes: @MainActor (_ data: Data, _ presenter: DocumentFilePresenter?, _ recordVersion: Bool) async throws -> Void
     /// The one-time opened-version snapshot store, or `nil` when revert snapshots are
     /// unavailable (e.g. a hostless test that doesn't exercise them).
     private let snapshotStore: RevertSnapshotStore?
@@ -185,6 +205,8 @@ final class DocumentSession {
     /// The document's current file name (for the save format and the snapshot name).
     /// `nil` means there is no save destination.
     private let documentFileName: @MainActor () -> String?
+    /// The clock, injected so the version-throttle policy is tested deterministically.
+    private let now: @Sendable () -> Date
     private let autosave: AutosaveController
 
     // MARK: - Init
@@ -196,10 +218,11 @@ final class DocumentSession {
         watchURLProvider: @escaping @MainActor (UUID) -> URL? = { _ in nil },
         options: RenderOptions = .default,
         importScene: @escaping @Sendable (Data) -> Scene? = { try? SceneImporter.import(data: $0) },
-        writeBytes: @escaping @MainActor (_ data: Data, _ presenter: DocumentFilePresenter?) async throws -> Void = { _, _ in throw DocumentSaveError.noDestination },
+        writeBytes: @escaping @MainActor (_ data: Data, _ presenter: DocumentFilePresenter?, _ recordVersion: Bool) async throws -> Void = { _, _, _ in throw DocumentSaveError.noDestination },
         snapshotStore: RevertSnapshotStore? = nil,
         keepRevertSnapshot: @escaping @MainActor () -> Bool = { true },
         documentFileName: @escaping @MainActor () -> String? = { nil },
+        now: @escaping @Sendable () -> Date = { Date() },
         autosave: AutosaveController = AutosaveController()
     ) {
         self.entryID = entryID
@@ -212,6 +235,7 @@ final class DocumentSession {
         self.snapshotStore = snapshotStore
         self.keepRevertSnapshot = keepRevertSnapshot
         self.documentFileName = documentFileName
+        self.now = now
         self.autosave = autosave
     }
 
@@ -238,11 +262,11 @@ final class DocumentSession {
                 )
             },
             options: options,
-            writeBytes: { [weak store] data, presenter in
+            writeBytes: { [weak store] data, presenter, recordVersion in
                 guard let store, let entry = store.entry(id: entryID) else {
                     throw DocumentSaveError.noDestination
                 }
-                try await Self.writeThroughBookmark(data, bookmark: entry.bookmark, presenter: presenter)
+                try await Self.writeThroughBookmark(data, bookmark: entry.bookmark, presenter: presenter, recordVersion: recordVersion)
             },
             snapshotStore: RevertSnapshotStore(directory: store.locations.snapshotsDirectory),
             keepRevertSnapshot: { EmfySettings.shared.keepOpenedVersionForRevert },
@@ -256,7 +280,8 @@ final class DocumentSession {
     private static func writeThroughBookmark(
         _ data: Data,
         bookmark: Data,
-        presenter: DocumentFilePresenter?
+        presenter: DocumentFilePresenter?,
+        recordVersion: Bool
     ) async throws {
         try await Task.detached(priority: .userInitiated) {
             var isStale = false
@@ -268,7 +293,7 @@ final class DocumentSession {
             )
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            try CoordinatedDocumentWriter.write(data, to: url, presenter: presenter, recordVersion: true)
+            try CoordinatedDocumentWriter.write(data, to: url, presenter: presenter, recordVersion: recordVersion)
         }.value
     }
 
@@ -430,15 +455,18 @@ final class DocumentSession {
 
     // MARK: - Editing: begin, mutate, undo bridge (E2a)
 
-    /// The scene the viewer should draw once editing has made the document dirty, or
-    /// `nil` while read-only / clean. Read after an `editVersion` change.
+    /// The scene the viewer should draw once edits have diverged from the opened
+    /// version (saved or unsaved), or `nil` while read-only / unedited. Keyed on
+    /// `hasDivergedFromOpened`, NOT `isDirty`, so a saved-then-clean document keeps
+    /// showing the edits rather than flashing back to the original prepared model
+    /// after an autosave (review #1). Read after an `editVersion` change.
     var editedScene: Scene? {
-        guard editing == .editing, isDirty else { return nil }
+        guard editing == .editing, hasDivergedFromOpened else { return nil }
         return history?.scene
     }
 
     /// The edited scene's page size, so the viewer can size its render (design call
-    /// E2a-3). `nil` while read-only / clean.
+    /// E2a-3). `nil` while read-only / unedited.
     var editedPageSize: CGSize? { editedScene?.pageSizeDevice }
 
     /// Rasterises the edited scene through `SceneRenderer` for the viewer's edit
@@ -472,10 +500,13 @@ final class DocumentSession {
         undoManager.groupsByEvent = false   // one group per recorded step, deterministically
         history = SceneHistory(scene: scene)
         savedScene = scene
+        openedScene = scene
         openedBytes = data
         isDirty = false
+        hasDivergedFromOpened = false
         editVersion &+= 1
         editing = .editing
+        DocumentEditRegistry.shared.register(self)
     }
 
     /// The single mutation path for the scene (design call E2a-2). Applies `command`
@@ -540,8 +571,12 @@ final class DocumentSession {
         editVersion &+= 1
         if let markDirty {
             isDirty = markDirty
+            // An edit always diverges from the opened version (cheap hot path).
+            if markDirty { hasDivergedFromOpened = true }
         } else {
+            // Undo/redo: recompute against both baselines (O(scene), infrequent).
             isDirty = history?.scene != savedScene
+            hasDivergedFromOpened = history?.scene != openedScene
         }
         if isDirty {
             autosave.schedule { [weak self] in await self?.performSave(isAutosave: true) }
@@ -602,7 +637,7 @@ final class DocumentSession {
             return
         }
 
-        await commitWrite(data: result.data, warnings: result.warnings, fileName: fileName, scene: current.scene)
+        await commitWrite(data: result.data, warnings: result.warnings, fileName: fileName, scene: current.scene, isAutosave: isAutosave)
     }
 
     /// Confirms the pending WMF/WMZ save ("Save Anyway"): writes the stashed bytes and
@@ -611,7 +646,7 @@ final class DocumentSession {
         guard let pending = pendingWMFConfirmation, let fileName = documentFileName() else { return }
         wmfSaveConfirmed = true
         pendingWMFConfirmation = nil
-        await commitWrite(data: pending.data, warnings: pending.warnings, fileName: fileName, scene: history?.scene)
+        await commitWrite(data: pending.data, warnings: pending.warnings, fileName: fileName, scene: history?.scene, isAutosave: false)
     }
 
     /// Dismisses the pending WMF/WMZ confirmation without writing (Cancel). The
@@ -632,13 +667,16 @@ final class DocumentSession {
     /// writes the bytes in place through the coordinated writer, updates the saved
     /// baseline and the warnings, and clears dirty. A write failure is typed and left
     /// for the viewer to toast.
-    private func commitWrite(data: Data, warnings: [ExportWarning], fileName: String, scene: Scene?) async {
+    private func commitWrite(data: Data, warnings: [ExportWarning], fileName: String, scene: Scene?, isAutosave: Bool) async {
         if !snapshotTaken, keepRevertSnapshot(), let snapshotStore, let openedBytes {
             snapshotStore.writeIfAbsent(entryID: entryID, data: openedBytes, originalFileName: fileName)
             snapshotTaken = true
         }
+        // Record an NSFileVersion on every explicit save and flush, and at most once
+        // per hour for idle autosaves, so the version store doesn't bloat (review #4).
+        let record = Self.shouldRecordVersion(isAutosave: isAutosave, lastVersionDate: lastVersionDate, now: now())
         do {
-            try await writeBytes(data, presenter)
+            try await writeBytes(data, presenter, record)
         } catch let error as DocumentSaveError {
             lastSaveError = error
             return
@@ -646,12 +684,39 @@ final class DocumentSession {
             lastSaveError = .writeFailed(String(describing: error))
             return
         }
+        if record { lastVersionDate = now() }
         savedScene = scene
         isDirty = false
         lastSaveWarnings = warnings
         lastSaveError = nil
+        // A non-WMF explicit save that lost fidelity surfaces a notice (review #5); a
+        // silent autosave shows nothing, and does not clear a notice already pending.
+        if let notice = Self.saveNotice(isAutosave: isAutosave, warnings: warnings) {
+            pendingSaveNotice = notice
+        }
         autosave.cancel()
     }
+
+    /// Whether to record an `NSFileVersion` for this write (review #4): always for an
+    /// explicit save/flush, and for an idle autosave only once the throttle (1 h) has
+    /// elapsed since the last recorded version. Pure, for the policy test.
+    nonisolated static func shouldRecordVersion(
+        isAutosave: Bool, lastVersionDate: Date?, now: Date, throttle: TimeInterval = 3600
+    ) -> Bool {
+        guard isAutosave else { return true }
+        guard let last = lastVersionDate else { return true }
+        return now.timeIntervalSince(last) >= throttle
+    }
+
+    /// The "saved with limitations" notice for a save, or `nil` (review #5): only an
+    /// explicit save with warnings produces one. Pure, for the policy test.
+    nonisolated static func saveNotice(isAutosave: Bool, warnings: [ExportWarning]) -> SaveNotice? {
+        guard !isAutosave, !warnings.isEmpty else { return nil }
+        return SaveNotice(categories: SceneExporter.summarize(warnings))
+    }
+
+    /// Clears the save notice after the viewer has toasted it.
+    func clearSaveNotice() { pendingSaveNotice = nil }
 
     /// Clears the last save error after the viewer has toasted it (so the same error
     /// isn't shown twice).
@@ -678,7 +743,9 @@ final class DocumentSession {
     func revertToOpenedVersion() async {
         guard let snapshotStore, let snapshot = snapshotStore.read(for: entryID) else { return }
         do {
-            try await writeBytes(snapshot.data, presenter)
+            // Record a version of the current (edited) bytes before restoring, so the
+            // edits remain recoverable from the system version browser.
+            try await writeBytes(snapshot.data, presenter, true)
         } catch let error as DocumentSaveError {
             lastSaveError = error
             return
@@ -697,14 +764,19 @@ final class DocumentSession {
         undoManager.removeAllActions()
         history = nil
         savedScene = nil
+        openedScene = nil
         openedBytes = nil
         isDirty = false
+        hasDivergedFromOpened = false
         wmfSaveConfirmed = false
         snapshotTaken = false
+        lastVersionDate = nil
         pendingWMFConfirmation = nil
+        pendingSaveNotice = nil
         showsExternalChangeBanner = false
         editVersion &+= 1
         editing = .notEditing
+        DocumentEditRegistry.shared.unregister(self)
     }
 
     // MARK: - Editing: external change banner (E2a-8)
@@ -754,6 +826,13 @@ final class DocumentSession {
         if Self.externalChangeShowsBanner(isEditing: editing == .editing, isDirty: isDirty) {
             showsExternalChangeBanner = true
             return
+        }
+        // Editing but clean: the opened bytes are about to change under us, so drop the
+        // now-stale edit state (history/savedScene/openedBytes) before reloading — else
+        // the next edit would apply to a stale scene and autosave would overwrite the
+        // external change (review #2). E2b re-enters editing on the reloaded bytes.
+        if editing == .editing {
+            endEditingState()
         }
         reloadDebounce?.cancel()
         reloadDebounce = Task { @MainActor [weak self] in
