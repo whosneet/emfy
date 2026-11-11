@@ -845,6 +845,13 @@ final class DocumentSession {
     // MARK: - File-change observation
 
     private func startWatching() {
+        #if DEBUG
+        // During a DEBUG screenshot run, don't watch the file: a spurious presenter
+        // event would drop clean edit mode before the external capture (E2b-8). Checked
+        // via the raw argument so this stays self-contained (the tests target compiles
+        // this file but not the app-only EditorDebugLaunch).
+        if ProcessInfo.processInfo.arguments.contains("-EmfyDebugOpen") { stopWatching(); return }
+        #endif
         guard let url = watchURLProvider(entryID) else { stopWatching(); return }
         if presenter?.presentedItemURL == url { return }
         presenter?.stop()

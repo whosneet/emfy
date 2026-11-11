@@ -18,22 +18,38 @@ struct EditorCanvasMapping: Equatable {
     let pageBoundsDevice: CGRect
     /// The view-space rectangle the page is drawn into (the paper/overlay bounds).
     let target: CGRect
+    /// Whether the mapping flips y. The Mac overlay is y-up (matching
+    /// `SceneRenderer`'s y-up target), so it flips (the default). The iOS overlay is
+    /// y-down, exactly like EMF device space, so it maps straight through with no
+    /// flip (`flipY = false`). The iOS tiled view applies its own UIKit flip when it
+    /// draws, which is independent of this pointer mapping.
+    let flipY: Bool
 
-    init(pageBoundsDevice: CGRect, target: CGRect) {
+    init(pageBoundsDevice: CGRect, target: CGRect, flipY: Bool = true) {
         self.pageBoundsDevice = pageBoundsDevice
         self.target = target
+        self.flipY = flipY
     }
 
-    /// device → view. Identical to `SceneRenderer.deviceToTarget(pageBounds:target:)`.
+    /// device → view. With `flipY` it is identical to
+    /// `SceneRenderer.deviceToTarget(pageBounds:target:)`; without, a pure scale/offset
+    /// (both spaces y-down).
     var deviceToView: CGAffineTransform {
         let deviceWidth = max(pageBoundsDevice.width, 1)
         let deviceHeight = max(pageBoundsDevice.height, 1)
         let sx = target.width / deviceWidth
         let sy = target.height / deviceHeight
+        if flipY {
+            return CGAffineTransform(
+                a: sx, b: 0, c: 0, d: -sy,
+                tx: target.minX - sx * pageBoundsDevice.minX,
+                ty: target.maxY + sy * pageBoundsDevice.minY
+            )
+        }
         return CGAffineTransform(
-            a: sx, b: 0, c: 0, d: -sy,
+            a: sx, b: 0, c: 0, d: sy,
             tx: target.minX - sx * pageBoundsDevice.minX,
-            ty: target.maxY + sy * pageBoundsDevice.minY
+            ty: target.minY - sy * pageBoundsDevice.minY
         )
     }
 

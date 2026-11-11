@@ -132,8 +132,13 @@ struct LibraryWindow: View {
             applyInitialSelection()
             #if os(iOS)
             // One scene, once per version, once per launch (C3b scope 7), gated by the
-            // "Show What's New after updates" setting (S1a-5).
-            if WhatsNewPresenter.claimLaunchPresentation(enabled: settings.showWhatsNewAfterUpdates) {
+            // "Show What's New after updates" setting (S1a-5). Suppressed during a DEBUG
+            // screenshot run so it never covers the captured edit mode.
+            var allowWhatsNew = true
+            #if DEBUG
+            if EditorDebugLaunch.isActive { allowWhatsNew = false }
+            #endif
+            if allowWhatsNew, WhatsNewPresenter.claimLaunchPresentation(enabled: settings.showWhatsNewAfterUpdates) {
                 showLaunchWhatsNew = true
             }
             #endif

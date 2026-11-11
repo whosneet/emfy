@@ -107,6 +107,17 @@ private func passthroughElement(id: Int, rect: CGRect) -> Element {
         #expect(abs(m4.deviceLength(fromViewLength: 4) - 1) < 1e-6)
     }
 
+    @Test func nonFlippedMappingKeepsYDirectionForIOS() {
+        // The iOS overlay is y-down like EMF device space, so flipY=false maps device
+        // top (minY) to view top (minY) and round-trips.
+        let page = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let m = EditorCanvasMapping(pageBoundsDevice: page, target: CGRect(x: 0, y: 0, width: 200, height: 200), flipY: false)
+        #expect(abs(m.viewPoint(fromDevice: CGPoint(x: 50, y: 0)).y - 0) < 1e-6)
+        #expect(abs(m.viewPoint(fromDevice: CGPoint(x: 50, y: 100)).y - 200) < 1e-6)
+        let back = m.devicePoint(fromView: m.viewPoint(fromDevice: CGPoint(x: 30, y: 70)))
+        #expect(abs(back.x - 30) < 1e-6 && abs(back.y - 70) < 1e-6)
+    }
+
     @Test func conjugatedTranslationMovesInDeviceSpace() {
         // A pure view-space translation conjugates to a device-space translation with
         // the y component flipped (the mapping folds in the one y-flip).
