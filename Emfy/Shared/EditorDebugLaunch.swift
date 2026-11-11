@@ -26,6 +26,26 @@ enum EditorDebugLaunch {
     /// and at 400% (to `<base>-fit.png` / `<base>-400.png`) then quits.
     static var screenshotBase: String? { value(for: "-EmfyDebugShot") }
 
+    /// `-EmfyDebugInspector YES`: open the file-details/Format inspector after edit mode
+    /// and selection, so a capture shows the Format panel (E2c).
+    static var showInspector: Bool { (value(for: "-EmfyDebugInspector") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugSelectText YES`: select the first text element (instead of the first N
+    /// editable ids) so a capture shows the Text section (E2c screenshot 2).
+    static var selectText: Bool { (value(for: "-EmfyDebugSelectText") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugTextEdit YES`: open the text-edit popover on the first text element
+    /// after entering edit mode, so a capture shows the popover (E2c design call 5).
+    static var textEdit: Bool { (value(for: "-EmfyDebugTextEdit") ?? "NO").uppercased() == "YES" }
+
+    /// Whether any E2c screenshot flag is driving this run (distinct capture path).
+    static var isE2cCapture: Bool { showInspector || selectText || textEdit || recolorDelete }
+
+    /// `-EmfyDebugRecolorDelete YES`: recolour the selection red, then delete the first
+    /// selected element, so a capture shows the canvas updated by a recolour + delete
+    /// (E2c acceptance screenshot 4).
+    static var recolorDelete: Bool { (value(for: "-EmfyDebugRecolorDelete") ?? "NO").uppercased() == "YES" }
+
     /// Whether the launch hook is driving this run.
     static var isActive: Bool { openPath != nil }
 

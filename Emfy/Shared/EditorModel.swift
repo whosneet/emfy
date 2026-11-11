@@ -1,5 +1,6 @@
 import CoreGraphics
 import Observation
+import SwiftUI
 
 /// Per-pane editor UI state, shared between the SwiftUI pane (toggle, menus,
 /// selection pruning) and the AppKit/UIKit canvas coordinator (pointer and touch).
@@ -15,4 +16,22 @@ final class EditorModel {
     /// The live rotation angle readout (e.g. "-12°") shown while a rotation drag is in
     /// flight, or nil when not rotating.
     var rotationReadout: String?
+
+    /// A pending text-edit popover (design call E2c-5): set when the user double-clicks
+    /// (Mac) or double-taps (iPad) a text element, read by the editing container to
+    /// present a popover anchored to the element. `nil` when none is open.
+    var textEdit: TextEditRequest?
+}
+
+/// The state driving the text-edit popover: which text element, where to anchor the
+/// popover within the canvas, and the run's current string. `Identifiable` so a
+/// `.popover(item:)` tracks it.
+struct TextEditRequest: Equatable, Identifiable {
+    /// The text element's id (also the popover's identity).
+    let id: Int
+    /// Where to anchor the popover within the canvas, as a fraction of its visible
+    /// area (0…1 in each axis).
+    var anchor: UnitPoint
+    /// The run's string when the popover opened.
+    var initialText: String
 }

@@ -497,6 +497,18 @@ final class DocumentSession {
         return Set(scene.editableElements.map(\.id))
     }
 
+    /// The first editable text element's id, for the DEBUG text screenshots (the
+    /// EMFEdit-free pane can't inspect element kinds itself).
+    func firstTextElementID() -> Int? {
+        editingScene?.editableElements.first { $0.kind == .text }?.id
+    }
+
+    /// The string of a text element, or `nil` — used by the DEBUG text-edit hook from
+    /// the EMFEdit-free Mac pane.
+    func textString(of id: Int) -> String? {
+        editingScene?.elements.first { $0.id == id }?.text?.string
+    }
+
     #if DEBUG
     /// Translates the given elements (device units) through the normal mutation path,
     /// so the screenshot hook can prove a committed transform re-renders the canvas
@@ -504,6 +516,13 @@ final class DocumentSession {
     func debugTranslate(ids: Set<Int>, dx: Double, dy: Double) {
         guard !ids.isEmpty else { return }
         apply(.translate(ids: ids, dx: dx, dy: dy))
+    }
+
+    /// Recolours the given elements through the normal mutation path, for the E2c
+    /// recolour-and-delete screenshot (the pane can't name `SceneFill`).
+    func debugSetFill(ids: Set<Int>, red: Double, green: Double, blue: Double) {
+        guard !ids.isEmpty else { return }
+        apply(.setFill(ids: ids, SceneFill(color: SceneColor(red: red, green: green, blue: blue), evenOdd: false)))
     }
     #endif
 
@@ -578,6 +597,62 @@ final class DocumentSession {
             registerSystemUndo(name: updated.undoActionName ?? command.actionName)
         }
         afterMutation(markDirty: true)
+    }
+
+    /// Restores the editor's selection after an undo/redo of a delete. Set by the
+    /// canvas/pane to the per-window `EditorModel`'s selection setter; `nil` in a
+    /// hostless test unless the test wants to observe the restored ids (design call
+    /// E2c-4). `@ObservationIgnored` — it is a wiring hook, not observable state.
+    @ObservationIgnored var selectionRestore: ((Set<Int>) -> Void)?
+
+    /// Deletes the selected elements as ONE undoable step and clears the selection
+    /// (design call E2c-4). Undo restores both the elements (through `SceneHistory`)
+    /// and the selection to those ids; redo deletes and clears again. Routes through
+    /// `history.apply(.delete)` like every other edit, but registers its own undo so
+    /// the selection travels with the elements.
+    func deleteSelection(_ ids: Set<Int>) {
+        guard editing == .editing, var updated = history, !ids.isEmpty else { return }
+        let before = updated.undoCount
+        do {
+            try updated.apply(.delete(ids: ids))
+        } catch {
+            return   // SceneEditError: nothing changed (e.g. a locked element)
+        }
+        history = updated
+        if updated.undoCount > before {
+            registerDeleteUndo(restored: ids)
+        }
+        afterMutation(markDirty: true)
+        selectionRestore?([])   // the deleted elements are gone; clear the selection
+    }
+
+    private func registerDeleteUndo(restored ids: Set<Int>) {
+        undoManager.beginUndoGrouping()
+        undoManager.registerUndo(withTarget: self) { session in MainActor.assumeIsolated { session.undoDelete(restored: ids) } }
+        undoManager.setActionName(Self.undoDisplayName(.delete))
+        undoManager.endUndoGrouping()
+    }
+
+    /// Reverses a delete: the elements return and the selection snaps back to them.
+    func undoDelete(restored ids: Set<Int>) {
+        guard var updated = history, updated.canUndo else { return }
+        updated.undo()
+        history = updated
+        undoManager.registerUndo(withTarget: self) { session in MainActor.assumeIsolated { session.redoDelete(restored: ids) } }
+        undoManager.setActionName(Self.undoDisplayName(.delete))
+        afterMutation(markDirty: nil)
+        selectionRestore?(ids)
+    }
+
+    /// Re-applies a delete: the elements go again and the selection clears.
+    func redoDelete(restored ids: Set<Int>) {
+        guard var updated = history, updated.canRedo else { return }
+        updated.redo()
+        history = updated
+        undoManager.registerUndo(withTarget: self) { session in MainActor.assumeIsolated { session.undoDelete(restored: ids) } }
+        undoManager.setActionName(Self.undoDisplayName(.delete))
+        afterMutation(markDirty: nil)
+        selectionRestore?([])
     }
 
     /// Registers one forward undo action with the system `UndoManager`, wrapped in its
