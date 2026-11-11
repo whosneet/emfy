@@ -36,6 +36,7 @@ enum EditorDebugScreenshot {
         for window in windows {
             guard let view = window.contentView else { continue }
             view.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()   // force a sheet's text/buttons to lay out before caching
             let bounds = view.bounds
             guard bounds.width > 0, bounds.height > 0,
                   let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { continue }
@@ -62,6 +63,27 @@ enum EditorDebugScreenshot {
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let data = bitmap.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
+    /// Captures the library window's attached sheet (e.g. the close-prompt NSAlert) by
+    /// rendering its layer tree, which — unlike `cacheDisplay` — includes the vibrant
+    /// alert's text and buttons. Permission-free. Returns whether it wrote.
+    @MainActor
+    @discardableResult
+    static func captureAttachedSheet(to path: String) -> Bool {
+        guard let sheet = libraryWindow()?.attachedSheet, let view = sheet.contentView else { return false }
+        view.layoutSubtreeIfNeeded()
+        sheet.displayIfNeeded()
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0,
+              let layer = view.layer,
+              let rep = view.bitmapImageRepForCachingDisplay(in: bounds),
+              let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return false }
+        // The NSGraphicsContext from the bitmap rep is already in AppKit's orientation,
+        // so render the layer tree directly (no extra flip).
+        layer.render(in: ctx.cgContext)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
         return (try? data.write(to: URL(fileURLWithPath: path))) != nil
     }
 

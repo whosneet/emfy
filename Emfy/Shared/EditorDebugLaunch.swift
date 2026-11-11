@@ -54,12 +54,33 @@ enum EditorDebugLaunch {
     /// system's) so a capture can show both, in-process. `nil` leaves it unchanged.
     static var appearance: String? { value(for: "-EmfyDebugAppearance")?.lowercased() }
 
+    /// `-EmfyDebugScript <name>`: a scripted end-to-end gate flow (E2d). `edit-save`
+    /// edits, recolours and explicitly saves a temp copy; `plain` re-opens the same temp
+    /// copy read-only; `close-dirty` edits, forces a save failure and triggers the Mac
+    /// window close so the unsaved-changes sheet shows. `nil` when no script is running.
+    static var script: String? { value(for: "-EmfyDebugScript")?.lowercased() }
+
+    /// `-EmfyDebugScriptFile <path>`: the temp copy a script run opens DIRECTLY (not
+    /// re-copied), so `edit-save` and `plain` touch the SAME file and persistence is
+    /// provable. The driver creates it outside `corpus/`; see `scriptOpenPath()`.
+    static var scriptFile: String? { value(for: "-EmfyDebugScriptFile") }
+
     /// `-EmfyDebugScrollInspector YES`: scrolls the Format inspector to its Text section
     /// so a capture shows the font controls (E2c screenshot 2).
     static var scrollInspectorToText: Bool { (value(for: "-EmfyDebugScrollInspector") ?? "NO").uppercased() == "YES" }
 
     /// Whether the launch hook is driving this run.
-    static var isActive: Bool { openPath != nil }
+    static var isActive: Bool { openPath != nil || script != nil }
+
+    /// The temp copy a script run opens, used verbatim so a second launch can re-open the
+    /// edited file (proving persistence). It is already a temp copy the driver made, so it
+    /// is opened directly — but still refused if it somehow resolves inside `corpus/`, so a
+    /// script can never open a tracked file in place. `nil` when no script file is given.
+    static func scriptOpenPath() -> String? {
+        guard let path = scriptFile else { return nil }
+        guard !URL(fileURLWithPath: path).standardizedFileURL.path.contains("/corpus/") else { return nil }
+        return path
+    }
 
     /// A temp-directory COPY of `openPath`, so a DEBUG run never opens a tracked file
     /// (e.g. anything under `corpus/`) in place — an armed autosave could otherwise

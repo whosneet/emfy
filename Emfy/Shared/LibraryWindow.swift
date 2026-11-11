@@ -126,8 +126,10 @@ struct LibraryWindow: View {
             // viewer then reads -EmfyDebugEdit / -EmfyDebugSelect to enter edit mode
             // with a selection (design call E2b-8).
             // Always open a temp-dir COPY, never the tracked file in place (an armed
-            // autosave must never be able to write into corpus/).
-            if model.selection == nil, let path = EditorDebugLaunch.safeCopiedOpenPath() {
+            // autosave must never be able to write into corpus/). A scripted gate flow
+            // (E2d) opens its own temp copy directly, so a second launch can re-open the
+            // edited file; both paths refuse anything under corpus/.
+            if model.selection == nil, let path = EditorDebugLaunch.scriptOpenPath() ?? EditorDebugLaunch.safeCopiedOpenPath() {
                 if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
             }
             #endif
