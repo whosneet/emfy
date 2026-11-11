@@ -94,23 +94,36 @@ struct FormatSections: View {
         // mutations; selection drives which elements are shown).
         let _ = session.editVersion
         let model = self.model
-        Form {
-            if model.isEmpty {
-                Section { Text("No Selection").foregroundStyle(.secondary) }
-            } else {
-                fillSection(model)
-                strokeSection(model)
-                opacitySection(model)
-                if let text = model.text {
-                    TextSection(session: session, text: text, transform: transform(of: text.id))
+        ScrollViewReader { proxy in
+            Form {
+                if model.isEmpty {
+                    Section { Text("No Selection").foregroundStyle(.secondary) }
+                } else {
+                    fillSection(model)
+                    strokeSection(model)
+                    opacitySection(model)
+                    if let text = model.text {
+                        TextSection(session: session, text: text, transform: transform(of: text.id))
+                            .id("format.text")
+                    }
                 }
             }
+            #if os(macOS)
+            .formStyle(.grouped)
+            #endif
+            .onAppear {
+                syncLiveValues(model)
+                #if DEBUG
+                if EditorDebugLaunch.scrollInspectorToText, model.text != nil {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(500))
+                        proxy.scrollTo("format.text", anchor: .top)
+                    }
+                }
+                #endif
+            }
+            .onChange(of: editorModel.selection) { _, _ in syncLiveValues(self.model) }
         }
-        #if os(macOS)
-        .formStyle(.grouped)
-        #endif
-        .onAppear { syncLiveValues(model) }
-        .onChange(of: editorModel.selection) { _, _ in syncLiveValues(self.model) }
     }
 
     private func transform(of id: Int) -> CGAffineTransform {
@@ -133,15 +146,25 @@ struct FormatSections: View {
             case .gradient:
                 LabeledContent("Fill", value: "Gradient")
                 Button("Replace with Colour") { applyFill(.black, model: model) }
+                noFillButton(model)
             case .mixed:
                 LabeledContent("Fill", value: "Mixed")
                 ColorPicker("Colour", selection: fillColorBinding(model, current: .gray), supportsOpacity: true)
+                noFillButton(model)
             case .none:
                 LabeledContent("Fill", value: "None")
                 ColorPicker("Colour", selection: fillColorBinding(model, current: .black), supportsOpacity: true)
             case .color(let colour):
                 ColorPicker("Colour", selection: fillColorBinding(model, current: Color(colour)), supportsOpacity: true)
+                noFillButton(model)
             }
+        }
+    }
+
+    /// The Fill ▸ None action: clears the fill of every selected element.
+    private func noFillButton(_ model: FormatInspectorModel) -> some View {
+        Button("No Fill", role: .destructive) {
+            session.apply(model.clearFillCommand())
         }
     }
 

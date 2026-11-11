@@ -127,6 +127,11 @@ struct FormatInspectorModel: Equatable {
         .setFill(ids: ids, SceneFill(color: colour, evenOdd: evenOdd, gradient: nil))
     }
 
+    /// Clears the fill of every selected element (Fill ▸ None).
+    func clearFillCommand() -> SceneCommand {
+        .setFill(ids: ids, nil)
+    }
+
     /// Sets the opacity of every selected element.
     func opacityCommand(_ value: Double) -> SceneCommand {
         .setOpacity(ids: ids, value)
