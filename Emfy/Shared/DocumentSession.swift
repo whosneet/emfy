@@ -525,6 +525,13 @@ final class DocumentSession {
         apply(.setFill(ids: ids, SceneFill(color: SceneColor(red: red, green: green, blue: blue), evenOdd: false)))
     }
 
+    /// Clears the fill of the given elements (Fill ▸ None) through the normal mutation
+    /// path, for the E2c "No Fill applied" screenshot (the pane can't name `SceneFill`).
+    func debugClearFill(ids: Set<Int>) {
+        guard !ids.isEmpty else { return }
+        apply(.setFill(ids: ids, nil))
+    }
+
     /// Cancels any armed autosave, so a DEBUG capture run never writes on its way out.
     func debugCancelAutosave() { autosave.cancel() }
     #endif

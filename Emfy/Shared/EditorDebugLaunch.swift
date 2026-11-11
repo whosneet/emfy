@@ -39,7 +39,11 @@ enum EditorDebugLaunch {
     static var textEdit: Bool { (value(for: "-EmfyDebugTextEdit") ?? "NO").uppercased() == "YES" }
 
     /// Whether any E2c screenshot flag is driving this run (distinct capture path).
-    static var isE2cCapture: Bool { showInspector || selectText || textEdit || recolorDelete }
+    static var isE2cCapture: Bool { showInspector || selectText || textEdit || recolorDelete || clearFill }
+
+    /// `-EmfyDebugClearFill YES`: clears the fill of the selection (Fill ▸ None) so a
+    /// capture shows a shape with an empty interior (E2c screenshot e).
+    static var clearFill: Bool { (value(for: "-EmfyDebugClearFill") ?? "NO").uppercased() == "YES" }
 
     /// `-EmfyDebugRecolorDelete YES`: recolour the selection red, then delete the first
     /// selected element, so a capture shows the canvas updated by a recolour + delete

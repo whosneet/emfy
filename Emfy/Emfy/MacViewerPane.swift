@@ -226,6 +226,9 @@ struct MacViewerPane: View {
             session.debugSetFill(ids: ids, red: 0.20, green: 0.55, blue: 0.95)
             if let first = ids.sorted().first { session.deleteSelection([first]) }
         }
+        if EditorDebugLaunch.clearFill {
+            session.debugClearFill(ids: editorModel.selection.ids)
+        }
         if EditorDebugLaunch.textEdit, let tid = session.firstTextElementID(), let string = session.textString(of: tid) {
             editorModel.selection.replace(with: tid)
             // A fixed anchor near the first run, so the capture reliably shows the popover
