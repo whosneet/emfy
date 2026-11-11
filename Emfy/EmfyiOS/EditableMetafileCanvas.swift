@@ -30,6 +30,9 @@ struct MetafileEditingContainer: View {
                     displayScale: displayScale, tilePaint: tilePaint, options: options,
                     apply: { command, key in session.apply(command, coalescing: key) },
                     delete: { ids in session.deleteSelection(ids) },
+                    // The scene's undo manager, vended by the overlay as first responder so
+                    // ⌘Z/⇧⌘Z and the three-finger undo/redo gestures drive SceneHistory (E2d).
+                    sceneUndoManager: session.undoManager,
                     trailingInset: trailingInset
                 )
                 .ignoresSafeArea()
@@ -71,6 +74,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
     /// Deletes the given ids as one undoable step (design call E2c-4).
     let delete: (Set<Int>) -> Void
+    /// The scene's undo manager, vended by the overlay as first responder (E2d).
+    let sceneUndoManager: UndoManager
     /// Trailing width the inspector overlay occupies (E2c item 4).
     var trailingInset: CGFloat = 0
 
@@ -98,6 +103,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         let overlay = IOSEditorOverlayView(frame: paper.bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.coordinator = context.coordinator
+        overlay.sceneUndoManager = sceneUndoManager
         paper.addSubview(overlay)
 
         scrollView.addSubview(paper)
@@ -601,6 +607,11 @@ private final class IOSTiledSceneView: UIView {
 private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelegate {
     weak var coordinator: EditableMetafileCanvas.Coordinator?
 
+    /// The scene's undo manager, vended to the responder chain so ⌘Z/⇧⌘Z and the system
+    /// three-finger undo/redo gestures drive `SceneHistory` while this is first responder
+    /// (E2d). `undoManager` is overridden to return it.
+    var sceneUndoManager: UndoManager?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
@@ -613,9 +624,19 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
 
     private var zoom: CGFloat { coordinator?.zoom ?? 1 }
 
-    // MARK: Hardware keyboard + context menu delete
+    // MARK: Hardware keyboard + undo + context menu delete
 
     override var canBecomeFirstResponder: Bool { true }
+
+    /// The scene's undo manager, so Undo/Redo gestures and ⌘Z/⇧⌘Z reach `SceneHistory`.
+    override var undoManager: UndoManager? { sceneUndoManager ?? super.undoManager }
+
+    /// Take first responder on entering edit mode, so keyboard/gesture undo works before
+    /// any selection (e.g. to undo a delete that cleared the selection).
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { becomeFirstResponder() }
+    }
 
     override var keyCommands: [UIKeyCommand]? {
         guard let coordinator, !coordinator.selection.ids.isEmpty else { return nil }

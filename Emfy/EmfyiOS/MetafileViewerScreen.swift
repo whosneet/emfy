@@ -108,6 +108,7 @@ struct MetafileViewerScreen: View {
         // default inline title, which already tail-truncates.
         .toolbar { regularWidthTitle }
         .toolbar { editToolbarItem }
+        .toolbar { undoRedoToolbar }
         .toolbar { bottomBar }
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .navigationBar)
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .bottomBar)
@@ -244,10 +245,12 @@ struct MetafileViewerScreen: View {
     /// selection without any touches. The capture itself is `xcrun simctl io screenshot`.
     @MainActor
     private func runDebugLaunchIfNeeded() async {
-        guard !debugLaunchRan, EditorDebugLaunch.isActive, EditorDebugLaunch.editOnOpen else { return }
+        guard !debugLaunchRan, EditorDebugLaunch.isActive else { return }
         debugLaunchRan = true
         for _ in 0..<80 { if session.loaded != nil { break }; try? await Task.sleep(for: .milliseconds(100)) }
         guard session.loaded != nil else { return }
+        if EditorDebugLaunch.script == "undo-redo" { await runUndoRedoScript(); return }
+        guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
             if EditorDebugLaunch.selectText, let tid = session.firstTextElementID() {
@@ -258,6 +261,54 @@ struct MetafileViewerScreen: View {
             // E2c: open the Format inspector for the selection-driven screenshot.
             if EditorDebugLaunch.showInspector { showInspector = true }
         }
+    }
+
+    /// iPad undo/redo gate proof (E2d): edit mode → select the first element → Change Fill
+    /// → drive the UI Undo (the same `UndoManager` the toolbar buttons and gestures use) →
+    /// assert the scene reverted → capture the window (toolbar shows Undo/Redo) → Redo →
+    /// assert it re-applies. Logs before/after to stderr; writes the PNG into Documents so
+    /// the host can copy it out. Exits so the launch always terminates.
+    @MainActor
+    private func runUndoRedoScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios undo-redo: begin editing failed"); exit(2) }
+        let ids = session.firstEditableIDs(1)
+        editorModel.selection.replace(with: ids)
+        session.debugSetFill(ids: ids, red: 0.55, green: 0.10, blue: 0.85)   // a Change Fill edit
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(700))
+        Self.logScript("ios undo-redo: afterEdit matchesOpened=\(session.debugSceneMatchesOpened()) canUndo=\(session.undoManager.canUndo)")
+        // The UI Undo path: the same undo manager the toolbar buttons and ⌘Z/gestures use.
+        session.undoManager.undo()
+        try? await Task.sleep(for: .milliseconds(700))
+        Self.logScript("ios undo-redo: afterUndo matchesOpened=\(session.debugSceneMatchesOpened()) canRedo=\(session.undoManager.canRedo)")
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let wrote = Self.captureKeyWindow(to: docs.appendingPathComponent("e2d-ios-undo.png").path)
+        Self.logScript("ios undo-redo: screenshotWritten=\(wrote) path=Documents/e2d-ios-undo.png")
+        session.undoManager.redo()
+        try? await Task.sleep(for: .milliseconds(500))
+        Self.logScript("ios undo-redo: afterRedo matchesOpened=\(session.debugSceneMatchesOpened())")
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(300))
+        exit(0)
+    }
+
+    /// Permission-free in-process capture of the key window (toolbar included), written to
+    /// `path`, so the host copies it out of the app container.
+    @MainActor
+    private static func captureKeyWindow(to path: String) -> Bool {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+        guard let window = windows.first(where: { $0.isKeyWindow }) ?? windows.first else { return false }
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+        let image = renderer.image { _ in _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        guard let data = image.pngData() else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
+    private static func logScript(_ message: String) {
+        FileHandle.standardError.write(Data("EMFY-E2D \(message)\n".utf8))
     }
     #endif
 
@@ -456,6 +507,28 @@ struct MetafileViewerScreen: View {
             }
         }
     }
+
+    /// Undo / Redo in edit mode (E2d), Freeform-style: iPad (regular width) only, in the
+    /// nav bar's leading group, enabled per the scene history's canUndo/canRedo. They drive
+    /// the same `UndoManager` the canvas vends, so a hardware ⌘Z and these buttons agree.
+    @ToolbarContentBuilder
+    private var undoRedoToolbar: some ToolbarContent {
+        if isRegularWidth, session.editing == .editing {
+            ToolbarItemGroup(placement: .topBarLeading) {
+                Button { session.undoManager.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                    .disabled(!undoAvailable)
+                    .accessibilityIdentifier("viewerUndo")
+                Button { session.undoManager.redo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
+                    .disabled(!redoAvailable)
+                    .accessibilityIdentifier("viewerRedo")
+            }
+        }
+    }
+
+    /// Reads `editVersion` (observed) so the enablement re-evaluates after every edit,
+    /// undo and redo — `UndoManager.canUndo` itself isn't observable.
+    private var undoAvailable: Bool { _ = session.editVersion; return session.undoManager.canUndo }
+    private var redoAvailable: Bool { _ = session.editVersion; return session.undoManager.canRedo }
 
     private func toggleEditMode() {
         if session.editing == .editing {
