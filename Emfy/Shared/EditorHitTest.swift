@@ -58,16 +58,24 @@ enum EditorHitTest {
             let bounds = element.boundsDevice
             return !bounds.isNull && bounds.standardized.contains(devicePoint)
         default:
+            let tolerance = max(strokeHalfWidthDevice(element), strokeToleranceDevice)
+            // Cheap bounds pre-reject: a point outside the element's bounds grown by the
+            // tolerance can hit neither its fill nor its stroke, so skip the expensive
+            // point-in-path / stroke-outline work entirely (keeps hit testing fast on
+            // dense scenes — WS-B was 16 ms without this).
+            let bounds = element.boundsDevice
+            if !bounds.isNull, !bounds.standardized.insetBy(dx: -tolerance, dy: -tolerance).contains(devicePoint) {
+                return false
+            }
             let path = element.geometryDevice.cgPath
-            if path.isEmpty { return element.boundsDevice.standardized.contains(devicePoint) }
+            if path.isEmpty { return !bounds.isNull && bounds.standardized.contains(devicePoint) }
             if let fill = element.style.fill,
                path.contains(devicePoint, using: fill.evenOdd ? .evenOdd : .winding, transform: .identity) {
                 return true
             }
             // Stroked, or an unfilled/open path: within tolerance of the outline.
             if element.style.fill == nil || element.style.stroke != nil {
-                let half = max(strokeHalfWidthDevice(element), strokeToleranceDevice)
-                let outline = path.copy(strokingWithWidth: half * 2, lineCap: .round, lineJoin: .round, miterLimit: 10)
+                let outline = path.copy(strokingWithWidth: tolerance * 2, lineCap: .round, lineJoin: .round, miterLimit: 10)
                 if outline.contains(devicePoint, using: .winding, transform: .identity) { return true }
             }
             return false

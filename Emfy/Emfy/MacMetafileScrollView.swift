@@ -28,6 +28,18 @@ final class MacMetafileZoomController {
     /// Sets an explicit magnification (used by the DEBUG screenshot hook to reach 400%).
     func setZoom(_ value: CGFloat) { apply(value) }
 
+    #if DEBUG
+    /// Scrolls to the document's top-left visual corner, so the 400% screenshot hook
+    /// shows the selection's top-left handles rather than the centre.
+    func debugScrollToTopLeft() {
+        guard let scrollView, let doc = scrollView.documentView else { return }
+        let clip = scrollView.contentView
+        let origin = CGPoint(x: doc.frame.minX, y: Swift.max(doc.frame.minY, doc.frame.maxY - clip.bounds.height))
+        clip.scroll(to: origin)
+        scrollView.reflectScrolledClipView(clip)
+    }
+    #endif
+
     /// The scroll view's live magnification, or the mirrored value before it is set.
     private var currentMagnification: CGFloat { scrollView?.magnification ?? zoom }
 

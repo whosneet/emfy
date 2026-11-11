@@ -201,7 +201,10 @@ struct MacEditableCanvas: NSViewRepresentable {
                 top: scrollView.safeAreaInsets.top, leading: scrollView.safeAreaInsets.left,
                 bottom: scrollView.safeAreaInsets.bottom, trailing: scrollView.safeAreaInsets.right
             )
-            let fit = ViewerFit.fitScale(content: natural, viewport: viewport, insets: insets, margin: Self.fitMargin, minScale: 0.01, maxScale: 1)
+            // The editor fits the drawing to FILL the canvas (upscale allowed, unlike
+            // the read-only viewer's 1× cap), so a small drawing is large enough to edit
+            // and its handles read clearly.
+            let fit = ViewerFit.fitScale(content: natural, viewport: viewport, insets: insets, margin: Self.fitMargin, minScale: 0.01, maxScale: ZoomMath.maxZoom)
             let wasFitted = !hasSetInitialZoom || ZoomMath.wasFitted(current: scrollView.magnification, fit: parent.controller.fitScale)
             scrollView.minMagnification = ZoomMath.minMagnification(fit: fit)
             scrollView.maxMagnification = ZoomMath.maxMagnification(fit: fit)
@@ -266,8 +269,8 @@ struct MacEditableCanvas: NSViewRepresentable {
             return nil
         }
 
-        static let handleHitRadius: CGFloat = 10
-        static let handleDrawSize: CGFloat = 8
+        static let handleHitRadius: CGFloat = 11
+        static let handleDrawSize: CGFloat = 9
 
         // MARK: Pointer
 
@@ -331,9 +334,20 @@ struct MacEditableCanvas: NSViewRepresentable {
                 break   // selection already updated live
             case .move, .resize, .rotate:
                 if let (command, key) = committedCommand(state: state, end: viewPoint, shift: shift, option: option) {
+                    markDirtyRegion(old: state.startViewBounds ?? selectionViewBounds(),
+                                    viewTransform: liveViewTransform(state: state, shift: shift, option: option))
                     parent.apply(command, key)
                 }
             }
+        }
+
+        /// Invalidate only the region a committed edit touches — the union of the
+        /// selection's old and new bounds plus an outset for strokes/antialiasing — so
+        /// the tiled view repaints just those tiles rather than blanking the whole
+        /// canvas (E2b item 5).
+        private func markDirtyRegion(old: CGRect?, viewTransform: CGAffineTransform) {
+            guard let old else { tiledView?.pendingDirtyRegion = nil; return }
+            tiledView?.pendingDirtyRegion = old.union(old.applying(viewTransform)).insetBy(dx: -48, dy: -48)
         }
 
         /// Esc cancels an in-progress drag with no commit, restoring the live scene.
@@ -443,7 +457,9 @@ struct MacEditableCanvas: NSViewRepresentable {
             default: break
             }
             if let viewDelta, !selection.isEmpty {
-                let device = mapping.deviceTransform(fromView: CGAffineTransform(translationX: viewDelta.dx, y: viewDelta.dy))
+                let viewMove = CGAffineTransform(translationX: viewDelta.dx, y: viewDelta.dy)
+                markDirtyRegion(old: selectionViewBounds(), viewTransform: viewMove)
+                let device = mapping.deviceTransform(fromView: viewMove)
                 parent.apply(.translate(ids: selection.ids, dx: Double(device.tx), dy: Double(device.ty)), EditorNudge.coalescingKey)
                 return true
             }
@@ -540,10 +556,21 @@ private final class TiledSceneView: NSView {
         }
     }
 
+    /// A view-space region to invalidate on the next `setScene` instead of the whole
+    /// view, so a committed move/resize/nudge only repaints the changed tiles (E2b item
+    /// 5). Set on the main thread by the coordinator before it applies the edit.
+    var pendingDirtyRegion: CGRect?
+
     func setScene(_ scene: EMFEdit.Scene) {
         sceneLock.withLock { $0 = scene }
-        setNeedsDisplay(bounds)
-        layer?.setNeedsDisplay()
+        if let region = pendingDirtyRegion {
+            pendingDirtyRegion = nil
+            setNeedsDisplay(region)
+            (layer as? CATiledLayer)?.setNeedsDisplay(region)
+        } else {
+            setNeedsDisplay(bounds)
+            layer?.setNeedsDisplay()
+        }
     }
     func setHiddenIDs(_ ids: Set<Int>) {
         let changed = hiddenLock.withLock { current -> Bool in
@@ -567,8 +594,12 @@ private final class TiledSceneView: NSView {
         var scene = sceneLock.withLock { $0 }
         let natural = pageSize
         if !hidden.isEmpty { scene = SceneGhostSupport.hiding(ids: hidden, in: scene) }
+        // Only the elements that reach this tile are rendered, so a tile's cost is
+        // bounded by its own content rather than the whole scene (E2b item 5). The Mac
+        // tiled view is y-up, matching SceneRenderer's target (flipY: true).
+        let tileScene = SceneTileFilter.subscene(scene, viewRect: dirtyRect, target: CGRect(origin: .zero, size: natural), flipY: true)
         TilePainter.paint(paint, into: context, rect: dirtyRect) { ctx in
-            SceneRenderer.render(scene, into: ctx, target: CGRect(origin: .zero, size: natural))
+            SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural))
         }
     }
 }
@@ -635,7 +666,7 @@ private final class EditorOverlayView: NSView {
             context.saveGState()
             if let draggingTransform { context.concatenate(draggingTransform) }
             context.setStrokeColor(accent.cgColor)
-            context.setLineWidth(1 / mag)
+            context.setLineWidth(1.5 / mag)
             context.stroke(box)
             context.restoreGState()
 
@@ -649,7 +680,7 @@ private final class EditorOverlayView: NSView {
                 context.setFillColor(NSColor.white.cgColor)
                 context.fill(r)
                 context.setStrokeColor(accent.cgColor)
-                context.setLineWidth(1 / mag)
+                context.setLineWidth(1.5 / mag)
                 context.stroke(r)
             }
         }

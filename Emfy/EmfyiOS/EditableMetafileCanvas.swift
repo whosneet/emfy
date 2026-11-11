@@ -322,11 +322,18 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             tiledView?.setHiddenIDs(selection.ids)
         }
 
+        /// Invalidate only the region a committed edit touches (E2b item 5).
+        private func markDirtyRegion(old: CGRect?, viewTransform: CGAffineTransform) {
+            guard let old else { tiledView?.pendingDirtyRegion = nil; return }
+            tiledView?.pendingDirtyRegion = old.union(old.applying(viewTransform)).insetBy(dx: -48, dy: -48)
+        }
+
         private func commitDrag(end: CGPoint) {
             defer { finishDrag() }
             guard let state = drag else { return }
             let viewTransform = liveViewTransform(state: state)
             guard !viewTransform.isIdentity, !selection.ids.isEmpty else { return }
+            markDirtyRegion(old: state.startViewBounds ?? selectionViewBounds(), viewTransform: viewTransform)
             if state.kind == .move {
                 let device = mapping.deviceTransform(fromView: viewTransform)
                 parent.apply(.translate(ids: selection.ids, dx: Double(device.tx), dy: Double(device.ty)), nil)
@@ -340,6 +347,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             guard let state = drag, let box = state.startViewBounds, !selection.ids.isEmpty, radians != 0 else { return }
             let centre = CGPoint(x: box.midX, y: box.midY)
             let viewTransform = CGAffineTransform(translationX: centre.x, y: centre.y).rotated(by: radians).translatedBy(x: -centre.x, y: -centre.y)
+            markDirtyRegion(old: box, viewTransform: viewTransform)
             parent.apply(.applyTransform(ids: selection.ids, mapping.deviceTransform(fromView: viewTransform)), nil)
         }
 
@@ -406,7 +414,21 @@ private final class IOSTiledSceneView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    func setScene(_ scene: EMFEdit.Scene) { sceneLock.withLock { $0 = scene }; setNeedsDisplay(); tiledLayer.setNeedsDisplay() }
+    /// A view-space region to invalidate on the next `setScene` instead of the whole
+    /// view, so a committed edit only repaints the changed tiles (E2b item 5).
+    var pendingDirtyRegion: CGRect?
+
+    func setScene(_ scene: EMFEdit.Scene) {
+        sceneLock.withLock { $0 = scene }
+        if let region = pendingDirtyRegion {
+            pendingDirtyRegion = nil
+            setNeedsDisplay(region)
+            tiledLayer.setNeedsDisplay(region)
+        } else {
+            setNeedsDisplay()
+            tiledLayer.setNeedsDisplay()
+        }
+    }
     func setHiddenIDs(_ ids: Set<Int>) {
         let changed = hiddenLock.withLock { c -> Bool in guard c != ids else { return false }; c = ids; return true }
         if changed { setNeedsDisplay(); tiledLayer.setNeedsDisplay() }
@@ -427,10 +449,14 @@ private final class IOSTiledSceneView: UIView {
         var scene = sceneLock.withLock { $0 }
         let natural = pageSize
         if !hidden.isEmpty { scene = SceneGhostSupport.hiding(ids: hidden, in: scene) }
+        // Only the elements reaching this tile are rendered (E2b item 5). The iOS tiled
+        // view is y-down (flipY: false); the UIKit flip below is applied when drawing,
+        // separately from this pointer-space filter.
+        let tileScene = SceneTileFilter.subscene(scene, viewRect: rect, target: CGRect(origin: .zero, size: natural), flipY: false)
         TilePainter.paint(paint, into: context, rect: rect) { ctx in
             ctx.translateBy(x: 0, y: natural.height)
             ctx.scaleBy(x: 1, y: -1)
-            SceneRenderer.render(scene, into: ctx, target: CGRect(origin: .zero, size: natural))
+            SceneRenderer.render(tileScene, into: ctx, target: CGRect(origin: .zero, size: natural))
         }
     }
 }

@@ -182,6 +182,7 @@ struct MacViewerPane: View {
         try? await Task.sleep(for: .milliseconds(800))
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-fit.png")
         controller.setZoom(4.0)
+        controller.debugScrollToTopLeft()   // show the selection's top-left handles at 400%
         try? await Task.sleep(for: .milliseconds(800))
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-400.png")
         // Supplementary: prove one committed transform re-renders the canvas (the
@@ -193,7 +194,7 @@ struct MacViewerPane: View {
             await session.beginEditing()
             editorModel.selection.replace(with: session.firstEditableIDs(EditorDebugLaunch.selectFirst))
         }
-        session.debugTranslate(ids: editorModel.selection.ids, dx: 220, dy: 160)
+        session.debugTranslate(ids: editorModel.selection.ids, dx: 55, dy: 45)
         try? await Task.sleep(for: .milliseconds(900))
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-moved.png")
         try? await Task.sleep(for: .milliseconds(200))
