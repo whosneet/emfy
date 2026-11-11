@@ -501,6 +501,7 @@ private struct MacGeneralTab: View {
                 MacOptionRow(title: "Recents to keep", value: $settings.recentsToKeep)
                 Toggle("Reopen last file at launch", isOn: $settings.reopenLastFileAtLaunch)
                 Toggle("Show What’s New after updates", isOn: $settings.showWhatsNewAfterUpdates)
+                Toggle("Keep the opened version for Revert", isOn: $settings.keepOpenedVersionForRevert)
                 LabeledContent("Recent files") {
                     Button("Clear Recents…", role: .destructive) {
                         MacRecentsConfirmation.confirmClear(store: store)
@@ -781,6 +782,7 @@ private struct IOSSettingsForm: View {
                 IOSOptionRow(title: "Recents to keep", value: $settings.recentsToKeep)
                 Toggle("Reopen last file at launch", isOn: $settings.reopenLastFileAtLaunch)
                 Toggle("Show What’s New after updates", isOn: $settings.showWhatsNewAfterUpdates)
+                Toggle("Keep the opened version for Revert", isOn: $settings.keepOpenedVersionForRevert)
                 Button(role: .destructive) {
                     removal.requestClear(store: store)
                 } label: {
