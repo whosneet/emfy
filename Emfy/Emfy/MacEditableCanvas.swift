@@ -19,13 +19,15 @@ struct MacEditingContainer: View {
     var options: RenderOptions = .default
 
     var body: some View {
+        @Bindable var editorModel = editorModel
         let _ = session.editVersion
         Group {
             if let scene = session.editingScene {
                 MacEditableCanvas(
                     scene: scene, editorModel: editorModel, controller: controller,
                     pageShadow: pageShadow, tilePaint: tilePaint, options: options,
-                    apply: { command, key in session.apply(command, coalescing: key) }
+                    apply: { command, key in session.apply(command, coalescing: key) },
+                    delete: { ids in session.deleteSelection(ids) }
                 )
                 .ignoresSafeArea()
             } else {
@@ -36,6 +38,17 @@ struct MacEditingContainer: View {
         // exist after each scene change (design call E2b-4).
         .onChange(of: session.editVersion) { _, _ in
             if let scene = session.editingScene { editorModel.selection.prune(to: scene) }
+        }
+        // Undo/redo of a delete restores the selection through this hook (design call E2c-4).
+        .onAppear { session.selectionRestore = { ids in editorModel.selection.replace(with: ids) } }
+        // The double-click text-edit popover, anchored to the element (design call E2c-5).
+        .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center)) { request in
+            TextEditPopover(
+                request: request,
+                onCommit: { string in session.apply(.setText(id: request.id, string)) },
+                onCancel: {},
+                onClose: { editorModel.textEdit = nil }
+            )
         }
     }
 }
@@ -60,6 +73,8 @@ struct MacEditableCanvas: NSViewRepresentable {
     var options: RenderOptions = .default
     /// Commits one undoable mutation through `DocumentSession.apply`.
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
+    /// Deletes the given ids as one undoable step (design call E2c-4).
+    let delete: (Set<Int>) -> Void
 
     private var pageSize: CGSize { scene.pageSizeDevice }
 
@@ -365,6 +380,39 @@ struct MacEditableCanvas: NSViewRepresentable {
             EditorHitTest.topmost(in: scene, atDevice: mapping.devicePoint(fromView: viewPoint), strokeToleranceDevice: strokeTolerance())
         }
 
+        /// A double-click on a text element opens the text-edit popover anchored to the
+        /// element (design call E2c-5); on anything else it is ignored.
+        func doubleClick(at viewPoint: CGPoint) {
+            guard let id = hitElement(at: viewPoint),
+                  let element = scene.elements.first(where: { $0.id == id }),
+                  element.kind == .text, let text = element.text else { return }
+            selection.replace(with: id)
+            parent.editorModel.textEdit = TextEditRequest(id: id, anchor: anchor(for: element), initialText: text.string)
+            overlay?.needsDisplay = true
+        }
+
+        /// The element's centre as a fraction of the scroll view's visible viewport, for
+        /// anchoring the text popover near the element.
+        private func anchor(for element: Element) -> UnitPoint {
+            guard let scrollView, let overlay else { return .center }
+            let deviceCentre = CGPoint(x: element.boundsDevice.midX, y: element.boundsDevice.midY)
+            let paperPoint = mapping.viewPoint(fromDevice: deviceCentre)
+            let clip = scrollView.contentView
+            let inClip = overlay.convert(paperPoint, to: clip)
+            let bounds = clip.bounds
+            guard bounds.width > 0, bounds.height > 0 else { return .center }
+            // The clip view is y-flipped relative to a top-left UnitPoint on macOS.
+            let x = (inClip.x - bounds.minX) / bounds.width
+            let y = 1 - (inClip.y - bounds.minY) / bounds.height
+            return UnitPoint(x: min(1, max(0, x)), y: min(1, max(0, y)))
+        }
+
+        /// Deletes the current selection as one undoable step (design call E2c-4).
+        func deleteSelection() {
+            guard !selection.isEmpty else { return }
+            parent.delete(selection.ids)
+        }
+
         // MARK: Drag kinds
 
         private func beginMove(at viewPoint: CGPoint) {
@@ -447,6 +495,10 @@ struct MacEditableCanvas: NSViewRepresentable {
             if event.keyCode == 53 {   // Esc
                 if drag != nil { cancelDrag() } else if !selection.isEmpty { selection.clear(); overlay?.needsDisplay = true }
                 return true
+            }
+            if event.keyCode == 51 || event.keyCode == 117 {   // Delete (⌫) or forward Delete
+                if !selection.isEmpty { deleteSelection(); return true }
+                return false
             }
             let large = event.modifierFlags.contains(.shift)
             // Arrow direction in VIEW space, then into device via the mapping.
@@ -730,6 +782,10 @@ private final class EditorOverlayView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        if event.clickCount == 2 {
+            coordinator?.doubleClick(at: p)
+            return
+        }
         coordinator?.mouseDown(at: p, shift: event.modifierFlags.contains(.shift), command: event.modifierFlags.contains(.command))
     }
     override func mouseDragged(with event: NSEvent) {

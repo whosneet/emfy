@@ -45,6 +45,10 @@ struct ViewerActions {
     var selectAllElements: (() -> Void)? = nil
     var deselectElements: (() -> Void)? = nil
 
+    // Editing (E2c): Edit ▸ Delete, present only while editing with a selection
+    // (`nil` disables the menu item).
+    var deleteSelection: (() -> Void)? = nil
+
     // iOS/iPadOS immersive chrome + the Info inspector, surfaced in the iOS View menu
     // (K1). `nil` on the Mac, which has its own View toggles and toolbar.
     var toggleChrome: (() -> Void)? = nil

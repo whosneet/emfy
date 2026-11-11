@@ -171,9 +171,17 @@ struct MacViewerPane: View {
         guard session.loaded != nil else { return }
         if EditorDebugLaunch.editOnOpen {
             await session.beginEditing()
-            if session.editing == .editing, EditorDebugLaunch.selectFirst > 0 {
+            if session.editing == .editing, EditorDebugLaunch.selectText, let tid = session.firstTextElementID() {
+                editorModel.selection.replace(with: tid)
+            } else if session.editing == .editing, EditorDebugLaunch.selectFirst > 0 {
                 editorModel.selection.replace(with: session.firstEditableIDs(EditorDebugLaunch.selectFirst))
             }
+        }
+        // E2c captures (Format inspector, text popover, recolour+delete) take a distinct,
+        // single-shot path — the composite capture includes a popover window.
+        if EditorDebugLaunch.isE2cCapture {
+            await captureE2cScreenshot()
+            return
         }
         guard let base = EditorDebugLaunch.screenshotBase else { return }
         try? await Task.sleep(for: .milliseconds(1200))
@@ -197,6 +205,33 @@ struct MacViewerPane: View {
         session.debugTranslate(ids: editorModel.selection.ids, dx: 55, dy: 45)
         try? await Task.sleep(for: .milliseconds(900))
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-moved.png")
+        try? await Task.sleep(for: .milliseconds(200))
+        NSApp.terminate(nil)
+    }
+
+    /// The E2c single-shot capture: fits, opens the Format inspector / applies a
+    /// recolour+delete / opens the text popover per the launch flags, then composites
+    /// every window (so a popover shows) to `<base>-e2c.png` and quits.
+    @MainActor
+    private func captureE2cScreenshot() async {
+        guard let base = EditorDebugLaunch.screenshotBase else { return }
+        NSApp.activate(ignoringOtherApps: true)   // so a transient popover presents and stays
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(700))
+        if EditorDebugLaunch.showInspector { showInspector = true }
+        if EditorDebugLaunch.recolorDelete {
+            let ids = editorModel.selection.ids
+            session.debugSetFill(ids: ids, red: 0.20, green: 0.55, blue: 0.95)
+            if let first = ids.sorted().first { session.deleteSelection([first]) }
+        }
+        if EditorDebugLaunch.textEdit, let tid = session.firstTextElementID() {
+            if let string = session.textString(of: tid) {
+                editorModel.selection.replace(with: tid)
+                editorModel.textEdit = TextEditRequest(id: tid, anchor: .center, initialText: string)
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(1200))
+        _ = EditorDebugScreenshot.captureAllWindows(to: base + "-e2c.png")
         try? await Task.sleep(for: .milliseconds(200))
         NSApp.terminate(nil)
     }
@@ -357,6 +392,20 @@ struct MacViewerPane: View {
 
     @ViewBuilder
     private var inspector: some View {
+        // In edit mode with a selection, the Format panel replaces Info (a Format | Info
+        // segmented control switches between them); otherwise Info as today (E2c design
+        // call 1).
+        if session.editing == .editing, !editorModel.selection.isEmpty, loaded != nil, entry != nil {
+            EditorInspectorPanel(session: session, editorModel: editorModel, onClose: { showInspector = false }) {
+                infoView
+            }
+        } else {
+            infoView
+        }
+    }
+
+    @ViewBuilder
+    private var infoView: some View {
         if let loaded, let entry {
             MetafileInfoView(
                 entry: entry,
@@ -592,7 +641,8 @@ struct MacViewerPane: View {
             save: (session.editing == .editing && session.isDirty) ? { Task { await session.save() } } : nil,
             revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil,
             selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,
-            deselectElements: (session.editing == .editing && !editorModel.selection.isEmpty) ? { editorModel.selection.clear() } : nil
+            deselectElements: (session.editing == .editing && !editorModel.selection.isEmpty) ? { editorModel.selection.clear() } : nil,
+            deleteSelection: (session.editing == .editing && !editorModel.selection.isEmpty) ? { session.deleteSelection(editorModel.selection.ids) } : nil
         )
     }
 

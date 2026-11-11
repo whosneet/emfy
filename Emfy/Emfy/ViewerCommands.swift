@@ -109,6 +109,12 @@ struct EditMenuCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
+            // Delete the selection (E2c). No key equivalent: the canvas handles the
+            // bare Delete/Backspace key itself (so a focused text field keeps its own
+            // backspace); this item is for discoverability and when the canvas isn't
+            // focused.
+            Button("Delete") { actions?.deleteSelection?() }
+                .disabled(actions?.deleteSelection == nil)
             Divider()
             Button("Select All") { actions?.selectAllElements?() }
                 .keyboardShortcut("a", modifiers: .command)
