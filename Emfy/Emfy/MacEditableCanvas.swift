@@ -759,7 +759,7 @@ private final class EditorOverlayView: NSView {
         context.setStrokeColor(accent.withAlphaComponent(0.9).cgColor)
         context.setLineWidth(1 / mag)
         for element in coordinator.scene.elements where coordinator.selection.contains(element.id) {
-            let box = coordinator.mapping.viewRect(fromDevice: element.boundsDevice)
+            let box = coordinator.mapping.viewRect(fromDevice: element.selectionBoundsDevice)
             if !box.isNull { context.stroke(box.insetBy(dx: -0.5 / mag, dy: -0.5 / mag)) }
         }
         context.restoreGState()

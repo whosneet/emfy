@@ -53,9 +53,56 @@ struct EditorSelection: Equatable {
     func boundsDevice(in scene: Scene) -> CGRect? {
         var box = CGRect.null
         for element in scene.elements where ids.contains(element.id) {
-            let bounds = element.boundsDevice
+            let bounds = element.selectionBoundsDevice
             if !bounds.isNull { box = box.isNull ? bounds : box.union(bounds) }
         }
         return box.isNull ? nil : box
+    }
+}
+
+extension Element {
+    /// The element's device-space bounds for the editor's selection box and handles.
+    /// For most elements this is `boundsDevice` (geometry ∩ clip). A GDI
+    /// text run usually has NO device geometry, so EMFEdit's `boundsDevice` collapses
+    /// to the inherited clip — which for a full-page run is the WHOLE PAGE, giving a
+    /// page-tall selection box. For those runs a tight box is derived from the run's
+    /// own metrics instead (the same estimate EMFEdit's rasteriser uses to place the
+    /// glyphs; all fields are public on `SceneText`).
+    var selectionBoundsDevice: CGRect {
+        if kind == .text, let tight = EditorTextBounds.device(for: self) { return tight }
+        return boundsDevice
+    }
+}
+
+/// A tight device-space bounding box for a text run, from its font metrics and
+/// reference point — used when the run carries no device geometry so `boundsDevice`
+/// is the inherited page clip. The box is built in the run's PRE-transform
+/// (logical/world) space then mapped by `element.transform`; the horizontal anchor
+/// follows the text-alignment flags ([MS-EMF] §2.3.11.25) and the vertical band is
+/// anchor-agnostic. Mirrors `SceneRasterize.estimatedTextBounds`.
+enum EditorTextBounds {
+    static func device(for element: Element) -> CGRect? {
+        guard element.kind == .text, let text = element.text else { return nil }
+        let count = text.string.utf16.count
+        guard count > 0 else { return nil }
+        var em = abs(Double(text.logicalHeight))
+        if em < 1 { em = text.emSize > 0 ? text.emSize : 16 }
+        let ref = Double(text.referenceLogical.x)
+        let refY = Double(text.referenceLogical.y)
+        let advanceSum = text.advancesLogical.reduce(0.0) { $0 + Double($1) }
+        let width = advanceSum > 0 ? advanceSum : Double(count) * em
+        let x0: Double
+        switch text.alignRawValue & 0x6 {
+        case 0x2: x0 = ref - width        // TA_RIGHT
+        case 0x6: x0 = ref - width / 2    // TA_CENTER
+        default:  x0 = ref                // TA_LEFT
+        }
+        let marginX = em
+        let box = CGRect(x: x0 - marginX, y: refY - em * 1.4, width: width + 2 * marginX, height: em * 2.8)
+        let device = box.applying(element.transform).standardized
+        guard device.origin.x.isFinite, device.origin.y.isFinite,
+              device.width.isFinite, device.height.isFinite,
+              !device.isNull, device.width > 0, device.height > 0 else { return nil }
+        return device
     }
 }

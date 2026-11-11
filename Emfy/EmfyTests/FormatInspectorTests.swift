@@ -329,3 +329,56 @@ private let blue = SceneColor(red: 0, green: 0, blue: 1)
         #expect(displayPt >= 40 && displayPt <= 56)
     }
 }
+
+// MARK: - Text-run selection bounds (E2c item 3)
+
+@Suite struct TextSelectionBoundsTests {
+
+    private func corpusTextScene() throws -> Scene {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("corpus/gate-p4-text.emf")
+        return try SceneImporter.import(data: Data(contentsOf: url))
+    }
+
+    /// Selecting the single text run in gate-p4-text.emf must draw a TIGHT box around the
+    /// glyphs, not a page-tall box. EMFEdit's `boundsDevice` for a GDI text run with no
+    /// device geometry is the inherited page clip (effectively the whole page); the app's
+    /// `selectionBoundsDevice` derives a tight box from the run's metrics instead, and the
+    /// selection's union box (what the overlay draws) uses it.
+    @Test func textRunSelectionBoxIsTightNotFullPage() throws {
+        let scene = try corpusTextScene()
+        let textElement = try #require(scene.editableElements.first { $0.kind == .text })
+        let page = scene.pageBoundsDevice
+
+        // The raw EMFEdit bounds (page clip) vs the app's tight selection bounds. For
+        // gate-p4-text.emf the run has no device geometry, so `boundsDevice` is the whole
+        // page (377×177) while `selectionBoundsDevice` is a tight ~239×78 glyph box.
+        let raw = textElement.boundsDevice
+        let tight = textElement.selectionBoundsDevice
+
+        // The app-derived tight box is well under half the page height and smaller than
+        // the raw (page-clip) box in both dimensions.
+        #expect(tight.height < page.height * 0.5)
+        #expect(tight.height < raw.height)
+        #expect(tight.width <= raw.width)
+        #expect(!tight.isNull && tight.width > 0 && tight.height > 0)
+
+        // The selection's union box (handles drawn around it) is the tight box, not the
+        // full page.
+        var selection = EditorSelection()
+        selection.replace(with: textElement.id)
+        let box = try #require(selection.boundsDevice(in: scene))
+        #expect(box.height < page.height * 0.5)
+        #expect(abs(box.height - tight.height) < 0.5)
+    }
+
+    /// A non-text element is unaffected: its `selectionBoundsDevice` is exactly its
+    /// `boundsDevice` (only text runs get the metric-derived box).
+    @Test func nonTextSelectionBoundsAreUnchanged() throws {
+        let scene = try corpusTextScene()
+        if let shape = scene.editableElements.first(where: { $0.kind != .text }) {
+            #expect(shape.selectionBoundsDevice == shape.boundsDevice)
+        }
+    }
+}
