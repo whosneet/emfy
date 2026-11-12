@@ -651,6 +651,51 @@ struct DeviceContext {
         }
     }
 
+    // MARK: - Partial-playback checkpoints (F5)
+
+    /// A full snapshot of the playback DC taken at a safe boundary, so the
+    /// step-through replay can resume playback from a cached raster without
+    /// re-interpreting every earlier record. It captures the three pieces that
+    /// survive a record boundary: the saveable `State`, the object table, and
+    /// the SaveDC stack. Transient path-bracket construction is NOT captured —
+    /// checkpoints are only taken where `isAtCleanPathBoundary` is true, so
+    /// there is nothing in flight to restore.
+    struct Checkpoint {
+        var state: State
+        var objects: [UInt32: TableObject]
+        var saveStack: [State]
+    }
+
+    /// True when no path bracket is open (EMR_BEGINPATH … EMR_ENDPATH) and no
+    /// closed-but-unconsumed path is pending — the only boundaries a checkpoint
+    /// may be taken at, since `Checkpoint` carries no path-bracket state.
+    var isAtCleanPathBoundary: Bool {
+        pathAccumulator == nil && currentPath == nil && pathSubpathStart == nil
+    }
+
+    /// Captures the full resumable DC state at the current record boundary.
+    func checkpoint() -> Checkpoint {
+        Checkpoint(state: state, objects: objects, saveStack: saveStack)
+    }
+
+    /// Restores a checkpoint, discarding any in-flight path-bracket state (there
+    /// is none to keep — checkpoints are only taken at a clean boundary).
+    mutating func restore(_ checkpoint: Checkpoint) {
+        state = checkpoint.state
+        objects = checkpoint.objects
+        saveStack = checkpoint.saveStack
+        pathAccumulator = nil
+        pathSubpathStart = nil
+        currentPath = nil
+    }
+
+    /// The number of SaveDC states currently stacked — for the inspector's DC
+    /// panel.
+    var saveDepth: Int { saveStack.count }
+
+    /// The number of live object-table entries — for the inspector's DC panel.
+    var objectCount: Int { objects.count }
+
     /// The on-disk 0x8000_00xx value for a defined stock object (log
     /// reporting only).
     private static func rawStockValue(_ stock: StockObject) -> UInt32 {
