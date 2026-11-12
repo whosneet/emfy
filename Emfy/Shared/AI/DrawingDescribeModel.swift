@@ -24,15 +24,31 @@ final class DrawingDescribeModel {
     private(set) var phase: Phase = .idle
     /// The streamed (or final) description text.
     private(set) var text = ""
+    /// Which engine produced the current description (for the footnote).
+    private(set) var engineLabel = ""
+    /// Set when a provider Describe needs consent; the view presents the consent screen.
+    var pendingConsent: AIProviderConfig?
+    /// The configured-provider store, injected by the view, used to resolve the engine.
+    @ObservationIgnored var providerStore: AIProviderStore?
+
     /// The content id the current description belongs to, so a drawing change resets.
     @ObservationIgnored private var contentID: Int?
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// Parameters held while the consent screen is shown, so Allow can resume.
+    @ObservationIgnored private var pendingInputs: (Int, @Sendable () async -> Data?, String, [String], DrawingAltTextStore)?
 
     var isBusy: Bool {
         switch phase {
         case .loading, .streaming: return true
         default: return false
         }
+    }
+
+    private var onDeviceAvailable: Bool { EmfySettings.shared.useOnDeviceAI && DrawingAIAvailability.current().isAvailable }
+
+    private var engine: AIEngineChoice? {
+        if let providerStore { return providerStore.resolvedEngine(onDeviceAvailable: onDeviceAvailable) }
+        return onDeviceAvailable ? .onDevice : nil
     }
 
     /// Resets to idle when the open drawing changes, so a stale description never
@@ -44,11 +60,13 @@ final class DrawingDescribeModel {
         self.contentID = contentID
         phase = .idle
         text = ""
+        pendingConsent = nil
+        pendingInputs = nil
     }
 
-    /// Starts (or restarts) a description for the open drawing. Resolves the bytes
-    /// through `dataProvider`, builds the context off-main, streams the answer, and
-    /// asks the alt-text store to seed its cache.
+    /// Starts (or restarts) a description for the open drawing with the selected engine.
+    /// Resolves the bytes through `dataProvider`, builds the context off-main, streams
+    /// the answer, and asks the alt-text store to seed its cache (on-device).
     func describe(
         contentID: Int,
         dataProvider: @escaping @Sendable () async -> Data?,
@@ -56,14 +74,48 @@ final class DrawingDescribeModel {
         unsupportedNotes: [String],
         altTextStore: DrawingAltTextStore
     ) {
-        guard #available(macOS 26, iOS 26, *), DrawingAIEngine.isModelAvailable else {
-            phase = .failed("On-device AI isn’t available right now.")
+        guard let engine else {
+            phase = .failed("AI isn’t available right now.")
             return
         }
+        // A provider Describe needs consent first — present the consent screen and
+        // resume on Allow.
+        if case .provider(let config) = engine, !(providerStore?.isConsentGranted(config.id) ?? false) {
+            pendingInputs = (contentID, dataProvider, fileName, unsupportedNotes, altTextStore)
+            pendingConsent = config
+            return
+        }
+        start(contentID: contentID, dataProvider: dataProvider, fileName: fileName, unsupportedNotes: unsupportedNotes, altTextStore: altTextStore, engine: engine)
+    }
+
+    /// Resumes a held Describe after the consent screen is allowed.
+    func consentAllowed() {
+        pendingConsent = nil
+        guard let (contentID, dataProvider, fileName, notes, altTextStore) = pendingInputs, let engine else { return }
+        pendingInputs = nil
+        start(contentID: contentID, dataProvider: dataProvider, fileName: fileName, unsupportedNotes: notes, altTextStore: altTextStore, engine: engine)
+    }
+
+    /// Dismisses the consent screen without sending.
+    func consentDeclined() {
+        pendingConsent = nil
+        pendingInputs = nil
+    }
+
+    private func start(
+        contentID: Int,
+        dataProvider: @escaping @Sendable () async -> Data?,
+        fileName: String,
+        unsupportedNotes: [String],
+        altTextStore: DrawingAltTextStore,
+        engine: AIEngineChoice
+    ) {
         task?.cancel()
         self.contentID = contentID
         phase = .loading
         text = ""
+        engineLabel = AIEngineLabel.text(for: engine)
+        // On-device alt text is a separate feature; it self-gates on availability.
         altTextStore.generateIfNeeded(contentID: contentID, dataProvider: dataProvider, fileName: fileName, unsupportedNotes: unsupportedNotes)
         task = Task { [weak self] in
             guard let data = await dataProvider() else {
@@ -78,8 +130,12 @@ final class DrawingDescribeModel {
                 self.phase = .failed("Emfy couldn’t read this drawing for the model.")
                 return
             }
-            // The enclosing `guard #available` covers this closure.
-            await self.stream(bundle: bundle)
+            switch engine {
+            case .onDevice:
+                await self.streamOnDevice(bundle: bundle)
+            case .provider(let config):
+                await self.streamProvider(bundle: bundle, config: config)
+            }
         }
     }
 
@@ -90,8 +146,11 @@ final class DrawingDescribeModel {
         if isBusy { phase = text.isEmpty ? .idle : .done }
     }
 
-    @available(macOS 26, iOS 26, *)
-    private func stream(bundle: DrawingAIContextProvider.Bundle) async {
+    private func streamOnDevice(bundle: DrawingAIContextProvider.Bundle) async {
+        guard #available(macOS 26, iOS 26, *), DrawingAIEngine.isModelAvailable else {
+            phase = .failed("On-device AI isn’t available right now.")
+            return
+        }
         let session = DrawingAIEngine.makeSession(toolData: bundle.toolData)
         let prompt = DrawingAIPrompt.describePrompt(for: bundle.context)
         phase = .streaming
@@ -105,6 +164,29 @@ final class DrawingDescribeModel {
         } catch {
             if error is CancellationError { phase = text.isEmpty ? .idle : .done; return }
             phase = .failed(DrawingAIEngine.friendlyMessage(for: error))
+        }
+    }
+
+    private func streamProvider(bundle: DrawingAIContextProvider.Bundle, config: AIProviderConfig) async {
+        guard let service = providerStore?.service else {
+            phase = .failed("AI isn’t available right now.")
+            return
+        }
+        phase = .streaming
+        let request = AIProviderRequestBuilder.describe(bundle: bundle, model: config.model)
+        do {
+            let refused = try await DrawingAIProviderRun.stream(
+                service: service, config: config, request: request,
+                onText: { [weak self] value in self?.text = value },
+                onTool: { _ in })
+            if refused {
+                phase = .failed("The provider declined this request.")
+            } else {
+                phase = Task.isCancelled ? (text.isEmpty ? .idle : .done) : .done
+            }
+        } catch {
+            if error is CancellationError { phase = text.isEmpty ? .idle : .done; return }
+            phase = .failed((error as? ProviderError)?.friendlyMessage ?? "Something went wrong with the provider. Please try again.")
         }
     }
 }

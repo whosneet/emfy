@@ -37,6 +37,10 @@
 		A2A00000000000000000001E /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001C /* OpenAIProvider.swift */; };
 		A2A000000000000000000020 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001F /* AIProviderService.swift */; };
 		A2A000000000000000000021 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001F /* AIProviderService.swift */; };
+		A2B00000000000000000107A /* AIProviderRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000107F /* AIProviderRouting.swift */; };
+		A2B00000000000000000107T /* AIProviderRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000107F /* AIProviderRouting.swift */; };
+		A2B00000000000000000106A /* AIConsentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000106F /* AIConsentSheet.swift */; };
+		A2B00000000000000000106T /* AIConsentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000106F /* AIConsentSheet.swift */; };
 		A2B00000000000000000104A /* AIConsentContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000104F /* AIConsentContent.swift */; };
 		A2B00000000000000000104T /* AIConsentContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000104F /* AIConsentContent.swift */; };
 		A2B00000000000000000103A /* AIEngineSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000103F /* AIEngineSelection.swift */; };
@@ -48,6 +52,7 @@
 		A2A000000000000000000041 /* AIProviderStubURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000040 /* AIProviderStubURLProtocol.swift */; };
 		A2A000000000000000000043 /* SSEParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000042 /* SSEParserTests.swift */; };
 		A2A000000000000000000045 /* AIProviderCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000044 /* AIProviderCoreTests.swift */; };
+		A2B00000000000000000205A /* AIProviderRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000205F /* AIProviderRoutingTests.swift */; };
 		A2B00000000000000000204A /* AIProviderStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000204F /* AIProviderStoreTests.swift */; };
 		A2B00000000000000000203A /* AIConsentContentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000203F /* AIConsentContentTests.swift */; };
 		A2B00000000000000000202A /* AIEngineSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000202F /* AIEngineSelectionTests.swift */; };
@@ -427,6 +432,8 @@
 		A2A000000000000000000019 /* AnthropicProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AnthropicProvider.swift"; sourceTree = "<group>"; };
 		A2A00000000000000000001C /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/OpenAIProvider.swift"; sourceTree = "<group>"; };
 		A2A00000000000000000001F /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderService.swift"; sourceTree = "<group>"; };
+		A2B00000000000000000107F /* AIProviderRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderRouting.swift"; sourceTree = "<group>"; };
+		A2B00000000000000000106F /* AIConsentSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/AIConsentSheet.swift"; sourceTree = "<group>"; };
 		A2B00000000000000000104F /* AIConsentContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIConsentContent.swift"; sourceTree = "<group>"; };
 		A2B00000000000000000103F /* AIEngineSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIEngineSelection.swift"; sourceTree = "<group>"; };
 		A2B00000000000000000102F /* AIProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderStore.swift"; sourceTree = "<group>"; };
@@ -434,6 +441,7 @@
 		A2A000000000000000000040 /* AIProviderStubURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderStubURLProtocol.swift; sourceTree = "<group>"; };
 		A2A000000000000000000042 /* SSEParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParserTests.swift; sourceTree = "<group>"; };
 		A2A000000000000000000044 /* AIProviderCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderCoreTests.swift; sourceTree = "<group>"; };
+		A2B00000000000000000205F /* AIProviderRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderRoutingTests.swift; sourceTree = "<group>"; };
 		A2B00000000000000000204F /* AIProviderStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderStoreTests.swift; sourceTree = "<group>"; };
 		A2B00000000000000000203F /* AIConsentContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConsentContentTests.swift; sourceTree = "<group>"; };
 		A2B00000000000000000202F /* AIEngineSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIEngineSelectionTests.swift; sourceTree = "<group>"; };
@@ -877,6 +885,8 @@
 				A2A000000000000000000019 /* AnthropicProvider.swift */,
 				A2A00000000000000000001C /* OpenAIProvider.swift */,
 				A2A00000000000000000001F /* AIProviderService.swift */,
+				A2B00000000000000000107F /* AIProviderRouting.swift */,
+				A2B00000000000000000106F /* AIConsentSheet.swift */,
 				A2B00000000000000000104F /* AIConsentContent.swift */,
 				A2B00000000000000000103F /* AIEngineSelection.swift */,
 				A2B00000000000000000102F /* AIProviderStore.swift */,
@@ -936,6 +946,7 @@
 				A2A000000000000000000040 /* AIProviderStubURLProtocol.swift */,
 				A2A000000000000000000042 /* SSEParserTests.swift */,
 				A2A000000000000000000044 /* AIProviderCoreTests.swift */,
+				A2B00000000000000000205F /* AIProviderRoutingTests.swift */,
 				A2B00000000000000000204F /* AIProviderStoreTests.swift */,
 				A2B00000000000000000203F /* AIConsentContentTests.swift */,
 				A2B00000000000000000202F /* AIEngineSelectionTests.swift */,
@@ -1266,6 +1277,8 @@
 				A2A00000000000000000001A /* AnthropicProvider.swift in Sources */,
 				A2A00000000000000000001D /* OpenAIProvider.swift in Sources */,
 				A2A000000000000000000020 /* AIProviderService.swift in Sources */,
+				A2B00000000000000000107A /* AIProviderRouting.swift in Sources */,
+				A2B00000000000000000106A /* AIConsentSheet.swift in Sources */,
 				A2B00000000000000000104A /* AIConsentContent.swift in Sources */,
 				A2B00000000000000000103A /* AIEngineSelection.swift in Sources */,
 				A2B00000000000000000102A /* AIProviderStore.swift in Sources */,
@@ -1475,6 +1488,8 @@
 				A2A00000000000000000001B /* AnthropicProvider.swift in Sources */,
 				A2A00000000000000000001E /* OpenAIProvider.swift in Sources */,
 				A2A000000000000000000021 /* AIProviderService.swift in Sources */,
+				A2B00000000000000000107T /* AIProviderRouting.swift in Sources */,
+				A2B00000000000000000106T /* AIConsentSheet.swift in Sources */,
 				A2B00000000000000000104T /* AIConsentContent.swift in Sources */,
 				A2B00000000000000000103T /* AIEngineSelection.swift in Sources */,
 				A2B00000000000000000102T /* AIProviderStore.swift in Sources */,
@@ -1482,6 +1497,7 @@
 				A2A000000000000000000041 /* AIProviderStubURLProtocol.swift in Sources */,
 				A2A000000000000000000043 /* SSEParserTests.swift in Sources */,
 				A2A000000000000000000045 /* AIProviderCoreTests.swift in Sources */,
+				A2B00000000000000000205A /* AIProviderRoutingTests.swift in Sources */,
 				A2B00000000000000000204A /* AIProviderStoreTests.swift in Sources */,
 				A2B00000000000000000203A /* AIConsentContentTests.swift in Sources */,
 				A2B00000000000000000202A /* AIEngineSelectionTests.swift in Sources */,

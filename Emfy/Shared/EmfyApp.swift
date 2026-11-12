@@ -20,6 +20,9 @@ struct EmfyApp: App {
     @State private var coordinator = OpenCoordinator.shared
     // The S1a settings store, injected into every window on both platforms.
     @State private var settings = EmfySettings.shared
+    // The A2b configured-provider store (engine selection, providers, consent),
+    // injected alongside settings.
+    @State private var aiProviders = AIProviderStore.shared
     #if os(macOS)
     // Flush and, if needed, confirm unsaved edits before quitting (E2a-9, review #7).
     @NSApplicationDelegateAdaptor(EmfyAppDelegate.self) private var appDelegate
@@ -50,6 +53,7 @@ struct EmfyApp: App {
                 .environment(store)
                 .environment(coordinator)
                 .environment(settings)
+                .environment(aiProviders)
                 #if DEBUG
                 // The DEBUG appearance flag drives SwiftUI's colorScheme too (NSApp's
                 // appearance alone only reaches AppKit), so a capture shows the inspector
@@ -113,6 +117,7 @@ struct EmfyApp: App {
             SettingsView()
                 .environment(store)
                 .environment(settings)
+                .environment(aiProviders)
         }
         #endif
     }

@@ -19,6 +19,7 @@ import UniformTypeIdentifiers
 struct MetafileViewerScreen: View {
     @Environment(RecentsStore.self) private var store
     @Environment(EmfySettings.self) private var settings
+    @Environment(AIProviderStore.self) private var aiProviders: AIProviderStore?
     @Environment(\.colorScheme) private var colorScheme
     // Non-optional: verified at runtime that the window's ToastCenter reaches the
     // compact pushed viewer (the "Image copied" toast appears there).
@@ -1876,9 +1877,15 @@ struct MetafileViewerScreen: View {
 
     // MARK: - On-device AI (A1a)
 
-    /// Whether on-device AI is both available and switched on.
-    private var aiEnabled: Bool {
+    /// Whether on-device AI is available and switched on.
+    private var onDeviceReady: Bool {
         settings.useOnDeviceAI && DrawingAIAvailability.current().isAvailable
+    }
+
+    /// Whether the AI surface appears: on-device ready OR a provider configured (A2b).
+    private var aiEnabled: Bool {
+        guard let aiProviders else { return onDeviceReady }
+        return aiProviders.shouldShowAISurface(onDeviceAvailable: onDeviceReady)
     }
 
     /// The AI inputs for this drawing, or `nil` when AI is off or there's nothing to
@@ -1901,13 +1908,15 @@ struct MetafileViewerScreen: View {
     /// "Drawing, <file name>" (A1a).
     private var canvasAccessibilityLabel: String {
         let fallback = "Drawing: \(entry?.baseName ?? "Metafile")"
-        guard aiEnabled else { return fallback }
+        guard onDeviceReady else { return fallback }
         return altTextStore.label(for: session.loadedContentID, fileName: entry?.displayName ?? "")
     }
 
     /// Resets the AI models when the drawing changes, and seeds alt text when
     /// VoiceOver is running (A1a).
     private func configureAIForCurrentDrawing() {
+        askModel.providerStore = aiProviders
+        describeModel.providerStore = aiProviders
         describeModel.resetIfDrawingChanged(contentID: session.loadedContentID)
         guard let inputs = aiInputs else { return }
         askModel.prepare(

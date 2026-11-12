@@ -26,6 +26,8 @@ struct DrawingDescribeSection: View {
     let altTextStore: DrawingAltTextStore
     let inputs: DrawingAIInspectorInputs
 
+    @Environment(AIProviderStore.self) private var providerStore: AIProviderStore?
+
     var body: some View {
         Section {
             switch model.phase {
@@ -48,6 +50,11 @@ struct DrawingDescribeSection: View {
                         Text("Describing…").foregroundStyle(.secondary)
                     }
                 } else {
+                    if !model.engineLabel.isEmpty {
+                        Text(model.engineLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     describeButton(title: "Describe again")
                 }
             case .failed(let message):
@@ -59,6 +66,13 @@ struct DrawingDescribeSection: View {
         } header: {
             Label("Describe", systemImage: "sparkles")
         }
+        .onAppear { model.providerStore = providerStore }
+        .aiConsentSheet(
+            provider: model.pendingConsent,
+            purpose: .drawingData,
+            store: providerStore,
+            onAllow: { model.consentAllowed() },
+            onDeny: { model.consentDeclined() })
     }
 
     private func describeButton(title: String) -> some View {
@@ -85,6 +99,7 @@ struct DrawingAskView: View {
     let model: DrawingAskModel
     let inputs: DrawingAIInspectorInputs
 
+    @Environment(AIProviderStore.self) private var providerStore: AIProviderStore?
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -95,6 +110,7 @@ struct DrawingAskView: View {
             composer(model: model)
         }
         .onAppear {
+            model.providerStore = providerStore
             model.prepare(
                 contentID: inputs.contentID,
                 dataProvider: inputs.dataProvider,
@@ -102,6 +118,12 @@ struct DrawingAskView: View {
                 unsupportedNotes: inputs.unsupportedNotes
             )
         }
+        .aiConsentSheet(
+            provider: model.pendingConsent,
+            purpose: .drawingData,
+            store: providerStore,
+            onAllow: { model.consentAllowed() },
+            onDeny: { model.consentDeclined() })
     }
 
     private var transcript: some View {
@@ -162,8 +184,8 @@ struct DrawingAskView: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if !message.toolsUsed.isEmpty {
-                    Text("Used: \(message.toolsUsed.joined(separator: ", "))")
+                if !message.toolsUsed.isEmpty || !message.engineLabel.isEmpty {
+                    Text(footnote(for: message))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -203,5 +225,18 @@ struct DrawingAskView: View {
     private func send() {
         guard model.canSend else { return }
         model.send()
+    }
+
+    /// The per-answer footnote: the tools used (if any) and the engine that answered,
+    /// e.g. "Used: Find text · via Anthropic · claude-opus-5-5".
+    private func footnote(for message: DrawingAskModel.Message) -> String {
+        var parts: [String] = []
+        if !message.toolsUsed.isEmpty {
+            parts.append("Used: \(message.toolsUsed.joined(separator: ", "))")
+        }
+        if !message.engineLabel.isEmpty {
+            parts.append(message.engineLabel)
+        }
+        return parts.joined(separator: " · ")
     }
 }

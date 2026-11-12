@@ -40,6 +40,7 @@ struct MetafileInfoView: View {
 
     @Environment(ToastCenter.self) private var toast
     @Environment(EmfySettings.self) private var settings
+    @Environment(AIProviderStore.self) private var providerStore: AIProviderStore?
     /// Moves VoiceOver focus to the header when the inspector opens (C4a A18).
     @AccessibilityFocusState private var headerFocused: Bool
     @State private var exportRunner = ExportTaskRunner()
@@ -112,10 +113,18 @@ struct MetafileInfoView: View {
         #if os(macOS)
         .formStyle(.grouped)
         #endif
+        .onAppear { explainModel.providerStore = providerStore }
         // A new drawing clears any stale "what's missing" explanation (A1b Part 3).
         .onChange(of: aiInputs?.contentID) { _, id in
             explainModel.resetIfChanged(key: id ?? 0)
         }
+        // A provider Explain presents the consent screen before any send (A2b).
+        .aiConsentSheet(
+            provider: explainModel.pendingConsent,
+            purpose: .drawingData,
+            store: providerStore,
+            onAllow: { explainModel.consentAllowed() },
+            onDeny: { explainModel.consentDeclined() })
         .fileExporter(
             isPresented: $isExportingPNG,
             document: pngDocument,

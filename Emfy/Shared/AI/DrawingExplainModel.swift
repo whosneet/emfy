@@ -145,13 +145,27 @@ final class DrawingExplainModel {
 
     private(set) var phase: Phase = .idle
     private(set) var text = ""
+    /// Set when a provider Explain needs consent; the view presents the consent screen.
+    var pendingConsent: AIProviderConfig?
+    /// The configured-provider store, injected by the view, used to resolve the engine.
+    @ObservationIgnored var providerStore: AIProviderStore?
+
     /// Which drawing the current explanation belongs to, so a drawing change resets it.
     @ObservationIgnored private var key: Int?
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// Items held while the consent screen is shown, so Allow can resume.
+    @ObservationIgnored private var pendingItems: (Int, [String])?
 
     var isBusy: Bool {
         if case .streaming = phase { return true }
         return false
+    }
+
+    private var onDeviceAvailable: Bool { EmfySettings.shared.useOnDeviceAI && DrawingAIAvailability.current().isAvailable }
+
+    private var engine: AIEngineChoice? {
+        if let providerStore { return providerStore.resolvedEngine(onDeviceAvailable: onDeviceAvailable) }
+        return onDeviceAvailable ? .onDevice : nil
     }
 
     /// Resets to idle when the open drawing changes, so a stale explanation never shows
@@ -163,21 +177,52 @@ final class DrawingExplainModel {
         self.key = key
         phase = .idle
         text = ""
+        pendingConsent = nil
+        pendingItems = nil
     }
 
-    /// Streams an explanation grounded only in `items` (the diagnostics list).
+    /// Streams an explanation grounded only in `items` (the diagnostics list), with the
+    /// selected engine.
     func explain(key: Int, items: [String]) {
         guard !items.isEmpty else { return }
-        guard #available(macOS 26, iOS 26, *), DrawingAIEngine.isModelAvailable else {
-            phase = .failed("On-device AI isn’t available right now.")
+        guard let engine else {
+            phase = .failed("AI isn’t available right now.")
             return
         }
+        if case .provider(let config) = engine, !(providerStore?.isConsentGranted(config.id) ?? false) {
+            pendingItems = (key, items)
+            pendingConsent = config
+            return
+        }
+        start(key: key, items: items, engine: engine)
+    }
+
+    /// Resumes a held Explain after the consent screen is allowed.
+    func consentAllowed() {
+        pendingConsent = nil
+        guard let (key, items) = pendingItems, let engine else { return }
+        pendingItems = nil
+        start(key: key, items: items, engine: engine)
+    }
+
+    /// Dismisses the consent screen without sending.
+    func consentDeclined() {
+        pendingConsent = nil
+        pendingItems = nil
+    }
+
+    private func start(key: Int, items: [String], engine: AIEngineChoice) {
         task?.cancel()
         self.key = key
         text = ""
         phase = .streaming
         task = Task { [weak self] in
-            await self?.stream(items: items)
+            switch engine {
+            case .onDevice:
+                await self?.streamOnDevice(items: items)
+            case .provider(let config):
+                await self?.streamProvider(items: items, config: config)
+            }
         }
     }
 
@@ -187,8 +232,11 @@ final class DrawingExplainModel {
         if isBusy { phase = text.isEmpty ? .idle : .done }
     }
 
-    @available(macOS 26, iOS 26, *)
-    private func stream(items: [String]) async {
+    private func streamOnDevice(items: [String]) async {
+        guard #available(macOS 26, iOS 26, *), DrawingAIEngine.isModelAvailable else {
+            phase = .failed("On-device AI isn’t available right now.")
+            return
+        }
         let session = LanguageModelSession(instructions: DrawingAIPrompt.structuredInstructions)
         let prompt = DrawingAIPrompt.explainMissingPrompt(items: items)
         do {
@@ -201,6 +249,28 @@ final class DrawingExplainModel {
         } catch {
             if error is CancellationError { phase = text.isEmpty ? .idle : .done; return }
             phase = .failed(DrawingAIEngine.friendlyMessage(for: error))
+        }
+    }
+
+    private func streamProvider(items: [String], config: AIProviderConfig) async {
+        guard let service = providerStore?.service else {
+            phase = .failed("AI isn’t available right now.")
+            return
+        }
+        let request = AIProviderRequestBuilder.explain(items: items, model: config.model)
+        do {
+            let refused = try await DrawingAIProviderRun.stream(
+                service: service, config: config, request: request,
+                onText: { [weak self] value in self?.text = value },
+                onTool: { _ in })
+            if refused {
+                phase = .failed("The provider declined this request.")
+            } else {
+                phase = Task.isCancelled ? (text.isEmpty ? .idle : .done) : .done
+            }
+        } catch {
+            if error is CancellationError { phase = text.isEmpty ? .idle : .done; return }
+            phase = .failed((error as? ProviderError)?.friendlyMessage ?? "Something went wrong with the provider. Please try again.")
         }
     }
 }

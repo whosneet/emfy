@@ -20,6 +20,7 @@ struct MacViewerPane: View {
     @Environment(RecentsStore.self) private var store
     @Environment(ToastCenter.self) private var toast
     @Environment(EmfySettings.self) private var settings
+    @Environment(AIProviderStore.self) private var aiProviders: AIProviderStore?
     @Environment(\.colorScheme) private var colorScheme
     let session: DocumentSession
     /// Clears the window's selection when the file is removed from Recents.
@@ -1703,10 +1704,17 @@ struct MacViewerPane: View {
 
     // MARK: - On-device AI (A1a)
 
-    /// Whether on-device AI is both available and switched on. The AI surface (the
-    /// Describe section, the Ask segment, alt text) appears only when this is true.
-    private var aiEnabled: Bool {
+    /// Whether on-device AI is available and switched on.
+    private var onDeviceReady: Bool {
         settings.useOnDeviceAI && DrawingAIAvailability.current().isAvailable
+    }
+
+    /// Whether the AI surface (Describe, Ask, Explain, alt text) appears: when the
+    /// on-device engine is ready OR a provider is configured (A2b). Alt text stays an
+    /// on-device-only feature.
+    private var aiEnabled: Bool {
+        guard let aiProviders else { return onDeviceReady }
+        return aiProviders.shouldShowAISurface(onDeviceAvailable: onDeviceReady)
     }
 
     /// The AI inputs for this drawing, or `nil` when AI is off or there's nothing to
@@ -1729,13 +1737,15 @@ struct MacViewerPane: View {
     /// "Drawing, <file name>" (A1a).
     private var canvasAccessibilityLabel: String {
         let fallback = "Drawing: \(entry?.baseName ?? "Metafile")"
-        guard aiEnabled else { return fallback }
+        guard onDeviceReady else { return fallback }
         return altTextStore.label(for: session.loadedContentID, fileName: entry?.displayName ?? "")
     }
 
     /// Resets the AI models when the open drawing changes, and seeds alt text when
     /// VoiceOver is running (A1a).
     private func configureAIForCurrentDrawing() {
+        askModel.providerStore = aiProviders
+        describeModel.providerStore = aiProviders
         describeModel.resetIfDrawingChanged(contentID: session.loadedContentID)
         guard let inputs = aiInputs else { return }
         askModel.prepare(
