@@ -136,8 +136,10 @@ final class BatchConvertController {
                 write: { data, url in try data.write(to: url, options: .atomic) },
                 fileExists: { FileManager.default.fileExists(atPath: $0.path) },
                 progress: { done in
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
+                    // The enclosing run task already holds `self` for its lifetime, so a
+                    // short-lived progress hop references it directly (a `weak` capture here
+                    // would only warn about the mixed ownership).
+                    Task { @MainActor in
                         self.completed = max(self.completed, done)
                     }
                 })
