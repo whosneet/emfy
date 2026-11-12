@@ -508,6 +508,7 @@ private struct MacGeneralTab: View {
                 MacOptionRow(title: "Recents to keep", value: $settings.recentsToKeep)
                 Toggle("Reopen last file at launch", isOn: $settings.reopenLastFileAtLaunch)
                 Toggle("Show What’s New after updates", isOn: $settings.showWhatsNewAfterUpdates)
+                Toggle("Show drawings in Spotlight", isOn: $settings.showDrawingsInSpotlight)
                 Toggle("Keep the opened version for Revert", isOn: $settings.keepOpenedVersionForRevert)
                 LabeledContent("Recent files") {
                     Button("Clear Recents…", role: .destructive) {
@@ -542,6 +543,10 @@ private struct MacGeneralTab: View {
         // (the Mac Settings scene is separate — S1a-5 review).
         .onChange(of: settings.privateMode) { _, on in
             store.setPrivate(on)
+        }
+        // The Spotlight toggle reaches the index even with no library window open (F3d).
+        .onChange(of: settings.showDrawingsInSpotlight) { _, _ in
+            SpotlightService.shared.settingsChanged()
         }
         .capReduction(cap, store: store, settings: settings)
     }
@@ -804,6 +809,7 @@ private struct IOSSettingsForm: View {
                 IOSOptionRow(title: "Recents to keep", value: $settings.recentsToKeep)
                 Toggle("Reopen last file at launch", isOn: $settings.reopenLastFileAtLaunch)
                 Toggle("Show What’s New after updates", isOn: $settings.showWhatsNewAfterUpdates)
+                Toggle("Show drawings in Spotlight", isOn: $settings.showDrawingsInSpotlight)
                 Toggle("Keep the opened version for Revert", isOn: $settings.keepOpenedVersionForRevert)
                 Button(role: .destructive) {
                     removal.requestClear(store: store)
@@ -882,6 +888,10 @@ private struct IOSSettingsForm: View {
         // Private mode toggled in More Library Options reaches the store directly.
         .onChange(of: settings.privateMode) { _, on in
             store.setPrivate(on)
+        }
+        // The Spotlight toggle wipes or re-syncs the index (F3d).
+        .onChange(of: settings.showDrawingsInSpotlight) { _, _ in
+            SpotlightService.shared.settingsChanged()
         }
         .capReduction(cap, store: store, settings: settings)
         #if DEBUG
