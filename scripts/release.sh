@@ -35,7 +35,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="${REPO_ROOT}/Emfy/Emfy.xcodeproj"
 SCHEME="Emfy"
-CONFIGURATION="Release"
+# The GitHub/DMG distribution build is the UNSANDBOXED Release-DMG configuration
+# (U1): its own updater replaces the app in place, which the sandbox forbids. The
+# App Store build is the sandboxed Release-AppStore config, archived in Xcode.
+CONFIGURATION="Release-DMG"
 # The Emfy scheme is multiplatform (macOS + iOS). Pin the Mac so xcodebuild
 # never resolves an iOS destination for this Developer ID / DMG build.
 DESTINATION="generic/platform=macOS"
