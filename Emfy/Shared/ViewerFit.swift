@@ -89,6 +89,45 @@ enum ViewerFit {
         return origin
     }
 
+    /// The editor's re-fit decision when the viewport changes (E3e fix B). The Mac editor
+    /// must keep the page fully inside the visible pane — re-fitting when the inspector
+    /// opens or closes and on window resize — while leaving a MANUAL zoom alone, exactly as
+    /// the iPad already does. Returns the magnification to adopt, or nil to keep the
+    /// current one.
+    ///
+    /// Re-fit when: it's the first layout (`hasFittedBefore == false`); or the viewport
+    /// changed and the page was still at its fit scale (not manually zoomed); or the
+    /// viewport changed and the page now OVERFLOWS the visible region (so a shrink — e.g.
+    /// the inspector opening — never leaves it cut off), even after a manual zoom.
+    static func editorRefitScale(
+        content: CGSize,
+        viewport: CGSize,
+        insets: Insets,
+        margin: CGFloat,
+        minScale: CGFloat,
+        maxScale: CGFloat,
+        currentMagnification: CGFloat,
+        previousFitScale: CGFloat,
+        hasFittedBefore: Bool,
+        viewportChanged: Bool
+    ) -> CGFloat? {
+        let fit = fitScale(content: content, viewport: viewport, insets: insets, margin: margin, minScale: minScale, maxScale: maxScale)
+        guard hasFittedBefore else { return fit }
+        guard viewportChanged else { return nil }
+        // Still at the previous fit (within a small relative tolerance) → follow the new fit.
+        if previousFitScale > 0, abs(currentMagnification - previousFitScale) <= previousFitScale * 0.01 {
+            return fit
+        }
+        // Manually zoomed, but the page no longer fits the visible region → snap to fit so
+        // it is never cut off.
+        let available = availableSize(viewport: viewport, insets: insets, margin: margin)
+        if content.width * currentMagnification > available.width + 0.5 ||
+           content.height * currentMagnification > available.height + 0.5 {
+            return fit
+        }
+        return nil
+    }
+
     /// The inset that centres `content * scale` within the safe-area-reduced
     /// viewport (a scroll view's `contentInset`): the safe-area inset on each edge
     /// plus half the slack on each axis. Zero extra on an axis where the scaled

@@ -96,6 +96,11 @@
 		E2C0000000000000000000D1 /* FormatInspectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000D0 /* FormatInspectorTests.swift */; };
 		E2B0000000000000000000F1 /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000F0 /* EditorModel.swift */; };
 		E2B0000000000000000000F2 /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000F0 /* EditorModel.swift */; };
+		E3E0000000000000000000A1 /* EditorArrange.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3E0000000000000000000A0 /* EditorArrange.swift */; };
+		E3E0000000000000000000A2 /* EditorArrange.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3E0000000000000000000A0 /* EditorArrange.swift */; };
+		E3E0000000000000000000B1 /* EditorSnap.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3E0000000000000000000B0 /* EditorSnap.swift */; };
+		E3E0000000000000000000B2 /* EditorSnap.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3E0000000000000000000B0 /* EditorSnap.swift */; };
+		E3E0000000000000000000C1 /* E3ArrangeSnapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3E0000000000000000000C0 /* E3ArrangeSnapTests.swift */; };
 		E3D00000000000000000A001 /* LayerEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D00000000000000000A000 /* LayerEditing.swift */; };
 		E3D00000000000000000A002 /* LayerEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D00000000000000000A000 /* LayerEditing.swift */; };
 		E3D00000000000000000B001 /* E3LayerPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D00000000000000000B000 /* E3LayerPanelTests.swift */; };
@@ -290,6 +295,9 @@
 		E2C0000000000000000000C0 /* EditorTextEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTextEditing.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000D0 /* FormatInspectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatInspectorTests.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000F0 /* EditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorModel.swift; sourceTree = "<group>"; };
+		E3E0000000000000000000A0 /* EditorArrange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorArrange.swift; sourceTree = "<group>"; };
+		E3E0000000000000000000B0 /* EditorSnap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSnap.swift; sourceTree = "<group>"; };
+		E3E0000000000000000000C0 /* E3ArrangeSnapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E3ArrangeSnapTests.swift; sourceTree = "<group>"; };
 		E3D00000000000000000A000 /* LayerEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerEditing.swift; sourceTree = "<group>"; };
 		E3D00000000000000000B000 /* E3LayerPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E3LayerPanelTests.swift; sourceTree = "<group>"; };
 		E3A0000000000000000000A0 /* NewDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewDrawing.swift; sourceTree = "<group>"; };
@@ -480,6 +488,8 @@
 				E2B0000000000000000000D0 /* EditorTransform.swift */,
 				E2B000000000000000000100 /* EditorDebugLaunch.swift */,
 				E2B0000000000000000000F0 /* EditorModel.swift */,
+				E3E0000000000000000000A0 /* EditorArrange.swift */,
+				E3E0000000000000000000B0 /* EditorSnap.swift */,
 				E3D00000000000000000A000 /* LayerEditing.swift */,
 				E3A0000000000000000000A0 /* NewDrawing.swift */,
 				E3A0000000000000000000B0 /* ShapeTool.swift */,
@@ -517,6 +527,7 @@
 				E2B0000000000000000000E0 /* EditorToolsTests.swift */,
 				E2C0000000000000000000D0 /* FormatInspectorTests.swift */,
 				E3D00000000000000000B000 /* E3LayerPanelTests.swift */,
+				E3E0000000000000000000C0 /* E3ArrangeSnapTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -858,6 +869,8 @@
 				E2B0000000000000000000D1 /* EditorTransform.swift in Sources */,
 				E2B000000000000000000101 /* EditorDebugLaunch.swift in Sources */,
 				E2B0000000000000000000F1 /* EditorModel.swift in Sources */,
+				E3E0000000000000000000A1 /* EditorArrange.swift in Sources */,
+				E3E0000000000000000000B1 /* EditorSnap.swift in Sources */,
 				E3A0000000000000000000A1 /* NewDrawing.swift in Sources */,
 				E3A0000000000000000000B1 /* ShapeTool.swift in Sources */,
 				E3C0000000000000000000A1 /* TextImageTools.swift in Sources */,
@@ -952,6 +965,9 @@
 				E3A0000000000000000000D1 /* E3ShapeToolTests.swift in Sources */,
 				E3C0000000000000000000B1 /* E3TextImageToolTests.swift in Sources */,
 				E2B0000000000000000000F2 /* EditorModel.swift in Sources */,
+				E3E0000000000000000000A2 /* EditorArrange.swift in Sources */,
+				E3E0000000000000000000B2 /* EditorSnap.swift in Sources */,
+				E3E0000000000000000000C1 /* E3ArrangeSnapTests.swift in Sources */,
 				E3B000000000000000000051 /* StrokeSmoothingTests.swift in Sources */,
 				E3B000000000000000000061 /* ShapeRecognizerTests.swift in Sources */,
 				E3B000000000000000000071 /* PenToolTests.swift in Sources */,

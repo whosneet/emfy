@@ -74,6 +74,18 @@ final class EditorModel {
 
     /// Disarms every creation tool (Esc, leaving edit mode, arming an image insert).
     func disarmTools() { armedShapeTool = nil; armedPen = false; armedTextTool = false }
+
+    /// Whether the 10 mm editing grid is drawn in the overlay (E3e design call 2). Per
+    /// session only (no persistent default); the View ▸ Show Grid item (⌘') toggles it.
+    var showGrid = false
+
+    /// Whether a drag snaps the moving bounds to the grid (when shown) — View ▸ Snap to
+    /// Grid (E3e design call 3). On by default.
+    var snapToGrid = true
+
+    /// Whether a drag snaps to other elements' and the page's edges/centres with smart
+    /// guides — View ▸ Snap to Guides (E3e design call 3). On by default.
+    var snapToGuides = true
 }
 
 /// The state driving the text-edit popover: which text element, the point to anchor the

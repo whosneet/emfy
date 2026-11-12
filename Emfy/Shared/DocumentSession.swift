@@ -817,6 +817,76 @@ final class DocumentSession {
     func sendSelectionBackward(_ ids: Set<Int>) { apply(.arrange(ids: ids, .backward)) }
     func sendSelectionToBack(_ ids: Set<Int>) { apply(.arrange(ids: ids, .toBack)) }
 
+    // MARK: - Align / distribute (E3e)
+
+    /// Aligns the selected elements (E3e design call 1). The reference is the selection's
+    /// union bounds for 2+ elements, or the page bounds for a single element. Applied as
+    /// one grouped undo entry named for the action.
+    func alignSelection(_ ids: Set<Int>, _ alignment: EditorArrange.Alignment) {
+        guard editing == .editing, let scene = editingScene, !ids.isEmpty else { return }
+        let boxes = arrangeBoxes(ids, in: scene)
+        guard !boxes.isEmpty else { return }
+        let reference = boxes.count >= 2 ? EditorArrange.union(of: boxes) : scene.pageBoundsDevice
+        let deltas = EditorArrange.alignDeltas(boxes, to: reference, alignment)
+        applyArrangement(deltas, name: .group(Self.alignUndoName(alignment)))
+    }
+
+    /// Distributes the selected elements so the gaps between bounds are equal (E3e design
+    /// call 1). A no-op for fewer than 3 elements. One grouped undo entry.
+    func distributeSelection(_ ids: Set<Int>, _ axis: EditorArrange.Distribution) {
+        guard editing == .editing, let scene = editingScene, ids.count >= 3 else { return }
+        let boxes = arrangeBoxes(ids, in: scene)
+        let deltas = EditorArrange.distributeDeltas(boxes, axis)
+        applyArrangement(deltas, name: .group(Self.distributeUndoName(axis)))
+    }
+
+    /// The device-space boxes for the selected ids (skipping any with no usable bounds),
+    /// the input to the align/distribute maths.
+    private func arrangeBoxes(_ ids: Set<Int>, in scene: EMFEdit.Scene) -> [EditorArrange.Box] {
+        ids.compactMap { id in
+            guard let element = scene.elements.first(where: { $0.id == id }) else { return nil }
+            let rect = element.selectionBoundsDevice
+            return rect.isNull ? nil : EditorArrange.Box(id: id, rect: rect)
+        }
+    }
+
+    /// Applies per-element device translations as ONE undo entry named `name` (E3e). Each
+    /// non-zero delta becomes a single-element `.translate` inside one history group, so an
+    /// align/distribute is a single "Align Left"/"Distribute Horizontally" step.
+    func applyArrangement(_ deltas: [EditorArrange.Delta], name: SceneActionName) {
+        guard editing == .editing, var updated = history, !deltas.isEmpty else { return }
+        let before = updated.undoCount
+        updated.beginGroup(name: name)
+        for delta in deltas where delta.dx != 0 || delta.dy != 0 {
+            try? updated.apply(.translate(ids: [delta.id], dx: delta.dx, dy: delta.dy))
+        }
+        updated.endGroup()
+        history = updated
+        if updated.undoCount > before { registerSystemUndo(name: name) }
+        afterMutation(markDirty: true)
+    }
+
+    /// The menu / undo display name for an alignment (app-layer text; the model never
+    /// hard-codes display strings).
+    static func alignUndoName(_ alignment: EditorArrange.Alignment) -> String {
+        switch alignment {
+        case .left: return "Align Left"
+        case .centreHorizontal: return "Align Centre"
+        case .right: return "Align Right"
+        case .top: return "Align Top"
+        case .centreVertical: return "Align Middle"
+        case .bottom: return "Align Bottom"
+        }
+    }
+
+    /// The menu / undo display name for a distribution.
+    static func distributeUndoName(_ axis: EditorArrange.Distribution) -> String {
+        switch axis {
+        case .horizontal: return "Distribute Horizontally"
+        case .vertical: return "Distribute Vertically"
+        }
+    }
+
     /// Deletes the selected elements as ONE undoable step and clears the selection
     /// (design call E2c-4). Undo restores both the elements (through `SceneHistory`)
     /// and the selection to those ids; redo deletes and clears again. Routes through
