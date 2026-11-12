@@ -153,6 +153,7 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
         DrawingAIEvalSuite.runIfNeeded()
         DrawingAIDebugProbe.runIfNeeded()
         DrawingAIScreenshots.runIfNeeded()
+        AIProviderScreenshots.runIfNeeded()
         #endif
     }
 
@@ -265,6 +266,19 @@ private struct RootView: View {
 
     @ViewBuilder
     private var content: some View {
+        #if os(iOS) && DEBUG
+        if AIProviderScreenshots.iosSettingsRequested {
+            AIProviderScreenshots.iosSettingsScreen()
+        } else {
+            baseContent
+        }
+        #else
+        baseContent
+        #endif
+    }
+
+    @ViewBuilder
+    private var baseContent: some View {
         #if os(iOS) && DEBUG
         if let probeIndex = QuickLookProbeView.requestedStartIndex {
             QuickLookProbeView(startIndex: probeIndex)
