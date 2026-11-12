@@ -161,6 +161,16 @@ final class UpdateController {
             let staged = try UpdateStaging.stage(verifiedApp: verified.appURL)
             verifier.detach(mountPoint: verified.mountPoint)
             try? FileManager.default.removeItem(at: dmg)
+            // TOCTOU guard: re-verify the STAGED copy (now on a user-writable path)
+            // immediately. Any failure deletes it and aborts.
+            do {
+                try await Task.detached {
+                    try verifier.verifyStagedBundle(appURL: staged, expectedBundleID: bundleID, current: current)
+                }.value
+            } catch {
+                try? FileManager.default.removeItem(at: staged)
+                throw error
+            }
             stagedAppURL = staged
             phase = .readyToInstall(version: String(describing: verified.version))
         } catch let error as UpdateError {
@@ -212,6 +222,15 @@ final class UpdateController {
             isTranslocated: facts.translocated) != nil {
             return   // the UI already surfaced the refusal; never touch the bundle
         }
+        // TOCTOU guard: re-verify the staged copy ONE LAST TIME before swapping — it may
+        // have sat on a writable path for hours. A failure deletes it and aborts.
+        do {
+            try verifier.verifyStagedBundle(appURL: staged, expectedBundleID: bundleID, current: current)
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            stagedAppURL = nil
+            return
+        }
         didLaunchSwap = true
         launchSwapHelper(staged: staged, target: bundleURL)
     }
@@ -235,10 +254,12 @@ final class UpdateController {
             stagedApp: staged.path,
             targetApp: target.path,
             backupPath: backup.path))
-        let scriptURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("EmfyUpdateSwap-\(UUID().uuidString).sh")
         do {
+            let helperDir = try UpdateStaging.helperDirectory()
+            let scriptURL = helperDir.appendingPathComponent("swap-\(UUID().uuidString).sh")
             try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            // Lock the script to the owner only, so it can't be swapped before it runs.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
             process.arguments = [scriptURL.path]
@@ -253,10 +274,19 @@ final class UpdateController {
     /// verification b), driven by `-EmfyDebugUpdateAvailable <version>`. No network.
     private func seedDebugStateIfRequested() {
         let args = ProcessInfo.processInfo.arguments
-        guard let i = args.firstIndex(of: "-EmfyDebugUpdateAvailable"), i + 1 < args.count else { return }
-        let version = args[i + 1]
+        guard args.contains("-EmfyDebugUpdateAvailable") else { return }
+        // Default to a version strictly NEWER than the running one (current patch + 1),
+        // so the screenshot never advertises an older build as an update. An explicit
+        // argument is honoured only when it genuinely parses as newer.
+        let newer = AppVersion(core: [current.core[0], current.core[1], current.core[2] + 1],
+                               build: (current.build ?? 0) + 1)
+        var text = "\(newer.core.map(String.init).joined(separator: ".")) (\(newer.build ?? 0))"
+        if let i = args.firstIndex(of: "-EmfyDebugUpdateAvailable"), i + 1 < args.count,
+           let provided = AppVersion(tag: args[i + 1]), provided > current {
+            text = args[i + 1]
+        }
         lastChecked = Date()
-        phase = .available(version: version)
+        phase = .available(version: text)
     }
     #endif
 

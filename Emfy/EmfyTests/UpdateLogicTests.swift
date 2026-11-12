@@ -244,6 +244,8 @@ struct UpdateLogicTests {
         #expect(script.contains("/usr/bin/open '/Applications/Emfy.app'"))
         // The restore branch exists.
         #expect(script.contains("/bin/mv '/Applications/.Emfy.app.backup-1' '/Applications/Emfy.app'"))
+        // The script deletes itself on every exit path.
+        #expect(script.contains("trap '/bin/rm -f \"$0\"' EXIT"))
     }
 
     @Test func swapScriptEscapesSingleQuotes() {

@@ -40,6 +40,8 @@ enum UpdateSwapScript {
         # Emfy update swap helper (generated). Waits for pid \(p.pid) to exit, then
         # replaces the app bundle in place with a backup, and relaunches.
         set -u
+        # Delete this script on every exit path, so it never lingers on disk.
+        trap '/bin/rm -f "$0"' EXIT
         i=0
         while kill -0 \(p.pid) 2>/dev/null; do
             i=$((i + 1))

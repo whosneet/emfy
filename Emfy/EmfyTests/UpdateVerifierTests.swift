@@ -40,6 +40,49 @@ struct UpdateVerifierTests {
         }
     }
 
+    @Test func processRunTimesOut() {
+        // A child that outlives the timeout is terminated and reported as a typed
+        // timeout — spctl can stall on an online revocation check, so verification
+        // must never hang forever.
+        #expect(throws: UpdateError.verificationTimedOut) {
+            _ = try UpdateProcess.run("/bin/sleep", ["5"], timeout: 1)
+        }
+    }
+
+    @Test func stagedBundleReverificationRefusesTampered() throws {
+        // The TOCTOU guard: an unsigned/tampered staged bundle must fail
+        // re-verification, so it never swaps in.
+        let (dir, app) = try Self.makeUnsignedBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(throws: UpdateError.self) {
+            try SecurityUpdateVerifier().verifyStagedBundle(
+                appURL: app, expectedBundleID: "com.avneetsingh.emfy",
+                current: AppVersion(core: [3, 0, 0], build: 5))
+        }
+    }
+
+    /// Builds a minimal, UNSIGNED `.app` in a fresh temp dir; returns (dir, appURL).
+    private static func makeUnsignedBundle() throws -> (URL, URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyUnsigned-\(UUID().uuidString)", isDirectory: true)
+        let app = dir.appendingPathComponent("Emfy.app", isDirectory: true)
+        let macos = app.appendingPathComponent("Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
+        let info = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>com.avneetsingh.emfy</string>
+          <key>CFBundleExecutable</key><string>Emfy</string>
+          <key>CFBundleShortVersionString</key><string>9.9.9</string>
+          <key>CFBundleVersion</key><string>999</string>
+        </dict></plist>
+        """
+        try Data(info.utf8).write(to: app.appendingPathComponent("Contents/Info.plist"))
+        try Data([0x7f, 0x45, 0x4c, 0x46]).write(to: macos.appendingPathComponent("Emfy"))
+        return (dir, app)
+    }
+
     @Test func unsignedBundleFailsSignatureCheck() throws {
         // Build a minimal, UNSIGNED .app in a temp dir. The designated-requirement
         // validity check must throw .signatureInvalid — it never installs an app that

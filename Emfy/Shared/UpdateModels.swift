@@ -103,6 +103,7 @@ enum UpdateError: Error, Equatable, Sendable {
     case appNotFoundInImage
     case signatureInvalid(String)
     case notNotarized
+    case verificationTimedOut
     case bundleIdentifierMismatch
     case notNewer
     case targetNotWritable
@@ -117,7 +118,7 @@ enum UpdateError: Error, Equatable, Sendable {
             return "Emfy couldn’t check for updates."
         case .notHTTPS, .hostNotAllowed, .downloadTooLarge,
              .digestUnavailable, .digestMismatch, .signatureInvalid,
-             .notNotarized, .bundleIdentifierMismatch:
+             .notNotarized, .bundleIdentifierMismatch, .verificationTimedOut:
             return "The update couldn’t be verified and was not installed."
         case .notNewer:
             return "Emfy is already up to date."

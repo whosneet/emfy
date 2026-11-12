@@ -18,6 +18,12 @@ protocol UpdateVerifying: Sendable {
         current: AppVersion
     ) throws -> VerifiedUpdate
 
+    /// Re-verifies an already-STAGED bundle (not in a mount): signature + designated
+    /// requirement + Gatekeeper + bundle-ID + newer-version. Run right after staging
+    /// and again immediately before the swap, so a tampered staged copy never installs
+    /// (TOCTOU). Throws on any failure.
+    func verifyStagedBundle(appURL: URL, expectedBundleID: String, current: AppVersion) throws
+
     /// Detaches a mount opened by `verify`.
     func detach(mountPoint: URL)
 }
@@ -177,29 +183,71 @@ struct SecurityUpdateVerifier: UpdateVerifying {
         }
     }
 
+    /// Re-verifies a staged bundle in place (TOCTOU guard). No digest, no mount — the
+    /// staged copy is on a user-writable path, so its signature is the source of truth.
+    func verifyStagedBundle(appURL: URL, expectedBundleID: String, current: AppVersion) throws {
+        try Self.checkCodeSignature(appURL: appURL)
+        try Self.checkGatekeeper(appURL: appURL)
+        _ = try Self.checkIdentityAndVersion(
+            appURL: appURL, expectedBundleID: expectedBundleID, current: current)
+    }
+
+    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 120) throws -> UpdateProcess.Result {
+        try UpdateProcess.run(path, args, timeout: timeout)
+    }
+
     func detach(mountPoint: URL) {
         Self.detachMount(mountPoint)
     }
+}
 
-    // MARK: Process helper
+/// A `Process` runner that drains stdout and stderr CONCURRENTLY (so a child that
+/// fills one pipe can never deadlock against a sequential read of the other) and
+/// enforces a hard timeout (`spctl` can stall on an online revocation check). On
+/// timeout the child is terminated and `.verificationTimedOut` is thrown.
+enum UpdateProcess {
+    struct Result { let exitCode: Int32; let stdout: String; let stderr: String }
 
-    private struct ProcessResult { let exitCode: Int32; let stdout: String; let stderr: String }
-
-    private static func run(_ path: String, _ args: [String]) throws -> ProcessResult {
+    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 120) throws -> Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
+
+        // Drain both pipes on their own concurrent tasks so neither blocks the other.
+        let queue = DispatchQueue(label: "com.avneetsingh.emfy.update.proc", attributes: .concurrent)
+        let drain = DispatchGroup()
+        let lock = NSLock()
+        var outData = Data(), errData = Data()
+        func drainPipe(_ pipe: Pipe, isOut: Bool) {
+            drain.enter()
+            queue.async {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                lock.lock(); if isOut { outData = data } else { errData = data }; lock.unlock()
+                drain.leave()
+            }
+        }
+
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
         try process.run()
-        let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return ProcessResult(
+        drainPipe(out, isOut: true)
+        drainPipe(err, isOut: false)
+
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            _ = done.wait(timeout: .now() + 3)
+            _ = drain.wait(timeout: .now() + 3)
+            throw UpdateError.verificationTimedOut
+        }
+        drain.wait()
+        lock.lock(); let o = outData, e = errData; lock.unlock()
+        return Result(
             exitCode: process.terminationStatus,
-            stdout: String(decoding: outData, as: UTF8.self),
-            stderr: String(decoding: errData, as: UTF8.self))
+            stdout: String(decoding: o, as: UTF8.self),
+            stderr: String(decoding: e, as: UTF8.self))
     }
 }
 #endif

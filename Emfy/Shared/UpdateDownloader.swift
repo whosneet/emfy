@@ -95,18 +95,44 @@ enum UpdateStaging {
         try baseDirectory().appendingPathComponent("staged", isDirectory: true)
     }
 
+    /// The private directory the swap helper script is written into, created 0700 so
+    /// no other user can read or replace the script between write and launch.
+    static func helperDirectory() throws -> URL {
+        let dir = try baseDirectory().appendingPathComponent("helper", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        return dir
+    }
+
     /// Copies the verified app into the staged directory and returns its path. A
-    /// previous staged copy is cleared first so staging is idempotent.
+    /// previous staged copy is cleared first so staging is idempotent. Uses `ditto`
+    /// (not `FileManager.copyItem`) so symlinks, extended attributes and the code
+    /// signature are preserved byte-for-byte — the caller re-verifies the staged copy
+    /// regardless (TOCTOU guard).
     static func stage(verifiedApp: URL) throws -> URL {
         let staged = try stagedDirectory()
         try? FileManager.default.removeItem(at: staged)
-        try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: staged, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
         let dest = staged.appendingPathComponent("Emfy.app", isDirectory: true)
+        #if os(macOS)
+        do {
+            let result = try UpdateProcess.run("/usr/bin/ditto", [verifiedApp.path, dest.path], timeout: 120)
+            guard result.exitCode == 0 else { throw UpdateError.stagingFailed(result.stderr) }
+        } catch let error as UpdateError {
+            throw error
+        } catch {
+            throw UpdateError.stagingFailed(error.localizedDescription)
+        }
+        #else
         do {
             try FileManager.default.copyItem(at: verifiedApp, to: dest)
         } catch {
             throw UpdateError.stagingFailed(error.localizedDescription)
         }
+        #endif
         return dest
     }
 }
