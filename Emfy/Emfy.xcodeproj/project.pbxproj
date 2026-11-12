@@ -202,6 +202,22 @@
 		B01100000000000000000406 /* SharedRenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000321 /* SharedRenderSettings.swift */; };
 		B01100000000000000000407 /* SharedRenderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000321 /* SharedRenderSettings.swift */; };
 		B01100000000000000000408 /* QuickLookSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000340 /* QuickLookSettingsTests.swift */; };
+		CA0000000000000000000001 /* UpdateVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* UpdateVersion.swift */; };
+		CA0000000000000000000002 /* UpdateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* UpdateModels.swift */; };
+		CA0000000000000000000003 /* UpdateSwapScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* UpdateSwapScript.swift */; };
+		CA0000000000000000000004 /* UpdateMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000004 /* UpdateMode.swift */; };
+		CA0000000000000000000005 /* UpdateDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000005 /* UpdateDownloader.swift */; };
+		CA0000000000000000000006 /* UpdateVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000006 /* UpdateVerifier.swift */; };
+		CA0000000000000000000007 /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000007 /* UpdateController.swift */; };
+		CA0000000000000000000008 /* UpdatesUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000008 /* UpdatesUI.swift */; };
+		CB0000000000000000000001 /* UpdateVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* UpdateVersion.swift */; };
+		CB0000000000000000000002 /* UpdateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* UpdateModels.swift */; };
+		CB0000000000000000000003 /* UpdateSwapScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* UpdateSwapScript.swift */; };
+		CB0000000000000000000004 /* UpdateMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000004 /* UpdateMode.swift */; };
+		CB0000000000000000000005 /* UpdateDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000005 /* UpdateDownloader.swift */; };
+		CB0000000000000000000006 /* UpdateVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000006 /* UpdateVerifier.swift */; };
+		CB0000000000000000000009 /* UpdateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000009 /* UpdateLogicTests.swift */; };
+		CB000000000000000000000A /* UpdateVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000A /* UpdateVerifierTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -384,6 +400,16 @@
 		B00100000000000000000330 /* EmfyiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmfyiOS.entitlements; sourceTree = "<group>"; };
 		B00100000000000000000331 /* EmfyiOSQuickLook.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmfyiOSQuickLook.entitlements; sourceTree = "<group>"; };
 		B00100000000000000000332 /* EmfyiOSThumbnail.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EmfyiOSThumbnail.entitlements; sourceTree = "<group>"; };
+		C00000000000000000000001 /* UpdateVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateVersion.swift; sourceTree = "<group>"; };
+		C00000000000000000000002 /* UpdateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateModels.swift; sourceTree = "<group>"; };
+		C00000000000000000000003 /* UpdateSwapScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateSwapScript.swift; sourceTree = "<group>"; };
+		C00000000000000000000004 /* UpdateMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateMode.swift; sourceTree = "<group>"; };
+		C00000000000000000000005 /* UpdateDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateDownloader.swift; sourceTree = "<group>"; };
+		C00000000000000000000006 /* UpdateVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateVerifier.swift; sourceTree = "<group>"; };
+		C00000000000000000000007 /* UpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateController.swift; sourceTree = "<group>"; };
+		C00000000000000000000008 /* UpdatesUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesUI.swift; sourceTree = "<group>"; };
+		C00000000000000000000009 /* UpdateLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateLogicTests.swift; sourceTree = "<group>"; };
+		C0000000000000000000000A /* UpdateVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateVerifierTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -515,6 +541,14 @@
 				E2C0000000000000000000A0 /* FormatInspectorModel.swift */,
 				E2C0000000000000000000B0 /* EditorFormatInspector.swift */,
 				E2C0000000000000000000C0 /* EditorTextEditing.swift */,
+				C00000000000000000000001 /* UpdateVersion.swift */,
+				C00000000000000000000002 /* UpdateModels.swift */,
+				C00000000000000000000003 /* UpdateSwapScript.swift */,
+				C00000000000000000000004 /* UpdateMode.swift */,
+				C00000000000000000000005 /* UpdateDownloader.swift */,
+				C00000000000000000000006 /* UpdateVerifier.swift */,
+				C00000000000000000000007 /* UpdateController.swift */,
+				C00000000000000000000008 /* UpdatesUI.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -541,6 +575,8 @@
 				E3D00000000000000000B000 /* E3LayerPanelTests.swift */,
 				E3E0000000000000000000C0 /* E3ArrangeSnapTests.swift */,
 				E4A0000000000000000000D0 /* E4LightEditingTests.swift */,
+				C00000000000000000000009 /* UpdateLogicTests.swift */,
+				C0000000000000000000000A /* UpdateVerifierTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -933,6 +969,14 @@
 				B0110000000000000000030B /* CapReductionController.swift in Sources */,
 				B01100000000000000000400 /* AppGroup.swift in Sources */,
 				B01100000000000000000404 /* SharedRenderSettings.swift in Sources */,
+				CA0000000000000000000001 /* UpdateVersion.swift in Sources */,
+				CA0000000000000000000002 /* UpdateModels.swift in Sources */,
+				CA0000000000000000000003 /* UpdateSwapScript.swift in Sources */,
+				CA0000000000000000000004 /* UpdateMode.swift in Sources */,
+				CA0000000000000000000005 /* UpdateDownloader.swift in Sources */,
+				CA0000000000000000000006 /* UpdateVerifier.swift in Sources */,
+				CA0000000000000000000007 /* UpdateController.swift in Sources */,
+				CA0000000000000000000008 /* UpdatesUI.swift in Sources */,
 				B01100000000000000000F40 /* SVGExport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1032,6 +1076,14 @@
 				E3B000000000000000000032 /* PenTool.swift in Sources */,
 				B01100000000000000000408 /* QuickLookSettingsTests.swift in Sources */,
 				B01100000000000000000F41 /* SVGExport.swift in Sources */,
+				CB0000000000000000000001 /* UpdateVersion.swift in Sources */,
+				CB0000000000000000000002 /* UpdateModels.swift in Sources */,
+				CB0000000000000000000003 /* UpdateSwapScript.swift in Sources */,
+				CB0000000000000000000004 /* UpdateMode.swift in Sources */,
+				CB0000000000000000000005 /* UpdateDownloader.swift in Sources */,
+				CB0000000000000000000006 /* UpdateVerifier.swift in Sources */,
+				CB0000000000000000000009 /* UpdateLogicTests.swift in Sources */,
+				CB000000000000000000000A /* UpdateVerifierTests.swift in Sources */,
 				B01100000000000000000F42 /* SVGExportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
