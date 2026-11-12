@@ -928,6 +928,7 @@ struct MacViewerPane: View {
             ToolbarSpacer(.fixed)
             ToolbarItem { fitButton }
             ToolbarSpacer(.fixed)
+            if session.editing != .editing { ToolbarItem { dragHandle } }
             ToolbarItem { shareMenu }
             ToolbarItem { infoButton }
         } else {
@@ -944,10 +945,35 @@ struct MacViewerPane: View {
                 MacZoomPercentLabel(controller: controller)
                 zoomInButton
                 fitButton
+                if session.editing != .editing { dragHandle }
                 shareMenu
                 infoButton
             }
         }
+    }
+
+    /// The document-proxy drag handle (F1 design call 3), shown in viewer mode. Dragging
+    /// it provides the whole drawing as a PDF file promise + PNG, plus the original EMF
+    /// when it cleanly applies. Chosen over an ⌥-drag on the canvas, which already owns
+    /// pan/magnify/element-drag gestures.
+    private var dragHandle: some View {
+        Image(systemName: "square.and.arrow.up.on.square")
+            .foregroundStyle(loaded == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+            .onDrag { makeDragProvider() }
+            .help("Drag out as PDF or PNG")
+            .accessibilityLabel("Drag Out")
+            .allowsHitTesting(loaded != nil)
+    }
+
+    /// Builds the drag item provider for the current drawing (F1 design call 3).
+    private func makeDragProvider() -> NSItemProvider {
+        guard let loaded, let entry else { return NSItemProvider() }
+        let background: RenderBackground = settings.pngBackground == .transparent ? .transparent : .white
+        return MacDrawingDrag.itemProvider(
+            prepared: loaded.prepared, baseName: entry.baseName,
+            pngScale: settings.defaultPNGScale.multiplier, background: background,
+            options: settings.renderOptions, bookmark: entry.bookmark,
+            originalIsEMF: entry.formatLabel.uppercased() == "EMF")
     }
 
     /// The Shapes menu (E3a design call 5), present only in edit mode. Choosing a
