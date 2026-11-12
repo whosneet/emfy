@@ -133,6 +133,11 @@ struct EditMenuCommands: Commands {
             Button("Deselect All") { actions?.deselectElements?() }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .disabled(actions?.deselectElements == nil)
+            Divider()
+            // Insert ▸ Image… (E3c). ⇧⌘I is free; it opens an images-only NSOpenPanel.
+            Button("Insert Image…") { actions?.insertImage?() }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(actions?.insertImage == nil)
         }
     }
 }

@@ -29,9 +29,13 @@ struct MacEditingContainer: View {
                     // canvas's cursor refreshes the moment a shape or pen is armed/disarmed.
                     armedTool: editorModel.armedShapeTool,
                     armedPen: editorModel.armedPen,
+                    armedText: editorModel.armedTextTool,
                     pageShadow: pageShadow, tilePaint: tilePaint, options: options,
                     apply: { command, key in session.apply(command, coalescing: key) },
                     delete: { ids in session.deleteSelection(ids) },
+                    // Opens the coalesced "Insert Text" group; the popover's commit/cancel
+                    // closes it (E3c design call 1).
+                    beginInsertText: { element in session.beginInsertText(element) },
                     // The scene's undo manager, handled by the overlay as first responder so
                     // Edit ▸ Undo/Redo and ⌘Z/⇧⌘Z reach SceneHistory (E2d).
                     sceneUndoManager: session.undoManager
@@ -53,8 +57,10 @@ struct MacEditingContainer: View {
         .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center), arrowEdge: .top) { request in
             TextEditPopover(
                 request: request,
-                onCommit: { string in session.apply(.setText(id: request.id, string)) },
-                onCancel: {},
+                // Routes through the insert-text group when the run is a brand-new text
+                // (one "Insert Text" undo); a plain `setText` for an existing element (E3c).
+                onCommit: { string in session.commitInsertedText(id: request.id, string: string) },
+                onCancel: { session.cancelInsertedText(id: request.id) },
                 onClose: { editorModel.textEdit = nil }
             )
         }
@@ -82,6 +88,8 @@ struct MacEditableCanvas: NSViewRepresentable {
     var armedTool: ShapeToolKind? = nil
     /// Whether the pen is armed (E3b). Stored for the same cursor-refresh reason.
     var armedPen: Bool = false
+    /// Whether the text tool is armed (E3c). Stored for the same cursor-refresh reason.
+    var armedText: Bool = false
     var pageShadow: Bool = true
     var tilePaint: TilePaint = .plain
     var options: RenderOptions = .default
@@ -89,6 +97,8 @@ struct MacEditableCanvas: NSViewRepresentable {
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
     /// Deletes the given ids as one undoable step (design call E2c-4).
     let delete: (Set<Int>) -> Void
+    /// Begins the coalesced insert-text undo group for a new text element (E3c).
+    let beginInsertText: (EMFEdit.Element) -> Void
     /// The scene's undo manager, handled by the overlay as first responder (E2d).
     let sceneUndoManager: UndoManager
 
@@ -311,6 +321,28 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Whether a shape-creation tool is currently armed (E3a).
         var isShapeToolArmed: Bool { parent.editorModel.armedShapeTool != nil }
 
+        /// Whether the text-creation tool is currently armed (E3c).
+        var isTextToolArmed: Bool { parent.editorModel.armedTextTool }
+
+        /// Inserts a new text element at the clicked device point, selects it, opens the
+        /// text popover on it (one coalesced "Insert Text" undo), and disarms the tool.
+        /// The popover anchors to the just-built element directly — the coordinator's
+        /// `scene` snapshot has not yet been refreshed with the insert this frame.
+        private func insertText(at viewPoint: CGPoint) {
+            let origin = mapping.devicePoint(fromView: viewPoint)
+            let insertion = TextToolInsertion.element(originDevice: origin, in: scene)
+            parent.beginInsertText(insertion.element)
+            var next = EditorSelection()
+            next.replace(with: insertion.id)
+            selection = next
+            parent.editorModel.armedTextTool = false
+            if let overlay { overlay.window?.invalidateCursorRects(for: overlay) }
+            parent.editorModel.textEdit = TextEditRequest(
+                id: insertion.id, anchor: anchor(for: insertion.element),
+                initialText: insertion.element.text?.string ?? TextToolInsertion.placeholder)
+            overlay?.needsDisplay = true
+        }
+
         func mouseDown(at viewPoint: CGPoint, shift: Bool, command: Bool) {
             overlay?.window?.makeFirstResponder(overlay)
             parent.editorModel.rotationReadout = nil
@@ -321,6 +353,13 @@ struct MacEditableCanvas: NSViewRepresentable {
                 state.shapeKind = tool
                 drag = state
                 overlay?.needsDisplay = true
+                return
+            }
+
+            // 0a. The armed text tool inserts a new text element at the click and opens its
+            //     popover; the tool disarms after one insert (E3c design call 1).
+            if parent.editorModel.armedTextTool {
+                insertText(at: viewPoint)
                 return
             }
 
@@ -658,8 +697,8 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Esc cancels a drag or clears the selection; ⌘A selects all.
         func keyDown(_ event: NSEvent) -> Bool {
             if event.keyCode == 53 {   // Esc
-                // An armed creation tool (shape or pen) disarms first, cancelling any draw.
-                if isShapeToolArmed || isPenArmed {
+                // An armed creation tool (shape, pen or text) disarms first, cancelling any draw.
+                if isShapeToolArmed || isPenArmed || isTextToolArmed {
                     cancelDrag()
                     parent.editorModel.disarmTools()
                     if let overlay { overlay.window?.invalidateCursorRects(for: overlay) }
@@ -1083,8 +1122,8 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
     // MARK: Cursors
 
     override func resetCursorRects() {
-        // An armed creation tool (shape or pen) shows a crosshair across the canvas.
-        if coordinator?.isShapeToolArmed == true || coordinator?.isPenArmed == true {
+        // An armed creation tool (shape, pen or text) shows a crosshair across the canvas.
+        if coordinator?.isShapeToolArmed == true || coordinator?.isPenArmed == true || coordinator?.isTextToolArmed == true {
             addCursorRect(bounds, cursor: .crosshair)
             return
         }

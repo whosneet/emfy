@@ -269,6 +269,8 @@ struct MacViewerPane: View {
         case "undo-redo": await runUndoRedoScript(base: base)
         case "new-shapes": await runNewShapesScript(base: base)
         case "pen-strokes": await runPenStrokesScript(base: base)
+        case "text-image": await runTextImageScript(base: base)
+        case "text-popover": await runTextPopoverScript(base: base)
         default: Self.logScript("unknown script \(script)"); exit(1)
         }
     }
@@ -418,6 +420,71 @@ struct MacViewerPane: View {
         Self.logScript("pen-strokes: ids=\(id1 ?? -1),\(id2 ?? -1),\(id3 ?? -1),\(id4 ?? -1) kinds=[\(kinds)] savedPath=\(resolvedEntryPath() ?? "?") saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil")")
         try? await Task.sleep(for: .milliseconds(200))
         exit(session.lastSaveError == nil ? 0 : 3)
+    }
+
+    /// `text-image` (E3c): a blank drawing → edit mode → insert a text element "Hello Emfy"
+    /// and an in-process gradient image through the SAME tool commit paths
+    /// (`debugInsertText` / `debugInsertImage`) → select the image → screenshot (d) → save →
+    /// exit. A `plain` relaunch proves persistence.
+    @MainActor
+    private func runTextImageScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("text-image: begin editing failed"); exit(2) }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        let textID = session.debugInsertText("Hello Emfy", originDevice: CGPoint(x: page.width * 0.12, y: page.height * 0.2))
+        let imageID = session.debugInsertImage(Self.debugGradientPNG(), centreDevice: CGPoint(x: page.width * 0.5, y: page.height * 0.6))
+        if let imageID { editorModel.selection.replace(with: imageID) }
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(1000))
+        if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-d-text-image.png") {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-d-text-image.png")
+        }
+        await session.save()
+        try? await Task.sleep(for: .milliseconds(500))
+        session.debugCancelAutosave()
+        let kinds = session.editingScene?.editableElements.map { "\($0.kind)" }.joined(separator: ",") ?? "?"
+        Self.logScript("text-image: textID=\(textID ?? -1) imageID=\(imageID ?? -1) kinds=[\(kinds)] savedPath=\(resolvedEntryPath() ?? "?") saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil")")
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(session.lastSaveError == nil ? 0 : 3)
+    }
+
+    /// `text-popover` (E3c): a blank drawing → edit mode → insert a text element and open its
+    /// popover (the SAME popover a text-tool click opens) → screenshot (e, composited so the
+    /// popover child window shows over the canvas) → exit.
+    @MainActor
+    private func runTextPopoverScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing, let scene = session.editingScene else { Self.logScript("text-popover: begin editing failed"); exit(2) }
+        let page = scene.pageSizeDevice
+        let insertion = TextToolInsertion.element(originDevice: CGPoint(x: page.width * 0.2, y: page.height * 0.35), in: scene)
+        session.beginInsertText(insertion.element)
+        editorModel.selection.replace(with: insertion.id)
+        editorModel.textEdit = TextEditRequest(id: insertion.id, anchor: UnitPoint(x: 0.3, y: 0.4), initialText: insertion.element.text?.string ?? "Text")
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(1200))
+        _ = EditorDebugScreenshot.captureAllWindows(to: base + "-e-text-popover.png")
+        Self.logScript("text-popover: id=\(insertion.id) popoverOpen=\(editorModel.textEdit != nil)")
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(0)
+    }
+
+    /// A small in-process gradient PNG, so the image-insert script needs no external file.
+    @MainActor
+    private static func debugGradientPNG() -> Data {
+        let size = NSSize(width: 240, height: 160)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSGradient(starting: .systemBlue, ending: .systemOrange)?.draw(in: NSRect(origin: .zero, size: size), angle: 45)
+        image.unlockFocus()
+        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return Data() }
+        return png
     }
 
     /// A wavy open freehand line (top-left): too wavy to be a straight line, and no hold, so
@@ -734,6 +801,8 @@ struct MacViewerPane: View {
             if session.editing == .editing {
                 ToolbarItem { shapesMenu }
                 ToolbarItem { penMenu }
+                ToolbarItem { textButton }
+                ToolbarItem { imageButton }
             }
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
@@ -753,6 +822,8 @@ struct MacViewerPane: View {
                 if session.editing == .editing {
                     shapesMenu
                     penMenu
+                    textButton
+                    imageButton
                 }
                 zoomOutButton
                 MacZoomPercentLabel(controller: controller)
@@ -822,6 +893,65 @@ struct MacViewerPane: View {
         .help("Pen")
         .symbolVariant(editorModel.armedPen ? .fill : .none)
         .foregroundStyle(editorModel.armedPen ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+    }
+
+    /// The Text tool (E3c design call 1), present only in edit mode. Tapping it arms the
+    /// tool; the next canvas click inserts a text element and opens its popover, then the
+    /// tool disarms (Keynote). A tint marks the armed state.
+    private var textButton: some View {
+        Button {
+            if editorModel.armedTextTool { editorModel.disarmTools() } else { editorModel.armText() }
+        } label: {
+            Label("Text", systemImage: "textformat")
+        }
+        .help("Text")
+        .symbolVariant(editorModel.armedTextTool ? .fill : .none)
+        .foregroundStyle(editorModel.armedTextTool ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+    }
+
+    /// The Insert Image button (E3c design call 2), present only in edit mode: it opens
+    /// an images-only NSOpenPanel and inserts the chosen image centred on the page.
+    private var imageButton: some View {
+        Button {
+            presentImagePanel()
+        } label: {
+            Label("Image", systemImage: "photo")
+        }
+        .help("Insert Image…")
+    }
+
+    /// Opens an images-only open panel and inserts the chosen file centred on the page
+    /// (one undo), selecting the new image; a decode/cap failure toasts (design call 2).
+    /// Arming an image insert disarms the other creation tools (single armed tool).
+    private func presentImagePanel() {
+        guard session.editing == .editing else { return }
+        editorModel.disarmTools()
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.prompt = "Insert"
+        panel.message = "Choose an image to insert"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            MainActor.assumeIsolated { insertImage(from: url) }
+        }
+    }
+
+    /// Reads `url`'s bytes (security-scoped) and inserts them through the session's
+    /// capped, metadata-stripping image path, selecting the new element.
+    private func insertImage(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            toast.show("This image couldn’t be added", systemImage: "photo.badge.exclamationmark")
+            return
+        }
+        if let id = session.insertImage(data: data) {
+            editorModel.selection.replace(with: id)
+        } else {
+            toast.show("This image couldn’t be added", systemImage: "photo.badge.exclamationmark")
+        }
     }
 
     /// The Edit toggle (design call E2b-1), modelled on Preview's Markup button:
@@ -1010,7 +1140,8 @@ struct MacViewerPane: View {
             revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil,
             selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,
             deselectElements: (session.editing == .editing && !editorModel.selection.isEmpty) ? { editorModel.selection.clear() } : nil,
-            deleteSelection: (session.editing == .editing && !editorModel.selection.isEmpty) ? { session.deleteSelection(editorModel.selection.ids) } : nil
+            deleteSelection: (session.editing == .editing && !editorModel.selection.isEmpty) ? { session.deleteSelection(editorModel.selection.ids) } : nil,
+            insertImage: session.editing == .editing ? { presentImagePanel() } : nil
         )
     }
 
