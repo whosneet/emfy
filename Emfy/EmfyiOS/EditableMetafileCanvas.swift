@@ -1287,8 +1287,9 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
         let subdivisions = EditorGrid.subdivisions(onScreenMajorPoints: onScreenMajor)
         let fine = major / CGFloat(subdivisions)
         guard fine > 0, page.width / fine < 5000 else { return }
-        let minor = UIColor.separator.withAlphaComponent(0.4)
-        let majorColor = UIColor.separator
+        // Fixed neutral ink, independent of appearance — the paper is always white (E3e review).
+        let minor = UIColor(white: 0, alpha: 0.06)
+        let majorColor = UIColor(white: 0, alpha: 0.12)
         let topV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.minY)).y
         let botV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.maxY)).y
         let leftV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.minY)).x
