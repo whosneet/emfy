@@ -65,6 +65,7 @@ struct EmfyApp: App {
             InspectorCommands()
             FileMenuCommands(store: store, coordinator: coordinator)
             EditMenuCommands()
+            ArrangeMenuCommands()
             ViewMenuCommands()
             EmfyCommands()
         }

@@ -635,6 +635,49 @@ struct MacEditableCanvas: NSViewRepresentable {
             parent.delete(selection.ids)
         }
 
+        // MARK: Context menu (E3d) — Arrange + Move Selection to Layer
+
+        /// The right-click menu for a non-empty selection: Arrange (reorder within the
+        /// layer) and a Move Selection to Layer submenu. `nil` when nothing is selected.
+        func contextMenu() -> NSMenu? {
+            guard !selection.isEmpty else { return nil }
+            let menu = NSMenu()
+            menu.addItem(arrangeItem("Bring to Front", #selector(bringToFront(_:))))
+            menu.addItem(arrangeItem("Bring Forward", #selector(bringForward(_:))))
+            menu.addItem(arrangeItem("Send Backward", #selector(sendBackward(_:))))
+            menu.addItem(arrangeItem("Send to Back", #selector(sendToBack(_:))))
+
+            if parent.scene.layers.count > 1 {
+                menu.addItem(.separator())
+                let move = NSMenuItem(title: "Move Selection to Layer", action: nil, keyEquivalent: "")
+                let submenu = NSMenu()
+                // Top layer first, matching the panel's order.
+                for order in parent.scene.layers.indices.reversed() {
+                    let item = NSMenuItem(title: parent.scene.layers[order].name, action: #selector(moveToLayer(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.tag = order
+                    submenu.addItem(item)
+                }
+                move.submenu = submenu
+                menu.addItem(move)
+            }
+            return menu
+        }
+
+        private func arrangeItem(_ title: String, _ action: Selector) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            return item
+        }
+
+        @objc private func bringToFront(_ sender: Any?) { parent.apply(.arrange(ids: selection.ids, .toFront), nil) }
+        @objc private func bringForward(_ sender: Any?) { parent.apply(.arrange(ids: selection.ids, .forward), nil) }
+        @objc private func sendBackward(_ sender: Any?) { parent.apply(.arrange(ids: selection.ids, .backward), nil) }
+        @objc private func sendToBack(_ sender: Any?) { parent.apply(.arrange(ids: selection.ids, .toBack), nil) }
+        @objc private func moveToLayer(_ sender: NSMenuItem) {
+            parent.apply(.moveElementsToLayer(ids: selection.ids, layer: sender.tag), nil)
+        }
+
         // MARK: Drag-and-drop image (E3c)
 
         /// Inserts dropped image `data` centred at the drop point, mapped to device space
@@ -963,6 +1006,11 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
     override var isOpaque: Bool { false }
 
     override func becomeFirstResponder() -> Bool { true }
+
+    /// The right-click Arrange / Move-to-Layer menu for a selection (E3d).
+    override func menu(for event: NSEvent) -> NSMenu? {
+        coordinator?.contextMenu()
+    }
 
     // MARK: Undo / redo (first-responder handler for the Edit menu + ⌘Z/⇧⌘Z)
 

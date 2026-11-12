@@ -1141,8 +1141,17 @@ struct MacViewerPane: View {
             selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,
             deselectElements: (session.editing == .editing && !editorModel.selection.isEmpty) ? { editorModel.selection.clear() } : nil,
             deleteSelection: (session.editing == .editing && !editorModel.selection.isEmpty) ? { session.deleteSelection(editorModel.selection.ids) } : nil,
-            insertImage: session.editing == .editing ? { presentImagePanel() } : nil
+            insertImage: session.editing == .editing ? { presentImagePanel() } : nil,
+            bringToFront: arrangeEnabled ? { session.bringSelectionToFront(editorModel.selection.ids) } : nil,
+            bringForward: arrangeEnabled ? { session.bringSelectionForward(editorModel.selection.ids) } : nil,
+            sendBackward: arrangeEnabled ? { session.sendSelectionBackward(editorModel.selection.ids) } : nil,
+            sendToBack: arrangeEnabled ? { session.sendSelectionToBack(editorModel.selection.ids) } : nil
         )
+    }
+
+    /// Arrange is enabled only in edit mode with a non-empty selection (E3d).
+    private var arrangeEnabled: Bool {
+        ArrangeAvailability.isEnabled(editing: session.editing == .editing, selectionCount: editorModel.selection.ids.count)
     }
 
     /// ⌘A: select every editable element (design call E2b-4).

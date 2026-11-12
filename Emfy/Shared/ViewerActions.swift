@@ -53,6 +53,13 @@ struct ViewerActions {
     // menu item). Opens the image file picker and inserts the chosen image.
     var insertImage: (() -> Void)? = nil
 
+    // Editing (E3d): the Arrange menu — reorder the selection within its layer. Each is
+    // `nil` (the menu item disabled) unless in edit mode with a non-empty selection.
+    var bringToFront: (() -> Void)? = nil
+    var bringForward: (() -> Void)? = nil
+    var sendBackward: (() -> Void)? = nil
+    var sendToBack: (() -> Void)? = nil
+
     // iOS/iPadOS immersive chrome + the Info inspector, surfaced in the iOS View menu
     // (K1). `nil` on the Mac, which has its own View toggles and toolbar.
     var toggleChrome: (() -> Void)? = nil

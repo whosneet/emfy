@@ -142,6 +142,31 @@ struct EditMenuCommands: Commands {
     }
 }
 
+/// The Arrange menu (E3d): reorder the selection within its layer. The four Keynote
+/// shortcuts are all free in Emfy's key map (checked against every existing
+/// `.keyboardShortcut`): ⇧⌘F / ⌥⌘F / ⌥⌘B / ⇧⌘B. Each item reads as disabled (`nil`
+/// action) unless a document is in edit mode with a non-empty selection.
+struct ArrangeMenuCommands: Commands {
+    @FocusedValue(\.viewerActions) private var actions
+
+    var body: some Commands {
+        CommandMenu("Arrange") {
+            Button("Bring to Front") { actions?.bringToFront?() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(actions?.bringToFront == nil)
+            Button("Bring Forward") { actions?.bringForward?() }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(actions?.bringForward == nil)
+            Button("Send Backward") { actions?.sendBackward?() }
+                .keyboardShortcut("b", modifiers: [.command, .option])
+                .disabled(actions?.sendBackward == nil)
+            Button("Send to Back") { actions?.sendToBack?() }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .disabled(actions?.sendToBack == nil)
+        }
+    }
+}
+
 /// The Open Recent submenu, built from the store's recent files (the newest ten),
 /// plus Clear Menu. A `View` inside the File `CommandGroup`; reading `store.entries`
 /// here makes the menu track the store through Observation.
