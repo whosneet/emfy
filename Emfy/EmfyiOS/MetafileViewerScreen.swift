@@ -36,6 +36,7 @@ struct MetafileViewerScreen: View {
     @State private var controller = MetafileZoomController()
     @State private var exporter = MetafileExportController()
     @State private var editorModel = EditorModel()
+    @State private var findModel = DrawingFindModel()
     #if DEBUG
     @State private var debugLaunchRan = false
     #if DEBUG
@@ -162,6 +163,13 @@ struct MetafileViewerScreen: View {
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .bottomBar)
         .statusBarHidden(effectiveChromeHidden)
         .overlay(alignment: .top) { topOverlays }
+        // The find bar + its highlight/scroll plumbing (F3b), collapsed into one modifier so
+        // the already-large body stays type-checkable.
+        .metafileFindBar(
+            model: findModel,
+            runsKey: findRunsKey,
+            refreshRuns: { await refreshFindRuns() },
+            onCurrentChange: { scrollToCurrentMatch() })
         // Built-in inspector: a column on iPad, a sheet on iPhone (screenshot #6).
         // A fixed width so the drawing's reserved trailing space matches it exactly.
         .inspector(isPresented: $showInspector) { inspectorContent }
@@ -692,7 +700,8 @@ struct MetafileViewerScreen: View {
                 // fitted and centred into the region the inspector overlay leaves clear.
                 trailingInset: (showInspector && isRegularWidth) ? inspectorWidth : 0,
                 // Light mode (E4): selection outline only, drag moves only — no handles.
-                lightMode: editorMode == .light
+                lightMode: editorMode == .light,
+                findHighlights: findHighlightSet
             )
             .ignoresSafeArea()
             .overlay(alignment: .bottom) { rotationReadout }
@@ -737,6 +746,7 @@ struct MetafileViewerScreen: View {
                     isDark: colorScheme == .dark
                 ),
                 options: settings.renderOptions,
+                findHighlights: findHighlightSet,
                 onSingleTap: { toggleChrome() }
             )
             .ignoresSafeArea()
@@ -1033,6 +1043,7 @@ struct MetafileViewerScreen: View {
         } else if #available(iOS 27.0, *) {
             ToolbarItemGroup(placement: .bottomBar) {
                 shareMenu
+                findButton
                 fitButton
                 infoButton
             }
@@ -1040,10 +1051,22 @@ struct MetafileViewerScreen: View {
         } else {
             ToolbarItemGroup(placement: .bottomBar) {
                 shareMenu
+                findButton
                 fitButton
                 infoButton
             }
         }
+    }
+
+    /// The Find button (F3b): opens the find bar over the drawing.
+    private var findButton: some View {
+        Button {
+            presentFind()
+        } label: {
+            Label("Find", systemImage: "magnifyingglass")
+        }
+        .disabled(loaded == nil)
+        .accessibilityIdentifier("viewerFind")
     }
 
     // MARK: - Light editor bottom toolbar (E4)
@@ -1242,6 +1265,15 @@ struct MetafileViewerScreen: View {
             } label: {
                 Label("Save to Photos", systemImage: "square.and.arrow.down")
             }
+            // Copy All Text (F3b): the drawing's text, reading order, plain text. Disabled
+            // when the drawing has no text.
+            Button {
+                copyAllText()
+            } label: {
+                Label("Copy All Text", systemImage: "text.quote")
+            }
+            .disabled(!findModel.hasText)
+            .accessibilityIdentifier("copyAllText")
             Divider()
             Button {
                 DiagnosticReportAction.copyFileReport(
@@ -1327,6 +1359,78 @@ struct MetafileViewerScreen: View {
             .allowsHitTesting(false)
     }
 
+    // MARK: - Find (F3b)
+
+    /// The page bounds (device) and natural size the current mode draws with: the edited
+    /// scene in edit mode, the prepared model in viewer mode. `nil` when nothing is shown.
+    private var findPageGeometry: (pageBoundsDevice: CGRect, naturalSize: CGSize)? {
+        if session.editing == .editing, let scene = session.editedScene {
+            return (scene.pageBoundsDevice, scene.pageSizeDevice)
+        }
+        if let model = loaded {
+            return (model.prepared.deviceBounds, model.displaySize)
+        }
+        return nil
+    }
+
+    /// The find highlights for the current matches, in device space, for the overlays.
+    private var findHighlightSet: FindHighlightSet {
+        guard findModel.isPresented, !findModel.matches.isEmpty, let geometry = findPageGeometry else {
+            return .empty
+        }
+        return FindHighlightSet(
+            pageBoundsDevice: geometry.pageBoundsDevice,
+            matchDeviceRects: FindHighlightGeometry.distinctDeviceRects(findModel.matches),
+            currentDeviceRect: FindHighlightGeometry.matchDeviceRect(findModel.matches, current: findModel.current)
+        )
+    }
+
+    /// Changes whenever the drawing the find model should search over changes.
+    private var findRunsKey: String {
+        "\(session.editing == .editing)-\(session.editVersion)-\(session.loadedContentID)"
+    }
+
+    /// Recomputes the find model's runs: the edited scene in edit mode (cheap), the
+    /// renderer observation in viewer mode (off the main actor).
+    private func refreshFindRuns() async {
+        if session.editing == .editing, let scene = session.editedScene {
+            findModel.setRuns(DrawingTextExtractor.extract(from: scene), contentID: findRunsKey.hashValue)
+            return
+        }
+        guard let model = loaded else {
+            findModel.setRuns([], contentID: findRunsKey.hashValue)
+            return
+        }
+        let prepared = model.prepared
+        let options = settings.renderOptions
+        let runs = await Task.detached(priority: .userInitiated) {
+            DrawingTextExtractor.extract(from: MetafileRenderer.observe(prepared, options: options))
+        }.value
+        findModel.setRuns(runs, contentID: findRunsKey.hashValue)
+    }
+
+    /// Scrolls the current match into view through the active scroll view (F3b).
+    private func scrollToCurrentMatch() {
+        guard let rect = FindHighlightGeometry.matchDeviceRect(findModel.matches, current: findModel.current),
+              let geometry = findPageGeometry else { return }
+        controller.scrollDeviceRectToVisible(rect, pageBoundsDevice: geometry.pageBoundsDevice, naturalSize: geometry.naturalSize)
+    }
+
+    /// Opens the find bar (⌘F / the Find button). The chrome is restored first so the bar
+    /// is reachable even from immersive mode.
+    private func presentFind() {
+        if chromeHidden { chromeHidden = false }
+        withAnimation(.easeOut(duration: 0.2)) { findModel.present() }
+    }
+
+    /// Copies the drawing's text (reading order, plain text) to the pasteboard (F3b).
+    private func copyAllText() {
+        let text = findModel.copyAllText()
+        guard !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+        toast.show("Copied all text", systemImage: "doc.on.doc")
+    }
+
     /// The viewer actions published to the scene for the shared iOS View menu (K1):
     /// the zoom group plus the immersive-controls and Info toggles. Rebuilt when
     /// `isLoaded` or `chromeHidden` change — not per zoom frame — so it never churns
@@ -1338,6 +1442,9 @@ struct MetafileViewerScreen: View {
             zoomOut: { controller.zoomOut() },
             fit: { controller.fit() },
             actualSize: { controller.actualSize() },
+            presentFind: isLoaded ? { presentFind() } : nil,
+            findNext: isLoaded ? { presentFind(); findModel.goNext() } : nil,
+            findPrevious: isLoaded ? { presentFind(); findModel.goPrevious() } : nil,
             toggleChrome: isLoaded ? { toggleChrome() } : nil,
             toggleInfo: { toggleInspector() },
             isChromeHidden: chromeHidden

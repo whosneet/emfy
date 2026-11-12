@@ -48,6 +48,20 @@ struct ViewerCommandsIOS: Commands {
             Button("Show Details") { actions?.toggleInfo?() }
                 .keyboardShortcut("i", modifiers: .command)
                 .disabled(noDocument)
+
+            Divider()
+
+            // Find (F3b): the single ⌘F/⌘G/⇧⌘G owners, routed through the viewer's
+            // focusedSceneValue like the zoom group so they fire from the hardware keyboard.
+            Button("Find…") { actions?.presentFind?() }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(actions?.presentFind == nil)
+            Button("Find Next") { actions?.findNext?() }
+                .keyboardShortcut("g", modifiers: .command)
+                .disabled(actions?.findNext == nil)
+            Button("Find Previous") { actions?.findPrevious?() }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(actions?.findPrevious == nil)
         }
     }
 }

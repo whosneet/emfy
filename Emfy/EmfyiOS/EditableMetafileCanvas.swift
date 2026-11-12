@@ -23,6 +23,8 @@ struct MetafileEditingContainer: View {
     /// The light editor (compact iPhone, E4): the selection shows an outline only, with
     /// no resize/rotate handles, and a drag on it only moves it.
     var lightMode: Bool = false
+    /// The find highlights to draw in the overlay (F3b). `.empty` draws none.
+    var findHighlights: FindHighlightSet = .empty
 
     var body: some View {
         @Bindable var editorModel = editorModel
@@ -32,6 +34,7 @@ struct MetafileEditingContainer: View {
                 EditableMetafileCanvas(
                     scene: scene, editorModel: editorModel, controller: controller,
                     displayScale: displayScale, tilePaint: tilePaint, options: options, lightMode: lightMode,
+                    findHighlights: findHighlights,
                     apply: { command, key in session.apply(command, coalescing: key) },
                     delete: { ids in session.deleteSelection(ids) },
                     // Opens the coalesced "Insert Text" group; the popover's commit/cancel
@@ -98,6 +101,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     /// Light editor (compact iPhone, E4): selection outline only, drag moves only — no
     /// resize/rotate handles.
     var lightMode: Bool = false
+    /// The find highlights to draw in the overlay (F3b). `.empty` draws none.
+    var findHighlights: FindHighlightSet = .empty
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
     /// Deletes the given ids as one undoable step (design call E2c-4).
     let delete: (Set<Int>) -> Void
@@ -166,6 +171,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         // The inspector opening/closing changes the clear region but not the scroll
         // view's bounds, so re-fit/centre here (the canvas still fills the full width).
         context.coordinator.configureZoomScales(for: scrollView.bounds.size)
+        context.coordinator.overlay?.findHighlights = findHighlights   // live find highlights (F3b)
         context.coordinator.overlay?.setNeedsDisplay()
     }
 
@@ -1060,6 +1066,9 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
     /// (E2d). `undoManager` is overridden to return it.
     var sceneUndoManager: UndoManager?
 
+    /// The find highlights to draw under the selection in edit mode (F3b).
+    var findHighlights: FindHighlightSet = .empty
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
@@ -1186,6 +1195,15 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
 
         // Editing grid (E3e design call 2): editor-only, never exported.
         if coordinator.parent.editorModel.showGrid { drawGrid(coordinator: coordinator, into: context, mag: mag) }
+
+        // Find highlights (F3b): under the selection chrome, mapped through the editor's own
+        // device→view mapping so they land on the glyphs.
+        if !findHighlights.isEmpty {
+            let mapping = coordinator.mapping
+            let all = findHighlights.matchDeviceRects.map { mapping.viewRect(fromDevice: $0) }
+            let current = findHighlights.currentDeviceRect.map { mapping.viewRect(fromDevice: $0) }
+            IOSFindHighlightPainter.paint(all: all, current: current, into: context, onScreenScale: mag)
+        }
 
         if let drag = coordinator.drag, drag.kind != .marquee, let ghost = drag.ghost, let bounds = drag.ghostViewBounds {
             context.saveGState()

@@ -39,6 +39,28 @@ final class MetafileZoomController {
     /// step ±0.25 (25%), WCAG 2.5.1 single-pointer zoom (A14).
     func step(by delta: CGFloat) { setZoom((scrollView?.zoomScale ?? zoom) + delta) }
 
+    /// Scrolls a DEVICE-space rect (a find match) into view, zooming OUT first when the
+    /// match is larger than the viewport (F3b). iOS device space is y-down, like the zoom
+    /// view's own space, so the mapping never flips. Works in both viewer and edit mode —
+    /// `scrollView` points at whichever is active, and its zoom view (the tiled view or the
+    /// paper) is at `naturalSize`.
+    func scrollDeviceRectToVisible(_ deviceRect: CGRect, pageBoundsDevice: CGRect, naturalSize: CGSize) {
+        guard let scrollView, naturalSize.width > 0, naturalSize.height > 0 else { return }
+        let mapping = EditorCanvasMapping(
+            pageBoundsDevice: pageBoundsDevice,
+            target: CGRect(origin: .zero, size: naturalSize), flipY: false)
+        if let target = FindHighlightGeometry.zoomToFit(
+            deviceRect: deviceRect, mapping: mapping, viewport: scrollView.bounds.size,
+            currentZoom: scrollView.zoomScale, minZoom: scrollView.minimumZoomScale) {
+            scrollView.setZoomScale(target, animated: false)
+        }
+        let scale = scrollView.zoomScale
+        let contentRect = mapping.viewRect(fromDevice: deviceRect)
+            .applying(CGAffineTransform(scaleX: scale, y: scale))
+            .insetBy(dx: -40, dy: -40)
+        scrollView.scrollRectToVisible(contentRect, animated: !reduceMotion)
+    }
+
     private func setZoom(_ target: CGFloat, announce: Bool = true) {
         guard let scrollView else { return }
         let clamped = min(max(target, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
@@ -115,6 +137,8 @@ struct ZoomableMetafileView: UIViewRepresentable {
     /// WMF embedded-EMF choice) arrives as a new `prepared` through the view's
     /// content identity, so this view never swaps `prepared`.
     var options: RenderOptions = .default
+    /// The find highlights to draw above the tiles (F3b). `.empty` draws nothing.
+    var findHighlights: FindHighlightSet = .empty
     /// Toggles the chrome; reused as the drawing's "Show/Hide controls" action.
     let onSingleTap: () -> Void
 
@@ -167,6 +191,15 @@ struct ZoomableMetafileView: UIViewRepresentable {
         scrollView.contentSize = naturalSize
         controller.scrollView = scrollView
 
+        // The find-highlight overlay rides the tiles (its subview), so it zooms/pans with
+        // them (F3b). Transparent to touches.
+        let findOverlay = IOSFindHighlightView(frame: tiled.bounds)
+        findOverlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        findOverlay.controller = controller
+        findOverlay.setHighlights(findHighlights)
+        tiled.addSubview(findOverlay)
+        context.coordinator.findOverlay = findOverlay
+
         // Double tap toggles fit ↔ 2×; a single tap (that waits for the double
         // to fail) toggles the chrome.
         let doubleTap = UITapGestureRecognizer(
@@ -201,6 +234,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
             // displays) — re-render the tiles at the new resolution.
             tiled.updateContentsScale(displayScale)
         }
+        context.coordinator.findOverlay?.setHighlights(findHighlights)   // live find highlights (F3b)
         // Re-fit when the chrome toggles (§5): hiding the bars uses `.zero` insets
         // (full screen), showing them fits inside. `safeAreaInsetsDidChange` covers
         // most toggles; this makes the refit reliable even when the insets don't
@@ -214,6 +248,9 @@ struct ZoomableMetafileView: UIViewRepresentable {
         scrollView.delegate = nil
         (scrollView as? ZoomScrollView)?.onLayoutSize = nil
         (scrollView as? ZoomScrollView)?.onSafeAreaChange = nil
+        coordinator.findOverlay?.controller = nil
+        coordinator.findOverlay?.removeFromSuperview()
+        coordinator.findOverlay = nil
         if let tiled = coordinator.tiledView {
             tiled.controller = nil
             tiled.onToggleChrome = nil
@@ -227,6 +264,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
     final class Coordinator: NSObject, UIScrollViewDelegate {
         var parent: ZoomableMetafileView
         fileprivate weak var tiledView: TiledMetafileView?
+        fileprivate weak var findOverlay: IOSFindHighlightView?
 
         private var hasSetInitialZoom = false
         private var lastViewportSize: CGSize = .zero
