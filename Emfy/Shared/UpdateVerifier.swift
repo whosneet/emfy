@@ -242,7 +242,16 @@ enum UpdateProcess {
             _ = drain.wait(timeout: .now() + 3)
             throw UpdateError.verificationTimedOut
         }
-        drain.wait()
+        // The process has exited, but a surviving grandchild can still hold the
+        // inherited pipe fds (hdiutil's diskimages helpers do this), so a plain
+        // `drain.wait()` could block forever on the NORMAL path too. Bound it; on
+        // timeout close the read handles — which unblocks the drain reads — and keep
+        // whatever was collected. The exit code is already known.
+        if drain.wait(timeout: .now() + 10) == .timedOut {
+            try? out.fileHandleForReading.close()
+            try? err.fileHandleForReading.close()
+            _ = drain.wait(timeout: .now() + 2)
+        }
         lock.lock(); let o = outData, e = errData; lock.unlock()
         return Result(
             exitCode: process.terminationStatus,

@@ -49,6 +49,17 @@ struct UpdateVerifierTests {
         }
     }
 
+    @Test func processReturnsDespiteSurvivingGrandchild() {
+        // A backgrounded grandchild inherits stdout/stderr and outlives the child that
+        // spawned it (hdiutil's helpers do this). The runner's NORMAL-exit path must
+        // still return promptly — it bounds the pipe drain and closes the read handles
+        // — rather than hang on `readDataToEndOfFile`.
+        let start = Date()
+        let result = try? UpdateProcess.run("/bin/sh", ["-c", "sleep 30 & exit 0"])
+        #expect(result?.exitCode == 0)
+        #expect(Date().timeIntervalSince(start) < 15)
+    }
+
     @Test func stagedBundleReverificationRefusesTampered() throws {
         // The TOCTOU guard: an unsigned/tampered staged bundle must fail
         // re-verification, so it never swaps in.
