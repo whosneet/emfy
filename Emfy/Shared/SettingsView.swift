@@ -153,6 +153,7 @@ private enum SettingsFooter {
     static let recentsCap = "Lowering Recents to keep may remove files Emfy received and is keeping; it’ll ask before removing any."
     static let privateMode = "Private mode keeps no history or copies of the files you open in Emfy. They aren’t added to Recents and leave no thumbnails."
     static let darkPage = "Dim lowers the page brightness in Dark Mode; Invert flips a dark drawing to light while keeping its colours."
+    static let recognizeTextInPictures = "Lets Find and Copy All Text read text inside embedded pictures. Recognition runs on your device; nothing is sent anywhere."
     static let exportLimit = "Very large drawings export at a lower scale to stay within size limits."
     static let pin = "Pin a file from its context menu to keep it at the top."
     static let fullEditorOnIPhone = "Shows all editing tools on iPhone. Best on larger screens and iPhone Duo."
@@ -552,12 +553,17 @@ private struct MacViewerTab: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section("Viewer") {
+            Section {
                 MacOptionRow(title: "Default zoom on open", value: $settings.defaultZoomOnOpen, segmented: true)
                 MacOptionRow(title: "Page background", value: $settings.pageBackground)
                 // The Mac retired its partial-support banner (0964d74); partial
                 // support shows in the Info inspector, so there is no toggle here.
                 // The toggle stays on iOS, where the banner still shows.
+                Toggle("Recognise text in pictures", isOn: $settings.recognizeTextInPictures)
+            } header: {
+                Text("Viewer")
+            } footer: {
+                Text(SettingsFooter.recognizeTextInPictures)
             }
             Section {
                 MacOptionRow(title: "Page in Dark Mode", value: $settings.darkPageMode, segmented: true)
@@ -782,12 +788,17 @@ private struct IOSSettingsForm: View {
         @Bindable var settings = settings
         ScrollViewReader { proxy in
         Form {
-            Section("Viewer") {
+            Section {
                 IOSOptionRow(title: "Default zoom on open", value: $settings.defaultZoomOnOpen)
                 IOSOptionRow(title: "Page background", value: $settings.pageBackground)
                 Toggle("Show partial support banner", isOn: $settings.showPartialSupportBanner)
+                Toggle("Recognise text in pictures", isOn: $settings.recognizeTextInPictures)
                 NavigationLink("More Viewer Options") { IOSMoreViewerOptions() }
                 NavigationLink("Rendering") { IOSRenderingScreen() }
+            } header: {
+                Text("Viewer")
+            } footer: {
+                Text(SettingsFooter.recognizeTextInPictures)
             }
             Section {
                 IOSOptionRow(title: "Recents to keep", value: $settings.recentsToKeep)

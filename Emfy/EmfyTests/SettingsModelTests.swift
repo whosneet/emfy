@@ -109,6 +109,7 @@ struct SettingsModelTests {
         #expect(s.defaultZoomOnOpen == .fit)
         #expect(s.pageBackground == .whitePage)
         #expect(s.showPartialSupportBanner == true)
+        #expect(s.recognizeTextInPictures == true)
         #expect(s.darkPageMode == .off)
         #expect(s.pageShadow == true)
         #expect(s.openFilesIn == .frontWindow)
@@ -136,6 +137,7 @@ struct SettingsModelTests {
         s.defaultZoomOnOpen = .actualSize
         s.pageBackground = .checkerboard
         s.showPartialSupportBanner = false
+        s.recognizeTextInPictures = false
         s.darkPageMode = .invert
         s.pageShadow = false
         s.openFilesIn = .newWindow
@@ -156,6 +158,7 @@ struct SettingsModelTests {
         #expect(reloaded.defaultZoomOnOpen == .actualSize)
         #expect(reloaded.pageBackground == .checkerboard)
         #expect(reloaded.showPartialSupportBanner == false)
+        #expect(reloaded.recognizeTextInPictures == false)
         #expect(reloaded.darkPageMode == .invert)
         #expect(reloaded.pageShadow == false)
         #expect(reloaded.openFilesIn == .newWindow)
