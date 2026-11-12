@@ -530,8 +530,8 @@ private struct MacGeneralTab: View {
             } footer: {
                 Text(SettingsFooter.privateMode)
             }
-            // Apple Intelligence (A1a) — hidden where AI is unsupported.
-            AppleIntelligenceSettingsSection()
+            // AI (A1a on-device + A2b providers) — hidden where no engine is available.
+            AISettingsSection()
         }
         .formStyle(.grouped)
         .frame(width: macSettingsWidth)
@@ -846,8 +846,8 @@ private struct IOSSettingsForm: View {
             } footer: {
                 Text(SettingsFooter.exportLimit)
             }
-            // Apple Intelligence (A1a) — hidden where AI is unsupported.
-            AppleIntelligenceSettingsSection()
+            // AI (A1a on-device + A2b providers) — hidden where no engine is available.
+            AISettingsSection()
             Section {
                 NavigationLink {
                     WhatsNewView().navigationTitle("What’s New").navigationBarTitleDisplayMode(.inline)

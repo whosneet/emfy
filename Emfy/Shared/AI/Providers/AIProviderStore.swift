@@ -135,10 +135,29 @@ final class AIProviderStore {
     // MARK: Network (Settings actions)
 
     /// Loads the provider's model list for the picker (needs no consent — no drawing
-    /// data). Throws a typed `ProviderError` on failure.
-    func loadModels(for config: AIProviderConfig) async throws -> [String] {
-        let key = ((try? keyStore.key(for: config.id)) ?? nil) ?? ""
+    /// data). Uses `explicitKey` when given (the editor's typed key, before it is
+    /// saved), else the stored key. Throws a typed `ProviderError` on failure.
+    func loadModels(for config: AIProviderConfig, explicitKey: String? = nil) async throws -> [String] {
+        let key = explicitKey ?? (((try? keyStore.key(for: config.id)) ?? nil) ?? "")
         return try await AIModelCatalog.fetch(config: config, key: key, session: sessionFactory())
+    }
+
+    /// Runs a tiny Test-connection request through the consent-gated core (a no-drawing
+    /// "Reply with OK" prompt). Returns nil on success or the typed error — including
+    /// `.consentRequired` when the provider hasn't been allowed, which the UI turns into
+    /// the consent screen. The provider must be configured with a stored key first.
+    func testConnection(config: AIProviderConfig) async -> ProviderError? {
+        do {
+            let stream = try service.stream(config: config, request: AIProviderRequestBuilder.testConnection(model: config.model))
+            for try await _ in stream {}
+            return nil
+        } catch let error as ProviderError {
+            return error
+        } catch is CancellationError {
+            return nil
+        } catch {
+            return .transport("\(error)")
+        }
     }
 
     // MARK: Persistence
