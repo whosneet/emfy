@@ -101,6 +101,7 @@
 		E4A0000000000000000000B1 /* LightColorRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A0000000000000000000B0 /* LightColorRouter.swift */; };
 		E4A0000000000000000000B2 /* LightColorRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A0000000000000000000B0 /* LightColorRouter.swift */; };
 		E4A0000000000000000000C1 /* LightColorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A0000000000000000000C0 /* LightColorSheet.swift */; platformFilters = (ios, ); };
+		E4A0000000000000000000D1 /* E4LightEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A0000000000000000000D0 /* E4LightEditingTests.swift */; };
 		E3E0000000000000000000A1 /* EditorArrange.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3E0000000000000000000A0 /* EditorArrange.swift */; };
 		E3E0000000000000000000A2 /* EditorArrange.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3E0000000000000000000A0 /* EditorArrange.swift */; };
 		E3E0000000000000000000B1 /* EditorSnap.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3E0000000000000000000B0 /* EditorSnap.swift */; };
@@ -303,6 +304,7 @@
 		E4A0000000000000000000A0 /* EditorMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorMode.swift; sourceTree = "<group>"; };
 		E4A0000000000000000000B0 /* LightColorRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightColorRouter.swift; sourceTree = "<group>"; };
 		E4A0000000000000000000C0 /* LightColorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightColorSheet.swift; sourceTree = "<group>"; };
+		E4A0000000000000000000D0 /* E4LightEditingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E4LightEditingTests.swift; sourceTree = "<group>"; };
 		E3E0000000000000000000A0 /* EditorArrange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorArrange.swift; sourceTree = "<group>"; };
 		E3E0000000000000000000B0 /* EditorSnap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSnap.swift; sourceTree = "<group>"; };
 		E3E0000000000000000000C0 /* E3ArrangeSnapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E3ArrangeSnapTests.swift; sourceTree = "<group>"; };
@@ -538,6 +540,7 @@
 				E2C0000000000000000000D0 /* FormatInspectorTests.swift */,
 				E3D00000000000000000B000 /* E3LayerPanelTests.swift */,
 				E3E0000000000000000000C0 /* E3ArrangeSnapTests.swift */,
+				E4A0000000000000000000D0 /* E4LightEditingTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -981,6 +984,7 @@
 				E2B0000000000000000000F2 /* EditorModel.swift in Sources */,
 				E4A0000000000000000000A2 /* EditorMode.swift in Sources */,
 				E4A0000000000000000000B2 /* LightColorRouter.swift in Sources */,
+				E4A0000000000000000000D1 /* E4LightEditingTests.swift in Sources */,
 				E3E0000000000000000000A2 /* EditorArrange.swift in Sources */,
 				E3E0000000000000000000B2 /* EditorSnap.swift in Sources */,
 				E3E0000000000000000000C1 /* E3ArrangeSnapTests.swift in Sources */,
