@@ -106,6 +106,30 @@ enum EditorDebugScreenshot {
         return (try? data.write(to: URL(fileURLWithPath: path))) != nil
     }
 
+    /// Writes a PNG of the largest non-panel window's content view EVEN IF the window is
+    /// not on-screen. A headless raw-exec launch (no active GUI session, used when
+    /// LaunchServices `open` can't be used because a lingering same-bundle instance makes
+    /// it defer) creates and lays out the window but never makes it `isVisible`;
+    /// `cacheDisplay` still renders the view hierarchy (the tiled scene + overlay) offscreen,
+    /// so this captures the live canvas without needing the window shown. Returns whether it
+    /// wrote.
+    @MainActor
+    @discardableResult
+    static func captureLargestWindowOffscreen(to path: String) -> Bool {
+        let window = NSApp.windows
+            .filter { !($0 is NSPanel) && ($0.contentView?.bounds.height ?? 0) > 200 }
+            .max { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) }
+        guard let window, let view = window.contentView else { return false }
+        view.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0,
+              let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return false }
+        view.cacheDisplay(in: bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
     /// The main library window: the largest visible non-panel window. With the
     /// What's New popup suppressed during a debug run, this is unambiguous.
     @MainActor

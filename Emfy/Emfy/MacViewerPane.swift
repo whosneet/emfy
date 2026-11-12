@@ -385,7 +385,6 @@ struct MacViewerPane: View {
     @MainActor
     private func runPenStrokesScript(base: String) async {
         NSApp.activate(ignoringOtherApps: true)
-        Self.scriptWindow()?.makeKeyAndOrderFront(nil)
         controller.fit()
         try? await Task.sleep(for: .milliseconds(400))
         await session.beginEditing()
@@ -407,7 +406,11 @@ struct MacViewerPane: View {
         editorModel.armPen()
         session.debugCancelAutosave()
         try? await Task.sleep(for: .milliseconds(1000))
-        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-a-strokes.png")
+        // Prefer the on-screen library window; fall back to an offscreen cacheDisplay when
+        // the window isn't visible (headless raw-exec launch).
+        if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-a-strokes.png") {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-a-strokes.png")
+        }
         await session.save()
         try? await Task.sleep(for: .milliseconds(500))
         session.debugCancelAutosave()
