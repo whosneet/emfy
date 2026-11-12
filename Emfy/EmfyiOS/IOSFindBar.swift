@@ -108,6 +108,10 @@ private struct MetafileFindBarModifier: ViewModifier {
     let runsKey: String
     let refreshRuns: () async -> Void
     let onCurrentChange: () -> Void
+    /// The live "Recognise text in pictures" setting (F3c), observed here so the giant screen
+    /// body gains no modifier.
+    let ocrEnabled: Bool
+    let onOCRToggle: (Bool) -> Void
 
     func body(content: Content) -> some View {
         content
@@ -119,18 +123,24 @@ private struct MetafileFindBarModifier: ViewModifier {
             }
             .task(id: runsKey) { await refreshRuns() }
             .onChange(of: model.current) { _, _ in onCurrentChange() }
+            .onChange(of: ocrEnabled) { _, enabled in onOCRToggle(enabled) }
     }
 }
 
 extension View {
-    /// Attaches the F3b find bar, its live-runs task and the scroll-to-match reaction.
+    /// Attaches the F3b find bar, its live-runs task, the scroll-to-match reaction, and the
+    /// F3c OCR-toggle reaction.
     func metafileFindBar(
         model: DrawingFindModel,
         runsKey: String,
         refreshRuns: @escaping () async -> Void,
-        onCurrentChange: @escaping () -> Void
+        onCurrentChange: @escaping () -> Void,
+        ocrEnabled: Bool,
+        onOCRToggle: @escaping (Bool) -> Void
     ) -> some View {
-        modifier(MetafileFindBarModifier(model: model, runsKey: runsKey, refreshRuns: refreshRuns, onCurrentChange: onCurrentChange))
+        modifier(MetafileFindBarModifier(
+            model: model, runsKey: runsKey, refreshRuns: refreshRuns, onCurrentChange: onCurrentChange,
+            ocrEnabled: ocrEnabled, onOCRToggle: onOCRToggle))
     }
 }
 

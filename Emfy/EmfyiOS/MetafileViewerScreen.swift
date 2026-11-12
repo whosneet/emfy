@@ -169,17 +169,18 @@ struct MetafileViewerScreen: View {
             model: findModel,
             runsKey: findRunsKey,
             refreshRuns: { await refreshFindRuns() },
-            onCurrentChange: { scrollToCurrentMatch() })
-        // Toggling "Recognise text in pictures" (F3c): off drops picture matches and clears
-        // the in-memory cache; on re-runs the find pass so OCR starts.
-        .onChange(of: settings.recognizeTextInPictures) { _, enabled in
-            if enabled {
-                Task { await refreshFindRuns() }
-            } else {
-                findModel.clearPictureRuns()
-                Task { await DrawingOCRService.shared.clearMemoryCache() }
-            }
-        }
+            onCurrentChange: { scrollToCurrentMatch() },
+            ocrEnabled: settings.recognizeTextInPictures,
+            onOCRToggle: { enabled in
+                // Toggling "Recognise text in pictures" (F3c): off drops picture matches and
+                // clears the in-memory cache; on re-runs the find pass so OCR starts.
+                if enabled {
+                    Task { await refreshFindRuns() }
+                } else {
+                    findModel.clearPictureRuns()
+                    Task { await DrawingOCRService.shared.clearMemoryCache() }
+                }
+            })
         // Built-in inspector: a column on iPad, a sheet on iPhone (screenshot #6).
         // A fixed width so the drawing's reserved trailing space matches it exactly.
         .inspector(isPresented: $showInspector) { inspectorContent }
