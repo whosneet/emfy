@@ -90,14 +90,6 @@ final class DrawingDescribeModel {
         if isBusy { phase = text.isEmpty ? .idle : .done }
     }
 
-    #if DEBUG
-    /// Seeds a finished description for an in-process screenshot (A1a verification).
-    func debugSeed(text: String) {
-        self.text = text
-        phase = .done
-    }
-    #endif
-
     @available(macOS 26, iOS 26, *)
     private func stream(bundle: DrawingAIContextProvider.Bundle) async {
         let session = DrawingAIEngine.makeSession(toolData: bundle.toolData)

@@ -109,4 +109,33 @@ import Testing
         #expect(prompt.contains(DrawingAIPrompt.openMarker))
         #expect(prompt.contains("Invoice"))
     }
+
+    // A1b Part 0: a truncated excerpt appends a trusted instruction (outside the data
+    // markers) telling the model to use findText for anything beyond the excerpt, so a
+    // token past the cap isn't reported "absent". No instruction when not truncated.
+    @Test func truncatedExcerptAddsToolUseInstructionOutsideDataBlock() {
+        let big = Array(repeating: String(repeating: "x", count: 300), count: 20)
+        let truncated = DrawingAIContext.build(
+            format: "Enhanced Metafile", pageSizeMM: nil,
+            recordKinds: [], textRuns: big, hasPictures: false, unsupportedNotes: []
+        )
+        #expect(truncated.textTruncated)
+        let instruction = DrawingAIPrompt.truncationInstruction(for: truncated)
+        #expect(instruction.contains("findText"))
+        // The instruction is appended AFTER the closing data marker (trusted region).
+        let prompt = DrawingAIPrompt.askPrompt(question: "find x", context: truncated)
+        let closeRange = prompt.range(of: DrawingAIPrompt.closeMarker)
+        let findRange = prompt.range(of: "findText")
+        #expect(closeRange != nil && findRange != nil)
+        if let closeRange, let findRange { #expect(findRange.lowerBound > closeRange.lowerBound) }
+    }
+
+    @Test func untruncatedExcerptHasNoToolUseInstruction() {
+        let small = DrawingAIContext.build(
+            format: "Enhanced Metafile", pageSizeMM: nil,
+            recordKinds: [], textRuns: ["Invoice"], hasPictures: false, unsupportedNotes: []
+        )
+        #expect(!small.textTruncated)
+        #expect(DrawingAIPrompt.truncationInstruction(for: small).isEmpty)
+    }
 }

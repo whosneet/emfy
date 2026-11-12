@@ -129,7 +129,7 @@ struct GetDrawingTextTool: Tool {
 @available(macOS 26, iOS 26, *)
 struct FindTextTool: Tool {
     let name = "findText"
-    let description = "Find where a word or phrase appears in the open drawing's text. Case- and accent-insensitive."
+    let description = "Find where a word, phrase, number or token appears in the open drawing's full text, and on which line. Use this whenever the user names a specific word or token or asks for a line number — the shown excerpt is partial and has no line numbers. Case- and accent-insensitive."
     let data: DrawingAIToolData
 
     @Generable

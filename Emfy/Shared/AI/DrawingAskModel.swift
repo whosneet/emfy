@@ -169,14 +169,4 @@ final class DrawingAskModel {
         messages.append(Message(role: .assistant, text: message, failed: true))
         isResponding = false
     }
-
-    #if DEBUG
-    /// Seeds a finished Q&A for an in-process screenshot (A1a verification). Sets the
-    /// content id so the view's `prepare(contentID:)` on appear is a no-op and the
-    /// seeded messages survive.
-    func debugSeed(messages: [Message], contentID: Int) {
-        self.contentID = contentID
-        self.messages = messages
-    }
-    #endif
 }
