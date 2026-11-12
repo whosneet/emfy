@@ -40,6 +40,8 @@ struct MetafileEditingContainer: View {
                             editorModel.selection.replace(with: id)
                         }
                     },
+                    align: { ids, alignment in session.alignSelection(ids, alignment) },
+                    distribute: { ids, axis in session.distributeSelection(ids, axis) },
                     // The scene's undo manager, vended by the overlay as first responder so
                     // ⌘Z/⇧⌘Z and the three-finger undo/redo gestures drive SceneHistory (E2d).
                     sceneUndoManager: session.undoManager,
@@ -97,6 +99,9 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     let beginInsertText: (EMFEdit.Element) -> Void
     /// Inserts a dropped image's bytes centred at a DEVICE-space point (E3c).
     let insertImageData: (Data, CGPoint) -> Void
+    /// Aligns / distributes the selection as one undo entry (E3e).
+    let align: (Set<Int>, EditorArrange.Alignment) -> Void
+    let distribute: (Set<Int>, EditorArrange.Distribution) -> Void
     /// The scene's undo manager, vended by the overlay as first responder (E2d).
     let sceneUndoManager: UndoManager
     /// Trailing width the inspector overlay occupies (E2c item 4).
@@ -442,6 +447,16 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             parent.apply(.arrange(ids: selection.ids, direction), nil)
         }
 
+        /// Aligns / distributes the selection as one undo entry (E3e).
+        func align(_ alignment: EditorArrange.Alignment) {
+            guard !selection.ids.isEmpty else { return }
+            parent.align(selection.ids, alignment)
+        }
+        func distribute(_ axis: EditorArrange.Distribution) {
+            guard selection.ids.count >= 3 else { return }
+            parent.distribute(selection.ids, axis)
+        }
+
         func moveSelection(toLayer order: Int) {
             guard !selection.ids.isEmpty else { return }
             parent.apply(.moveElementsToLayer(ids: selection.ids, layer: order), nil)
@@ -500,14 +515,31 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                 if let h = handle(at: p) {
                     var state = DragState(kind: .resize, start: p, current: p)
                     state.handle = h; state.startViewBounds = selectionViewBounds()
+                    state.snapCandidates = buildSnapCandidates()   // once per drag (design call 3)
                     drag = state
                 } else if let box = selectionViewBounds(), box.contains(p) {
-                    drag = DragState(kind: .move, start: p, current: p)
+                    var state = DragState(kind: .move, start: p, current: p)
+                    state.startViewBounds = box
+                    state.snapCandidates = buildSnapCandidates()
+                    drag = state
                 } else { scrollView.isScrollEnabled = true; return }
                 prepareGhost()
             case .changed:
                 guard var state = drag else { return }
-                state.current = p; drag = state
+                // A resize snaps the dragged point; a move snaps its whole bounds (below).
+                if state.kind == .resize {
+                    let (snapped, gx, gy) = snapViewPoint(state: state, view: p)
+                    state.current = snapped
+                    state.snapGuideXsDevice = gx; state.snapGuideYsDevice = gy
+                } else {
+                    state.current = p
+                }
+                drag = state
+                if state.kind == .move {
+                    let raw = CGAffineTransform(translationX: state.current.x - state.start.x, y: state.current.y - state.start.y)
+                    let (_, _, gx, gy) = moveSnap(state: state, rawView: raw)
+                    drag?.snapGuideXsDevice = gx; drag?.snapGuideYsDevice = gy
+                }
                 drag?.liveTransform = liveViewTransform(state: state)
                 overlay.setNeedsDisplay()
             case .ended:
@@ -551,16 +583,21 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             switch g.state {
             case .began:
                 scrollView.isScrollEnabled = false
-                drag = DragState(kind: .shape, start: p, current: p)
-                drag?.shapeKind = kind
+                var state = DragState(kind: .shape, start: p, current: p)
+                state.shapeKind = kind
+                state.snapCandidates = buildSnapCandidates()   // once per draw (design call 3)
+                drag = state
                 overlay.setNeedsDisplay()
             case .changed:
                 guard let state = drag else { return }
-                drag?.current = p
-                drag?.shapePreviewRect = ShapeToolGeometry.sweptRect(kind: kind, start: state.start, current: p, shift: false, fromCentre: false)
+                let (snapped, gx, gy) = snapViewPoint(state: state, view: p)
+                drag?.current = snapped
+                drag?.snapGuideXsDevice = gx; drag?.snapGuideYsDevice = gy
+                drag?.shapePreviewRect = ShapeToolGeometry.sweptRect(kind: kind, start: state.start, current: snapped, shift: false, fromCentre: false)
                 overlay.setNeedsDisplay()
             case .ended:
                 if let state = drag {
+                    let p = snapViewPoint(state: state, view: p).0
                     let rectDevice: CGRect
                     if ShapeToolGeometry.isDrag(start: state.start, current: p, magnification: zoom) {
                         rectDevice = sweptDeviceRect(fromView: ShapeToolGeometry.sweptRect(kind: kind, start: state.start, current: p, shift: false, fromCentre: false))
@@ -721,10 +758,64 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             if PencilSupport.squeezeAction() == .showPalette { parent.editorModel.penPalettePresented = true }
         }
 
+        // MARK: Snapping + grid (E3e)
+
+        /// The finest displayed grid spacing in device units, for drawing and snapping.
+        var gridSpacingDevice: CGFloat {
+            let onScreenMajor = EditorGrid.deviceSpacing(deviceUnitsPerInch: scene.deviceUnitsPerInch ?? 96)
+                * mapping.viewLength(fromDeviceLength: 1) * zoom
+            return EditorGrid.displayedSpacing(deviceUnitsPerInch: scene.deviceUnitsPerInch ?? 96, onScreenMajorPoints: onScreenMajor)
+        }
+
+        /// The 6 view-pt snap threshold in device units at the current zoom.
+        private var snapThresholdDevice: CGFloat { mapping.deviceLength(fromViewLength: 6 / max(zoom, 0.0001)) }
+
+        /// Collects the snap candidates once at drag start (design call 3): other elements'
+        /// and the page's edges/centres, plus the grid when shown. Empty when snapping is off.
+        func buildSnapCandidates() -> EditorSnap.Candidates {
+            let model = parent.editorModel
+            let grid = (model.showGrid && model.snapToGrid) ? gridSpacingDevice : nil
+            guard model.snapToGuides || grid != nil else { return .empty }
+            var xs: [CGFloat] = []
+            var ys: [CGFloat] = []
+            if model.snapToGuides {
+                for element in scene.elements where !selection.contains(element.id) {
+                    let b = element.selectionBoundsDevice
+                    guard !b.isNull else { continue }
+                    xs.append(contentsOf: [b.minX, b.midX, b.maxX])
+                    ys.append(contentsOf: [b.minY, b.midY, b.maxY])
+                }
+                let p = scene.pageBoundsDevice
+                xs.append(contentsOf: [p.minX, p.midX, p.maxX])
+                ys.append(contentsOf: [p.minY, p.midY, p.maxY])
+            }
+            return EditorSnap.Candidates(xs: xs, ys: ys, gridSpacing: grid)
+        }
+
+        /// The device adjustment + guide lines for a snapped MOVE, as a view translation.
+        private func moveSnap(state: DragState, rawView: CGAffineTransform) -> (CGFloat, CGFloat, [CGFloat], [CGFloat]) {
+            guard let candidates = state.snapCandidates, let base = state.startViewBounds else { return (0, 0, [], []) }
+            let movedDevice = mapping.deviceRect(fromView: base.applying(rawView))
+            let result = EditorSnap.snapMove(movedDevice, candidates: candidates, threshold: snapThresholdDevice)
+            let dt = mapping.deviceToView
+            return (result.dx * dt.a, result.dy * dt.d, result.guideXs, result.guideYs)
+        }
+
+        /// Snaps a dragged POINT (resize handle / draw corner) to the candidates.
+        private func snapViewPoint(state: DragState, view: CGPoint) -> (CGPoint, [CGFloat], [CGFloat]) {
+            guard let candidates = state.snapCandidates else { return (view, [], []) }
+            let device = mapping.devicePoint(fromView: view)
+            let result = EditorSnap.snap(xEdges: [device.x], yEdges: [device.y], candidates: candidates, threshold: snapThresholdDevice)
+            let dt = mapping.deviceToView
+            return (CGPoint(x: view.x + result.dx * dt.a, y: view.y + result.dy * dt.d), result.guideXs, result.guideYs)
+        }
+
         private func liveViewTransform(state: DragState) -> CGAffineTransform {
             switch state.kind {
             case .move:
-                return CGAffineTransform(translationX: state.current.x - state.start.x, y: state.current.y - state.start.y)
+                let raw = CGAffineTransform(translationX: state.current.x - state.start.x, y: state.current.y - state.start.y)
+                let (adjX, adjY, _, _) = moveSnap(state: state, rawView: raw)
+                return raw.concatenating(CGAffineTransform(translationX: adjX, y: adjY))
             case .resize:
                 guard let handle = state.handle, let box = state.startViewBounds else { return .identity }
                 return EditorTransform.resizeTransform(
@@ -804,6 +895,11 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         var penHoldElapsed = false
         /// The snapped shape preview shown live during a hold, or nil.
         var penSnapPreview: ShapeRecognizer.Match?
+        /// Snapping (E3e): candidates pre-collected once at drag start; the device-space
+        /// guide lines currently shown.
+        var snapCandidates: EditorSnap.Candidates?
+        var snapGuideXsDevice: [CGFloat] = []
+        var snapGuideYsDevice: [CGFloat] = []
     }
 }
 
@@ -1042,7 +1138,23 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
                 UIAction(title: "Send Backward", image: UIImage(systemName: "square.2.layers.3d.bottom.filled")) { _ in coordinator.arrange(.backward) },
                 UIAction(title: "Send to Back", image: UIImage(systemName: "square.3.layers.3d.bottom.filled")) { _ in coordinator.arrange(.toBack) },
             ])
-            var children: [UIMenuElement] = [arrange]
+            // Align / Distribute (E3e).
+            let alignMenu = UIMenu(title: "Align", image: UIImage(systemName: "align.horizontal.left"), children: [
+                UIAction(title: "Align Left", image: UIImage(systemName: "align.horizontal.left")) { _ in coordinator.align(.left) },
+                UIAction(title: "Align Centre", image: UIImage(systemName: "align.horizontal.center")) { _ in coordinator.align(.centreHorizontal) },
+                UIAction(title: "Align Right", image: UIImage(systemName: "align.horizontal.right")) { _ in coordinator.align(.right) },
+                UIAction(title: "Align Top", image: UIImage(systemName: "align.vertical.top")) { _ in coordinator.align(.top) },
+                UIAction(title: "Align Middle", image: UIImage(systemName: "align.vertical.center")) { _ in coordinator.align(.centreVertical) },
+                UIAction(title: "Align Bottom", image: UIImage(systemName: "align.vertical.bottom")) { _ in coordinator.align(.bottom) },
+            ])
+            var children: [UIMenuElement] = [arrange, alignMenu]
+            if coordinator.selection.ids.count >= 3 {
+                let distributeMenu = UIMenu(title: "Distribute", image: UIImage(systemName: "distribute.horizontal"), children: [
+                    UIAction(title: "Distribute Horizontally", image: UIImage(systemName: "distribute.horizontal")) { _ in coordinator.distribute(.horizontal) },
+                    UIAction(title: "Distribute Vertically", image: UIImage(systemName: "distribute.vertical")) { _ in coordinator.distribute(.vertical) },
+                ])
+                children.append(distributeMenu)
+            }
             // Move Selection to Layer, when there's more than one layer (E3d).
             let layers = coordinator.layersTopFirst
             if layers.count > 1 {
@@ -1063,6 +1175,9 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
         guard let coordinator, let context = UIGraphicsGetCurrentContext() else { return }
         let mag = zoom
         let accent = UIColor.tintColor
+
+        // Editing grid (E3e design call 2): editor-only, never exported.
+        if coordinator.parent.editorModel.showGrid { drawGrid(coordinator: coordinator, into: context, mag: mag) }
 
         if let drag = coordinator.drag, drag.kind != .marquee, let ghost = drag.ghost, let bounds = drag.ghostViewBounds {
             context.saveGState()
@@ -1111,6 +1226,11 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
             context.strokeEllipse(in: r)
         }
 
+        // Live smart-guide lines while a drag is snapped (E3e design call 3).
+        if let drag = coordinator.drag, !drag.snapGuideXsDevice.isEmpty || !drag.snapGuideYsDevice.isEmpty {
+            drawSnapGuides(drag, coordinator: coordinator, into: context, mag: mag)
+        }
+
         let draggingTransform = coordinator.drag.flatMap { $0.kind == .marquee ? nil : $0.liveTransform }
         context.saveGState()
         if let draggingTransform { context.concatenate(draggingTransform) }
@@ -1135,12 +1255,83 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
             for handle in ResizeHandle.allCases {
                 let p = handle.point(in: handleBox)
                 let r = CGRect(x: p.x - size / 2, y: p.y - size / 2, width: size, height: size)
+                // Fix A (E3e): a subtle dark drop shadow + ring under the white fill, so the
+                // handle reads on any colour (white dots vanished over blue fills).
+                context.saveGState()
+                context.setShadow(offset: .zero, blur: 2.5 / mag, color: UIColor.black.withAlphaComponent(0.5).cgColor)
+                context.setFillColor(UIColor.white.cgColor)
+                context.fillEllipse(in: r)
+                context.restoreGState()
+                context.setStrokeColor(UIColor.black.withAlphaComponent(0.28).cgColor)
+                context.setLineWidth(2.5 / mag)
+                context.strokeEllipse(in: r.insetBy(dx: -0.6 / mag, dy: -0.6 / mag))
                 context.setFillColor(UIColor.white.cgColor)
                 context.fillEllipse(in: r)
                 context.setStrokeColor(accent.cgColor)
                 context.setLineWidth(1.5 / mag)
                 context.strokeEllipse(in: r)
             }
+        }
+    }
+
+    /// Draws the 10 mm editing grid over the page (E3e design call 2), subdividing when the
+    /// major cell is large on screen so it stays crisp at any zoom.
+    func drawGrid(coordinator: EditableMetafileCanvas.Coordinator, into context: CGContext, mag: CGFloat) {
+        let scene = coordinator.scene
+        let page = scene.pageBoundsDevice.standardized
+        let perInch = scene.deviceUnitsPerInch ?? 96
+        let major = EditorGrid.deviceSpacing(deviceUnitsPerInch: perInch)
+        guard major > 0, page.width > 0, page.height > 0 else { return }
+        let mapping = coordinator.mapping
+        let onScreenMajor = major * abs(mapping.deviceToView.a) * mag
+        let subdivisions = EditorGrid.subdivisions(onScreenMajorPoints: onScreenMajor)
+        let fine = major / CGFloat(subdivisions)
+        guard fine > 0, page.width / fine < 5000 else { return }
+        let minor = UIColor.separator.withAlphaComponent(0.4)
+        let majorColor = UIColor.separator
+        let topV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.minY)).y
+        let botV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.maxY)).y
+        let leftV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.minY)).x
+        let rightV = mapping.viewPoint(fromDevice: CGPoint(x: page.maxX, y: page.minY)).x
+        var index = 0
+        var dx = page.minX
+        while dx <= page.maxX + 0.001 {
+            let vx = mapping.viewPoint(fromDevice: CGPoint(x: dx, y: page.minY)).x
+            let isMajor = index % subdivisions == 0
+            context.setStrokeColor((isMajor ? majorColor : minor).cgColor)
+            context.setLineWidth((isMajor ? 1 : 0.5) / mag)
+            context.beginPath(); context.move(to: CGPoint(x: vx, y: topV)); context.addLine(to: CGPoint(x: vx, y: botV)); context.strokePath()
+            index += 1; dx = page.minX + CGFloat(index) * fine
+        }
+        index = 0
+        var dy = page.minY
+        while dy <= page.maxY + 0.001 {
+            let vy = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: dy)).y
+            let isMajor = index % subdivisions == 0
+            context.setStrokeColor((isMajor ? majorColor : minor).cgColor)
+            context.setLineWidth((isMajor ? 1 : 0.5) / mag)
+            context.beginPath(); context.move(to: CGPoint(x: leftV, y: vy)); context.addLine(to: CGPoint(x: rightV, y: vy)); context.strokePath()
+            index += 1; dy = page.minY + CGFloat(index) * fine
+        }
+    }
+
+    /// Draws the smart-guide lines (device coords mapped to view) while a drag is snapped.
+    func drawSnapGuides(_ drag: EditableMetafileCanvas.DragState, coordinator: EditableMetafileCanvas.Coordinator, into context: CGContext, mag: CGFloat) {
+        let mapping = coordinator.mapping
+        let page = coordinator.scene.pageBoundsDevice.standardized
+        context.setStrokeColor(UIColor.systemYellow.cgColor)
+        context.setLineWidth(1 / mag)
+        let topV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.minY)).y
+        let botV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.maxY)).y
+        let leftV = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.minY)).x
+        let rightV = mapping.viewPoint(fromDevice: CGPoint(x: page.maxX, y: page.minY)).x
+        for dx in drag.snapGuideXsDevice {
+            let vx = mapping.viewPoint(fromDevice: CGPoint(x: dx, y: page.minY)).x
+            context.beginPath(); context.move(to: CGPoint(x: vx, y: topV)); context.addLine(to: CGPoint(x: vx, y: botV)); context.strokePath()
+        }
+        for dy in drag.snapGuideYsDevice {
+            let vy = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: dy)).y
+            context.beginPath(); context.move(to: CGPoint(x: leftV, y: vy)); context.addLine(to: CGPoint(x: rightV, y: vy)); context.strokePath()
         }
     }
 }

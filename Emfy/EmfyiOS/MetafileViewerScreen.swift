@@ -272,6 +272,7 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "text-image" { await runTextImageScript(); return }
         if EditorDebugLaunch.script == "text-popover" { await runTextPopoverScript(); return }
         if EditorDebugLaunch.script == "layers" { await runLayersScript(); return }
+        if EditorDebugLaunch.script == "align-grid" { await runAlignGridScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -362,6 +363,29 @@ struct MetafileViewerScreen: View {
         showInspector = true
         session.debugCancelAutosave()
         Self.logScript("ios layers: names=\(session.debugLayerNames()) notesHidden=\(notesID.map { session.debugLayerHidden($0) } ?? false)")
+    }
+
+    /// `align-grid` (E3e): blank drawing → edit mode → insert 3 shapes at uneven positions →
+    /// select all → Align Top → Distribute Horizontally → show the grid → select one shape so
+    /// its outlined handles show on the blue fill (fix A) → stay on screen for the capture.
+    @MainActor
+    private func runAlignGridScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios align-grid: begin editing failed"); return }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        let a = session.debugInsertShape(.rect, rectDevice: CGRect(x: page.width * 0.08, y: page.height * 0.22, width: page.width * 0.17, height: page.height * 0.13))
+        let b = session.debugInsertShape(.ellipse, rectDevice: CGRect(x: page.width * 0.46, y: page.height * 0.52, width: page.width * 0.17, height: page.height * 0.13))
+        let c = session.debugInsertShape(.rect, rectDevice: CGRect(x: page.width * 0.80, y: page.height * 0.34, width: page.width * 0.15, height: page.height * 0.17))
+        let ids = Set([a, b, c].compactMap { $0 })
+        guard ids.count == 3 else { Self.logScript("ios align-grid: insert failed (\(ids.count))"); return }
+        editorModel.selection.replace(with: ids)
+        session.alignSelection(ids, .top)
+        session.distributeSelection(ids, .horizontal)
+        editorModel.showGrid = true
+        if let b { editorModel.selection.replace(with: b) }   // handles over a blue fill (fix A)
+        session.debugCancelAutosave()
+        let tops = ids.compactMap { id in session.editingScene?.elements.first { $0.id == id }?.selectionBoundsDevice.minY }
+        Self.logScript("ios align-grid: tops=\(tops.map { Int($0) }) grid=\(editorModel.showGrid)")
     }
 
     /// iPad pen proof (E3b): blank drawing → edit mode → feed a couple of synthetic strokes
@@ -710,7 +734,25 @@ struct MetafileViewerScreen: View {
             ToolbarItem(placement: .topBarLeading) {
                 imageMenu
             }
+            ToolbarItem(placement: .topBarLeading) {
+                gridMenu
+            }
         }
+    }
+
+    /// The grid + snapping menu in edit mode (E3e design call 2/3): iPad (regular width).
+    /// Show Grid draws the 10 mm editor grid; the two Snap toggles govern snapping to the
+    /// grid and to smart guides. State lives on `EditorModel` (per session).
+    private var gridMenu: some View {
+        Menu {
+            Toggle("Show Grid", isOn: Binding(get: { editorModel.showGrid }, set: { editorModel.showGrid = $0 }))
+            Toggle("Snap to Grid", isOn: Binding(get: { editorModel.snapToGrid }, set: { editorModel.snapToGrid = $0 }))
+            Toggle("Snap to Guides", isOn: Binding(get: { editorModel.snapToGuides }, set: { editorModel.snapToGuides = $0 }))
+        } label: {
+            Label("Grid", systemImage: "grid")
+        }
+        .tint(editorModel.showGrid ? Color.accentColor : nil)
+        .accessibilityIdentifier("viewerGrid")
     }
 
     /// The Text tool (E3c design call 1): iPad (regular width) only. A tap arms it; the
