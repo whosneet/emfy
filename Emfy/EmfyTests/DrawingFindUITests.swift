@@ -90,6 +90,43 @@ import AppKit
         #expect((z ?? 0) <= 0.5)
     }
 
+    // MARK: DrawingTextBounds
+
+    @Test func derivedTextBoxFromMetrics() {
+        // TA_LEFT | TA_TOP, identity transform, no advances: width = count*em*0.6.
+        let box = DrawingTextBounds.deviceBox(
+            referenceLogical: CGPoint(x: 10, y: 20), emLogical: 10, advancesLogical: [],
+            utf16Count: 5, alignRawValue: 0, transform: .identity)
+        #expect(box.minX == 10)
+        #expect(box.minY == 20)
+        #expect(box.width == 30)          // 5 * 10 * 0.6
+        #expect(box.height == 12.5)       // em * 1.25
+    }
+
+    @Test func derivedTextBoxUsesAdvancesAndRightAlign() {
+        // TA_RIGHT (0x2): the reference point is the run's right edge.
+        let box = DrawingTextBounds.deviceBox(
+            referenceLogical: CGPoint(x: 100, y: 0), emLogical: 10, advancesLogical: [20, 20, 20],
+            utf16Count: 3, alignRawValue: 0x2, transform: .identity)
+        #expect(box.width == 60)          // sum of advances
+        #expect(box.maxX == 100)          // right edge at the reference
+    }
+
+    @Test func derivedTextBoxNullForUnknownEm() {
+        #expect(DrawingTextBounds.deviceBox(
+            referenceLogical: .zero, emLogical: 0, advancesLogical: [],
+            utf16Count: 3, alignRawValue: 0, transform: .identity).isNull)
+    }
+
+    @Test func derivedTextBoxMapsThroughTransform() {
+        // A ×2 scale doubles the box's device extent.
+        let box = DrawingTextBounds.deviceBox(
+            referenceLogical: CGPoint(x: 5, y: 5), emLogical: 10, advancesLogical: [10, 10],
+            utf16Count: 2, alignRawValue: 0, transform: CGAffineTransform(scaleX: 2, y: 2))
+        #expect(box.minX == 10)
+        #expect(box.width == 40)          // 20 logical * 2
+    }
+
     // MARK: DrawingFindModel
 
     @MainActor

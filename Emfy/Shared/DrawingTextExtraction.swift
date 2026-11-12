@@ -90,7 +90,19 @@ enum DrawingTextExtractor {
         for op in observation.ops where op.kind == .text {
             guard let text = op.text else { continue }
             let size = text.logicalHeight == 0 ? nil : Double(abs(text.logicalHeight))
-            append(text.string, bounds: op.deviceGeometry.boundingBoxOrNull, family: emptyToNil(text.fontFamily), size: size)
+            // Prefer the op's own device geometry; when the EXTTEXTOUTW rectangle was zero
+            // (no geometry) derive a box from the run's metrics so Find can highlight it (F3b).
+            var bounds = op.deviceGeometry.boundingBoxOrNull
+            if bounds.isNull {
+                bounds = DrawingTextBounds.deviceBox(
+                    referenceLogical: CGPoint(x: Double(text.referenceLogical.x), y: Double(text.referenceLogical.y)),
+                    emLogical: Double(text.logicalHeight),
+                    advancesLogical: text.advancesLogical,
+                    utf16Count: text.string.utf16.count,
+                    alignRawValue: text.alignRawValue,
+                    transform: op.deviceTransform)
+            }
+            append(text.string, bounds: bounds, family: emptyToNil(text.fontFamily), size: size)
         }
         for entry in observation.plusEntries {
             guard case .plus(let op) = entry, op.kind == .text, let text = op.text else { continue }
@@ -114,9 +126,19 @@ enum DrawingTextExtractor {
             guard total < maxCharactersPerFile else { break }
             total += clean.utf16.count
             let size: Double? = text.emSize > 0 ? text.emSize : (text.logicalHeight == 0 ? nil : Double(abs(text.logicalHeight)))
+            // Imported text often has only the loose page-clip bounds; derive a tight box from
+            // the run's metrics (through the element's transform) so the highlight lands on the
+            // glyphs, falling back to the element's own bounds (F3b).
+            let derived = DrawingTextBounds.deviceBox(
+                referenceLogical: text.referenceLogical,
+                emLogical: text.emSize > 0 ? text.emSize : Double(text.logicalHeight),
+                advancesLogical: text.advancesLogical,
+                utf16Count: text.string.utf16.count,
+                alignRawValue: text.alignRawValue,
+                transform: element.transform)
             runs.append(DrawingTextRun(
                 text: clean,
-                boundsDevice: element.boundsDevice,
+                boundsDevice: derived.isNull ? element.boundsDevice : derived,
                 fontFamily: emptyToNil(text.fontFamily),
                 fontSize: size,
                 source: .drawing
