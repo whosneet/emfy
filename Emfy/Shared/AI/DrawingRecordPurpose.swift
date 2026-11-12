@@ -38,7 +38,7 @@ enum DrawingRecordPurpose {
     }
 
     /// Fallback when a defined EMR name has no specific purpose line.
-    static let genericEMFPurpose = "a drawing instruction Emfy doesn't support yet"
+    static let genericEMFPurpose = "a record Emfy doesn't support yet"
     /// Fallback for an EMF+ record with no specific purpose line.
     static let genericEMFPlusPurpose = "an EMF+ graphics instruction Emfy doesn't support yet"
 
@@ -48,6 +48,11 @@ enum DrawingRecordPurpose {
     // records the renderer already draws) carry a purpose; everything else uses the
     // generic line. One short sentence each, from the §2.3 record structure.
     private static let emfPurposes: [String: String] = [
+        // §2.2 / §2.3.4 structural & metadata records — skipping these loses no visible
+        // drawing (the renderer logs them as "unimplemented" because they draw nothing).
+        "EMR_HEADER": "the metafile header, which describes the drawing but draws nothing itself; skipping it changes nothing you see",   // §2.3.4.2
+        "EMR_EOF": "the end-of-metafile marker, which draws nothing; skipping it changes nothing you see",                               // §2.3.4.1
+        "EMR_COMMENT": "embedded private or application data, not a visible drawing; skipping it changes nothing you see",               // §2.3.3.4
         // §2.3.5 drawing
         "EMR_GRADIENTFILL": "a gradient fill that blends colours smoothly across triangles or rectangles",   // §2.3.5.12
         "EMR_ANGLEARC": "an arc of a circle drawn from a start angle through a sweep angle",                  // §2.3.5.1

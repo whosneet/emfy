@@ -118,7 +118,7 @@ enum DrawingAIScreenshots {
               let loaded = try? MetafileLoader.load(data), !loaded.couldNotShowNotes.isEmpty else { return }
         let notes = loaded.couldNotShowNotes
         let model = DrawingExplainModel()
-        model.explain(key: 1, items: DrawingMissingItems.list(from: notes))
+        model.explain(key: 1, items: DrawingMissingItems.list(from: loaded.diagnostics))
         await wait(timeout: .seconds(90)) {
             switch model.phase { case .done, .failed: return true; default: return false }
         }
