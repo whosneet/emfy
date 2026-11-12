@@ -69,6 +69,11 @@ enum EditorDebugLaunch {
     /// so a capture shows the font controls (E2c screenshot 2).
     static var scrollInspectorToText: Bool { (value(for: "-EmfyDebugScrollInspector") ?? "NO").uppercased() == "YES" }
 
+    /// Set by the `layers` script so the inspector opens on the Layers tab for the capture
+    /// (E3d). Not a launch argument — the script toggles it in-process before showing the
+    /// inspector. `@MainActor` since only the SwiftUI panel and the script touch it.
+    @MainActor static var forceLayersTab = false
+
     /// `-EmfyDebugNewDrawingSheet YES`: open the New Drawing presets sheet at launch and
     /// capture it (E3a screenshot a), then quit. Needs `-EmfyDebugShot <base>`.
     static var newDrawingSheet: Bool { (value(for: "-EmfyDebugNewDrawingSheet") ?? "NO").uppercased() == "YES" }

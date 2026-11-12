@@ -11,11 +11,11 @@ import SwiftUI
 // Kept in Shared (it imports EMFEdit) so the EMFEdit-free Mac pane can host it by
 // name without importing EMFEdit itself.
 
-/// Which panel the inspector shows while a selection exists.
-enum InspectorTab: Hashable { case format, info }
+/// Which panel the inspector shows in edit mode (design call 1; Layers added E3d).
+enum InspectorTab: Hashable { case format, layers, info }
 
-/// The inspector shown in edit mode with a selection: a Format | Info segmented
-/// control over either the Format sections or the caller's Info view (design call 1).
+/// The inspector shown in edit mode: a Format | Layers | Info segmented control over the
+/// Format sections, the Layers panel, or the caller's Info view (design call 1; E3d).
 struct EditorInspectorPanel<Info: View>: View {
     let session: DocumentSession
     let editorModel: EditorModel
@@ -29,6 +29,7 @@ struct EditorInspectorPanel<Info: View>: View {
             HStack {
                 Picker("", selection: $tab) {
                     Text("Format").tag(InspectorTab.format)
+                    Text("Layers").tag(InspectorTab.layers)
                     Text("Info").tag(InspectorTab.info)
                 }
                 .pickerStyle(.segmented)
@@ -41,11 +42,16 @@ struct EditorInspectorPanel<Info: View>: View {
 
             Divider()
 
-            if tab == .format {
-                FormatSections(session: session, editorModel: editorModel)
-            } else {
-                info()
+            switch tab {
+            case .format: FormatSections(session: session, editorModel: editorModel)
+            case .layers: LayersSection(session: session, editorModel: editorModel)
+            case .info: info()
             }
+        }
+        .onAppear {
+            #if DEBUG
+            if EditorDebugLaunch.forceLayersTab { tab = .layers }
+            #endif
         }
     }
 
@@ -324,6 +330,202 @@ struct FormatSections: View {
         if case .mixed = model.opacity {
             Text("Mixed").font(.caption).foregroundStyle(.secondary)
         }
+    }
+}
+
+// MARK: - Layers panel (E3d)
+
+/// The Layers panel: the scene's layers top-first, each with an eye/lock toggle, its name
+/// and element count; selecting a row makes it active, "+"/"−" add above / delete the
+/// active layer, drag reorders, and a footnote reminds that hidden layers still draw in
+/// other apps (design §2–3). One `SceneCommand` per edit through `DocumentSession.apply`.
+struct LayersSection: View {
+    let session: DocumentSession
+    let editorModel: EditorModel
+
+    @State private var editingLayerID: Int?
+    @State private var editingName: String = ""
+    @State private var pendingDelete: PendingLayerDelete?
+
+    /// A non-empty layer the "−" button is asking to delete.
+    private struct PendingLayerDelete: Identifiable {
+        let id: Int
+        let name: String
+        let count: Int
+    }
+
+    private var scene: EMFEdit.Scene? {
+        guard session.editing == .editing else { return nil }
+        return session.editingScene
+    }
+
+    var body: some View {
+        // Re-derive on every scene edit (editVersion) so a hide/lock/rename/reorder shows.
+        let _ = session.editVersion
+        if let scene {
+            let activeID = editorModel.resolvedActiveLayerID(in: scene)
+            VStack(spacing: 0) {
+                header(scene: scene)
+                Divider()
+                List {
+                    // Top layer first (the back-to-front array reversed).
+                    ForEach(scene.layers.reversed()) { layer in
+                        row(layer, activeID: activeID)
+                    }
+                    .onMove { move(from: $0, to: $1, scene: scene) }
+                }
+                #if os(macOS)
+                .listStyle(.inset)
+                #else
+                .listStyle(.plain)
+                #endif
+                .scrollContentBackground(.hidden)
+                if scene.layers.contains(where: \.hidden) {
+                    Text("Hidden layers still appear in other apps.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                }
+            }
+            .confirmationDialog(
+                pendingDelete.map { LayerDeletion.confirmationMessage(name: $0.name, elementCount: $0.count) } ?? "",
+                isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                titleVisibility: .visible
+            ) {
+                if let pending = pendingDelete {
+                    Button("Delete Layer", role: .destructive) {
+                        session.apply(.deleteLayer(id: pending.id))
+                        pendingDelete = nil
+                    }
+                    Button("Cancel", role: .cancel) { pendingDelete = nil }
+                }
+            }
+        } else {
+            Text("No Layers").foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // MARK: Header (+ / −)
+
+    @ViewBuilder
+    private func header(scene: EMFEdit.Scene) -> some View {
+        HStack(spacing: 10) {
+            Text("Layers").font(.headline)
+            Spacer()
+            Button { addLayer(scene: scene) } label: {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel("Add Layer")
+            Button { deleteActiveLayer(scene: scene) } label: {
+                Image(systemName: "minus")
+            }
+            .accessibilityLabel("Delete Layer")
+            .disabled(scene.layers.count <= 1)
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: Row
+
+    @ViewBuilder
+    private func row(_ layer: EMFEdit.Layer, activeID: Int?) -> some View {
+        let isActive = layer.id == activeID
+        HStack(spacing: 8) {
+            Button { session.apply(.setLayerHidden(id: layer.id, !layer.hidden)) } label: {
+                Image(systemName: layer.hidden ? "eye.slash" : "eye")
+                    .foregroundStyle(layer.hidden ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                    .frame(width: 20)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(layer.hidden ? "Show Layer" : "Hide Layer")
+
+            Button { session.apply(.setLayerLocked(id: layer.id, !layer.locked)) } label: {
+                Image(systemName: layer.locked ? "lock.fill" : "lock.open")
+                    .foregroundStyle(layer.locked ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .frame(width: 20)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(layer.locked ? "Unlock Layer" : "Lock Layer")
+
+            if editingLayerID == layer.id {
+                TextField("Layer name", text: $editingName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { commitRename() }
+                    #if os(macOS)
+                    .onExitCommand { editingLayerID = nil }
+                    #endif
+            } else {
+                Text(layer.name)
+                    .lineLimit(1)
+                    .foregroundStyle(.primary)
+            }
+
+            Spacer(minLength: 6)
+            Text("\(layer.elements.count)")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .listRowBackground(isActive ? Color.accentColor.opacity(0.18) : Color.clear)
+        #if os(macOS)
+        .onTapGesture(count: 2) { beginRename(layer) }
+        #endif
+        .onTapGesture { editorModel.activeLayerID = layer.id }
+        .contextMenu {
+            Button("Rename") { beginRename(layer) }
+        }
+    }
+
+    // MARK: Actions
+
+    private func beginRename(_ layer: EMFEdit.Layer) {
+        editingName = layer.name
+        editingLayerID = layer.id
+        editorModel.activeLayerID = layer.id
+    }
+
+    private func commitRename() {
+        defer { editingLayerID = nil }
+        guard let id = editingLayerID, let name = LayerName.sanitised(editingName) else { return }
+        session.apply(.renameLayer(id: id, name))
+    }
+
+    /// Adds a new "Layer N" directly above the active layer and makes it active (design §3).
+    private func addLayer(scene: EMFEdit.Scene) {
+        let activeID = editorModel.resolvedActiveLayerID(in: scene)
+        let order = activeID.flatMap { scene.layerOrder(ofLayer: $0) }.map { $0 + 1 } ?? scene.layers.count
+        let name = LayerName.nextDefault(existing: scene.layers.map(\.name))
+        let newID = scene.nextLayerID
+        session.apply(.addLayer(name: name, at: order))
+        editorModel.activeLayerID = newID
+    }
+
+    /// Deletes the active layer, confirming first when it still holds elements (design §3).
+    private func deleteActiveLayer(scene: EMFEdit.Scene) {
+        guard scene.layers.count > 1,
+              let activeID = editorModel.resolvedActiveLayerID(in: scene),
+              let order = scene.layerOrder(ofLayer: activeID) else { return }
+        let layer = scene.layers[order]
+        if LayerDeletion.needsConfirmation(elementCount: layer.elements.count) {
+            pendingDelete = PendingLayerDelete(id: activeID, name: layer.name, count: layer.elements.count)
+        } else {
+            session.apply(.deleteLayer(id: activeID))
+        }
+    }
+
+    /// Maps a move within the top-first display order back to the back-to-front layer id
+    /// list `reorderLayers` expects.
+    private func move(from source: IndexSet, to destination: Int, scene: EMFEdit.Scene) {
+        var displayed = Array(scene.layers.reversed())
+        displayed.move(fromOffsets: source, toOffset: destination)
+        session.apply(.reorderLayers(displayed.reversed().map(\.id)))
     }
 }
 
