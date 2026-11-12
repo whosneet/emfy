@@ -54,6 +54,12 @@ struct MetafileViewerScreen: View {
     @State private var photoPickerPresented = false
     @State private var imageImporterPresented = false
 
+    // Light editor (E4): the Colour sheet presentation.
+    @State private var showColorSheet = false
+    #if DEBUG
+    @State private var showDebugSettings = false
+    #endif
+
     private enum Phase {
         case loading
         case loaded(LoadedMetafile)
@@ -78,6 +84,35 @@ struct MetafileViewerScreen: View {
     private var effectiveChromeHidden: Bool { chromeHidden && isLoaded }
 
     private var isRegularWidth: Bool { horizontalSizeClass == .regular }
+
+    /// Which editor the viewer presents (E4): full (iPad-style) or light (compact
+    /// iPhone). Resolved purely from the size class, the Settings toggle and the device
+    /// family (`EditorMode.resolve`), so a live toggle or rotation re-resolves it.
+    private var editorMode: EditorMode {
+        EditorMode.resolve(
+            horizontalSizeClass: horizontalSizeClass,
+            fullEditorOnIPhone: settings.fullEditorOnIPhone,
+            idiom: Self.deviceIdiom
+        )
+    }
+
+    /// The device family for the editor-depth decision (design call 1). The one place
+    /// the viewer reads the idiom, per §11.1.
+    private static var deviceIdiom: EditorDeviceIdiom {
+        switch UIDevice.current.userInterfaceIdiom {
+        case .phone: return .phone
+        case .pad: return .pad
+        default: return .other
+        }
+    }
+
+    /// Editing with the full editor (iPad, iPhone Duo, or the toggle on) — the top
+    /// toolbars (Shapes, Pen, Text, Image, Grid, Undo/Redo) and the inspector show.
+    private var isFullEditing: Bool { session.editing == .editing && editorMode == .full }
+
+    /// Editing with the light editor (compact iPhone) — a bottom toolbar of Markup,
+    /// Colour, Text, Delete, Undo and Redo, selection without handles, no inspector.
+    private var isLightEditing: Bool { session.editing == .editing && editorMode == .light }
 
     /// A fixed inspector column width so the drawing can reserve exactly that much
     /// trailing space when the inspector is open (iPad). `.inspector` presents as a
@@ -136,6 +171,22 @@ struct MetafileViewerScreen: View {
             PenPaletteSheet(editorModel: editorModel)
                 .presentationDetents([.height(240), .medium])
         }
+        // The light editor's Colour sheet (E4 design call 2): 8 swatches plus a system
+        // ColorPicker, applied to the selection through `DocumentSession.applyColor`.
+        .sheet(isPresented: $showColorSheet) {
+            LightColorSheet(session: session, selection: editorModel.selection.ids)
+                .presentationDetents([.height(260), .medium])
+                .presentationDragIndicator(.visible)
+        }
+        #if DEBUG
+        // The `iphone-settings` script presents the real Settings screen so a capture
+        // shows the Full-editor toggle and its footer (E4 verification d).
+        .sheet(isPresented: $showDebugSettings) {
+            SettingsView()
+                .environment(store)
+                .environment(settings)
+        }
+        #endif
         // Image insert (E3c design call 2): the Photos / Files pickers and the failure
         // toast, hung off a zero-size overlay so the main body stays type-checkable.
         .overlay { imageInsertControls }
@@ -273,6 +324,11 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "text-popover" { await runTextPopoverScript(); return }
         if EditorDebugLaunch.script == "layers" { await runLayersScript(); return }
         if EditorDebugLaunch.script == "align-grid" { await runAlignGridScript(); return }
+        if EditorDebugLaunch.script == "iphone-light" { await runIPhoneLightScript(stage: .select); return }
+        if EditorDebugLaunch.script == "iphone-light-color" { await runIPhoneLightScript(stage: .colour); return }
+        if EditorDebugLaunch.script == "iphone-light-edited" { await runIPhoneLightScript(stage: .edited); return }
+        if EditorDebugLaunch.script == "iphone-settings" { await runIPhoneSettingsScript(); return }
+        if EditorDebugLaunch.script == "iphone-full" { await runIPhoneFullScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -386,6 +442,65 @@ struct MetafileViewerScreen: View {
         session.debugCancelAutosave()
         let tops = ids.compactMap { id in session.editingScene?.elements.first { $0.id == id }?.selectionBoundsDevice.minY }
         Self.logScript("ios align-grid: tops=\(tops.map { Int($0) }) grid=\(editorModel.showGrid)")
+    }
+
+    /// The stage an `iphone-light` capture sets up (E4 verification a/b/c).
+    private enum IPhoneLightStage { case select, colour, edited }
+
+    /// iPhone light-editor proof (E4): open a corpus file with shapes and text → enter edit
+    /// mode (which resolves to LIGHT on this compact iPhone) → select a shape, then either
+    /// just show it (a), open the Colour sheet (b), or recolour it through the real light
+    /// Colour path, add one Markup stroke and delete one element (c). Stays on screen so a
+    /// simulator screenshot shows the bottom toolbar and the handleless selection outline.
+    @MainActor
+    private func runIPhoneLightScript(stage: IPhoneLightStage) async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios iphone-light: begin editing failed"); return }
+        guard let shapeID = session.debugFirstShapeID() else { Self.logScript("ios iphone-light: no shape"); return }
+        editorModel.selection.replace(with: shapeID)
+        switch stage {
+        case .select:
+            break
+        case .colour:
+            showColorSheet = true
+        case .edited:
+            session.debugApplyLightColor(ids: [shapeID], red: 0.85, green: 0.16, blue: 0.16)
+            let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+            let stroke = (0 ... 40).map { i -> CGPoint in
+                CGPoint(x: page.width * 0.18 + Double(i) * (page.width * 0.5 / 40),
+                        y: page.height * 0.62 + sin(Double(i) * 0.5) * page.height * 0.05)
+            }
+            _ = session.debugInsertPenStroke(devicePoints: stroke, held: false, pen: PenStyle(color: PenPalette.blue, widthPoints: 3))
+            if let victim = session.allEditableIDs().subtracting([shapeID]).sorted().first {
+                session.deleteSelection([victim])
+            }
+            editorModel.selection.replace(with: shapeID)   // keep the recoloured shape selected
+        }
+        session.debugCancelAutosave()
+        Self.logScript("ios iphone-light: stage=\(stage) selected=\(shapeID) mode=light")
+    }
+
+    /// iPhone Settings proof (E4 verification d): present the real Settings screen so a
+    /// capture shows the "Full editor on iPhone" toggle and its footer.
+    @MainActor
+    private func runIPhoneSettingsScript() async {
+        showDebugSettings = true
+        Self.logScript("ios iphone-settings: presented toggle=\(settings.fullEditorOnIPhone)")
+    }
+
+    /// iPhone full-editor proof (E4 verification e): turn the Settings toggle on (so the
+    /// compact iPhone resolves to the FULL editor), enter edit mode, select a shape and open
+    /// the inspector — which `.inspector` presents as a sheet at compact width. Stays on
+    /// screen for the capture.
+    @MainActor
+    private func runIPhoneFullScript() async {
+        settings.fullEditorOnIPhone = true
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios iphone-full: begin editing failed"); return }
+        if let shapeID = session.debugFirstShapeID() { editorModel.selection.replace(with: shapeID) }
+        showInspector = true
+        session.debugCancelAutosave()
+        Self.logScript("ios iphone-full: fullEditor=\(settings.fullEditorOnIPhone) inspector=\(showInspector)")
     }
 
     /// iPad pen proof (E3b): blank drawing → edit mode → feed a couple of synthetic strokes
@@ -562,7 +677,9 @@ struct MetafileViewerScreen: View {
                 options: settings.renderOptions,
                 // The editable canvas fills the full width (E2c item 4); the drawing is
                 // fitted and centred into the region the inspector overlay leaves clear.
-                trailingInset: (showInspector && isRegularWidth) ? inspectorWidth : 0
+                trailingInset: (showInspector && isRegularWidth) ? inspectorWidth : 0,
+                // Light mode (E4): selection outline only, drag moves only — no handles.
+                lightMode: editorMode == .light
             )
             .ignoresSafeArea()
             .overlay(alignment: .bottom) { rotationReadout }
@@ -669,17 +786,15 @@ struct MetafileViewerScreen: View {
         }
     }
 
-    /// The Edit / Done nav-bar button (design call E2b-1). iPad (regular width) only;
-    /// the iPhone shows nothing, since light editing is E4. Entering lifts the scene;
-    /// Done clears the selection and flushes any pending save.
+    /// The Edit / Done nav-bar button (design call E2b-1; E4 extends it to compact
+    /// width for the iPhone light editor). Entering lifts the scene; Done clears the
+    /// selection and flushes any pending save.
     @ToolbarContentBuilder
     private var editToolbarItem: some ToolbarContent {
-        if isRegularWidth {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(session.editing == .editing ? "Done" : "Edit") { toggleEditMode() }
-                    .disabled(loaded == nil)
-                    .accessibilityIdentifier("viewerEdit")
-            }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button(session.editing == .editing ? "Done" : "Edit") { toggleEditMode() }
+                .disabled(loaded == nil)
+                .accessibilityIdentifier("viewerEdit")
         }
     }
 
@@ -688,7 +803,7 @@ struct MetafileViewerScreen: View {
     /// the same `UndoManager` the canvas vends, so a hardware ⌘Z and these buttons agree.
     @ToolbarContentBuilder
     private var undoRedoToolbar: some ToolbarContent {
-        if isRegularWidth, session.editing == .editing {
+        if isFullEditing {
             ToolbarItemGroup(placement: .topBarLeading) {
                 Button { session.undoManager.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
                     .disabled(!undoAvailable)
@@ -710,7 +825,7 @@ struct MetafileViewerScreen: View {
     /// then draws it on a drag (or inserts a default on a tap).
     @ToolbarContentBuilder
     private var shapesToolbar: some ToolbarContent {
-        if isRegularWidth, session.editing == .editing {
+        if isFullEditing {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
                     ForEach(ShapeToolKind.allCases) { kind in
@@ -846,30 +961,7 @@ struct MetafileViewerScreen: View {
     /// drawing and the armed tint.
     private var penMenu: some View {
         Menu {
-            Section("Colour") {
-                ForEach(PenPalette.colors.indices, id: \.self) { i in
-                    let swatch = PenPalette.colors[i]
-                    Button {
-                        editorModel.penStyle.color = swatch.color
-                    } label: {
-                        Label {
-                            Text(swatch.name)
-                        } icon: {
-                            Image(systemName: editorModel.penStyle.color == swatch.color ? "checkmark.circle.fill" : "circle.fill")
-                                .foregroundStyle(swatch.color.swiftUIColor)
-                        }
-                    }
-                }
-            }
-            Section("Width") {
-                ForEach(PenPalette.widths, id: \.self) { width in
-                    Button {
-                        editorModel.penStyle.widthPoints = width
-                    } label: {
-                        Label("\(Int(width)) pt", systemImage: editorModel.penStyle.widthPoints == width ? "checkmark" : "pencil.tip")
-                    }
-                }
-            }
+            penPaletteMenuContent
         } label: {
             Label("Pen", systemImage: "pencil.tip")
         } primaryAction: {
@@ -901,7 +993,19 @@ struct MetafileViewerScreen: View {
 
     @ToolbarContentBuilder
     private var bottomBar: some ToolbarContent {
-        if #available(iOS 27.0, *) {
+        if isLightEditing {
+            // The light editor's system bottom toolbar (E4 design call 2): Markup,
+            // Colour, Text (edit the selected run), Delete, Undo and Redo.
+            ToolbarItemGroup(placement: .bottomBar) {
+                markupMenu
+                colourButton
+                lightTextButton
+                deleteButton
+                Spacer()
+                lightUndoButton
+                lightRedoButton
+            }
+        } else if #available(iOS 27.0, *) {
             ToolbarItemGroup(placement: .bottomBar) {
                 shareMenu
                 fitButton
@@ -913,6 +1017,122 @@ struct MetafileViewerScreen: View {
                 shareMenu
                 fitButton
                 infoButton
+            }
+        }
+    }
+
+    // MARK: - Light editor bottom toolbar (E4)
+
+    /// Markup (the E3b pen): a tap toggles the pen armed (a finger then draws); long-
+    /// pressing opens the E3b pen palette (colour + width). Mirrors the iPad Pen button.
+    private var markupMenu: some View {
+        Menu {
+            penPaletteMenuContent
+        } label: {
+            Label("Markup", systemImage: "pencil.tip")
+        } primaryAction: {
+            if editorModel.armedPen { editorModel.armedPen = false } else { editorModel.armPen() }
+        }
+        .tint(editorModel.armedPen ? Color.accentColor : nil)
+        .accessibilityIdentifier("viewerMarkup")
+    }
+
+    /// Colour: opens the compact Colour sheet, applied to the selection (design call 2).
+    private var colourButton: some View {
+        Button {
+            showColorSheet = true
+        } label: {
+            Label("Colour", systemImage: "paintpalette")
+        }
+        .disabled(editorModel.selection.ids.isEmpty)
+        .accessibilityIdentifier("viewerColour")
+    }
+
+    /// Text: edits the SELECTED text element through the E2c popover (design call 2).
+    /// It does not insert new text, so it is enabled only for a single text selection.
+    private var lightTextButton: some View {
+        Button {
+            editSelectedTextElement()
+        } label: {
+            Label("Text", systemImage: "character.cursor.ibeam")
+        }
+        .disabled(!selectionIsSingleText)
+        .accessibilityIdentifier("viewerLightText")
+    }
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            session.deleteSelection(editorModel.selection.ids)
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+        .disabled(editorModel.selection.ids.isEmpty)
+        .accessibilityIdentifier("viewerDelete")
+    }
+
+    private var lightUndoButton: some View {
+        Button {
+            session.undoManager.undo()
+        } label: {
+            Label("Undo", systemImage: "arrow.uturn.backward")
+        }
+        .disabled(!undoAvailable)
+        .accessibilityIdentifier("viewerLightUndo")
+    }
+
+    private var lightRedoButton: some View {
+        Button {
+            session.undoManager.redo()
+        } label: {
+            Label("Redo", systemImage: "arrow.uturn.forward")
+        }
+        .disabled(!redoAvailable)
+        .accessibilityIdentifier("viewerLightRedo")
+    }
+
+    /// Whether the selection is exactly one text element (gates the light Text button).
+    private var selectionIsSingleText: Bool {
+        guard let scene = session.editingScene, editorModel.selection.ids.count == 1,
+              let id = editorModel.selection.ids.first else { return false }
+        return scene.elements.first { $0.id == id }?.kind == .text
+    }
+
+    /// Opens the E2c text-edit popover on the selected text element (anchored to the
+    /// centre of the editing container in light mode, where there are no toolbars to
+    /// steer the arrow). The container's popover commits through the session.
+    private func editSelectedTextElement() {
+        guard let scene = session.editingScene, let id = editorModel.selection.ids.first,
+              let element = scene.elements.first(where: { $0.id == id }),
+              element.kind == .text, let text = element.text else { return }
+        editorModel.textEdit = TextEditRequest(id: id, anchor: .center, initialText: text.string)
+    }
+
+    /// The pen palette's colour and width choices, shared by the iPad Pen menu and the
+    /// light-editor Markup menu (E3b `PenPalette`).
+    @ViewBuilder
+    private var penPaletteMenuContent: some View {
+        Section("Colour") {
+            ForEach(PenPalette.colors.indices, id: \.self) { i in
+                let swatch = PenPalette.colors[i]
+                Button {
+                    editorModel.penStyle.color = swatch.color
+                } label: {
+                    Label {
+                        Text(swatch.name)
+                    } icon: {
+                        Image(systemName: editorModel.penStyle.color == swatch.color ? "checkmark.circle.fill" : "circle.fill")
+                            .foregroundStyle(swatch.color.swiftUIColor)
+                    }
+                }
+            }
+        }
+        Section("Width") {
+            ForEach(PenPalette.widths, id: \.self) { width in
+                Button {
+                    editorModel.penStyle.widthPoints = width
+                } label: {
+                    Label("\(Int(width)) pt", systemImage: editorModel.penStyle.widthPoints == width ? "checkmark" : "pencil.tip")
+                }
             }
         }
     }

@@ -532,6 +532,18 @@ final class DocumentSession {
         apply(.setFill(ids: ids, nil))
     }
 
+    /// The first editable shape (non-text, non-image) element's id, for the E4
+    /// `iphone-light` script (the EMFEdit-free viewer can't inspect element kinds).
+    func debugFirstShapeID() -> Int? {
+        editingScene?.editableElements.first { $0.kind != .text && $0.kind != .image }?.id
+    }
+
+    /// Recolours the given elements through the SAME light-editor path the Colour sheet
+    /// uses (`applyColor` → `LightColorRouter`), for the E4 `iphone-light` script.
+    func debugApplyLightColor(ids: Set<Int>, red: Double, green: Double, blue: Double) {
+        applyColor(SceneColor(red: red, green: green, blue: blue), to: ids, coalescing: SceneCoalescingKey("lightColor"))
+    }
+
     /// Inserts a shape through the SAME code path the tool uses (`ShapeToolInsertion` →
     /// `apply(.insert)`), returning its new id, for the E3a `new-shapes` screenshot script.
     func debugInsertShape(_ kind: ShapeToolKind, rectDevice: CGRect) -> Int? {
@@ -717,6 +729,21 @@ final class DocumentSession {
             registerSystemUndo(name: updated.undoActionName ?? command.actionName)
         }
         afterMutation(markDirty: true)
+    }
+
+    /// Recolours the selected elements from the light-editor Colour sheet (E4 design
+    /// call 2). Routes each element to its paint channel (`LightColorRouter`): a solid
+    /// fill for closed shapes and text (a text run's fill is its glyph colour), a
+    /// stroke colour for lines and paths. Passing one `coalescing` key per continuous
+    /// pick (and a fresh key per discrete pick) makes a ColorPicker scrub a single
+    /// undo step while each swatch tap is its own. A no-op when read-only or the
+    /// selection recolours to nothing.
+    func applyColor(_ color: SceneColor, to ids: Set<Int>, coalescing key: SceneCoalescingKey?) {
+        guard editing == .editing, let scene = editingScene, !ids.isEmpty else { return }
+        let elements = scene.elements.filter { ids.contains($0.id) }
+        for command in LightColorRouter.commands(for: elements, color: color) {
+            apply(command, coalescing: key)
+        }
     }
 
     // MARK: - Editing: insert text + image (E3c)

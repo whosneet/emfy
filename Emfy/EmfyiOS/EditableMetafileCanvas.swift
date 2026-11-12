@@ -20,6 +20,9 @@ struct MetafileEditingContainer: View {
     /// Trailing width the inspector overlay occupies, so the drawing fits/centres into
     /// the clear region while the canvas itself fills the full width (E2c item 4).
     var trailingInset: CGFloat = 0
+    /// The light editor (compact iPhone, E4): the selection shows an outline only, with
+    /// no resize/rotate handles, and a drag on it only moves it.
+    var lightMode: Bool = false
 
     var body: some View {
         @Bindable var editorModel = editorModel
@@ -28,7 +31,7 @@ struct MetafileEditingContainer: View {
             if let scene = session.editingScene {
                 EditableMetafileCanvas(
                     scene: scene, editorModel: editorModel, controller: controller,
-                    displayScale: displayScale, tilePaint: tilePaint, options: options,
+                    displayScale: displayScale, tilePaint: tilePaint, options: options, lightMode: lightMode,
                     apply: { command, key in session.apply(command, coalescing: key) },
                     delete: { ids in session.deleteSelection(ids) },
                     // Opens the coalesced "Insert Text" group; the popover's commit/cancel
@@ -92,6 +95,9 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     var displayScale: CGFloat = 2
     var tilePaint: TilePaint = .plain
     var options: RenderOptions = .default
+    /// Light editor (compact iPhone, E4): selection outline only, drag moves only — no
+    /// resize/rotate handles.
+    var lightMode: Bool = false
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
     /// Deletes the given ids as one undoable step (design call E2c-4).
     let delete: (Set<Int>) -> Void
@@ -269,7 +275,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         private func strokeTolerance() -> CGFloat { mapping.deviceLength(fromViewLength: 10) }
 
         func handle(at viewPoint: CGPoint) -> ResizeHandle? {
-            guard let box = selectionViewBounds() else { return nil }
+            // Light mode shows no handles, so nothing resizes and a drag only moves (E4).
+            guard !parent.lightMode, let box = selectionViewBounds() else { return nil }
             let hit = Self.handleHitRadius / zoom   // 44-pt hit target
             for handle in ResizeHandle.allCases {
                 if hypot(viewPoint.x - handle.point(in: box).x, viewPoint.y - handle.point(in: box).y) <= hit { return handle }
@@ -554,7 +561,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             guard let overlay, let scrollView else { return }
             switch g.state {
             case .began:
-                guard let box = selectionViewBounds(), box.contains(g.location(in: overlay)) else { return }
+                // Light mode has no rotate (design call 2); the pinch still zooms.
+                guard !parent.lightMode, let box = selectionViewBounds(), box.contains(g.location(in: overlay)) else { return }
                 scrollView.pinchGestureRecognizer?.isEnabled = false
                 var state = DragState(kind: .rotate, start: .zero, current: .zero)
                 state.startViewBounds = box
@@ -1249,6 +1257,9 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
             context.setLineWidth(1.5 / mag)
             context.stroke(box)
             context.restoreGState()
+
+            // Light mode (E4 design call 2): a selection outline only, no handles.
+            if coordinator.parent.lightMode { return }
 
             let handleBox = draggingTransform.map { box.applying($0) } ?? box
             let size = EditableMetafileCanvas.Coordinator.handleDrawSize / mag
