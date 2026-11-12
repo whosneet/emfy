@@ -64,6 +64,11 @@ public enum ExportWarning: Sendable, Equatable {
     /// feature (a passthrough/unsupported EMF+ record) or a GDI raster op — was
     /// dropped from a cross-container export (slice E1b2c). Its content is lost.
     case contentDropped(elementID: Int)
+    /// A scene with a non-trivial layer structure was exported to WMF/WMZ, which has
+    /// no record Emfy uses to persist layers (unlike EMF's private EMR_COMMENT
+    /// markers), so every layer was flattened into one (design §1 / review fix 3).
+    /// Document-level — not tied to one element.
+    case layersFlattened
     /// An element the target container could not re-synthesise faithfully — a
     /// passthrough/unsupported EMF+ record, a WMF raster/ROP blit, a non-Latin-1
     /// text run (WMF strings are 8-bit), or an EMF+ text run — was RASTERISED: it
@@ -95,6 +100,8 @@ public enum ExportWarningCategory: String, Sendable, CaseIterable {
     /// `embeddedEMFOnly`, `fallbackMayBeStale` — a down-level reader may see
     /// pre-edit content.
     case downlevelStale
+    /// `layersFlattened` — a layered scene collapsed to one layer for a WMF export.
+    case layers
 }
 
 /// The bytes a `SceneExporter` produced, plus any fidelity warnings.
@@ -184,6 +191,9 @@ public enum SceneExporter {
 
     public static func export(_ scene: Scene, as format: ExportFormat, options: ExportOptions) throws(SceneExportError) -> ExportResult {
         let sourceIsEMF = scene.source.format == .emf
+        // WMF/WMZ has no record Emfy uses to persist layers, so a layered scene is
+        // flattened to one layer with a document-level warning (review fix 3).
+        let wmfLayersFlattened: [ExportWarning] = (!format.isEMFFamily && scene.hasNonTrivialLayers) ? [.layersFlattened] : []
 
         // Cross-container (EMF scene → WMF, or WMF scene → EMF): full synthesis in
         // the target container, with a de-duplicated limitations report (slice
@@ -203,7 +213,7 @@ public enum SceneExporter {
                 catch let error as EMFWriteError { throw .emfWriteFailed(error) }
                 catch { throw .unreadableSource }
             }
-            return ExportResult(data: finalize(result.0, format), warnings: dedupe(result.1))
+            return ExportResult(data: finalize(result.0, format), warnings: dedupe(result.1 + wmfLayersFlattened))
         }
 
         // Coverage-based `isEdited` cannot see an EMF+ delete — every EMF+ element's
@@ -249,7 +259,7 @@ public enum SceneExporter {
             return ExportResult(data: finalize(result.0, format), warnings: result.1)
         }
         let (data, warnings) = try exportEditedWMF(scene)
-        return ExportResult(data: finalize(data, format), warnings: warnings)
+        return ExportResult(data: finalize(data, format), warnings: dedupe(warnings + wmfLayersFlattened))
     }
 
     // MARK: - GDI → dual upgrade detection (slice E1b2b)
@@ -313,6 +323,7 @@ public enum SceneExporter {
         case .contentDropped: return .droppedContent
         case .contentRasterized: return .rasterized
         case .embeddedEMFOnly, .fallbackMayBeStale: return .downlevelStale
+        case .layersFlattened: return .layers
         }
     }
 

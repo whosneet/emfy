@@ -127,6 +127,27 @@ struct SceneLayerRoundTripTests {
         return image
     }
 
+    // MARK: - WMF flattens layers with a warning (fix 3)
+
+    @Test(arguments: [ExportFormat.wmf, .wmz])
+    func wmfExportFlattensLayersWithAWarning(_ format: ExportFormat) throws {
+        let scene = try Self.threeLayerScene()
+        let result = try SceneExporter.export(scene, as: format)
+        #expect(result.warnings.contains(.layersFlattened))
+        #expect(SceneExporter.summarize(result.warnings)[.layers] == 1)
+        // The WMF re-imports as a single layer (no markers persisted there).
+        let reimported = try SceneImporter.import(data: result.data)
+        #expect(reimported.layers.count == 1)
+    }
+
+    @Test func wmfExportOfaTrivialSceneHasNoLayerWarning() throws {
+        let scene = try Self.blankScene()   // one default layer, no markers
+        var history = SceneHistory(scene: scene)
+        try history.apply(.insertInLayer(element: Self.shape(1, x: 10), at: 0, layer: 0))
+        let result = try SceneExporter.export(history.scene, as: .wmf)
+        #expect(!result.warnings.contains(.layersFlattened))
+    }
+
     // MARK: - Arrange / move reach the saved file for UNEDITED source elements (fix 2)
 
     /// Two overlapping rectangles — a red one drawn first, a blue one on top — as a
