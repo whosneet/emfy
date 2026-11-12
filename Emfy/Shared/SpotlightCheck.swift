@@ -80,7 +80,9 @@ enum SpotlightCheck {
     private static func queryHitCount(for text: String) async -> Int {
         await withCheckedContinuation { continuation in
             let queryString = "textContent == \"*\(text)*\"cd || title == \"*\(text)*\"cd"
-            let query = CSSearchQuery(queryString: queryString, attributes: ["title"])
+            let context = CSSearchQueryContext()
+            context.fetchAttributes = ["title"]
+            let query = CSSearchQuery(queryString: queryString, queryContext: context)
             let counter = Counter()
             query.foundItemsHandler = { items in counter.add(items.count) }
             query.completionHandler = { _ in continuation.resume(returning: counter.value) }
