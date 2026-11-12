@@ -1,3 +1,4 @@
+import CoreSpotlight
 import SwiftUI
 
 /// One library window: a `NavigationSplitView` with a recents sidebar and a viewer
@@ -130,6 +131,8 @@ struct LibraryWindow: View {
             // first open can add anything (S1a-5).
             store.capLimit = settings.recentsToKeep.count
             store.setPrivate(settings.privateMode)
+            // Index the recents already on disk, once per launch, throttled (F3d).
+            SpotlightService.shared.syncOnLaunch()
             #if DEBUG
             // UI-test seeding (DEBUG only): SIMCTL_CHILD_EMFY_SEED_RECEIVED=<n>.
             if let raw = ProcessInfo.processInfo.environment["EMFY_SEED_RECEIVED"], let n = Int(raw), n > 0 {
@@ -266,6 +269,16 @@ struct LibraryWindow: View {
         // launch) show it here. iOS shows it in this active scene (v3-plan §9.1).
         .onOpenURL { url in
             Task { await openExternal(url) }
+        }
+        // Opening a Spotlight result (F3d): select the matching recents entry in this window;
+        // an unknown or removed id is ignored. The store is loaded first, so a cold-launch
+        // tap resolves the entry.
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            guard let id = CoreSpotlightActivity.entryID(from: activity) else { return }
+            Task {
+                await store.loadIfNeeded()
+                if store.entry(id: id) != nil { model.selection = id }
+            }
         }
         // New Drawing (E3a): the Mac File menu fires this focused action; every window
         // publishes it so ⌘N works even in an empty window.

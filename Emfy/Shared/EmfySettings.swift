@@ -96,6 +96,11 @@ final class EmfySettings {
     var showWhatsNewAfterUpdates: Bool {
         didSet { defaults.set(showWhatsNewAfterUpdates, forKey: Keys.showWhatsNewAfterUpdates) }
     }
+    /// Index recent drawings in Spotlight so a word in a drawing finds the file (F3d).
+    /// Default ON. Turning it off deletes Emfy's whole Spotlight domain.
+    var showDrawingsInSpotlight: Bool {
+        didSet { defaults.set(showDrawingsInSpotlight, forKey: Keys.showDrawingsInSpotlight) }
+    }
     /// Keep a one-time copy of each file as it was opened, so Revert to Opened Version
     /// works (E2a-7). Default ON. When off, no snapshot is taken and the Revert menu
     /// item is disabled.
@@ -230,6 +235,7 @@ final class EmfySettings {
         recentsToKeep = Self.int(defaults, Keys.recentsToKeep, default: .fifty)
         reopenLastFileAtLaunch = Self.bool(defaults, Keys.reopenLastFileAtLaunch, default: true)
         showWhatsNewAfterUpdates = Self.bool(defaults, Keys.showWhatsNewAfterUpdates, default: true)
+        showDrawingsInSpotlight = Self.bool(defaults, Keys.showDrawingsInSpotlight, default: true)
         keepOpenedVersionForRevert = Self.bool(defaults, Keys.keepOpenedVersionForRevert, default: true)
         fullEditorOnIPhone = Self.bool(defaults, Keys.fullEditorOnIPhone, default: false)
         sortRecentsBy = Self.string(defaults, Keys.sortRecentsBy, default: .date)
@@ -338,6 +344,7 @@ final class EmfySettings {
         static let recentsToKeep = "settings.library.recentsToKeep"
         static let reopenLastFileAtLaunch = "settings.library.reopenLastFileAtLaunch"
         static let showWhatsNewAfterUpdates = "settings.library.showWhatsNewAfterUpdates"
+        static let showDrawingsInSpotlight = "settings.library.showDrawingsInSpotlight"
         static let keepOpenedVersionForRevert = "settings.library.keepOpenedVersionForRevert"
         static let fullEditorOnIPhone = "settings.editing.fullEditorOnIPhone"
         static let sortRecentsBy = "settings.library.sortRecentsBy"

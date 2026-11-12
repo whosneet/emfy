@@ -102,6 +102,11 @@ final class RecentsStore {
     @ObservationIgnored private let persistence = RecentsPersistence()
     @ObservationIgnored private var loadTask: Task<Void, Never>?
 
+    /// The lifecycle sink that mirrors recents into Spotlight (F3d). The app sets it to a
+    /// `RecentsSpotlightBridge`; weak so the store never owns it. `nil` in tests that don't
+    /// install one, so the store's behaviour is unchanged without it.
+    @ObservationIgnored weak var lifecycleObserver: (any RecentsLifecycleObserver)?
+
     nonisolated static let log = Logger(subsystem: "com.avneetsingh.emfy", category: "recents")
 
     init(locations: Locations = .standard) {
@@ -208,6 +213,9 @@ final class RecentsStore {
 
         sortAndCap()
         persist()
+        // Mirror the add/refresh into Spotlight (F3d). After sortAndCap, so an entry this
+        // add evicted (already de-indexed there) is never re-indexed here.
+        lifecycleObserver?.recentsEntryAddedOrRefreshed(id: id)
         return id
     }
 
@@ -287,6 +295,8 @@ final class RecentsStore {
         guard isPrivate != on else { return }
         isPrivate = on
         if !on { purgeSessionPrivate() }
+        // Private on wipes the index; off re-syncs (the bridge decides, F3d).
+        lifecycleObserver?.recentsPrivateModeChanged()
     }
 
     /// Drops all session-only Private entries and deletes their in-memory thumbnails
@@ -349,6 +359,8 @@ final class RecentsStore {
         }
         entries.removeAll { ids.contains($0.id) }
         persist()
+        // De-index the pruned entries (F3d).
+        lifecycleObserver?.recentsEntriesRemoved(ids: evicted.map(\.id))
         return evicted
     }
 
@@ -545,6 +557,8 @@ final class RecentsStore {
         pendingRemoval = PendingRemoval(entry: entry, index: index)
         persist()
         scheduleCommit()
+        // De-index immediately (F3d); Undo re-indexes via `undoLastRemoval`.
+        lifecycleObserver?.recentsEntriesRemoved(ids: [id])
     }
 
     /// Restores the most recently removed entry and its file, cancelling the
@@ -558,6 +572,8 @@ final class RecentsStore {
         entries.insert(pending.entry, at: index)
         sortAndCap()
         persist()
+        // Undo restored the entry — re-index it (F3d).
+        lifecycleObserver?.recentsEntryAddedOrRefreshed(id: pending.entry.id)
     }
 
     /// Finalises a pending removal now: deletes its side files. Called on timeout,
@@ -586,6 +602,8 @@ final class RecentsStore {
         thumbnailCache.removeAll()
         entries.removeAll()
         persist()
+        // Wipe the whole Spotlight domain (F3d).
+        lifecycleObserver?.recentsCleared()
     }
 
     // MARK: - Ordering, cap, persistence
@@ -621,6 +639,8 @@ final class RecentsStore {
             thumbnailCache.remove(entry.id)
         }
         entries.removeAll { evictedIDs.contains($0.id) }
+        // De-index entries this add evicted over the cap (F3d).
+        lifecycleObserver?.recentsEntriesRemoved(ids: evicted.map(\.id))
     }
 
     @ObservationIgnored private var lastPersistTask: Task<Void, Never>?

@@ -13,8 +13,7 @@ import Foundation
 
 /// One drawing to index. The unique id is the recents entry id, so opening a
 /// Spotlight result (`CSSearchableItemActionType`) maps straight back to the
-/// entry. The thumbnail is supplied by the concrete implementation from the
-/// recents thumbnail, not carried here.
+/// entry.
 struct DrawingSpotlightItem: Equatable, Sendable {
     var id: String
     var title: String
@@ -24,6 +23,11 @@ struct DrawingSpotlightItem: Equatable, Sendable {
     var textContent: String
     /// The content UTI (e.g. "com.microsoft.emf").
     var contentTypeIdentifier: String
+    /// The recents thumbnail PNG, attached by the app (`RecentsSpotlightBridge`)
+    /// before indexing (F3d). Carried on the item — rather than fetched inside the
+    /// index — so the index seam stays a simple value sink. `nil` when none is
+    /// cheaply available (no cached PNG, or a Private-mode entry).
+    var thumbnailData: Data? = nil
 }
 
 /// The index seam. The app's Core Spotlight implementation conforms to this; the

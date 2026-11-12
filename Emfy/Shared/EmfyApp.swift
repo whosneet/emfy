@@ -34,6 +34,10 @@ struct EmfyApp: App {
         let settings = EmfySettings.shared
         RecentsStore.shared.capLimit = settings.recentsToKeep.count
         RecentsStore.shared.setPrivate(settings.privateMode)
+        // Install the Spotlight bridge as the store's lifecycle observer before any open can
+        // add an entry (F3d); the launch sync of existing recents runs from the library
+        // window's `.task`, throttled, so it never blocks launch.
+        SpotlightService.shared.activate(store: RecentsStore.shared, settings: settings)
     }
 
     var body: some Scene {
