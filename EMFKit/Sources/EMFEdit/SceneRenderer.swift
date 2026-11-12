@@ -32,6 +32,34 @@ public enum SceneRenderer {
         let replayOps: [Int: ResolvedDrawOp]
         /// Lifted EMF+ entries in z-order (indexed by element id). Empty for GDI/WMF.
         let plusEntries: [PlusEntry]
+        /// Decoded pixels for edited/new image elements, so a tiled canvas decodes each
+        /// inserted image ONCE for the whole session instead of re-decoding its DIB
+        /// pixel-by-pixel on every tile and every repaint (the E3c review hang).
+        let imageCache = ImageDecodeCache()
+    }
+
+    /// A thread-safe, lazily-populated cache of decoded image pixels, keyed by element
+    /// id. An edited/new `.image` element's pixels never change (edits move/resize/rotate
+    /// or re-alpha it, never repaint it), so one decode serves every tile and repaint of
+    /// the session. `@unchecked Sendable`: the only mutable state is a lock-guarded
+    /// dictionary of immutable `CGImage`s, safe to read from every tile thread.
+    final class ImageDecodeCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var images: [Int: CGImage] = [:]
+
+        /// The decoded native-resolution `CGImage` for `element`'s image, decoded once and
+        /// memoised by id; nil when the element carries no decodable image.
+        func image(for element: Element) -> CGImage? {
+            lock.lock()
+            let cached = images[element.id]
+            lock.unlock()
+            if let cached { return cached }
+            guard let image = element.image, let cg = SceneImageCoding.cgImage(for: image) else { return nil }
+            lock.lock()
+            images[element.id] = cg
+            lock.unlock()
+            return cg
+        }
     }
 
     /// Whether `render` needs a prepared source for this scene — true when it
@@ -123,6 +151,18 @@ public enum SceneRenderer {
             // (text/image/passthrough) for lift fidelity.
             let isEdit = element.provenance.edited || element.provenance.sourceRecordIndices.isEmpty
             switch element.kind {
+            case .image where element.provenance.sourceRecordIndices.isEmpty:
+                // A NEWLY-INSERTED image (compressed-PNG, no source crop) draws straight from
+                // its decoded pixels (cached once per session) rather than synthesise →
+                // STRETCHDIBITS → per-pixel re-decode on every tile (the E3c review hang).
+                // Edited IMPORTED images keep the synthesis path below, which matches the
+                // exported file exactly (a source crop, or a content-drop the exporter
+                // applies). Falls back to synthesis only if the pixels can't be decoded.
+                if let cg = decodedImage(element, source: source) {
+                    drawImageDirect(element, cg, into: context, base: base)
+                } else {
+                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                }
             case .text, .image:
                 if isEdit {
                     renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
@@ -217,6 +257,14 @@ public enum SceneRenderer {
             let isEdit = element.provenance.edited || element.provenance.sourceRecordIndices.isEmpty
             if isEdit {
                 flush()
+                // A NEWLY-INSERTED image draws straight from its decoded pixels (cached),
+                // never synthesise → re-decode per tile (the E3c review hang). Edited
+                // imported images keep the EMF+ synthesis below (source crop / fidelity).
+                if element.kind == .image, element.provenance.sourceRecordIndices.isEmpty,
+                   let cg = decodedImage(element, source: source) {
+                    drawImageDirect(element, cg, into: context, base: base)
+                    continue
+                }
                 // An edited GetDC-window GDI element re-emits as GDI; everything else
                 // re-emits as EMF+. Both use the exporter's synthesis, so the render
                 // matches the exported file.
@@ -267,6 +315,54 @@ public enum SceneRenderer {
         } catch {
             return
         }
+    }
+
+    // MARK: - Direct image draw (E3c review: no per-tile re-decode)
+
+    /// The decoded pixels for an edited/new image element: the session cache when a
+    /// prepared `source` is present (a tiled canvas), else a one-off decode (a `makeImage`
+    /// or a test, where one decode per call is fine).
+    private static func decodedImage(_ element: Element, source: SceneRenderSource?) -> CGImage? {
+        if let source { return source.imageCache.image(for: element) }
+        guard let image = element.image else { return nil }
+        return SceneImageCoding.cgImage(for: image)
+    }
+
+    /// Draws `cg` (the element's decoded pixels) into `context` filling the image's
+    /// device-space destination, mapped to target through `base` and honouring the
+    /// element opacity and clip — the fast twin of the STRETCHDIBITS synthesis, with no
+    /// per-pixel DIB decode. Handles both an axis-aligned dest rect and a rotated/sheared
+    /// parallelogram (`destCornersDevice`).
+    private static func drawImageDirect(_ element: Element, _ cg: CGImage, into context: CGContext, base: CGAffineTransform) {
+        guard let image = element.image else { return }
+        let corners: [CGPoint]
+        if let explicit = image.destCornersDevice, explicit.count == 4 {
+            corners = explicit
+        } else {
+            let r = image.destRectDevice.standardized
+            corners = [CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
+                       CGPoint(x: r.maxX, y: r.maxY), CGPoint(x: r.minX, y: r.maxY)]
+        }
+        // Map the image's unit square — (0,0) top-left, (1,0) top-right, (0,1) lower-left,
+        // y-down — to the device corners (upper-left, upper-right, lower-right, lower-left).
+        let ul = corners[0], ur = corners[1], ll = corners[3]
+        let unitToDevice = CGAffineTransform(
+            a: ur.x - ul.x, b: ur.y - ul.y, c: ll.x - ul.x, d: ll.y - ul.y, tx: ul.x, ty: ul.y)
+        guard unitToDevice.a.isFinite, unitToDevice.b.isFinite, unitToDevice.c.isFinite,
+              unitToDevice.d.isFinite, unitToDevice.tx.isFinite, unitToDevice.ty.isFinite else { return }
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        applyClip(element.clipDevice, base: base, into: context)
+        let opacity = element.style.opacity
+        if opacity < 1 { context.setAlpha(CGFloat(min(max(opacity, 0), 1))) }
+        context.interpolationQuality = .high
+        context.concatenate(unitToDevice.concatenating(base))
+        // `cg` is top-down (row 0 = top); CoreGraphics draws an image upward from the
+        // rect's base in user space, so flip the unit y to put row 0 at the top-left.
+        context.translateBy(x: 0, y: 1)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: 1, height: 1))
     }
 
     /// The inclusive device-bounds RectL for a throwaway one-element document,
