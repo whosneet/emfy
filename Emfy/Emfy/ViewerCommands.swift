@@ -14,6 +14,7 @@ struct FileMenuCommands: Commands {
     let coordinator: OpenCoordinator
     @FocusedValue(\.viewerActions) private var actions
     @FocusedValue(\.newDrawingAction) private var newDrawing
+    @FocusedValue(\.batchConvertAction) private var batchConvert
     @Environment(\.openWindow) private var openWindow
 
     private var noDocument: Bool { actions?.isDocumentLoaded != true }
@@ -39,6 +40,11 @@ struct FileMenuCommands: Commands {
             .keyboardShortcut("o", modifiers: .command)
 
             OpenRecentMenu(store: store, coordinator: coordinator)
+
+            // Batch Convert… (F1). Opens the sheet in the focused window; disabled only
+            // when no window can host it.
+            Button("Batch Convert…") { batchConvert?.present() }
+                .disabled(batchConvert == nil)
         }
 
         // Print… (⌘P), F1. Prints the drawing as vector through the renderer; disabled

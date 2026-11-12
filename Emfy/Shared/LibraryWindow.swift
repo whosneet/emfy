@@ -30,6 +30,11 @@ struct LibraryWindow: View {
     /// Drives the New Drawing presets sheet (E3a): the Mac File ▸ New Drawing… command
     /// sets it through the focused action; the iPad "+" presents its own copy.
     @State private var showNewDrawing = false
+    #if os(macOS)
+    /// Drives the Batch Convert sheet (F1); the Mac File menu sets it through the
+    /// focused action.
+    @State private var showBatchConvert = false
+    #endif
     /// One toast surface and one removal coordinator per window, injected so the
     /// sidebar, the viewer and the inspector all post to the same surface (C4a H3,
     /// H6/A2, M3).
@@ -226,6 +231,14 @@ struct LibraryWindow: View {
                 }
             }
         }
+        #if os(macOS)
+        // Batch Convert (F1): the Mac File menu fires this focused action; every window
+        // publishes it, and hosts its own sheet.
+        .focusedSceneValue(\.batchConvertAction, BatchConvertCommand(present: { showBatchConvert = true }))
+        .sheet(isPresented: $showBatchConvert) {
+            MacBatchConvertSheet()
+        }
+        #endif
         #if os(iOS)
         // A window opened by "Open in New Window" (UIWindowScene.ActivationAction)
         // carries the entry to show in its user activity (v3-plan §9.1).

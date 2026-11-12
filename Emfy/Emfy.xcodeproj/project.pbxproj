@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F1B000000000000000000012 /* BatchConvertController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000012 /* BatchConvertController.swift */; };
+		F1B000000000000000000013 /* MacBatchConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000013 /* MacBatchConvert.swift */; platformFilters = (macos, ); };
 		F1B000000000000000000011 /* MacDrawingDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000011 /* MacDrawingDrag.swift */; platformFilters = (macos, ); };
 		F1B000000000000000000010 /* MacDrawingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000010 /* MacDrawingCopy.swift */; platformFilters = (macos, ); };
 		F1B000000000000000000008 /* ScenePDF.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000008 /* ScenePDF.swift */; };
@@ -268,6 +270,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F1A000000000000000000012 /* BatchConvertController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchConvertController.swift; sourceTree = "<group>"; };
+		F1A000000000000000000013 /* MacBatchConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBatchConvert.swift; sourceTree = "<group>"; };
 		F1A000000000000000000011 /* MacDrawingDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDrawingDrag.swift; sourceTree = "<group>"; };
 		F1A000000000000000000010 /* MacDrawingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDrawingCopy.swift; sourceTree = "<group>"; };
 		F1A000000000000000000008 /* ScenePDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePDF.swift; sourceTree = "<group>"; };
@@ -580,6 +584,7 @@
 				F1A000000000000000000003 /* BatchConvert.swift */,
 				F1A000000000000000000004 /* BatchRenderer.swift */,
 				F1A000000000000000000008 /* ScenePDF.swift */,
+				F1A000000000000000000012 /* BatchConvertController.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -637,6 +642,7 @@
 				F1A000000000000000000009 /* MacPrint.swift */,
 				F1A000000000000000000010 /* MacDrawingCopy.swift */,
 				F1A000000000000000000011 /* MacDrawingDrag.swift */,
+				F1A000000000000000000013 /* MacBatchConvert.swift */,
 			);
 			path = Emfy;
 			sourceTree = "<group>";
@@ -995,6 +1001,8 @@
 				B01100000000000000000300 /* EmfySettings.swift in Sources */,
 				B01100000000000000000301 /* RecentSort.swift in Sources */,
 				B01100000000000000000302 /* ExportScale.swift in Sources */,
+				F1B000000000000000000012 /* BatchConvertController.swift in Sources */,
+				F1B000000000000000000013 /* MacBatchConvert.swift in Sources */,
 				F1B000000000000000000011 /* MacDrawingDrag.swift in Sources */,
 				F1B000000000000000000010 /* MacDrawingCopy.swift in Sources */,
 				F1B000000000000000000008 /* ScenePDF.swift in Sources */,
