@@ -1038,3 +1038,33 @@ private struct IOSRenderingScreen: View {
 }
 
 #endif
+
+#if DEBUG && os(macOS)
+/// F3c screenshot (f): hosts the Mac Viewer settings tab (which carries the "Recognise text
+/// in pictures" toggle) in an offscreen window and captures it via `cacheDisplay`, so the
+/// toggle can be shot in-process with no Screen Recording permission. Called from a `.task`
+/// on the library window, so nothing is added to its already-large view body.
+enum SettingsSceneScreenshot {
+    @MainActor
+    @discardableResult
+    static func captureViewerTab(settings: EmfySettings, to path: String) -> Bool {
+        let host = NSHostingView(rootView: MacViewerTab().environment(settings).padding(.vertical, 8))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Settings"
+        window.contentView = host
+        window.orderFrontRegardless()
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        guard let view = window.contentView else { return false }
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0,
+              let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return false }
+        view.cacheDisplay(in: bounds, to: rep)
+        window.orderOut(nil)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+}
+#endif

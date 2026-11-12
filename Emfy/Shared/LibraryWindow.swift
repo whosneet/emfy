@@ -142,7 +142,7 @@ struct LibraryWindow: View {
             // the plain -EmfyDebugOpen path only fills an empty window.
             if let path = EditorDebugLaunch.scriptOpenPath() {
                 if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
-            } else if model.selection == nil, let path = EditorDebugLaunch.safeCopiedOpenPath() {
+            } else if model.selection == nil, let path = EditorDebugLaunch.safeCopiedOpenPath() ?? EditorDebugLaunch.pictureFixturePath() {
                 if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
             }
             #endif
@@ -183,12 +183,22 @@ struct LibraryWindow: View {
         // F1 correction 1 proof: count the ⌘C menu items (must be exactly 1), write it
         // next to the shots, then quit.
         .task {
-            guard EditorDebugLaunch.menuAudit, let base = EditorDebugLaunch.screenshotBase else { return }
-            try? await Task.sleep(for: .milliseconds(1200))
-            let count = EditorDebugScreenshot.commandCItemCount()
-            try? "command-C menu items: \(count)\n".write(toFile: base + "-menu-audit.txt", atomically: true, encoding: .utf8)
-            try? await Task.sleep(for: .milliseconds(150))
-            exit(0)
+            if EditorDebugLaunch.menuAudit, let base = EditorDebugLaunch.screenshotBase {
+                try? await Task.sleep(for: .milliseconds(1200))
+                let count = EditorDebugScreenshot.commandCItemCount()
+                try? "command-C menu items: \(count)\n".write(toFile: base + "-menu-audit.txt", atomically: true, encoding: .utf8)
+                try? await Task.sleep(for: .milliseconds(150))
+                exit(0)
+            }
+            // F3c screenshot (f): the "Recognise text in pictures" toggle, hosted and captured
+            // in an offscreen window (no Screen Recording needed). Folded into this existing
+            // `.task` so the already-large body gains no modifier and stays type-checkable.
+            if EditorDebugLaunch.settingsScene == "viewer", let base = EditorDebugLaunch.screenshotBase {
+                try? await Task.sleep(for: .milliseconds(900))
+                _ = SettingsSceneScreenshot.captureViewerTab(settings: settings, to: base + "-f-settings-toggle.png")
+                try? await Task.sleep(for: .milliseconds(200))
+                exit(0)
+            }
         }
         #endif
         #if DEBUG && os(macOS) && EMFY_DMG

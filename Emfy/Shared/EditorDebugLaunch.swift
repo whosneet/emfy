@@ -1,4 +1,7 @@
 #if DEBUG
+import CoreGraphics
+import CoreText
+import EMFEdit
 import Foundation
 
 /// DEBUG-only launch hook (design call E2b-8). Screenshots can't be scripted with a
@@ -134,8 +137,67 @@ enum EditorDebugLaunch {
     /// via `-EmfyDebugUpdateAvailable <version>`) to `-EmfyDebugShot <base>`, then quit.
     static var updatesScene: String? { value(for: "-EmfyDebugUpdatesScene")?.lowercased() }
 
+    /// `-EmfyDebugSettingsScene viewer`: on Mac, host a Settings tab in a sheet and capture
+    /// it to `-EmfyDebugShot <base>`, then quit — used for the F3c "Recognise text in
+    /// pictures" toggle screenshot. Currently only `viewer` is defined.
+    static var settingsScene: String? { value(for: "-EmfyDebugSettingsScene")?.lowercased() }
+
+    /// `-EmfyDebugPictureFixture YES`: synthesise a one-page EMF whose only content is an
+    /// embedded picture of rendered "INVOICE 2026" text (scene → EMF export,
+    /// `SceneFactory.makeImage` with a CoreText bitmap), written to the app's own temp, so an
+    /// F3c find-in-picture capture has a deterministic fixture and no tracked file is touched.
+    /// Combine with `-EmfyDebugFind` and `-EmfyDebugShot`.
+    static var pictureFixture: Bool { (value(for: "-EmfyDebugPictureFixture") ?? "NO").uppercased() == "YES" }
+
     /// Whether the launch hook is driving this run.
-    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect || findQuery != nil || findMenuAudit }
+    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect || findQuery != nil || findMenuAudit || pictureFixture || settingsScene != nil }
+
+    /// Builds the `-EmfyDebugPictureFixture` EMF and returns its temp path, or nil when the
+    /// flag is off or synthesis fails. The picture is an EMF+ compressed-PNG bitmap of
+    /// `string`, placed on a blank A5-ish page — exactly the "text inside a picture" case F3c
+    /// recognises.
+    static func pictureFixturePath(text string: String = "INVOICE 2026") -> String? {
+        guard pictureFixture else { return nil }
+        guard let image = renderPictureText(string),
+              let data = try? pictureFixtureEMF(image: image) else { return nil }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyDebugPicture-\(UUID().uuidString)", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return nil }
+        let url = directory.appendingPathComponent("invoice-picture.emf")
+        guard (try? data.write(to: url)) != nil else { return nil }
+        return url.path
+    }
+
+    private static func pictureFixtureEMF(image: CGImage) throws -> Data {
+        var scene = try SceneImporter.import(data: SceneFactory.blankDocument(pageSizeMillimetres: CGSize(width: 210, height: 150)))
+        let dest = SceneFactory.fitImageRect(
+            imagePixelSize: CGSize(width: image.width, height: image.height),
+            pageBoundsDevice: scene.pageBoundsDevice)
+        let id = SceneFactory.nextElementID(in: scene)
+        guard let element = SceneFactory.makeImage(cgImage: image, destRectDevice: dest, id: id) else {
+            throw CocoaError(.featureUnsupported)
+        }
+        scene.insert(element, at: scene.elements.count)
+        return try SceneExporter.export(scene, as: .emf).data
+    }
+
+    /// Renders `string` as large black text on a white background into a CGImage.
+    private static func renderPictureText(_ string: String) -> CGImage? {
+        let width = 1100, height = 240
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, 120, nil)
+        let black = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let attrs: [CFString: Any] = [kCTFontAttributeName: font, kCTForegroundColorAttributeName: black]
+        guard let attributed = CFAttributedStringCreate(nil, string as CFString, attrs as CFDictionary) else { return nil }
+        let line = CTLineCreateWithAttributedString(attributed)
+        ctx.textPosition = CGPoint(x: 40, y: 80)
+        CTLineDraw(line, ctx)
+        return ctx.makeImage()
+    }
 
     /// Copies `batchFiles` into the app's own temp (so a DEBUG batch run never touches a
     /// tracked file in place) and returns the copies' URLs.

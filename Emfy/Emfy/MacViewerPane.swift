@@ -269,6 +269,14 @@ struct MacViewerPane: View {
         findModel.present()
         findModel.query = EditorDebugLaunch.findQuery ?? ""
         findModel.applyQuery()
+        // F3c: picture OCR runs off the main actor; wait for it so a find-in-picture capture
+        // shows the recognised match. `setPictureRuns` re-matches against the live query, so
+        // the highlight appears as soon as OCR finishes (cap the wait for a file with none).
+        var waited = 0
+        while findModel.isReadingPictures, waited < 45000 {
+            try? await Task.sleep(for: .milliseconds(100))
+            waited += 100
+        }
         try? await Task.sleep(for: .milliseconds(300))
         scrollToCurrentMatch()
         try? await Task.sleep(for: .milliseconds(900))
