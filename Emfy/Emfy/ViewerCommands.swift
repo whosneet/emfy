@@ -108,6 +108,23 @@ struct ViewMenuCommands: Commands {
             Button("Zoom to Fit") { actions?.fit() }
                 .keyboardShortcut("9", modifiers: .command)
                 .disabled(noDocument)
+
+            // Editing grid + snapping (E3e), present only while editing. Toggles render as
+            // checkmarked menu items; Show Grid owns ⌘'.
+            Divider()
+            Toggle("Show Grid", isOn: Binding(
+                get: { actions?.isGridShown == true },
+                set: { _ in actions?.toggleGrid?() }))
+                .keyboardShortcut("'", modifiers: .command)
+                .disabled(actions?.toggleGrid == nil)
+            Toggle("Snap to Grid", isOn: Binding(
+                get: { actions?.isSnapToGrid == true },
+                set: { _ in actions?.toggleSnapToGrid?() }))
+                .disabled(actions?.toggleSnapToGrid == nil)
+            Toggle("Snap to Guides", isOn: Binding(
+                get: { actions?.isSnapToGuides == true },
+                set: { _ in actions?.toggleSnapToGuides?() }))
+                .disabled(actions?.toggleSnapToGuides == nil)
         }
     }
 }
@@ -163,6 +180,26 @@ struct ArrangeMenuCommands: Commands {
             Button("Send to Back") { actions?.sendToBack?() }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
                 .disabled(actions?.sendToBack == nil)
+
+            Divider()
+
+            // Align / Distribute (E3e). The reference is the selection's union bounds for
+            // 2+ elements, or the page for a single element; distribute needs 3+.
+            Menu("Align Objects") {
+                Button("Align Left") { actions?.alignSelection?(.left) }
+                Button("Align Centre") { actions?.alignSelection?(.centreHorizontal) }
+                Button("Align Right") { actions?.alignSelection?(.right) }
+                Divider()
+                Button("Align Top") { actions?.alignSelection?(.top) }
+                Button("Align Middle") { actions?.alignSelection?(.centreVertical) }
+                Button("Align Bottom") { actions?.alignSelection?(.bottom) }
+            }
+            .disabled(actions?.alignSelection == nil)
+            Menu("Distribute Objects") {
+                Button("Distribute Horizontally") { actions?.distributeSelection?(.horizontal) }
+                Button("Distribute Vertically") { actions?.distributeSelection?(.vertical) }
+            }
+            .disabled(actions?.distributeSelection == nil || actions?.canDistribute != true)
         }
     }
 }

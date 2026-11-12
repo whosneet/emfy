@@ -272,6 +272,7 @@ struct MacViewerPane: View {
         case "text-image": await runTextImageScript(base: base)
         case "text-popover": await runTextPopoverScript(base: base)
         case "layers": await runLayersScript(base: base)
+        case "align-grid": await runAlignGridScript(base: base)
         default: Self.logScript("unknown script \(script)"); exit(1)
         }
     }
@@ -530,6 +531,54 @@ struct MacViewerPane: View {
         Self.logScript("layers: reloaded plain loaded=\(session.loaded != nil) recordKinds=\(session.loaded?.prepared.recordKinds.count ?? -1)")
         try? await Task.sleep(for: .milliseconds(200))
         exit(session.lastSaveError == nil ? 0 : 3)
+    }
+
+    /// `align-grid` (E3e): a blank drawing → insert 3 shapes at uneven positions → select all
+    /// → Align Top → Distribute Horizontally → show the grid → screenshot (a) with the
+    /// inspector open (fix B: the page stays fully fitted) → then a live snapped move drag
+    /// with a smart guide → screenshot (b) → exit.
+    @MainActor
+    private func runAlignGridScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("align-grid: begin editing failed"); exit(2) }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        // Three shapes at uneven positions and sizes.
+        let a = session.debugInsertShape(.rect, rectDevice: CGRect(x: page.width * 0.08, y: page.height * 0.22, width: page.width * 0.17, height: page.height * 0.13))
+        let b = session.debugInsertShape(.ellipse, rectDevice: CGRect(x: page.width * 0.46, y: page.height * 0.52, width: page.width * 0.17, height: page.height * 0.13))
+        let c = session.debugInsertShape(.rect, rectDevice: CGRect(x: page.width * 0.80, y: page.height * 0.34, width: page.width * 0.15, height: page.height * 0.17))
+        let ids = Set([a, b, c].compactMap { $0 })
+        guard ids.count == 3, let aID = a, let bID = b else { Self.logScript("align-grid: insert failed (\(ids.count))"); exit(3) }
+        editorModel.selection.replace(with: ids)
+        session.alignSelection(ids, .top)
+        session.distributeSelection(ids, .horizontal)
+        editorModel.showGrid = true
+        showInspector = true
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(350))
+        controller.fit()   // re-fit with the inspector open (fix B)
+        try? await Task.sleep(for: .milliseconds(1100))
+        if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-a.png") {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-a.png")
+        }
+        let tops = ids.compactMap { id in session.editingScene?.elements.first { $0.id == id }?.selectionBoundsDevice.minY }
+        Self.logScript("align-grid: aligned tops=\(tops.map { Int($0) }) grid=\(editorModel.showGrid) inspector=\(showInspector)")
+
+        // (b): a live snapped move drag that shows a smart guide. Disable grid-snap so the
+        // element-centre guide wins, then drive the drag and capture mid-drag.
+        editorModel.snapToGrid = false
+        try? await Task.sleep(for: .milliseconds(200))
+        let guideShown = MacEditableCanvas.Coordinator.debugActive?.debugBeginSnappedMoveDrag(moveID: aID, towardID: bID) ?? false
+        try? await Task.sleep(for: .milliseconds(900))
+        if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-b.png") {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-b.png")
+        }
+        Self.logScript("align-grid: guideShown=\(guideShown)")
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(0)
     }
 
     /// A small in-process gradient PNG, so the image-insert script needs no external file.
@@ -1203,7 +1252,16 @@ struct MacViewerPane: View {
             bringToFront: arrangeEnabled ? { session.bringSelectionToFront(editorModel.selection.ids) } : nil,
             bringForward: arrangeEnabled ? { session.bringSelectionForward(editorModel.selection.ids) } : nil,
             sendBackward: arrangeEnabled ? { session.sendSelectionBackward(editorModel.selection.ids) } : nil,
-            sendToBack: arrangeEnabled ? { session.sendSelectionToBack(editorModel.selection.ids) } : nil
+            sendToBack: arrangeEnabled ? { session.sendSelectionToBack(editorModel.selection.ids) } : nil,
+            alignSelection: arrangeEnabled ? { session.alignSelection(editorModel.selection.ids, $0) } : nil,
+            distributeSelection: arrangeEnabled ? { session.distributeSelection(editorModel.selection.ids, $0) } : nil,
+            canDistribute: editorModel.selection.ids.count >= 3,
+            toggleGrid: session.editing == .editing ? { editorModel.showGrid.toggle() } : nil,
+            toggleSnapToGrid: session.editing == .editing ? { editorModel.snapToGrid.toggle() } : nil,
+            toggleSnapToGuides: session.editing == .editing ? { editorModel.snapToGuides.toggle() } : nil,
+            isGridShown: editorModel.showGrid,
+            isSnapToGrid: editorModel.snapToGrid,
+            isSnapToGuides: editorModel.snapToGuides
         )
     }
 

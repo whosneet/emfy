@@ -60,6 +60,21 @@ struct ViewerActions {
     var sendBackward: (() -> Void)? = nil
     var sendToBack: (() -> Void)? = nil
 
+    // Editing (E3e): Arrange ▸ Align / Distribute. `align` is `nil` unless in edit mode
+    // with a non-empty selection; `distribute` additionally needs `canDistribute` (3+).
+    var alignSelection: ((EditorArrange.Alignment) -> Void)? = nil
+    var distributeSelection: ((EditorArrange.Distribution) -> Void)? = nil
+    var canDistribute: Bool = false
+
+    // Editing (E3e): View ▸ grid + snapping. The toggles are `nil` unless editing; the
+    // flags drive the menu checkmarks and the "Show/Hide Grid" label.
+    var toggleGrid: (() -> Void)? = nil
+    var toggleSnapToGrid: (() -> Void)? = nil
+    var toggleSnapToGuides: (() -> Void)? = nil
+    var isGridShown: Bool = false
+    var isSnapToGrid: Bool = true
+    var isSnapToGuides: Bool = true
+
     // iOS/iPadOS immersive chrome + the Info inspector, surfaced in the iOS View menu
     // (K1). `nil` on the Mac, which has its own View toggles and toolbar.
     var toggleChrome: (() -> Void)? = nil
