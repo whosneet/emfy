@@ -729,6 +729,18 @@ struct MetafileViewerScreen: View {
                 onSingleTap: { toggleChrome() }
             )
             .ignoresSafeArea()
+            // iPad long-press drag out (F1 design call 3): provides the drawing as a
+            // vector PDF file promise + PNG. Viewer-mode only — this read-only layer is
+            // replaced by the editable canvas in edit mode, so the drag never competes
+            // with element dragging.
+            .onDrag {
+                MetafileExportController.dragItemProvider(
+                    prepared: model.prepared,
+                    baseName: entry?.baseName ?? "Drawing",
+                    pngScale: settings.defaultPNGScale.multiplier,
+                    background: settings.pngBackground == .transparent ? .transparent : .white,
+                    options: settings.renderOptions)
+            }
             // Rebuild the tiled view only when the content actually changes, so a
             // changed-content reload shows the new drawing while an identical reload
             // keeps the same view and its zoom (C4a M4). The identity also tracks the
@@ -1170,10 +1182,24 @@ struct MetafileViewerScreen: View {
                 Label("Share as SVG", systemImage: "doc.text")
             }
             Divider()
+            // Print (F1): the vector PDF through UIPrintInteractionController.
+            Button {
+                exporter.printDrawing(prepared: model.prepared, options: settings.renderOptions, jobName: entry.displayName)
+            } label: {
+                Label("Print…", systemImage: "printer")
+            }
+            .accessibilityIdentifier("printDrawing")
+            // Copy (F1): PDF + PNG to the pasteboard.
+            Button {
+                exporter.copyDrawing(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+            .accessibilityIdentifier("copyDrawing")
             Button {
                 exporter.copyImage(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)
             } label: {
-                Label("Copy Image", systemImage: "doc.on.doc")
+                Label("Copy Image", systemImage: "photo.on.rectangle")
             }
             .accessibilityIdentifier("copyImage")
             Button {

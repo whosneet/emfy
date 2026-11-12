@@ -118,6 +118,64 @@ final class MetafileExportController {
         )
     }
 
+    /// Prints the drawing (F1) via `UIPrintInteractionController`, fed the vector PDF so
+    /// the print output is vector. `jobName` is the file name. Renders off-main, then
+    /// presents the system print UI (anchored to the key window on iPad).
+    func printDrawing(prepared: MetafileRenderer.Prepared, options: RenderOptions, jobName: String) {
+        runner.run(
+            setBusy: { [weak self] busy in self?.isRendering = busy },
+            render: { MetafileExport.pdfData(prepared, options: options) },
+            done: { [weak self] data in
+                guard let self else { return }
+                guard let data else { self.shareError = MetafileExport.pdfGenerateFailure; return }
+                let info = UIPrintInfo.printInfo()
+                info.jobName = jobName
+                info.outputType = .general
+                let controller = UIPrintInteractionController.shared
+                controller.printInfo = info
+                controller.printingItem = data
+                if let (view, rect) = Self.keyWindowAnchor() {
+                    controller.present(from: rect, in: view, animated: true, completionHandler: nil)
+                } else {
+                    controller.present(animated: true, completionHandler: nil)
+                }
+            }
+        )
+    }
+
+    /// Copies the drawing to the pasteboard as vector PDF + PNG (F1 design call 2),
+    /// confirming with a toast. `scale`/`background` come from the Export settings.
+    func copyDrawing(prepared: MetafileRenderer.Prepared, scale: CGFloat, background: RenderBackground, options: RenderOptions, toast: ToastCenter?) {
+        runner.run(
+            setBusy: { [weak self] busy in self?.isRendering = busy },
+            render: { CopyPayload(
+                pdf: MetafileExport.pdfData(prepared, options: options),
+                png: MetafileExport.pngData(prepared, scale: scale, background: background, options: options)) },
+            done: { [weak self] payload in
+                guard let self else { return }
+                var representation: [String: Any] = [:]
+                if let pdf = payload.pdf { representation[UTType.pdf.identifier] = pdf }
+                if let png = payload.png { representation[UTType.png.identifier] = png }
+                guard !representation.isEmpty else {
+                    self.shareError = MetafileExport.pdfGenerateFailure
+                    return
+                }
+                UIPasteboard.general.items = [representation]
+                toast?.show("Drawing copied", systemImage: "doc.on.doc")
+            }
+        )
+    }
+
+    /// An anchor for `UIPrintInteractionController.present(from:in:…)` on iPad — a tiny
+    /// rect at the top centre of the foreground key window.
+    private static func keyWindowAnchor() -> (UIView, CGRect)? {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        guard let window = scene?.keyWindow ?? scene?.windows.first else { return nil }
+        return (window, CGRect(x: window.bounds.midX - 1, y: 0, width: 2, height: 2))
+    }
+
     /// Renders a PNG and copies it to the pasteboard, confirming with a toast (the
     /// toast also announces to VoiceOver). C4a H6/A2. `scale`/`background` from the
     /// Export settings (S1a-6).
@@ -210,4 +268,68 @@ final class MetafileExportController {
     func cancelExport() {
         cancelOngoing()
     }
+}
+
+/// The two representations a Copy produces, rendered off-main in one pass (F1).
+private struct CopyPayload: Sendable {
+    let pdf: Data?
+    let png: Data?
+}
+
+extension MetafileExportController {
+    /// Builds the drag item provider for an iPad long-press drag on the viewer canvas
+    /// (F1 design call 3): the drawing as a vector PDF file promise (a drop yields
+    /// "<name>.pdf") and a PNG. Each representation renders lazily off-main, so starting
+    /// the drag is cheap.
+    static func dragItemProvider(
+        prepared: MetafileRenderer.Prepared,
+        baseName: String,
+        pngScale: Int,
+        background: RenderBackground,
+        options: RenderOptions
+    ) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.suggestedName = baseName
+
+        provider.registerFileRepresentation(
+            forTypeIdentifier: UTType.pdf.identifier, fileOptions: [], visibility: .all
+        ) { completion in
+            Task.detached(priority: .userInitiated) {
+                guard let data = MetafileRenderer.pdfData(prepared, options: options) else {
+                    completion(nil, false, DragError.renderFailed); return
+                }
+                do {
+                    let directory = ExportTemp.makeDirectory()
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let url = directory.appendingPathComponent(MetafileExport.sanitisedFileName("\(baseName).pdf"))
+                    try data.write(to: url, options: .atomic)
+                    completion(url, false, nil)
+                } catch {
+                    completion(nil, false, error)
+                }
+            }
+            return nil
+        }
+
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.png.identifier, visibility: .all
+        ) { completion in
+            Task.detached(priority: .userInitiated) {
+                let selection = ExportScale.select(
+                    baseWidth: Int(prepared.naturalSize.width.rounded()),
+                    baseHeight: Int(prepared.naturalSize.height.rounded()),
+                    requested: pngScale, areaCap: ExportScale.areaCap)
+                guard let (image, _) = MetafileRenderer.makeImage(
+                        prepared, scale: CGFloat(selection.multiplier), background: background, options: options),
+                      let data = EMFExport.pngData(from: image) else {
+                    completion(nil, DragError.renderFailed); return
+                }
+                completion(data, nil)
+            }
+            return nil
+        }
+        return provider
+    }
+
+    private enum DragError: Error { case renderFailed }
 }
