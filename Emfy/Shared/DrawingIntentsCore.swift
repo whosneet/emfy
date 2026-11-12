@@ -206,8 +206,8 @@ enum AppIntentDrawing {
 
     /// The EMF document's physical page size in millimetres from the header frame
     /// ([MS-EMF] §2.2.9, inclusive-inclusive, hundredths of a millimetre). `nil`
-    /// for WMF or a degenerate frame.
-    private static func pageSizeMM(opened: OpenedMetafile) -> CGSize? {
+    /// for WMF or a degenerate frame. Internal so the A1 AI context can reuse it.
+    static func pageSizeMM(opened: OpenedMetafile) -> CGSize? {
         guard opened.format == .emf, let file = try? EMFFile.parse(opened.data) else { return nil }
         let frame = file.header.frame
         let widthUnits = Int64(frame.right) - Int64(frame.left) + 1

@@ -116,6 +116,17 @@ final class EmfySettings {
         didSet { defaults.set(fullEditorOnIPhone, forKey: Keys.fullEditorOnIPhone) }
     }
 
+    // MARK: Apple Intelligence (A1)
+
+    /// Use Apple's on-device AI (Foundation Models) for Describe, Ask and VoiceOver
+    /// alt text. Default ON where the hardware and OS support it; the whole AI
+    /// surface is hidden anyway when the device or OS can't run it, so this toggle
+    /// only appears — and only matters — where AI is actually available (A1a).
+    /// Off means no AI UI at all.
+    var useOnDeviceAI: Bool {
+        didSet { defaults.set(useOnDeviceAI, forKey: Keys.useOnDeviceAI) }
+    }
+
     // MARK: Library extras
 
     /// Recents ordering. Today recents sort by most-recently-opened, so `.date`.
@@ -245,6 +256,7 @@ final class EmfySettings {
         defaultPNGScale = Self.int(defaults, Keys.defaultPNGScale, default: .x2)
         pngBackground = Self.string(defaults, Keys.pngBackground, default: .white)
         defaultExportFormat = Self.string(defaults, Keys.defaultExportFormat, default: .png)
+        useOnDeviceAI = Self.bool(defaults, Keys.useOnDeviceAI, default: true)
         // Rendering (S1b) reads from `sharedDefaults`. As with every other setting,
         // assignment in `init` doesn't trigger `didSet`, so construction reads without
         // writing back; the decoded table is already bounded.
@@ -354,6 +366,7 @@ final class EmfySettings {
         static let defaultPNGScale = "settings.export.defaultPNGScale"
         static let pngBackground = "settings.export.pngBackground"
         static let defaultExportFormat = "settings.export.defaultExportFormat"
+        static let useOnDeviceAI = "settings.ai.useOnDeviceAI"
         // Rendering (S1b) and Quick Look options (S1b-2b) persist through
         // `sharedDefaults` (the App Group suite). The key STRINGS live in
         // `SharedRenderSettings.Keys` — the single source of truth the Quick Look
