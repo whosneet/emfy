@@ -107,6 +107,12 @@ final class RecentsStore {
     /// install one, so the store's behaviour is unchanged without it.
     @ObservationIgnored weak var lifecycleObserver: (any RecentsLifecycleObserver)?
 
+    /// Called when an entry is added, promoted or restored, so the AI title/tags service
+    /// (A1b) can (re)generate its metadata in the background. Kept apart from
+    /// `lifecycleObserver` (Spotlight) and never fired by `setAITitleTags`, so storing the
+    /// result can't re-trigger generation. `nil` in tests and when AI isn't wired.
+    @ObservationIgnored var onEntryChanged: ((UUID) -> Void)?
+
     nonisolated static let log = Logger(subsystem: "com.avneetsingh.emfy", category: "recents")
 
     init(locations: Locations = .standard) {
@@ -216,6 +222,7 @@ final class RecentsStore {
         // Mirror the add/refresh into Spotlight (F3d). After sortAndCap, so an entry this
         // add evicted (already de-indexed there) is never re-indexed here.
         lifecycleObserver?.recentsEntryAddedOrRefreshed(id: id)
+        onEntryChanged?(id)
         return id
     }
 
@@ -574,6 +581,23 @@ final class RecentsStore {
         persist()
         // Undo restored the entry — re-index it (F3d).
         lifecycleObserver?.recentsEntryAddedOrRefreshed(id: pending.entry.id)
+        onEntryChanged?(pending.entry.id)
+    }
+
+    // MARK: - AI title and tags (A1b)
+
+    /// Stores on-device AI title/tags for an entry, tagged with the content hash they
+    /// were generated from, and refreshes its Spotlight keywords. A no-op for a missing
+    /// or session-only Private entry (Private metadata never persists). Does NOT fire
+    /// `onEntryChanged`, so storing can't re-trigger generation.
+    func setAITitleTags(_ titleTags: DrawingTitleTags, contentHash: String, for id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }), !privateIDs.contains(id) else { return }
+        entries[index].aiTitle = titleTags.title.isEmpty ? nil : titleTags.title
+        entries[index].aiTags = titleTags.tags.isEmpty ? nil : titleTags.tags
+        entries[index].aiContentHash = contentHash
+        persist()
+        // Refresh the Spotlight item so its keywords pick up the new title/tags (F3d).
+        lifecycleObserver?.recentsEntryAddedOrRefreshed(id: id)
     }
 
     /// Finalises a pending removal now: deletes its side files. Called on timeout,

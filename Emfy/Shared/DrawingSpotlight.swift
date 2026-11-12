@@ -23,6 +23,10 @@ struct DrawingSpotlightItem: Equatable, Sendable {
     var textContent: String
     /// The content UTI (e.g. "com.microsoft.emf").
     var contentTypeIdentifier: String
+    /// On-device AI keywords (the AI title plus its tags), attached by the app when AI
+    /// is on, so a Spotlight search matches the drawing's generated title/tags (A1b).
+    /// Empty when AI is off or no title has been generated.
+    var keywords: [String] = []
     /// The recents thumbnail PNG, attached by the app (`RecentsSpotlightBridge`)
     /// before indexing (F3d). Carried on the item — rather than fetched inside the
     /// index — so the index seam stays a simple value sink. `nil` when none is

@@ -33,6 +33,12 @@ struct AppleIntelligenceSettingsSection: View {
                 Text(AppleIntelligenceFooter.text)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // Turning AI on starts background title/tags generation; turning it off
+            // stops it and refreshes Spotlight so stale AI keywords are dropped (A1b).
+            .onChange(of: settings.useOnDeviceAI) { _, _ in
+                DrawingTitleTagService.shared.settingsChanged()
+                SpotlightService.shared.settingsChanged()
+            }
         }
     }
 }

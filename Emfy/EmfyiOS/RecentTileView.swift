@@ -38,6 +38,7 @@ struct RecentTileView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                RecentAITitleLine(entry: entry)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -243,6 +244,7 @@ struct RecentListRow: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                RecentAITitleLine(entry: entry)
             }
             Spacer(minLength: 4)
             if store.isPinned(entry.id) {

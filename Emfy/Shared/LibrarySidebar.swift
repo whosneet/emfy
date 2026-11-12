@@ -279,6 +279,7 @@ struct RecentRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                RecentAITitleLine(entry: entry)
             }
             if isPrivate {
                 Spacer(minLength: 4)

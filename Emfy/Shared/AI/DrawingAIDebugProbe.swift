@@ -21,6 +21,17 @@ import FoundationModels
 enum DrawingAIDebugProbe {
     static func runIfNeeded() {
         let args = ProcessInfo.processInfo.arguments
+        if let j = args.firstIndex(of: "-EmfyDebugTitleTags"), j + 1 < args.count {
+            let files = args[j + 1].split(separator: ",").map(String.init)
+            let out = args.firstIndex(of: "-EmfyDebugTitleTagsResult").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+                ?? (files.first.map { $0 + ".titletags.txt" } ?? "/tmp/titletags.txt")
+            Task { @MainActor in
+                let text = await runTitleTags(files: files)
+                try? text.write(toFile: out, atomically: true, encoding: .utf8)
+                exit(0)
+            }
+            return
+        }
         guard let i = args.firstIndex(of: "-EmfyDebugAIProbe"), i + 1 < args.count else { return }
         let sourcePath = args[i + 1]
         let resultPath = args.firstIndex(of: "-EmfyDebugAIResult").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
@@ -76,6 +87,29 @@ enum DrawingAIDebugProbe {
 
         // Injection probe: a drawing whose text tries to hijack the model.
         log.append(await injectionProbe())
+        return log.joined(separator: "\n\n")
+    }
+
+    /// Live auto title/tags over a list of files (A1b Part 1 gate), logging each file's
+    /// generated title and tags.
+    @MainActor
+    private static func runTitleTags(files: [String]) async -> String {
+        var log: [String] = []
+        let status = DrawingAIAvailability.current()
+        log.append("availability: \(status)")
+        guard status.isAvailable else { return (["UNAVAILABLE"] + log).joined(separator: "\n") }
+        for path in files {
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+                log.append("\(name): FAIL could not read"); continue
+            }
+            let result = await DrawingTitleTagService.shared.debugGenerate(data: data, fileName: name)
+            if let result {
+                log.append("\(name)\n  title: \(result.title)\n  tags: \(result.tags.joined(separator: ", "))")
+            } else {
+                log.append("\(name): no result")
+            }
+        }
         return log.joined(separator: "\n\n")
     }
 

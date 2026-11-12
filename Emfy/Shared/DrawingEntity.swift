@@ -39,6 +39,9 @@ struct DrawingEntity: AppEntity {
     /// attribute set that feeds Siri / Apple Intelligence semantic search. Nil on
     /// the light query path (no parse); set only when the text is already extracted.
     var textSummary: String? = nil
+    /// The on-device AI title, when one is stored and AI display is on, so the entity
+    /// subtitle is more descriptive (A1b, "if cheap" — no parse). Nil otherwise.
+    var aiTitle: String? = nil
 
     var displayRepresentation: DisplayRepresentation {
         let image: DisplayRepresentation.Image
@@ -46,6 +49,13 @@ struct DrawingEntity: AppEntity {
             image = DisplayRepresentation.Image(url: URL(fileURLWithPath: thumbnailPath))
         } else {
             image = DisplayRepresentation.Image(systemName: "doc.richtext")
+        }
+        if let aiTitle, !aiTitle.isEmpty {
+            return DisplayRepresentation(
+                title: "\(name)",
+                subtitle: "\(aiTitle) — \(formatLabel) · \(sizeLabel)",
+                image: image
+            )
         }
         return DisplayRepresentation(
             title: "\(name)",
@@ -95,6 +105,7 @@ enum DrawingEntityProvider {
             isPrivate: store.isPrivate,
             privateIDs: store.privateIDs,
             thumbnailsDirectory: store.locations.thumbnailsDirectory,
+            aiTitlesEnabled: EmfySettings.shared.useOnDeviceAI,
             ids: ids,
             search: search,
             limit: limit
@@ -113,6 +124,7 @@ enum DrawingEntityFactory {
         isPrivate: Bool,
         privateIDs: Set<UUID>,
         thumbnailsDirectory: URL,
+        aiTitlesEnabled: Bool = false,
         ids: Set<UUID>? = nil,
         search: String? = nil,
         limit: Int? = nil
@@ -133,10 +145,10 @@ enum DrawingEntityFactory {
         if let limit, limit >= 0 {
             list = Array(list.prefix(limit))
         }
-        return list.map { entity(from: $0, thumbnailsDirectory: thumbnailsDirectory) }
+        return list.map { entity(from: $0, thumbnailsDirectory: thumbnailsDirectory, aiTitlesEnabled: aiTitlesEnabled) }
     }
 
-    static func entity(from entry: RecentEntry, thumbnailsDirectory: URL) -> DrawingEntity {
+    static func entity(from entry: RecentEntry, thumbnailsDirectory: URL, aiTitlesEnabled: Bool = false) -> DrawingEntity {
         let thumbnailPath = entry.thumbnailFileName.map {
             thumbnailsDirectory.appendingPathComponent($0).path
         }
@@ -145,7 +157,8 @@ enum DrawingEntityFactory {
             name: entry.displayName,
             formatLabel: entry.formatLabel,
             sizeLabel: entry.sizeLabel,
-            thumbnailPath: thumbnailPath
+            thumbnailPath: thumbnailPath,
+            aiTitle: aiTitlesEnabled ? entry.aiTitle : nil
         )
     }
 }

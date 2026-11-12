@@ -47,6 +47,9 @@ struct CoreSpotlightIndex: DrawingSpotlightIndex {
         attributes.displayName = item.title
         attributes.contentDescription = item.contentDescription
         attributes.textContent = item.textContent
+        if !item.keywords.isEmpty {
+            attributes.keywords = item.keywords
+        }
         if let thumbnail = item.thumbnailData {
             attributes.thumbnailData = thumbnail
         }

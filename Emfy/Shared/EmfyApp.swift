@@ -38,6 +38,10 @@ struct EmfyApp: App {
         // add an entry (F3d); the launch sync of existing recents runs from the library
         // window's `.task`, throttled, so it never blocks launch.
         SpotlightService.shared.activate(store: RecentsStore.shared, settings: settings)
+        // Wire the background auto title/tags service so new opens trigger generation
+        // (A1b); the launch sweep of existing recents runs from the library window's
+        // `.task`, one at a time at low priority.
+        DrawingTitleTagService.shared.activate(store: RecentsStore.shared, settings: settings)
     }
 
     var body: some Scene {

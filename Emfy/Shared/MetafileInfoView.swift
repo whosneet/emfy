@@ -90,6 +90,10 @@ struct MetafileInfoView: View {
                 .accessibilityIdentifier("copyDiagnosticReport")
             }
 
+            // AI title and tags for this drawing (A1b), gated by the AI toggle/Private
+            // mode; absent when none have been generated.
+            DrawingAITagsSection(entry: entry)
+
             // Describe this drawing (A1a) — only when on-device AI is available.
             if let aiInputs, let describeModel, let altTextStore {
                 DrawingDescribeSection(model: describeModel, altTextStore: altTextStore, inputs: aiInputs)

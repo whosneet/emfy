@@ -55,6 +55,24 @@ struct RecentEntry: Identifiable, Hashable, Codable, Sendable {
     /// eviction.
     var isPinned: Bool? = nil
 
+    // MARK: - A1b fields (optional, so a pre-A1b store decodes cleanly)
+
+    /// A short on-device AI title (≤ 6 words), shown as a SECONDARY line under the
+    /// file name (the file is never renamed). `nil` until generated, when AI is off,
+    /// or in Private mode. Sanitised/capped at generation (`DrawingTitleTagsSanitizer`).
+    var aiTitle: String? = nil
+    /// 3–5 lowercase AI tags, shown in the Info segment and fed to Spotlight keywords.
+    var aiTags: [String]? = nil
+    /// The content hash the AI title/tags were generated from, so a reopened file whose
+    /// bytes changed regenerates rather than keeping a stale title.
+    var aiContentHash: String? = nil
+
+    /// The stored AI title + tags as a value, or `nil` when none has been generated.
+    var aiTitleTags: DrawingTitleTags? {
+        guard let aiTitle, !aiTitle.isEmpty else { return nil }
+        return DrawingTitleTags(title: aiTitle, tags: aiTags ?? [])
+    }
+
     /// The file name without its extension, for the viewer navigation title and
     /// VoiceOver.
     var baseName: String {

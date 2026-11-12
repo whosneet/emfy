@@ -69,6 +69,11 @@ final class SpotlightService {
         let ocrEnabled = settings.recognizeTextInPictures
         let options = settings.renderOptions
         let idString = id.uuidString
+        // AI title/tags become Spotlight keywords, but only while AI is on and Private
+        // mode is off — otherwise stored AI metadata is ignored (A1b).
+        let aiKeywords: [String] = (settings.useOnDeviceAI && !store.isPrivate)
+            ? (entry.aiTitleTags.map { [$0.title] + $0.tags } ?? [])
+            : []
 
         return await Task.detached(priority: .background) { () -> DrawingSpotlightItem? in
             guard case .success(let data, _) = RecentsStore.resolveBookmark(bookmark),
@@ -89,6 +94,7 @@ final class SpotlightService {
                 pictureText: pictureRuns
             )
             item.thumbnailData = thumbnail
+            item.keywords = aiKeywords.filter { !$0.isEmpty }
             return item
         }.value
     }

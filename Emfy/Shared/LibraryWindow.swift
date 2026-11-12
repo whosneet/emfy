@@ -133,6 +133,9 @@ struct LibraryWindow: View {
             store.setPrivate(settings.privateMode)
             // Index the recents already on disk, once per launch, throttled (F3d).
             SpotlightService.shared.syncOnLaunch()
+            // Generate AI title/tags for recents lacking them, one at a time in the
+            // background (A1b). Self-gates on the AI toggle, Private mode and availability.
+            DrawingTitleTagService.shared.syncOnLaunch()
             #if DEBUG
             // UI-test seeding (DEBUG only): SIMCTL_CHILD_EMFY_SEED_RECEIVED=<n>.
             if let raw = ProcessInfo.processInfo.environment["EMFY_SEED_RECEIVED"], let n = Int(raw), n > 0 {
