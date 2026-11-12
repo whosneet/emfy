@@ -141,6 +141,8 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
         NSUpdateDynamicServices()
         #if DEBUG
         MacConvertService.runDebugHookIfNeeded()
+        DrawingAIDebugProbe.runIfNeeded()
+        DrawingAIScreenshots.runIfNeeded()
         #endif
     }
 
