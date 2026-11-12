@@ -3,89 +3,82 @@ import Testing
 import EMFParse
 import EMFWrite
 
-/// The private EMR_COMMENT layer markers ([MS-EMF] §2.3.3): encode → decode is a
-/// fixed point, the records parse as ordinary comments, and hostile bytes decode
-/// to nil without trapping (§8).
-@Suite("Layer markers")
+/// The private EMR_COMMENT layer table ([MS-EMF] §2.3.3): encode → decode is a
+/// fixed point, the record is a well-formed comment, and hostile bytes decode to
+/// nil without trapping (§8).
+@Suite("Layer table")
 struct EMFLayerMarkerTests {
 
-    @Test func beginRoundTrips() {
-        let bytes = EMFLayerMarker.begin(name: "Background", hidden: true, locked: false)
-        let marker = EMFLayerMarker.decode(recordBytes: bytes)
-        #expect(marker == EMFLayerMarker.Marker(kind: .begin, name: "Background", hidden: true, locked: false))
+    typealias Info = EMFLayerMarker.LayerInfo
+
+    @Test func tableRoundTrips() {
+        let layers = [
+            Info(name: "Background", hidden: false, locked: true, count: 3),
+            Info(name: "Shapes", hidden: false, locked: false, count: 0),
+            Info(name: "Notes", hidden: true, locked: false, count: 5),
+        ]
+        let bytes = EMFLayerMarker.table(layers)
+        #expect(EMFLayerMarker.decodeTable(recordBytes: bytes) == layers)
     }
 
-    @Test func endRoundTrips() {
-        let bytes = EMFLayerMarker.end()
-        #expect(EMFLayerMarker.decode(recordBytes: bytes)
-            == EMFLayerMarker.Marker(kind: .end, name: "", hidden: false, locked: false))
-    }
-
-    @Test(arguments: [
-        (false, false), (true, false), (false, true), (true, true),
-    ])
-    func flagsRoundTrip(hidden: Bool, locked: Bool) {
-        let bytes = EMFLayerMarker.begin(name: "L", hidden: hidden, locked: locked)
-        let marker = EMFLayerMarker.decode(recordBytes: bytes)
-        #expect(marker?.hidden == hidden)
-        #expect(marker?.locked == locked)
+    @Test func emptyTableRoundTrips() {
+        let bytes = EMFLayerMarker.table([])
+        #expect(EMFLayerMarker.decodeTable(recordBytes: bytes) == [])
     }
 
     @Test func unicodeNameRoundTrips() {
-        let name = "レイヤー 1 — café 🎨"
-        let bytes = EMFLayerMarker.begin(name: name, hidden: false, locked: false)
-        #expect(EMFLayerMarker.decode(recordBytes: bytes)?.name == name)
+        let layers = [Info(name: "レイヤー 1 — café 🎨", hidden: false, locked: false, count: 1)]
+        #expect(EMFLayerMarker.decodeTable(recordBytes: EMFLayerMarker.table(layers)) == layers)
     }
 
     /// The record is a well-formed, 4-aligned EMR_COMMENT (Type 70, nSize >= 8).
     @Test func isAWellFormedComment() {
-        let marker = EMFLayerMarker.begin(name: "Shapes", hidden: false, locked: true)
-        #expect(marker.count % 4 == 0)
-        #expect(marker.count >= 8)
-        #expect(marker[0] == 70)   // EMR_COMMENT type id
+        let bytes = EMFLayerMarker.table([Info(name: "Shapes", hidden: false, locked: true, count: 2)])
+        #expect(bytes.count % 4 == 0)
+        #expect(bytes.count >= 8)
+        #expect(bytes[0] == 70)   // EMR_COMMENT type id
+        #expect(EMFLayerMarker.isLayerTable(recordBytes: bytes))
     }
 
     // MARK: - Hostile inputs (§8): never a trap, always nil
 
     @Test func rejectsShortRecord() {
-        #expect(EMFLayerMarker.decode(recordBytes: []) == nil)
-        #expect(EMFLayerMarker.decode(recordBytes: [70, 0, 0, 0]) == nil)
-        #expect(EMFLayerMarker.decode(recordBytes: [70, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0]) == nil)
+        #expect(EMFLayerMarker.decodeTable(recordBytes: []) == nil)
+        #expect(EMFLayerMarker.decodeTable(recordBytes: [70, 0, 0, 0]) == nil)
+        #expect(EMFLayerMarker.decodeTable(recordBytes: [70, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0]) == nil)
     }
 
     @Test func rejectsWrongType() {
-        var bytes = EMFLayerMarker.begin(name: "X", hidden: false, locked: false)
+        var bytes = EMFLayerMarker.table([Info(name: "X", hidden: false, locked: false, count: 1)])
         bytes[0] = 71   // not EMR_COMMENT
-        #expect(EMFLayerMarker.decode(recordBytes: bytes) == nil)
+        #expect(EMFLayerMarker.decodeTable(recordBytes: bytes) == nil)
     }
 
     @Test func rejectsForeignSignature() {
-        // An EMF+ comment: Type 70, DataSize 8, identifier "EMF+" then four bytes.
+        // An EMF+ comment: Type 70, DataSize 12, identifier "EMF+" then two words.
         var w = LE()
         w.u32(70); w.u32(24); w.u32(12)
         w.u32(0x2B46_4D45); w.u32(0x4001); w.u32(0)
-        #expect(EMFLayerMarker.decode(recordBytes: w.bytes) == nil)
+        #expect(EMFLayerMarker.decodeTable(recordBytes: w.bytes) == nil)
     }
 
     @Test func rejectsLyingDataSize() {
-        var bytes = EMFLayerMarker.begin(name: "Name", hidden: false, locked: false)
-        // Overstate DataSize far past the record — bounds-checked, no trap.
+        var bytes = EMFLayerMarker.table([Info(name: "Name", hidden: false, locked: false, count: 1)])
         bytes[8] = 0xFF; bytes[9] = 0xFF; bytes[10] = 0xFF; bytes[11] = 0x7F
-        #expect(EMFLayerMarker.decode(recordBytes: bytes) == nil)
+        #expect(EMFLayerMarker.decodeTable(recordBytes: bytes) == nil)
     }
 
-    @Test func rejectsLyingNameLength() {
-        var bytes = EMFLayerMarker.begin(name: "AB", hidden: false, locked: false)
-        // nameLen field sits at CommentData offset 12 (signature 8 + kind/flags/reserved 4),
-        // i.e. record offset 12 + 12 = 24. Set it to a huge value.
-        bytes[24] = 0xFF; bytes[25] = 0xFF; bytes[26] = 0xFF; bytes[27] = 0x7F
-        #expect(EMFLayerMarker.decode(recordBytes: bytes) == nil)
+    @Test func rejectsLyingLayerCount() {
+        var bytes = EMFLayerMarker.table([Info(name: "A", hidden: false, locked: false, count: 1)])
+        // layerCount (u16) sits at CommentData offset 10 → record offset 12 + 10 = 22.
+        bytes[22] = 0xFF; bytes[23] = 0xFF   // 65535 layers, way past the data
+        #expect(EMFLayerMarker.decodeTable(recordBytes: bytes) == nil)
     }
 
     @Test func clampsOverlongNameOnEncode() {
         let huge = String(repeating: "A", count: EMFLayerMarker.maxNameBytes + 500)
-        let bytes = EMFLayerMarker.begin(name: huge, hidden: false, locked: false)
-        let marker = EMFLayerMarker.decode(recordBytes: bytes)
-        #expect(marker?.name.utf8.count == EMFLayerMarker.maxNameBytes)
+        let bytes = EMFLayerMarker.table([Info(name: huge, hidden: false, locked: false, count: 0)])
+        let decoded = EMFLayerMarker.decodeTable(recordBytes: bytes)
+        #expect(decoded?.first?.name.utf8.count == EMFLayerMarker.maxNameBytes)
     }
 }

@@ -80,17 +80,16 @@ struct SceneLayerRoundTripTests {
         let once = try SceneImporter.import(data: SceneExporter.export(scene, as: .emf).data)
         let twice = try SceneImporter.import(data: SceneExporter.export(once, as: .emf).data)
         #expect(Self.shapeOf(twice) == Self.shapeOf(scene))
-        // Marker records should not pile up: the re-save's marker count equals a
-        // begin+end per layer (3 × 2 = 6).
+        // The layer table must not pile up: exactly one table record after a re-save.
         let resaved = try SceneExporter.export(once, as: .emf).data
         let file = try EMFFile.parse(resaved)
         let bytes = [UInt8](resaved)
-        var markerCount = 0
+        var tableCount = 0
         for record in file.records where record.type == 70 {
             let slice = Array(bytes[record.offset ..< record.offset + Int(record.size)])
-            if EMFLayerMarker.decode(recordBytes: slice) != nil { markerCount += 1 }
+            if EMFLayerMarker.isLayerTable(recordBytes: slice) { tableCount += 1 }
         }
-        #expect(markerCount == 6)
+        #expect(tableCount == 1)
     }
 
     // MARK: - Plain-renderer equivalence (markers ignored)
@@ -125,6 +124,56 @@ struct SceneLayerRoundTripTests {
         let opened = try OpenedMetafile.open(data)
         let image = try #require(MetafileRenderer.makeImage(opened, scale: 1, background: .white)?.0)
         return image
+    }
+
+    // MARK: - EMF+ / dual sources persist layers (fix 1)
+
+    /// A dual EMF+ corpus file split into two layers (keeping every element's
+    /// verbatim EMF+ provenance) round-trips its structure AND renders the same as
+    /// the original — the layer table draws nothing and the content is re-emitted
+    /// unchanged.
+    @Test func emfPlusSourceLayersRoundTrip() throws {
+        let url = EditTestPaths.corpusDirectory.appendingPathComponent("handmade-emfplus-shapes.emf")
+        let data = try Data(contentsOf: url)
+        var scene = try SceneImporter.import(data: data)
+        #expect(scene.source.renderPath == .emfPlus)
+        let all = scene.layers[0].elements
+        try #require(all.count >= 2)
+
+        // Split verbatim into two layers (no element edited), preserving z-order.
+        let half = all.count / 2
+        scene.layers = [
+            Layer(id: 0, name: "Base", elements: Array(all[..<half])),
+            Layer(id: 1, name: "Top", elements: Array(all[half...]), hidden: false, locked: true),
+        ]
+        #expect(scene.hasNonTrivialLayers)
+
+        let exported = try SceneExporter.export(scene, as: .emf)
+        let reimported = try SceneImporter.import(data: exported.data)
+        #expect(reimported.layers.map(\.name) == ["Base", "Top"])
+        #expect(reimported.layers.map(\.elements.count) == [half, all.count - half])
+        #expect(reimported.layers[1].locked)
+
+        // Plain render of the saved bytes equals the original within tolerance.
+        let diff = compareImages(try Self.render(data), try Self.render(exported.data), tolerance: 16)
+        #expect(diff.sameSize)
+        #expect(diff.differingFraction < 0.01)
+    }
+
+    /// Moving EMF+ elements to a new layer via the command path also persists the
+    /// structure (the moved elements are re-synthesised, so this checks structure,
+    /// not pixels).
+    @Test func emfPlusMoveToLayerPersistsStructure() throws {
+        let url = EditTestPaths.corpusDirectory.appendingPathComponent("handmade-emfplus-shapes.emf")
+        var history = SceneHistory(scene: try SceneImporter.import(data: try Data(contentsOf: url)))
+        let editable = history.scene.editableElements
+        try #require(editable.count >= 2)
+        let topIDs = Set(history.scene.elements.suffix(editable.count / 2).map(\.id))
+        try history.apply(.addLayer(name: "Top", at: 1))
+        try history.apply(.moveElementsToLayer(ids: topIDs, layer: 1))
+        let reimported = try SceneImporter.import(data: SceneExporter.export(history.scene, as: .emf).data)
+        #expect(reimported.layers.count == 2)
+        #expect(reimported.layers.map(\.elements.count) == history.scene.layers.map(\.elements.count))
     }
 
     // MARK: - WMF flattens layers with a warning (fix 3)

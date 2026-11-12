@@ -737,10 +737,10 @@ public enum SceneExporter {
 
         var body: [[UInt8]] = []
         var warnings: [ExportWarning] = []
-        // Emfy layer markers (E3d): fresh begin/end markers bracket each layer's
-        // emitted drawing content, in z-order. No-op for a trivial single layer,
-        // so existing exports stay byte-identical.
-        var markers = LayerMarkerEmitter(scene)
+        // Emfy layer table (E3d): one private EMR_COMMENT right after the header
+        // records the layer structure. No-op for a trivial single layer, so an
+        // existing export stays byte-identical.
+        appendLayerTable(scene, into: &body)
 
         // Mirror reEmit: re-emit every record[1…] (the EOF keeps its position);
         // drop deleted elements, replace edited ones, insert new ones at z.
@@ -750,12 +750,12 @@ public enum SceneExporter {
         // them (E3a new-document path).
         var startInserted = false
         for i in 1 ..< file.records.count {
-            // Drop the source's OWN Emfy layer markers — fresh ones are injected
-            // around the current layer structure, so a re-save never duplicates them.
+            // Drop the source's OWN Emfy layer table — a fresh one is injected for the
+            // current layer structure, so a re-save never duplicates it.
             if scene.layerMarkerIndices.contains(i) { continue }
             let record = file.records[i]
             if i == firstContent || (firstContent == nil && !startInserted && record.type == eofType) {
-                try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings, &markers)
+                try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings)
                 startInserted = true
             }
 
@@ -763,23 +763,20 @@ public enum SceneExporter {
                 if let owner = ownerByIndex[i] {
                     if owner.provenance.edited {
                         if i == owner.provenance.sourceRecordIndices.max() {
-                            try appendEMFBlocks([owner], baseHandle, &body, &warnings, &markers)
+                            try appendEMFBlocks([owner], baseHandle, &body, &warnings)
                         }
                     } else {
-                        markers.enter(owner, into: &body)
                         body.append(try rawOrThrow(bytes, record))
                     }
                 }   // deleted → drop
             } else {
-                if record.type == eofType { markers.close(into: &body) }   // close markers before the terminator
                 body.append(try rawOrThrow(bytes, record))   // structural / state / EOF
             }
-            if let after = insertions.afterRecord[i] { try appendEMFBlocks(after, baseHandle, &body, &warnings, &markers) }
+            if let after = insertions.afterRecord[i] { try appendEMFBlocks(after, baseHandle, &body, &warnings) }
         }
         // A contentless source with no EOF record at all: insert before the
         // canonical EOF the guarantee below appends.
-        if firstContent == nil, !startInserted { try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings, &markers) }
-        markers.close(into: &body)   // idempotent: closes any still-open markers before the EOF guarantee
+        if firstContent == nil, !startInserted { try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings) }
 
         // Guarantee a terminating EMR_EOF. The lossless overlay keeps the source's
         // own EOF record in place (it is structural, re-emitted verbatim above), but
@@ -807,70 +804,25 @@ public enum SceneExporter {
         return (Data(out), warnings)
     }
 
-    private static func appendEMFBlocks(_ elements: [Element], _ baseHandle: UInt32, _ body: inout [[UInt8]], _ warnings: inout [ExportWarning], _ markers: inout LayerMarkerEmitter) throws(EMFWriteError) {
+    private static func appendEMFBlocks(_ elements: [Element], _ baseHandle: UInt32, _ body: inout [[UInt8]], _ warnings: inout [ExportWarning]) throws(EMFWriteError) {
         for element in elements where !element.hidden {
-            markers.enter(element, into: &body)
             for payload in SceneSynthesis.emfBlock(for: element, baseHandle: baseHandle, warnings: &warnings) {
                 body.append([UInt8](try EMFRecordEncoder.encode(payload)))
             }
         }
     }
 
-    /// Interleaves Emfy layer-begin/end markers (`EMFLayerMarker`) into the overlay
-    /// body as drawing content is emitted, so each layer's records sit between its
-    /// own markers in z-order (E3d, design §1). Active only when the scene carries a
-    /// non-trivial layer structure; otherwise every call is a no-op and the overlay
-    /// output is byte-identical to the pre-E3d path, so the existing suite is
-    /// unaffected. Empty layers (leading, trailing, or between populated ones) still
-    /// get a begin/end pair, so an empty layer round-trips too.
-    ///
-    /// This assumes the overlay emits drawing content in the scene's layer (z) order
-    /// — true for new documents and ordinary edits. A file whose unedited source
-    /// records are emitted out of layer order (a reordered, never-edited import) can
-    /// produce non-contiguous markers; the layer names/attributes still round-trip.
-    struct LayerMarkerEmitter {
-        private let enabled: Bool
-        private let layers: [Layer]
-        private let layerOf: [Int: Int]
-        private var lastLayer = -1
-        private var closed = false
+    /// The layer-structure attributes and element counts, in z-order, for the table.
+    static func layerInfos(_ scene: Scene) -> [EMFLayerMarker.LayerInfo] {
+        scene.layers.map { EMFLayerMarker.LayerInfo(name: $0.name, hidden: $0.hidden, locked: $0.locked, count: $0.elements.count) }
+    }
 
-        init(_ scene: Scene) {
-            enabled = scene.hasNonTrivialLayers
-            layers = scene.layers
-            var map: [Int: Int] = [:]
-            for (order, layer) in scene.layers.enumerated() {
-                for element in layer.elements { map[element.id] = order }
-            }
-            layerOf = map
-        }
-
-        private func beginMarker(_ order: Int, into body: inout [[UInt8]]) {
-            let layer = layers[order]
-            body.append(EMFLayerMarker.begin(name: layer.name, hidden: layer.hidden, locked: layer.locked))
-        }
-
-        /// Opens the marker for `element`'s layer before its records are appended,
-        /// closing the previous layer and emitting any skipped empty layers first.
-        mutating func enter(_ element: Element, into body: inout [[UInt8]]) {
-            guard enabled, let target = layerOf[element.id], target != lastLayer, target >= 0 else { return }
-            if lastLayer >= 0 { body.append(EMFLayerMarker.end()) }
-            var k = max(0, lastLayer + 1)
-            while k < target { beginMarker(k, into: &body); body.append(EMFLayerMarker.end()); k += 1 }
-            beginMarker(target, into: &body)
-            lastLayer = target
-        }
-
-        /// Closes the open layer and emits a begin/end pair for every trailing empty
-        /// layer. Idempotent — safe to call before the EOF and again at the tail.
-        mutating func close(into body: inout [[UInt8]]) {
-            guard enabled, !closed else { return }
-            closed = true
-            if lastLayer >= 0 { body.append(EMFLayerMarker.end()) }
-            var k = max(0, lastLayer + 1)
-            while k < layers.count { beginMarker(k, into: &body); body.append(EMFLayerMarker.end()); k += 1 }
-            lastLayer = layers.count
-        }
+    /// Appends one Emfy layer-table EMR_COMMENT to `body` when the scene carries a
+    /// non-trivial layer structure (E3d). The table draws nothing, so other readers
+    /// are unaffected; the importer splits the z-ordered elements back by count.
+    static func appendLayerTable(_ scene: Scene, into body: inout [[UInt8]]) {
+        guard scene.hasNonTrivialLayers else { return }
+        body.append(EMFLayerMarker.table(layerInfos(scene)))
     }
 
     // MARK: - GDI → dual: an edit needs opacity or a gradient (slice E1b2b)
@@ -916,6 +868,9 @@ public enum SceneExporter {
 
         var warnings: [ExportWarning] = []
         var body: [[UInt8]] = []
+        // Emfy layer table (E3d): a private GDI EMR_COMMENT recording the layer
+        // structure, outside any EMF+ comment so it never breaks EMF+ continuity.
+        appendLayerTable(scene, into: &body)
         // The pending run of framed EMF+ record bytes awaiting a comment flush, and
         // whether a GetDC window is logically open for the GDI records that follow.
         var plusRun: [UInt8] = []
@@ -985,6 +940,7 @@ public enum SceneExporter {
         // stream is just header/GetDC/state/EndOfFile around GDI draws) is rebuilt
         // with our fresh EMF+ stream, so we never duplicate the header or EndOfFile.
         for i in 1 ..< file.records.count {
+            if scene.layerMarkerIndices.contains(i) { continue }   // drop the source's own layer table
             let record = file.records[i]
             if record.type == eofType { continue }   // EOF appended last, after EndOfFile
             let isSourcePlusComment = record.type == emrCommentType && isEMFPlusComment(bytes, record)
@@ -1195,6 +1151,10 @@ public enum SceneExporter {
             warnings.append(.fallbackMayBeStale)
         }
 
+        // A non-trivial layer structure must (re)write the layer table even when no
+        // element changed (a rename/reorder leaves `changed` false), so force Pass 2.
+        if scene.hasNonTrivialLayers { changed = true }
+
         // Nothing actually changed (coverage-based `isEdited` routes every EMF+ scene
         // here to catch a delete): re-emit byte-identical, like an unchanged export.
         guard changed else { return (try EMFDocumentWriter.reEmit(file, source: source), []) }
@@ -1202,7 +1162,11 @@ public enum SceneExporter {
         // Pass 2: assemble the EMF file (header + re-packed comments + GDI records + EOF).
         var headerBytes = try rawOrThrow(bytes, file.records[0])
         var body: [[UInt8]] = []
+        // Emfy layer table (E3d): a private GDI EMR_COMMENT recording the layer
+        // structure; the importer splits the z-ordered elements back by count.
+        appendLayerTable(scene, into: &body)
         for i in 1 ..< file.records.count {
+            if scene.layerMarkerIndices.contains(i) { continue }   // drop the source's own layer table
             let record = file.records[i]
             if record.type == Self.emrCommentType {
                 if sourceComments.contains(i) {
