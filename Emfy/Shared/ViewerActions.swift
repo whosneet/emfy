@@ -39,6 +39,15 @@ struct ViewerActions {
     // `.onCopyCommand`, so it uses the single system Edit ▸ Copy item.
     var printDocument: (() -> Void)? = nil
 
+    // Find + Copy All Text (F3b). `presentFind` opens the find bar (Edit ▸ Find ▸ Find…,
+    // ⌘F); `findNext`/`findPrevious` step the matches (⌘G / ⇧⌘G) — all `nil` when no
+    // document is shown. `copyAllText` puts the drawing's text on the pasteboard and is
+    // `nil` when the drawing has no text (so the menu item reads as disabled).
+    var presentFind: (() -> Void)? = nil
+    var findNext: (() -> Void)? = nil
+    var findPrevious: (() -> Void)? = nil
+    var copyAllText: (() -> Void)? = nil
+
     // Editing (E2a): Mac File ▸ Save and Revert to Opened Version. `nil` disables the
     // menu item — Save is `nil` unless there are unsaved edits; Revert is `nil` unless
     // an opened-version snapshot exists and the Settings toggle is on.

@@ -18,6 +18,7 @@ struct MacEditingContainer: View {
     var pageShadow: Bool = true
     var tilePaint: TilePaint = .plain
     var options: RenderOptions = .default
+    var findHighlights: FindHighlightSet = .empty
 
     var body: some View {
         @Bindable var editorModel = editorModel
@@ -32,6 +33,7 @@ struct MacEditingContainer: View {
                     armedPen: editorModel.armedPen,
                     armedText: editorModel.armedTextTool,
                     pageShadow: pageShadow, tilePaint: tilePaint, options: options,
+                    findHighlights: findHighlights,
                     apply: { command, key in session.apply(command, coalescing: key) },
                     delete: { ids in session.deleteSelection(ids) },
                     // Opens the coalesced "Insert Text" group; the popover's commit/cancel
@@ -109,6 +111,8 @@ struct MacEditableCanvas: NSViewRepresentable {
     var pageShadow: Bool = true
     var tilePaint: TilePaint = .plain
     var options: RenderOptions = .default
+    /// The find highlights to draw in the selection overlay (F3b). `.empty` draws none.
+    var findHighlights: FindHighlightSet = .empty
     /// Commits one undoable mutation through `DocumentSession.apply`.
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
     /// Deletes the given ids as one undoable step (design call E2c-4).
@@ -192,6 +196,7 @@ struct MacEditableCanvas: NSViewRepresentable {
         controller.scrollView = scrollView
         // A scene/selection change (undo, redo, a committed edit) redraws the overlay.
         if let overlay = context.coordinator.overlay {
+            overlay.findHighlights = findHighlights   // live find highlights (F3b)
             overlay.needsDisplay = true
             overlay.window?.invalidateCursorRects(for: overlay)
         }
@@ -1199,6 +1204,9 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
     /// never routes here (E2d).
     var sceneUndoManager: UndoManager?
 
+    /// The find highlights to draw under the selection in edit mode (F3b).
+    var findHighlights: FindHighlightSet = .empty
+
     override var isFlipped: Bool { false }
     override var acceptsFirstResponder: Bool { true }
     override var isOpaque: Bool { false }
@@ -1323,6 +1331,15 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
         // Editing grid (E3e design call 2): light semantic lines in the overlay, crisp at
         // any zoom; editor-only, never exported.
         if coordinator.parent.editorModel.showGrid { drawGrid(coordinator: coordinator, into: context, mag: mag) }
+
+        // Find highlights (F3b): under the selection chrome, mapped through the editor's
+        // own device→paper mapping so they land on the glyphs.
+        if !findHighlights.isEmpty {
+            let mapping = coordinator.mapping
+            let all = findHighlights.matchDeviceRects.map { mapping.viewRect(fromDevice: $0) }
+            let current = findHighlights.currentDeviceRect.map { mapping.viewRect(fromDevice: $0) }
+            FindHighlightPainter.paint(all: all, current: current, into: context, onScreenScale: mag)
+        }
 
         // Live ghost during a drag.
         if let drag = coordinator.drag, drag.kind != .marquee, let ghost = drag.ghost, let bounds = drag.ghostViewBounds {

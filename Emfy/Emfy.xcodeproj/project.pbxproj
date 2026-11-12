@@ -43,6 +43,7 @@
 		F3C000000000000000000013 /* FindHighlightGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000013 /* FindHighlightGeometry.swift */; };
 		F3C000000000000000000015 /* MenuShortcutAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000015 /* MenuShortcutAudit.swift */; };
 		F3C000000000000000000017 /* DrawingFindUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000017 /* DrawingFindUITests.swift */; };
+		F3B000000000000000000019 /* MacFindBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000019 /* MacFindBar.swift */; platformFilters = (macos, ); };
 		F1C000000000000000000007 /* BatchConvertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000007 /* BatchConvertTests.swift */; };
 		B01100000000000000000004 /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
 		B01100000000000000000130 /* EmfyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000130 /* EmfyApp.swift */; };
@@ -315,6 +316,7 @@
 		F3A000000000000000000013 /* FindHighlightGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindHighlightGeometry.swift; sourceTree = "<group>"; };
 		F3A000000000000000000015 /* MenuShortcutAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuShortcutAudit.swift; sourceTree = "<group>"; };
 		F3A000000000000000000017 /* DrawingFindUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingFindUITests.swift; sourceTree = "<group>"; };
+		F3A000000000000000000019 /* MacFindBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFindBar.swift; sourceTree = "<group>"; };
 		F1A000000000000000000007 /* BatchConvertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchConvertTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
 		B00100000000000000000F40 /* SVGExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGExport.swift; sourceTree = "<group>"; };
@@ -688,6 +690,7 @@
 				F1A000000000000000000011 /* MacDrawingDrag.swift */,
 				F1A000000000000000000013 /* MacBatchConvert.swift */,
 				F3A000000000000000000015 /* MenuShortcutAudit.swift */,
+				F3A000000000000000000019 /* MacFindBar.swift */,
 			);
 			path = Emfy;
 			sourceTree = "<group>";
@@ -1063,6 +1066,7 @@
 				F3B000000000000000000011 /* DrawingFindModel.swift in Sources */,
 				F3B000000000000000000013 /* FindHighlightGeometry.swift in Sources */,
 				F3B000000000000000000015 /* MenuShortcutAudit.swift in Sources */,
+				F3B000000000000000000019 /* MacFindBar.swift in Sources */,
 				F1B000000000000000000003 /* BatchConvert.swift in Sources */,
 				F1B000000000000000000004 /* BatchRenderer.swift in Sources */,
 				B01100000000000000000303 /* DiagnosticReport.swift in Sources */,

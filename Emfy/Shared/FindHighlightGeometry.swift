@@ -69,10 +69,38 @@ enum FindHighlightGeometry {
         return max(min(target, currentZoom), minZoom)
     }
 
+    /// The distinct DEVICE-space rects of `matches` (duplicate run bounds collapsed),
+    /// for building a `FindHighlightSet` the overlays draw.
+    static func distinctDeviceRects(_ matches: [DrawingTextFind.Match]) -> [CGRect] {
+        var seen: [CGRect] = []
+        for match in matches where !match.boundsDevice.isNull && !match.boundsDevice.isEmpty {
+            let rect = match.boundsDevice.standardized
+            if !seen.contains(where: { approxEqual($0, rect) }) { seen.append(rect) }
+        }
+        return seen
+    }
+
     /// Two rects equal within half a point, so sub-pixel rounding of the same device
     /// bounds through the mapping doesn't produce near-duplicate highlight fills.
     private static func approxEqual(_ a: CGRect, _ b: CGRect) -> Bool {
         abs(a.minX - b.minX) < 0.5 && abs(a.minY - b.minY) < 0.5 &&
         abs(a.width - b.width) < 0.5 && abs(a.height - b.height) < 0.5
     }
+}
+
+/// The find highlights for one drawing, in DEVICE space, handed to the platform overlays
+/// (Mac paper overlay / editor overlay; iOS canvas overlay). The overlay maps these to its
+/// own view space with the same device→view fit the viewer uses, so the highlight lands
+/// exactly on the drawn glyphs. `pageBoundsDevice` lets a self-contained overlay (the Mac
+/// viewer paper) build that mapping; the editor overlays already hold it.
+struct FindHighlightSet: Equatable, Sendable {
+    var pageBoundsDevice: CGRect
+    /// Every match's bounds (duplicates collapsed); all are filled translucent.
+    var matchDeviceRects: [CGRect]
+    /// The current match's bounds, drawn stronger and outlined. nil when none.
+    var currentDeviceRect: CGRect?
+
+    static let empty = FindHighlightSet(pageBoundsDevice: .zero, matchDeviceRects: [], currentDeviceRect: nil)
+
+    var isEmpty: Bool { matchDeviceRects.isEmpty && currentDeviceRect == nil }
 }

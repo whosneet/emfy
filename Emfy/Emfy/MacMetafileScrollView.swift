@@ -28,6 +28,32 @@ final class MacMetafileZoomController {
     /// Sets an explicit magnification (used by the DEBUG screenshot hook to reach 400%).
     func setZoom(_ value: CGFloat) { apply(value) }
 
+    /// Scrolls a DEVICE-space rect (a find match) into view (F3b), zooming OUT first when
+    /// the match is larger than the viewport so the whole match lands on screen. The rect
+    /// is mapped through the same device→paper fit the viewer draws with, so it targets the
+    /// drawn glyphs exactly. The paper is the document view (y-up), so the mapped rect is in
+    /// document coordinates; `scrollToVisible` brings it in, and the centring clip keeps a
+    /// fitted page put.
+    func scrollDeviceRectToVisible(_ deviceRect: CGRect, pageBoundsDevice: CGRect, naturalSize: CGSize) {
+        guard let scrollView, let paper = scrollView.documentView, naturalSize.width > 0, naturalSize.height > 0 else { return }
+        let mapping = EditorCanvasMapping(
+            pageBoundsDevice: pageBoundsDevice,
+            target: CGRect(origin: .zero, size: naturalSize), flipY: true)
+        // The clip bounds are in document points (the magnification scales bounds, not
+        // frame), so they are the on-paper viewport the zoom-to-fit check measures against.
+        let viewport = scrollView.contentView.bounds.size
+        if let target = FindHighlightGeometry.zoomToFit(
+            deviceRect: deviceRect, mapping: mapping, viewport: viewport,
+            currentZoom: scrollView.magnification, minZoom: scrollView.minMagnification) {
+            let centre = ZoomMath.visibleCentre(of: scrollView.contentView.bounds)
+            scrollView.setMagnification(target, centeredAt: centre)
+            zoom = target
+        }
+        let paperRect = mapping.viewRect(fromDevice: deviceRect).insetBy(dx: -40, dy: -40)
+        paper.scrollToVisible(paperRect)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
     #if DEBUG
     /// Scrolls to the document's top-left visual corner, so the 400% screenshot hook
     /// shows the selection's top-left handles rather than the centre.
@@ -109,6 +135,8 @@ struct MacMetafileScrollView: NSViewRepresentable {
     /// prepare-time option (the WMF embedded-EMF choice) arrives as a new `prepared`
     /// through the view's content identity, so this view need never swap `prepared`.
     var options: RenderOptions = .default
+    /// The find highlights to draw above the tiles (F3b). `.empty` draws nothing.
+    var findHighlights: FindHighlightSet = .empty
 
     /// The paper's drop shadow, built fresh each time it's applied (an `NSShadow`
     /// shouldn't be shared across views). `nil` when the setting is off.
@@ -173,10 +201,20 @@ struct MacMetafileScrollView: NSViewRepresentable {
         tiled.controller = controller
         tiled.setPaint(tilePaint)
         paper.addSubview(tiled)
+
+        // The find-highlight overlay sits above the tiles, in the paper's y-up space, so it
+        // rides the magnification/scroll with them (F3b). Transparent to the pointer.
+        let findOverlay = FindHighlightOverlayView(frame: paper.bounds)
+        findOverlay.autoresizingMask = [.width, .height]
+        findOverlay.controller = controller
+        findOverlay.setHighlights(findHighlights)
+        paper.addSubview(findOverlay)
+
         scrollView.documentView = paper
 
         context.coordinator.scrollView = scrollView
         context.coordinator.tiledView = tiled
+        context.coordinator.findOverlay = findOverlay
         controller.scrollView = scrollView
 
         // The real bounds are known in `layout()`, not here — configure the fit and
@@ -202,6 +240,7 @@ struct MacMetafileScrollView: NSViewRepresentable {
             tiled.setPaint(tilePaint)       // live page background + dark-mode treatment
             tiled.setOptions(options)       // live antialiasing / fonts / EMF+ arbitration (S1b)
         }
+        context.coordinator.findOverlay?.setHighlights(findHighlights)   // live find highlights (F3b)
         // Live-toggle the paper shadow (the document view is the paper).
         scrollView.documentView?.shadow = pageShadow ? Self.makePaperShadow() : nil
         (scrollView as? ZoomMetafileScrollView)?.scrollAction = scrollAction
@@ -218,6 +257,9 @@ struct MacMetafileScrollView: NSViewRepresentable {
             tiled.layer?.contents = nil
             tiled.removeFromSuperview()
         }
+        coordinator.findOverlay?.controller = nil
+        coordinator.findOverlay?.removeFromSuperview()
+        coordinator.findOverlay = nil
         coordinator.tiledView = nil
         coordinator.scrollView = nil
     }
@@ -227,6 +269,7 @@ struct MacMetafileScrollView: NSViewRepresentable {
         var parent: MacMetafileScrollView
         fileprivate weak var scrollView: NSScrollView?
         fileprivate weak var tiledView: TiledMetafileView?
+        fileprivate weak var findOverlay: FindHighlightOverlayView?
 
         private var hasSetInitialZoom = false
         private var lastViewportSize: CGSize = .zero

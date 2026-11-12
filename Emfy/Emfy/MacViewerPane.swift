@@ -28,6 +28,7 @@ struct MacViewerPane: View {
     @State private var controller = MacMetafileZoomController()
     @State private var exporter = MacViewerExporter()
     @State private var editorModel = EditorModel()
+    @State private var findModel = DrawingFindModel()
     @State private var showInspector = false
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
@@ -44,6 +45,20 @@ struct MacViewerPane: View {
             // Format · size under the title, using the shared helper (G6).
             .navigationSubtitle(subtitle)
             .toolbar { toolbarContent }
+            // The find bar slides in above the canvas when Edit ▸ Find ▸ Find… (⌘F) fires
+            // (F3b). Esc (its Done button) closes it.
+            .overlay(alignment: .top) {
+                if findModel.isPresented {
+                    MacFindBar(model: findModel) { withAnimation(.easeOut(duration: 0.2)) { findModel.dismiss() } }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            // Keep the find model's runs current: the renderer observation in viewer mode,
+            // the edited scene in edit mode (F3b). Recomputed only when the drawing changes.
+            .task(id: findRunsKey) { await refreshFindRuns() }
+            // Scroll the current match into view as Find Next/Previous or a live query moves
+            // it (F3b).
+            .onChange(of: findModel.current) { _, _ in scrollToCurrentMatch() }
             .inspector(isPresented: $showInspector) {
                 inspector
             }
@@ -770,7 +785,8 @@ struct MacViewerPane: View {
                 tilePaint: ViewerTilePaint.make(
                     background: settings.pageBackground, darkMode: settings.darkPageMode, isDark: colorScheme == .dark
                 ),
-                options: settings.renderOptions
+                options: settings.renderOptions,
+                findHighlights: findHighlightSet
             )
             .ignoresSafeArea()
             .overlay(alignment: .bottom) { rotationReadout }
@@ -812,7 +828,8 @@ struct MacViewerPane: View {
                     isDark: colorScheme == .dark
                 ),
                 scrollAction: settings.macScrollAction,
-                options: settings.renderOptions
+                options: settings.renderOptions,
+                findHighlights: findHighlightSet
             )
             .ignoresSafeArea()
             // Rebuild the tiled view only when the content actually changes, so a
@@ -1289,6 +1306,79 @@ struct MacViewerPane: View {
         )
     }
 
+    // MARK: - Find (F3b)
+
+    /// The page bounds (device) and natural size the current mode draws with: the edited
+    /// scene in edit mode, the prepared model in viewer mode. `nil` when nothing is shown.
+    private var findPageGeometry: (pageBoundsDevice: CGRect, naturalSize: CGSize)? {
+        if session.editing == .editing, let scene = session.editedScene {
+            return (scene.pageBoundsDevice, scene.pageSizeDevice)
+        }
+        if let loaded {
+            return (loaded.prepared.deviceBounds, loaded.displaySize)
+        }
+        return nil
+    }
+
+    /// The find highlights for the current matches, in device space, handed to the overlays.
+    private var findHighlightSet: FindHighlightSet {
+        guard findModel.isPresented, !findModel.matches.isEmpty, let geometry = findPageGeometry else {
+            return .empty
+        }
+        return FindHighlightSet(
+            pageBoundsDevice: geometry.pageBoundsDevice,
+            matchDeviceRects: FindHighlightGeometry.distinctDeviceRects(findModel.matches),
+            currentDeviceRect: FindHighlightGeometry.matchDeviceRect(findModel.matches, current: findModel.current)
+        )
+    }
+
+    /// Changes whenever the drawing the find model should search over changes: the edit
+    /// state, the edit version (edit-mode text edits), and the loaded content id.
+    private var findRunsKey: String {
+        "\(session.editing == .editing)-\(session.editVersion)-\(session.loadedContentID)"
+    }
+
+    /// Recomputes the find model's runs for the current drawing (F3b): the edited scene in
+    /// edit mode (cheap), the renderer observation in viewer mode (off the main actor). The
+    /// model keeps the open query and re-matches against the new runs.
+    private func refreshFindRuns() async {
+        if session.editing == .editing, let scene = session.editedScene {
+            findModel.setRuns(DrawingTextExtractor.extract(from: scene), contentID: findRunsKey.hashValue)
+            return
+        }
+        guard let loaded else {
+            findModel.setRuns([], contentID: findRunsKey.hashValue)
+            return
+        }
+        let prepared = loaded.prepared
+        let options = settings.renderOptions
+        let runs = await Task.detached(priority: .userInitiated) {
+            DrawingTextExtractor.extract(from: MetafileRenderer.observe(prepared, options: options))
+        }.value
+        findModel.setRuns(runs, contentID: findRunsKey.hashValue)
+    }
+
+    /// Scrolls the current match into view through the active scroll view (F3b).
+    private func scrollToCurrentMatch() {
+        guard let rect = FindHighlightGeometry.matchDeviceRect(findModel.matches, current: findModel.current),
+              let geometry = findPageGeometry else { return }
+        controller.scrollDeviceRectToVisible(rect, pageBoundsDevice: geometry.pageBoundsDevice, naturalSize: geometry.naturalSize)
+    }
+
+    /// Opens the find bar (⌘F); a second ⌘F re-focuses the field rather than closing.
+    private func presentFind() {
+        withAnimation(.easeOut(duration: 0.2)) { findModel.present() }
+    }
+
+    /// Copies the drawing's text (reading order, plain text) to the pasteboard (F3b).
+    private func copyAllText() {
+        let text = findModel.copyAllText()
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        toast.show("Copied all text", systemImage: "doc.on.doc")
+    }
+
     /// The per-window actions published to the menu bar. Recomputed each body pass,
     /// so the closures always target the current document.
     private var viewerActions: ViewerActions {
@@ -1307,6 +1397,10 @@ struct MacViewerPane: View {
             shareSVG: { shareSVG() },
             copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil,
             printDocument: loaded != nil ? { printDocument() } : nil,
+            presentFind: loaded != nil ? { presentFind() } : nil,
+            findNext: loaded != nil ? { findModel.present(); findModel.goNext() } : nil,
+            findPrevious: loaded != nil ? { findModel.present(); findModel.goPrevious() } : nil,
+            copyAllText: findModel.hasText ? { copyAllText() } : nil,
             save: (session.editing == .editing && session.isDirty) ? { Task { await session.save() } } : nil,
             revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil,
             selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,

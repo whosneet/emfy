@@ -172,6 +172,25 @@ struct EditMenuCommands: Commands {
             Button("Insert Image…") { actions?.insertImage?() }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(actions?.insertImage == nil)
+            Divider()
+            // Copy All Text (F3b): the drawing's text, in reading order, as plain text.
+            // No key equivalent (⌘C stays the drawing-copy responder path); disabled when
+            // the drawing has no text.
+            Button("Copy All Text") { actions?.copyAllText?() }
+                .disabled(actions?.copyAllText == nil)
+            // Find ▸ Find… / Find Next / Find Previous (F3b), the standard Find submenu.
+            // The single ⌘F/⌘G/⇧⌘G owners — a menu audit confirms no duplicates.
+            Menu("Find") {
+                Button("Find…") { actions?.presentFind?() }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .disabled(actions?.presentFind == nil)
+                Button("Find Next") { actions?.findNext?() }
+                    .keyboardShortcut("g", modifiers: .command)
+                    .disabled(actions?.findNext == nil)
+                Button("Find Previous") { actions?.findPrevious?() }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .disabled(actions?.findPrevious == nil)
+            }
         }
     }
 }
