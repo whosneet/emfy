@@ -74,13 +74,16 @@ struct RecordsInspectorPanel: View {
     let diagnostics: ViewerDiagnostics
 
     /// Record type names the render log reports as skipped/unsupported, so those rows
-    /// carry a badge.
+    /// carry a badge. EMR_HEADER (1) and EMR_EOF (14) are excluded: EMFParse decodes
+    /// both to `.unimplemented` (they are structure, not drawing content), so a render
+    /// log entry for either must not badge the structural row as "skipped".
     private var unsupportedTypeNames: Set<String> {
         var names = Set<String>()
         for entry in diagnostics.renderLog {
             switch entry {
             case .unimplementedRecord(let type, _), .malformedRecord(let type):
-                if let name = EMFRecordType.name(for: type) { names.insert(name) }
+                guard type != 1, type != 14, let name = EMFRecordType.name(for: type) else { continue }
+                names.insert(name)
             default:
                 break
             }
