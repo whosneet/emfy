@@ -247,10 +247,25 @@ public struct Scene: Sendable, Equatable {
         }
     }
 
+    /// The accepted range for a header-derived resolution (§8: header fields are
+    /// untrusted — a hostile or garbage header can yield 1e9 or 0.001 DPI, which would
+    /// make a new shape absurdly huge or invisibly tiny). Outside this range the caller
+    /// falls back to 96 DPI. 10…10 000 units/inch spans every real device (72, 96, 300,
+    /// 600, 1200, 2540 DPI) with margin.
+    static let resolutionRange: ClosedRange<CGFloat> = 10 ... 10_000
+
+    /// A header-derived units-per-inch clamped to `resolutionRange`, else nil.
+    private static func acceptResolution(_ perInch: Double) -> CGFloat? {
+        guard perInch.isFinite else { return nil }
+        let value = CGFloat(perInch)
+        return resolutionRange.contains(value) ? value : nil
+    }
+
     /// Reads rclBounds (device units) and rclFrame (0.01 mm) from an EMR_HEADER and
     /// returns the average of the X and Y device-units-per-inch, or nil when the header
-    /// is too short or the frame is degenerate (§8: a bounds-checked little-endian read,
-    /// never a trap). [MS-EMF] §2.3.4.2: rclBounds at offset 8, rclFrame at offset 24.
+    /// is too short, the frame is degenerate, or the result is outside the sane range
+    /// (§8: a bounds-checked little-endian read, never a trap). [MS-EMF] §2.3.4.2:
+    /// rclBounds at offset 8, rclFrame at offset 24.
     static func emfDeviceUnitsPerInch(_ data: Data) -> CGFloat? {
         guard data.count >= 40 else { return nil }
         func i32(_ offset: Int) -> Int32 {
@@ -266,17 +281,17 @@ public struct Scene: Sendable, Equatable {
         guard deviceW > 0, deviceH > 0, frameWmm > 0, frameHmm > 0 else { return nil }
         let perInchX = deviceW / frameWmm * 25.4
         let perInchY = deviceH / frameHmm * 25.4
-        let perInch = (perInchX + perInchY) / 2
-        return perInch.isFinite && perInch > 0 ? CGFloat(perInch) : nil
+        return acceptResolution((perInchX + perInchY) / 2)
     }
 
     /// Reads the Inch field of a placeable WMF header ([MS-WMF] §2.3.2.3: Key(4),
-    /// HWmf(2), BoundingBox(8), Inch(2) at offset 14) — the logical units per inch — or
-    /// nil when it is absent/zero. Bounds-checked little-endian read.
+    /// HWmf(2), BoundingBox(8), Inch(2) at offset 14) — the logical units per inch —
+    /// clamped to the sane range (so a hostile Inch of 1 or 65535 falls back to 96 DPI),
+    /// else nil. Bounds-checked little-endian read.
     static func placeableWMFUnitsPerInch(_ data: Data) -> CGFloat? {
         guard data.count >= 16 else { return nil }
         let b = data.startIndex + 14
         let inch = UInt16(data[b]) | (UInt16(data[b + 1]) << 8)
-        return inch > 0 ? CGFloat(inch) : nil
+        return acceptResolution(Double(inch))
     }
 }

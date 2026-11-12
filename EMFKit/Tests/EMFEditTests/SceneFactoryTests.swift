@@ -189,6 +189,47 @@ struct SceneFactoryTests {
         #expect(scene.deviceUnitsPerPoint > 0)
     }
 
+    // MARK: - Hostile header resolution (§8)
+
+    /// A 40-byte buffer with the given rclBounds and rclFrame, for the resolution reader.
+    private func emfHeaderBytes(bounds: (Int32, Int32, Int32, Int32), frame: (Int32, Int32, Int32, Int32)) -> Data {
+        var d = Data(count: 40)
+        func put(_ v: Int32, _ off: Int) {
+            let u = UInt32(bitPattern: v)
+            d[off] = UInt8(u & 0xFF); d[off + 1] = UInt8((u >> 8) & 0xFF)
+            d[off + 2] = UInt8((u >> 16) & 0xFF); d[off + 3] = UInt8((u >> 24) & 0xFF)
+        }
+        put(bounds.0, 8); put(bounds.1, 12); put(bounds.2, 16); put(bounds.3, 20)
+        put(frame.0, 24); put(frame.1, 28); put(frame.2, 32); put(frame.3, 36)
+        return d
+    }
+
+    @Test func hostileEMFResolutionFallsBack() {
+        // A 1-unit frame → an astronomically high DPI → rejected.
+        #expect(Scene.emfDeviceUnitsPerInch(emfHeaderBytes(bounds: (0, 0, 10_000, 10_000), frame: (0, 0, 1, 1))) == nil)
+        // A tiny device over a huge frame → near-zero DPI → rejected.
+        #expect(Scene.emfDeviceUnitsPerInch(emfHeaderBytes(bounds: (0, 0, 1, 1), frame: (0, 0, 1_000_000, 1_000_000))) == nil)
+        // A degenerate (zero) frame → rejected.
+        #expect(Scene.emfDeviceUnitsPerInch(emfHeaderBytes(bounds: (0, 0, 100, 100), frame: (0, 0, 0, 0))) == nil)
+        // A truncated header → rejected.
+        #expect(Scene.emfDeviceUnitsPerInch(Data(count: 20)) == nil)
+        // A sane 96-DPI header is still accepted.
+        let ok = Scene.emfDeviceUnitsPerInch(emfHeaderBytes(bounds: (0, 0, 1122, 793), frame: (0, 0, 29_700, 21_000)))
+        #expect(ok != nil)
+    }
+
+    @Test func hostileWMFInchFallsBack() {
+        func placeable(inch: UInt16) -> Data {
+            var d = Data(count: 16)
+            d[14] = UInt8(inch & 0xFF); d[15] = UInt8((inch >> 8) & 0xFF)
+            return d
+        }
+        #expect(Scene.placeableWMFUnitsPerInch(placeable(inch: 1)) == nil)       // garbage low
+        #expect(Scene.placeableWMFUnitsPerInch(placeable(inch: 65535)) == nil)   // garbage high
+        #expect(Scene.placeableWMFUnitsPerInch(placeable(inch: 0)) == nil)       // absent
+        #expect(Scene.placeableWMFUnitsPerInch(placeable(inch: 1440)) == 1440)   // a real value
+    }
+
     // MARK: - Unique ids
 
     @Test func nextElementIDIsOnePastLargest() throws {
