@@ -164,6 +164,10 @@
 		E2C0000000000000000000A2 /* FormatInspectorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000A0 /* FormatInspectorModel.swift */; };
 		F5B0000000000000000000A1 /* RecordInspectorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B0000000000000000000A0 /* RecordInspectorModel.swift */; };
 		F5B0000000000000000000A2 /* RecordInspectorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B0000000000000000000A0 /* RecordInspectorModel.swift */; };
+		F5C00000000000000000D001 /* RecordReplayDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D000 /* RecordReplayDriver.swift */; };
+		F5C00000000000000000D011 /* RecordsInspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D010 /* RecordsInspectorPanel.swift */; };
+		F5C00000000000000000D021 /* MacRecordReplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D020 /* MacRecordReplayView.swift */; platformFilters = (macos, ); };
+		F5C00000000000000000D031 /* RecordReplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D030 /* RecordReplayView.swift */; platformFilters = (ios, ); };
 		F5B0000000000000000000D1 /* RecordInspectorModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B0000000000000000000D0 /* RecordInspectorModelTests.swift */; };
 		E2C0000000000000000000B1 /* EditorFormatInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000B0 /* EditorFormatInspector.swift */; };
 		E2C0000000000000000000C1 /* EditorTextEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000C0 /* EditorTextEditing.swift */; };
@@ -439,6 +443,10 @@
 		E2B000000000000000000150 /* SceneTileFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneTileFilter.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000A0 /* FormatInspectorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatInspectorModel.swift; sourceTree = "<group>"; };
 		F5B0000000000000000000A0 /* RecordInspectorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordInspectorModel.swift; sourceTree = "<group>"; };
+		F5C00000000000000000D000 /* RecordReplayDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordReplayDriver.swift; sourceTree = "<group>"; };
+		F5C00000000000000000D010 /* RecordsInspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsInspectorPanel.swift; sourceTree = "<group>"; };
+		F5C00000000000000000D020 /* MacRecordReplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacRecordReplayView.swift; sourceTree = "<group>"; };
+		F5C00000000000000000D030 /* RecordReplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordReplayView.swift; sourceTree = "<group>"; };
 		F5B0000000000000000000D0 /* RecordInspectorModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordInspectorModelTests.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000B0 /* EditorFormatInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorFormatInspector.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000C0 /* EditorTextEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTextEditing.swift; sourceTree = "<group>"; };
@@ -668,6 +676,8 @@
 				E2B000000000000000000150 /* SceneTileFilter.swift */,
 				E2C0000000000000000000A0 /* FormatInspectorModel.swift */,
 				F5B0000000000000000000A0 /* RecordInspectorModel.swift */,
+				F5C00000000000000000D000 /* RecordReplayDriver.swift */,
+				F5C00000000000000000D010 /* RecordsInspectorPanel.swift */,
 				E2C0000000000000000000B0 /* EditorFormatInspector.swift */,
 				E2C0000000000000000000C0 /* EditorTextEditing.swift */,
 				C00000000000000000000001 /* UpdateVersion.swift */,
@@ -757,6 +767,7 @@
 			children = (
 				B00100000000000000000137 /* MacViewerPane.swift */,
 				B00100000000000000000141 /* MacMetafileScrollView.swift */,
+				F5C00000000000000000D020 /* MacRecordReplayView.swift */,
 				E2B000000000000000000120 /* MacEditableCanvas.swift */,
 				E2B000000000000000000130 /* EditorDebugScreenshot.swift */,
 				F3A000000000000000000060 /* SpotlightDebug.swift */,
@@ -837,6 +848,7 @@
 				B00100000000000000000075 /* EmptyRecentsView.swift */,
 				B00100000000000000000076 /* MetafileViewerScreen.swift */,
 				B0010000000000000000007B /* ZoomableMetafileView.swift */,
+				F5C00000000000000000D030 /* RecordReplayView.swift */,
 				F3A000000000000000000021 /* IOSFindBar.swift */,
 				E2B000000000000000000140 /* EditableMetafileCanvas.swift */,
 				E4A0000000000000000000C0 /* LightColorSheet.swift */,
@@ -1065,6 +1077,10 @@
 				B01100000000000000000136 /* OpenCoordinator.swift in Sources */,
 				B01100000000000000000137 /* MacViewerPane.swift in Sources */,
 				B01100000000000000000141 /* MacMetafileScrollView.swift in Sources */,
+				F5C00000000000000000D001 /* RecordReplayDriver.swift in Sources */,
+				F5C00000000000000000D011 /* RecordsInspectorPanel.swift in Sources */,
+				F5C00000000000000000D021 /* MacRecordReplayView.swift in Sources */,
+				F5C00000000000000000D031 /* RecordReplayView.swift in Sources */,
 				B01100000000000000000140 /* ZoomMath.swift in Sources */,
 				B01100000000000000000053 /* EmfyCommands.swift in Sources */,
 				B01100000000000000000004 /* EMFExport.swift in Sources */,
