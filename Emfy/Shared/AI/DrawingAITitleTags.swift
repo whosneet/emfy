@@ -45,9 +45,39 @@ enum DrawingTitleTagsSanitizer {
     /// At most this many tags are kept (brief: 3–5).
     static let maxTags = 5
 
+    /// Generic, content-free words. A title made ONLY of these adds nothing over the
+    /// file name (A1c, from the A1b live review: "Vector Drawing", "Vector Drawing
+    /// Data"), so such a title is rejected and nothing is shown.
+    static let genericTitleWords: Set<String> = [
+        "vector", "drawing", "metafile", "image", "graphic",
+        "data", "file", "untitled", "diagram",
+    ]
+
+    /// Tags that carry no search value: the generic title words plus the two
+    /// filler tags the live run produced ("metadata", "embodies"). Dropped from the
+    /// tag list (A1c).
+    static let meaninglessTags: Set<String> = genericTitleWords.union(["metadata", "embodies"])
+
     /// Sanitises and caps a raw model title + tags into what Emfy stores and shows.
+    /// A title made only of generic words is rejected (emptied), so nothing is
+    /// stored or displayed for it (A1c Part 1).
     static func sanitize(title rawTitle: String, tags rawTags: [String]) -> DrawingTitleTags {
-        DrawingTitleTags(title: sanitizeTitle(rawTitle), tags: sanitizeTags(rawTags))
+        let title = sanitizeTitle(rawTitle)
+        return DrawingTitleTags(
+            title: isGenericTitle(title) ? "" : title,
+            tags: sanitizeTags(rawTags)
+        )
+    }
+
+    /// True when `title` is empty or made ONLY of generic, content-free words
+    /// (case-insensitive, ignoring punctuation). "Vector Drawing" → true;
+    /// "Invoice Summary" → false. Used to reject titles that add nothing (A1c).
+    static func isGenericTitle(_ title: String) -> Bool {
+        let words = title.lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+        guard !words.isEmpty else { return true }
+        return words.allSatisfy { genericTitleWords.contains($0) }
     }
 
     /// Strips control/format characters, collapses whitespace, caps to 6 words then
@@ -72,7 +102,7 @@ enum DrawingTitleTagsSanitizer {
         for rawTag in raw {
             var tag = collapseWhitespace(stripControl(rawTag)).lowercased()
             tag = tag.trimmingCharacters(in: CharacterSet(charactersIn: "#.,;:!?\"'“”‘’ "))
-            guard !tag.isEmpty else { continue }
+            guard !tag.isEmpty, !meaninglessTags.contains(tag) else { continue }
             if tag.count > maxTagCharacters {
                 tag = String(tag.prefix(maxTagCharacters)).trimmingCharacters(in: .whitespaces)
             }

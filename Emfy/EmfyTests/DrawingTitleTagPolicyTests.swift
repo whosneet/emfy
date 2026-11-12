@@ -18,6 +18,13 @@ import Testing
         #expect(!DrawingTitleTagPolicy.shouldDisplay(aiEnabled: true, privateMode: true))
     }
 
+    @Test func requiresTwentyCharactersOfText() {
+        #expect(!DrawingTitleTagPolicy.hasEnoughText(characterCount: 0))
+        #expect(!DrawingTitleTagPolicy.hasEnoughText(characterCount: 19))
+        #expect(DrawingTitleTagPolicy.hasEnoughText(characterCount: 20))
+        #expect(DrawingTitleTagPolicy.hasEnoughText(characterCount: 200))
+    }
+
     @Test func contentHashIsStableAndContentSensitive() {
         let a = Data([1, 2, 3, 4])
         let b = Data([1, 2, 3, 4])

@@ -13,6 +13,17 @@ import FoundationModels
 /// The pure gate for generating and displaying AI title/tags, so both the service and
 /// the views decide identically and it's unit-tested without a model.
 enum DrawingTitleTagPolicy {
+    /// The minimum amount of extracted text (drawing text or OCR) a drawing must carry
+    /// before a title and tags are generated at all (A1c Part 1). Below this, a title
+    /// is guesswork over structure alone — the A1b live review's "Vector Drawing" with
+    /// tags like "metadata"/"embodies" — so nothing is generated, stored or shown.
+    static let minTextCharacters = 20
+
+    /// Whether a drawing carries enough extracted text to earn an AI title/tags.
+    static func hasEnoughText(characterCount: Int) -> Bool {
+        characterCount >= minTextCharacters
+    }
+
     /// New metadata is generated only when AI is on, Private mode is off, and the model
     /// is available.
     static func shouldGenerate(aiEnabled: Bool, privateMode: Bool, modelAvailable: Bool) -> Bool {
@@ -144,6 +155,9 @@ final class DrawingTitleTagService {
 
     @available(macOS 26, iOS 26, *)
     private func generate(context: DrawingAIContext) async -> DrawingTitleTags? {
+        // No title/tags for a drawing without enough real text (A1c Part 1): a title
+        // over structure alone is generic ("Vector Drawing"), so store and show nothing.
+        guard DrawingTitleTagPolicy.hasEnoughText(characterCount: context.textExcerpt.count) else { return nil }
         let session = LanguageModelSession(instructions: DrawingAIPrompt.structuredInstructions)
         do {
             let output = try await session.respond(

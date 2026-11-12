@@ -31,8 +31,10 @@ import Testing
     }
 
     @Test func tagsAreLowercasedTrimmedAndDeduplicated() {
-        let out = DrawingTitleTagsSanitizer.sanitizeTags(["Diagram", "#flowchart", "diagram", "  Logo  "])
-        #expect(out == ["diagram", "flowchart", "logo"])
+        // "diagram" is a meaningless tag (A1c Part 1), so it is dropped; the rest are
+        // lowercased, trimmed and de-duplicated.
+        let out = DrawingTitleTagsSanitizer.sanitizeTags(["Invoice", "#flowchart", "invoice", "  Logo  "])
+        #expect(out == ["invoice", "flowchart", "logo"])
     }
 
     @Test func tagsAreCappedToFive() {
@@ -66,5 +68,48 @@ import Testing
         #expect(result.title.split(separator: " ").count <= DrawingTitleTagsSanitizer.maxTitleWords)
         #expect(result.tags.count <= DrawingTitleTagsSanitizer.maxTags)
         #expect(result.tags.allSatisfy { $0 == $0.lowercased() })
+    }
+
+    // MARK: - A1c Part 1: generic-title rejection
+
+    @Test(arguments: [
+        "Vector Drawing", "Vector Drawing Data", "Metafile Image",
+        "Untitled Graphic", "DIAGRAM", "image file", "",
+    ])
+    func genericOnlyTitlesAreRejected(_ title: String) {
+        #expect(DrawingTitleTagsSanitizer.isGenericTitle(title))
+    }
+
+    @Test(arguments: [
+        "Floor Plan Sketch", "Invoice Summary", "Red Sports Car",
+        "Quarterly Sales Diagram", "Network Topology",
+    ])
+    func contentfulTitlesAreKept(_ title: String) {
+        #expect(!DrawingTitleTagsSanitizer.isGenericTitle(title))
+    }
+
+    @Test func sanitizeEmptiesAGenericTitle() {
+        let result = DrawingTitleTagsSanitizer.sanitize(title: "Vector Drawing Data", tags: ["flowchart"])
+        #expect(result.title.isEmpty)
+    }
+
+    @Test func sanitizeKeepsAContentfulTitle() {
+        let result = DrawingTitleTagsSanitizer.sanitize(title: "Office Floor Plan", tags: ["plan"])
+        #expect(result.title == "Office Floor Plan")
+    }
+
+    // MARK: - A1c Part 1: meaningless-tag filtering
+
+    @Test func meaninglessTagsAreDropped() {
+        let out = DrawingTitleTagsSanitizer.sanitizeTags([
+            "invoice", "metadata", "embodies", "vector", "drawing",
+            "metafile", "image", "data", "file", "diagram", "flowchart",
+        ])
+        #expect(out == ["invoice", "flowchart"])
+    }
+
+    @Test func allMeaninglessTagsProduceNoTags() {
+        let out = DrawingTitleTagsSanitizer.sanitizeTags(["metadata", "embodies", "vector", "image"])
+        #expect(out.isEmpty)
     }
 }
