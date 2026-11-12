@@ -445,6 +445,11 @@ private struct MacSettingsTabs: View {
         TabView {
             MacGeneralTab()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            #if EMFY_DMG
+            // The Updates group exists only in the GitHub/DMG build (U1).
+            UpdatesSettingsTab()
+                .tabItem { Label("Updates", systemImage: "arrow.down.circle") }
+            #endif
             MacViewerTab()
                 .tabItem { Label("Viewer", systemImage: "eye") }
             MacRenderingTab()

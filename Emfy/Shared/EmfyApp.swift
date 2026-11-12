@@ -68,6 +68,10 @@ struct EmfyApp: App {
             ArrangeMenuCommands()
             ViewMenuCommands()
             EmfyCommands()
+            #if EMFY_DMG
+            // Emfy ▸ Check for Updates… — GitHub/DMG build only (U1).
+            CheckForUpdatesCommands()
+            #endif
         }
         #else
         // The iPad/iPhone View menu: the viewer's zoom group, the controls toggle,
@@ -122,6 +126,15 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
         if let name = EditorDebugLaunch.appearance {
             NSApp.appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
         }
+    }
+    #endif
+
+    #if EMFY_DMG
+    /// Hand off to the swap-on-quit helper if a verified update is staged and the
+    /// mode/intent call for it — GitHub/DMG build only (U1). Runs on every real
+    /// termination, after any unsaved-changes flow has resolved.
+    func applicationWillTerminate(_ notification: Notification) {
+        UpdateController.shared.installOnQuitIfNeeded()
     }
     #endif
 
@@ -197,6 +210,11 @@ private struct RootView: View {
                     openWindow(id: "whats-new")
                 }
             }
+            #if EMFY_DMG
+            // The one-time "Keep Emfy up to date?" sheet, else the throttled launch
+            // check — GitHub/DMG build only (U1).
+            .updatesFirstLaunch()
+            #endif
             // Delete this launch's Private-import staging directory when the Mac app
             // quits, so no copy of a Private-mode file lingers (S-M3). Idempotent and
             // backed up by the next launch's sweep. Per window, but the deletion is a
