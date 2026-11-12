@@ -96,6 +96,14 @@ final class EmfySettings {
     var keepOpenedVersionForRevert: Bool {
         didSet { defaults.set(keepOpenedVersionForRevert, forKey: Keys.keepOpenedVersionForRevert) }
     }
+    /// Show the full editor (all tools, the inspector, selection handles) on iPhone
+    /// instead of the compact light editor (E4, docs/v3-plan §11.1). Default OFF —
+    /// iPhone edits light by default; the toggle is aimed at iPhone Duo and other
+    /// large screens. iPhone-only in the UI (hidden on iPad and Mac). Changing it
+    /// live re-resolves `EditorMode` in the open viewer.
+    var fullEditorOnIPhone: Bool {
+        didSet { defaults.set(fullEditorOnIPhone, forKey: Keys.fullEditorOnIPhone) }
+    }
 
     // MARK: Library extras
 
@@ -216,6 +224,7 @@ final class EmfySettings {
         reopenLastFileAtLaunch = Self.bool(defaults, Keys.reopenLastFileAtLaunch, default: true)
         showWhatsNewAfterUpdates = Self.bool(defaults, Keys.showWhatsNewAfterUpdates, default: true)
         keepOpenedVersionForRevert = Self.bool(defaults, Keys.keepOpenedVersionForRevert, default: true)
+        fullEditorOnIPhone = Self.bool(defaults, Keys.fullEditorOnIPhone, default: false)
         sortRecentsBy = Self.string(defaults, Keys.sortRecentsBy, default: .date)
         recentsLayout = Self.string(defaults, Keys.recentsLayout, default: .grid)
         thumbnailSize = Self.string(defaults, Keys.thumbnailSize, default: .medium)
@@ -322,6 +331,7 @@ final class EmfySettings {
         static let reopenLastFileAtLaunch = "settings.library.reopenLastFileAtLaunch"
         static let showWhatsNewAfterUpdates = "settings.library.showWhatsNewAfterUpdates"
         static let keepOpenedVersionForRevert = "settings.library.keepOpenedVersionForRevert"
+        static let fullEditorOnIPhone = "settings.editing.fullEditorOnIPhone"
         static let sortRecentsBy = "settings.library.sortRecentsBy"
         static let recentsLayout = "settings.library.recentsLayout"
         static let thumbnailSize = "settings.library.thumbnailSize"

@@ -155,6 +155,7 @@ private enum SettingsFooter {
     static let darkPage = "Dim lowers the page brightness in Dark Mode; Invert flips a dark drawing to light while keeping its colours."
     static let exportLimit = "Very large drawings export at a lower scale to stay within size limits."
     static let pin = "Pin a file from its context menu to keep it at the top."
+    static let fullEditorOnIPhone = "Shows all editing tools on iPhone. Best on larger screens and iPhone Duo."
     static let macDiagnostics = "This copies app, system and device details only, with no file names or drawing content. A file’s own report is in the File menu and the Info panel."
     static let iOSDiagnostics = "This copies app, system and device details only, with no file names or drawing content. A file’s own report is in the viewer’s share menu and the Info panel."
 }
@@ -763,6 +764,10 @@ private struct IOSSettingsForm: View {
     @Environment(RecentsStore.self) private var store
     @Environment(EmfySettings.self) private var settings
     @Environment(\.openURL) private var openURL
+    // iPad supports multiple windows; iPhone does not. Used to show the iPhone-only
+    // "Full editor on iPhone" toggle on iPhone (including iPhone Duo) and hide it on
+    // iPad, matching the per-platform hide pattern already used in More Viewer Options.
+    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     // The Settings sheet hosts its own removal flow (the window-level one is
     // covered by this sheet — C4a H3). Clear confirms and offers Save a Copy.
     @State private var removal = RemovalCoordinator()
@@ -794,6 +799,17 @@ private struct IOSSettingsForm: View {
                 Text("Library")
             } footer: {
                 Text(SettingsFooter.recentsCap)
+            }
+            // The full-editor toggle (E4). iPhone only — hidden on iPad, where the full
+            // editor is always on, and absent from the Mac Settings window entirely.
+            if !supportsMultipleWindows {
+                Section {
+                    Toggle("Full editor on iPhone", isOn: $settings.fullEditorOnIPhone)
+                } header: {
+                    Text("Editing")
+                } footer: {
+                    Text(SettingsFooter.fullEditorOnIPhone)
+                }
             }
             Section {
                 IOSOptionRow(title: "Default PNG scale", value: $settings.defaultPNGScale)
