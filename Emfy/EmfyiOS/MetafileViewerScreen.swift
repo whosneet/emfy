@@ -540,7 +540,14 @@ struct MetafileViewerScreen: View {
         viewerInspectorTab = .records
         configureRecordsIfNeeded()
         for _ in 0..<120 where !recordModel.hasRecords { try? await Task.sleep(for: .milliseconds(100)) }
-        let index = EditorDebugLaunch.recordIndex ?? max(0, recordModel.recordCount - 1)
+        // A specific mid index snaps to the nearest DRAWING record so the capture always
+        // outlines a drawn shape; no index means the last record (the full drawing).
+        let index: Int
+        if let requested = EditorDebugLaunch.recordIndex {
+            index = recordModel.drawingIndices.min(by: { abs($0 - requested) < abs($1 - requested) }) ?? requested
+        } else {
+            index = max(0, recordModel.recordCount - 1)
+        }
         recordModel.select(index)
         for _ in 0..<80 {
             if replayDriver.image != nil || !recordModel.supportsPartial { break }
