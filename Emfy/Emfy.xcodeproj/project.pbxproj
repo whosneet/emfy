@@ -37,6 +37,11 @@
 		A2A00000000000000000001E /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001C /* OpenAIProvider.swift */; };
 		A2A000000000000000000020 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001F /* AIProviderService.swift */; };
 		A2A000000000000000000021 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001F /* AIProviderService.swift */; };
+		A2A000000000000000000041 /* AIProviderStubURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000040 /* AIProviderStubURLProtocol.swift */; };
+		A2A000000000000000000043 /* SSEParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000042 /* SSEParserTests.swift */; };
+		A2A000000000000000000045 /* AIProviderCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000044 /* AIProviderCoreTests.swift */; };
+		A2A000000000000000000047 /* AnthropicProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000046 /* AnthropicProviderTests.swift */; };
+		A2A000000000000000000049 /* OpenAIProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000048 /* OpenAIProviderTests.swift */; };
 		A1A000000000000000000106 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
 		A1A0000000000000B1B00008A /* DrawingExplainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00008F /* DrawingExplainModel.swift */; };
 		A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00008F /* DrawingExplainModel.swift */; };
@@ -410,6 +415,11 @@
 		A2A000000000000000000019 /* AnthropicProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AnthropicProvider.swift"; sourceTree = "<group>"; };
 		A2A00000000000000000001C /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/OpenAIProvider.swift"; sourceTree = "<group>"; };
 		A2A00000000000000000001F /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderService.swift"; sourceTree = "<group>"; };
+		A2A000000000000000000040 /* AIProviderStubURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderStubURLProtocol.swift; sourceTree = "<group>"; };
+		A2A000000000000000000042 /* SSEParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParserTests.swift; sourceTree = "<group>"; };
+		A2A000000000000000000044 /* AIProviderCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderCoreTests.swift; sourceTree = "<group>"; };
+		A2A000000000000000000046 /* AnthropicProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicProviderTests.swift; sourceTree = "<group>"; };
+		A2A000000000000000000048 /* OpenAIProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProviderTests.swift; sourceTree = "<group>"; };
 		A1A0000000000000B1B00008F /* DrawingExplainModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingExplainModel.swift"; sourceTree = "<group>"; };
 		A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingRecordPurpose.swift"; sourceTree = "<group>"; };
 		A1A0000000000000EVAL000F /* DrawingAIEvalSuite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIEvalSuite.swift"; sourceTree = "<group>"; };
@@ -899,6 +909,11 @@
 				A1A0000000000000B1B00007F /* LibrarySearchRankerTests.swift */,
 				A1A0000000000000B1B00004F /* DrawingTitleTagPolicyTests.swift */,
 				A1A0000000000000B1B00002F /* DrawingAITitleTagsTests.swift */,
+				A2A000000000000000000040 /* AIProviderStubURLProtocol.swift */,
+				A2A000000000000000000042 /* SSEParserTests.swift */,
+				A2A000000000000000000044 /* AIProviderCoreTests.swift */,
+				A2A000000000000000000046 /* AnthropicProviderTests.swift */,
+				A2A000000000000000000048 /* OpenAIProviderTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -1428,6 +1443,11 @@
 				A2A00000000000000000001B /* AnthropicProvider.swift in Sources */,
 				A2A00000000000000000001E /* OpenAIProvider.swift in Sources */,
 				A2A000000000000000000021 /* AIProviderService.swift in Sources */,
+				A2A000000000000000000041 /* AIProviderStubURLProtocol.swift in Sources */,
+				A2A000000000000000000043 /* SSEParserTests.swift in Sources */,
+				A2A000000000000000000045 /* AIProviderCoreTests.swift in Sources */,
+				A2A000000000000000000047 /* AnthropicProviderTests.swift in Sources */,
+				A2A000000000000000000049 /* OpenAIProviderTests.swift in Sources */,
 				A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */,
 				A1A0000000000000RECP000T /* DrawingRecordPurpose.swift in Sources */,
 				A1A0000000000000B1B00006T /* LibrarySearch.swift in Sources */,
