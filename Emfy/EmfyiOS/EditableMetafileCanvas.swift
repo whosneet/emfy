@@ -278,17 +278,37 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             let rotate = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate(_:)))
             rotate.delegate = self
             overlay.addGestureRecognizer(rotate)
+
+            // Apple Pencil hover (supported iPads): a preview ring follows the Pencil while
+            // it hovers over the canvas in edit mode (design call 5). Hover can't be tested
+            // in the Simulator, so the glue is thin and the geometry is a pure helper.
+            let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
+            overlay.addGestureRecognizer(hover)
+
+            // Pencil double-tap and squeeze (design call 5): mapped to pure decisions.
+            let pencil = UIPencilInteraction()
+            pencil.delegate = self
+            overlay.addInteraction(pencil)
         }
 
         /// Whether a shape-creation tool is armed (E3a).
         var isShapeToolArmed: Bool { parent.editorModel.armedShapeTool != nil }
 
-        /// The pan only begins when it starts on the selection or a handle; otherwise it
-        /// yields to the scroll view so the drawing still pans. An armed shape tool, though,
-        /// claims the whole canvas so a drag anywhere draws the shape (E3a).
+        /// The touch type of the touch that started the current one-finger pan, so `handlePan`
+        /// can tell an Apple Pencil (always draws) from a finger.
+        private var panTouchType: UITouch.TouchType = .direct
+
+        /// The pan begins when it starts on the selection or a handle (finger select/move),
+        /// when an Apple Pencil touches (it always draws), or when a creation tool is armed —
+        /// otherwise it yields to the scroll view so the drawing still pans (design call 1).
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             if let pan = gestureRecognizer as? UIPanGestureRecognizer, pan.maximumNumberOfTouches == 1, let overlay {
-                if isShapeToolArmed { return true }
+                panTouchType = touch.type
+                let mode = PenDrawMode.resolve(
+                    isPencil: touch.type == .pencil,
+                    armedPen: parent.editorModel.armedPen,
+                    armedShape: isShapeToolArmed)
+                if mode != .select { return true }   // the pencil, or an armed tool, draws
                 let p = touch.location(in: overlay)
                 if handle(at: p) != nil { return true }
                 if let box = selectionViewBounds(), box.contains(p) { return true }
@@ -369,9 +389,18 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         @objc private func handlePan(_ g: UIPanGestureRecognizer) {
             guard let overlay, let scrollView else { return }
             let p = g.location(in: overlay)
-            // An armed shape tool sweeps a new shape instead of moving/resizing (E3a).
-            if let kind = parent.editorModel.armedShapeTool {
+            let mode = PenDrawMode.resolve(
+                isPencil: panTouchType == .pencil,
+                armedPen: parent.editorModel.armedPen,
+                armedShape: isShapeToolArmed)
+            // An armed shape tool sweeps a new shape; the pen (Pencil, or a finger when armed)
+            // draws a freehand stroke; otherwise a finger moves/resizes the selection.
+            if mode == .shape, let kind = parent.editorModel.armedShapeTool {
                 handleShapePan(g, kind: kind, point: p, overlay: overlay, scrollView: scrollView)
+                return
+            }
+            if mode == .pen {
+                handlePenPan(g, point: p, overlay: overlay, scrollView: scrollView)
                 return
             }
             switch g.state {
@@ -479,6 +508,128 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                           size: CGSize(width: farDevice.x - originDevice.x, height: farDevice.y - originDevice.y))
         }
 
+        // MARK: Pen (E3b)
+
+        private var penHoldSeq = 0
+        private var lastPenPoint: CGPoint = .zero
+        private static let penHoldDelay: TimeInterval = 0.5
+
+        /// The Pencil hover point (overlay space), or nil when not hovering.
+        fileprivate var hoverPoint: CGPoint?
+
+        /// De-dup / RDP tolerances in device units for the current zoom (~1 and ~1.5 screen pt).
+        private var penMinSpacingDevice: CGFloat { max(0.5, mapping.deviceLength(fromViewLength: 1 / max(zoom, 0.0001))) }
+        private var penRdpToleranceDevice: CGFloat { max(0.75, mapping.deviceLength(fromViewLength: 1.5 / max(zoom, 0.0001))) }
+
+        func penPreviewColor() -> CGColor {
+            let c = parent.editorModel.penStyle.color
+            return CGColor(red: CGFloat(c.red), green: CGFloat(c.green), blue: CGFloat(c.blue), alpha: 1)
+        }
+        var penPreviewWidthDevice: CGFloat {
+            ShapeToolGeometry.pointsToDevice(parent.editorModel.penStyle.widthPoints, deviceUnitsPerPoint: scene.deviceUnitsPerPoint)
+        }
+
+        /// The freehand pen sweep: a drag draws a live preview; release commits one `.insert`
+        /// (the smoothed curve, or the snapped shape after a hold). The pen stays armed and the
+        /// stroke is NOT selected (design call 1/4).
+        private func handlePenPan(_ g: UIPanGestureRecognizer, point p: CGPoint, overlay: IOSEditorOverlayView, scrollView: UIScrollView) {
+            switch g.state {
+            case .began:
+                scrollView.isScrollEnabled = false
+                var state = DragState(kind: .pen, start: p, current: p)
+                state.penPoints = [p]
+                drag = state
+                lastPenPoint = p
+                penHoldSeq += 1
+                overlay.setNeedsDisplay()
+            case .changed:
+                appendPenPoint(p, overlay: overlay)
+            case .ended:
+                if let state = drag, state.kind == .pen { commitPenStroke(state: state) }
+                drag = nil
+                scrollView.isScrollEnabled = true
+                overlay.setNeedsDisplay()
+            default:
+                drag = nil
+                scrollView.isScrollEnabled = true
+                overlay.setNeedsDisplay()
+            }
+        }
+
+        private func appendPenPoint(_ p: CGPoint, overlay: IOSEditorOverlayView) {
+            guard var state = drag, state.kind == .pen else { return }
+            state.penPoints.append(p)
+            if hypot(p.x - lastPenPoint.x, p.y - lastPenPoint.y) > 2 / max(zoom, 0.0001) {
+                lastPenPoint = p
+                state.penHoldElapsed = false
+                state.penSnapPreview = nil
+                penHoldSeq += 1
+                let seq = penHoldSeq
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.penHoldDelay) { [weak self] in
+                    self?.evaluatePenHold(seq: seq)
+                }
+            }
+            drag = state
+            overlay.setNeedsDisplay()
+        }
+
+        private func evaluatePenHold(seq: Int) {
+            guard penHoldSeq == seq, var state = drag, state.kind == .pen else { return }
+            state.penHoldElapsed = true
+            let devicePoints = state.penPoints.map { mapping.devicePoint(fromView: $0) }
+            state.penSnapPreview = ShapeRecognizer.recognize(points: devicePoints, rdpTolerance: penRdpToleranceDevice)
+            drag = state
+            overlay?.setNeedsDisplay()
+        }
+
+        private func commitPenStroke(state: DragState) {
+            let devicePoints = state.penPoints.map { mapping.devicePoint(fromView: $0) }
+            guard let insertion = PenCommit.command(
+                rawDevicePoints: devicePoints, held: state.penHoldElapsed,
+                minSpacing: penMinSpacingDevice, rdpTolerance: penRdpToleranceDevice,
+                pen: parent.editorModel.penStyle, in: scene) else { return }
+            parent.apply(insertion.command, nil)
+        }
+
+        // MARK: Pencil hover / squeeze / double-tap (design call 5)
+
+        @objc private func handleHover(_ g: UIHoverGestureRecognizer) {
+            guard let overlay else { return }
+            switch g.state {
+            case .began, .changed: hoverPoint = g.location(in: overlay)
+            default: hoverPoint = nil
+            }
+            overlay.setNeedsDisplay()
+        }
+
+        /// Maps UIKit's preferred tap action to the pure preference enum.
+        fileprivate static func tapPreference(_ action: UIPencilPreferredAction) -> PenPencilTapPreference {
+            switch action {
+            case .ignore: return .ignore
+            case .showColorPalette: return .showPalette
+            case .switchEraser, .switchPrevious: return .switchTool
+            default: return .systemDefault
+            }
+        }
+
+        /// Toggles between the pen and selection, respecting the user's tap preference.
+        fileprivate func performPencilDoubleTap() {
+            switch PencilSupport.doubleTapAction(for: Self.tapPreference(UIPencilInteraction.preferredTapAction)) {
+            case .togglePenSelect:
+                if parent.editorModel.armedPen { parent.editorModel.armedPen = false } else { parent.editorModel.armPen() }
+            case .showPalette:
+                parent.editorModel.penPalettePresented = true
+            case .none:
+                break
+            }
+            overlay?.setNeedsDisplay()
+        }
+
+        /// A squeeze shows the pen palette (design call 5).
+        fileprivate func performPencilSqueeze() {
+            if PencilSupport.squeezeAction() == .showPalette { parent.editorModel.penPalettePresented = true }
+        }
+
         private func liveViewTransform(state: DragState) -> CGAffineTransform {
             switch state.kind {
             case .move:
@@ -490,7 +641,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                     translation: CGVector(dx: state.current.x - state.start.x, dy: state.current.y - state.start.y),
                     aspectLocked: false, fromCenter: false
                 )
-            case .rotate, .marquee, .shape:
+            case .rotate, .marquee, .shape, .pen:
                 return state.liveTransform
             }
         }
@@ -542,7 +693,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     }
 
     fileprivate struct DragState {
-        enum Kind { case marquee, move, resize, rotate, shape }
+        enum Kind { case marquee, move, resize, rotate, shape, pen }
         var kind: Kind
         var start: CGPoint
         var current: CGPoint
@@ -556,6 +707,28 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         var shapeKind: ShapeToolKind?
         /// The constrained preview rect (view space) the overlay draws while sweeping.
         var shapePreviewRect: CGRect?
+        /// The freehand sample points (overlay/view space) while `kind == .pen`.
+        var penPoints: [CGPoint] = []
+        /// Whether the pointer/Pencil paused ≥ 0.5 s before release (snap window).
+        var penHoldElapsed = false
+        /// The snapped shape preview shown live during a hold, or nil.
+        var penSnapPreview: ShapeRecognizer.Match?
+    }
+}
+
+// MARK: - Pencil interaction (design call 5)
+
+extension EditableMetafileCanvas.Coordinator: UIPencilInteractionDelegate {
+    /// Double-tap toggles pen/select, respecting the user's preferred action (iOS 17.5+).
+    @available(iOS 17.5, *)
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+        performPencilDoubleTap()
+    }
+
+    /// Squeeze shows the pen palette (iOS 17.5+).
+    @available(iOS 17.5, *)
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+        if squeeze.phase == .ended { performPencilSqueeze() }
     }
 }
 
@@ -760,6 +933,14 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
         }
     }
 
+    /// The view-space rect for a snapped-shape preview, keeping a line's direction.
+    static func penSnapViewRect(_ match: ShapeRecognizer.Match, mapping: EditorCanvasMapping) -> CGRect {
+        guard match.kind == .line else { return mapping.viewRect(fromDevice: match.rect) }
+        let origin = mapping.viewPoint(fromDevice: match.rect.origin)
+        let far = mapping.viewPoint(fromDevice: CGPoint(x: match.rect.origin.x + match.rect.width, y: match.rect.origin.y + match.rect.height))
+        return CGRect(origin: origin, size: CGSize(width: far.x - origin.x, height: far.y - origin.y))
+    }
+
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
         guard let coordinator, let box = coordinator.selectionViewBounds(), box.contains(location) else { return nil }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
@@ -790,6 +971,36 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
         if let drag = coordinator.drag, drag.kind == .shape, let kind = drag.shapeKind, let rect = drag.shapePreviewRect {
             let cornerRadius = ShapeToolGeometry.pointsToDevice(16, deviceUnitsPerPoint: coordinator.scene.deviceUnitsPerPoint)
             Self.strokeShapePreview(kind: kind, rect: rect, into: context, lineWidth: 1.5 / mag, accent: accent, cornerRadius: cornerRadius)
+        }
+
+        // Live pen preview (design call 1/4): the snapped shape during a hold, else the raw
+        // freehand trace, both in the pen's own colour.
+        if let drag = coordinator.drag, drag.kind == .pen {
+            let penColor = coordinator.penPreviewColor()
+            if let match = drag.penSnapPreview {
+                let viewRect = Self.penSnapViewRect(match, mapping: coordinator.mapping)
+                Self.strokeShapePreview(kind: match.kind, rect: viewRect, into: context,
+                                        lineWidth: coordinator.penPreviewWidthDevice, accent: UIColor(cgColor: penColor), cornerRadius: 0)
+            } else if drag.penPoints.count > 1 {
+                context.setStrokeColor(penColor)
+                context.setLineWidth(coordinator.penPreviewWidthDevice)
+                context.setLineCap(.round)
+                context.setLineJoin(.round)
+                context.beginPath()
+                context.move(to: drag.penPoints[0])
+                for p in drag.penPoints.dropFirst() { context.addLine(to: p) }
+                context.strokePath()
+            }
+        }
+
+        // Pencil hover ring (design call 5): a ring at the hover point in the pen's colour
+        // and width, shown while hovering and not actively drawing.
+        if let hover = coordinator.hoverPoint, coordinator.drag == nil {
+            let d = PencilSupport.hoverRingDiameter(widthDevice: coordinator.penPreviewWidthDevice)
+            let r = CGRect(x: hover.x - d / 2, y: hover.y - d / 2, width: d, height: d)
+            context.setStrokeColor(coordinator.penPreviewColor())
+            context.setLineWidth(1.5 / mag)
+            context.strokeEllipse(in: r)
         }
 
         let draggingTransform = coordinator.drag.flatMap { $0.kind == .marquee ? nil : $0.liveTransform }

@@ -123,6 +123,12 @@ struct MetafileViewerScreen: View {
             ShareSheet(items: payload.items)
                 .presentationDetents([.medium, .large])   // G5
         }
+        // The pen palette, shown by a Pencil squeeze or double-tap-to-palette (design
+        // call 5); the Pen toolbar menu offers the same choices on a long-press.
+        .sheet(isPresented: penPaletteBinding) {
+            PenPaletteSheet(editorModel: editorModel)
+                .presentationDetents([.height(240), .medium])
+        }
         .alert(
             "Export Failed",
             isPresented: shareErrorBinding,
@@ -562,7 +568,7 @@ struct MetafileViewerScreen: View {
                 Menu {
                     ForEach(ShapeToolKind.allCases) { kind in
                         Button {
-                            editorModel.armedShapeTool = kind
+                            editorModel.armShape(kind)
                         } label: {
                             Label(kind.title, systemImage: kind.systemImage)
                         }
@@ -572,13 +578,60 @@ struct MetafileViewerScreen: View {
                 }
                 .accessibilityIdentifier("viewerShapes")
             }
+            ToolbarItem(placement: .topBarLeading) {
+                penMenu
+            }
         }
+    }
+
+    /// The Pen tool (E3b design call 1/3): iPad (regular width) only. A tap toggles the pen
+    /// (it stays armed until Esc or re-tap, unlike Shapes); long-pressing the button opens
+    /// the palette of 6 colours and 3 widths, persisted on `EditorModel`. An Apple Pencil
+    /// draws the pen even while unarmed (handled in the canvas); this button governs finger
+    /// drawing and the armed tint.
+    private var penMenu: some View {
+        Menu {
+            Section("Colour") {
+                ForEach(PenPalette.colors.indices, id: \.self) { i in
+                    let swatch = PenPalette.colors[i]
+                    Button {
+                        editorModel.penStyle.color = swatch.color
+                    } label: {
+                        Label {
+                            Text(swatch.name)
+                        } icon: {
+                            Image(systemName: editorModel.penStyle.color == swatch.color ? "checkmark.circle.fill" : "circle.fill")
+                                .foregroundStyle(swatch.color.swiftUIColor)
+                        }
+                    }
+                }
+            }
+            Section("Width") {
+                ForEach(PenPalette.widths, id: \.self) { width in
+                    Button {
+                        editorModel.penStyle.widthPoints = width
+                    } label: {
+                        Label("\(Int(width)) pt", systemImage: editorModel.penStyle.widthPoints == width ? "checkmark" : "pencil.tip")
+                    }
+                }
+            }
+        } label: {
+            Label("Pen", systemImage: "pencil.tip")
+        } primaryAction: {
+            if editorModel.armedPen { editorModel.armedPen = false } else { editorModel.armPen() }
+        }
+        .tint(editorModel.armedPen ? Color.accentColor : nil)
+        .accessibilityIdentifier("viewerPen")
+    }
+
+    private var penPaletteBinding: Binding<Bool> {
+        Binding(get: { editorModel.penPalettePresented }, set: { editorModel.penPalettePresented = $0 })
     }
 
     private func toggleEditMode() {
         if session.editing == .editing {
             editorModel.selection.clear()
-            editorModel.armedShapeTool = nil
+            editorModel.disarmTools()
             Task { await session.endEditing() }
         } else {
             Task {
@@ -992,6 +1045,54 @@ extension View {
             self.navigationSubtitle(subtitle)
         } else {
             self
+        }
+    }
+}
+
+/// The pen palette shown as a sheet (E3b design call 5), opened by a Pencil squeeze /
+/// double-tap or from the Pen toolbar menu: six colours and three widths, persisted on
+/// `EditorModel` for the session.
+private struct PenPaletteSheet: View {
+    @Bindable var editorModel: EditorModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Colour") {
+                    HStack(spacing: 16) {
+                        ForEach(PenPalette.colors.indices, id: \.self) { i in
+                            let swatch = PenPalette.colors[i]
+                            Button {
+                                editorModel.penStyle.color = swatch.color
+                            } label: {
+                                Circle()
+                                    .fill(swatch.color.swiftUIColor)
+                                    .frame(width: 34, height: 34)
+                                    .overlay(
+                                        Circle().strokeBorder(.primary, lineWidth: editorModel.penStyle.color == swatch.color ? 2.5 : 0)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(swatch.name)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                Section("Width") {
+                    Picker("Width", selection: $editorModel.penStyle.widthPoints) {
+                        ForEach(PenPalette.widths, id: \.self) { width in
+                            Text("\(Int(width)) pt").tag(width)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+            .navigationTitle("Pen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            }
         }
     }
 }
