@@ -258,6 +258,7 @@ struct MetafileViewerScreen: View {
         guard session.loaded != nil else { return }
         if EditorDebugLaunch.script == "undo-redo" { await runUndoRedoScript(); return }
         if EditorDebugLaunch.script == "new-shapes" { await runNewShapesScript(); return }
+        if EditorDebugLaunch.script == "pen-strokes" { await runPenStrokesScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -319,6 +320,29 @@ struct MetafileViewerScreen: View {
         if let lastID { editorModel.selection.replace(with: lastID) }
         session.debugCancelAutosave()
         Self.logScript("ios new-shapes: elements=\(session.editingScene?.editableElements.count ?? -1) selected=\(lastID ?? -1)")
+    }
+
+    /// iPad pen proof (E3b): blank drawing → edit mode → feed a couple of synthetic strokes
+    /// through the pen pipeline (`DocumentSession.debugInsertPenStroke`) — a wavy freehand
+    /// line (curve) and a wobbly circle with a hold (snaps to an ellipse) — then ARM the pen
+    /// and stay on screen, so a simulator screenshot shows the pen-armed toolbar plus strokes.
+    @MainActor
+    private func runPenStrokesScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios pen-strokes: begin editing failed"); return }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        let wavy = (0 ... 48).map { CGPoint(x: page.width * 0.08 + Double($0) * (page.width * 0.4 / 48), y: page.height * 0.22 + sin(Double($0) * 0.4) * page.height * 0.05) }
+        var circle = (0 ... 72).map { i -> CGPoint in
+            let a = Double(i) / 72 * 2 * .pi
+            return CGPoint(x: page.width * 0.72 + cos(a) * page.width * 0.16 + sin(Double(i) * 0.9) * 3,
+                           y: page.height * 0.32 + sin(a) * page.width * 0.16 + cos(Double(i) * 0.9) * 3)
+        }
+        circle.append(circle[0])
+        _ = session.debugInsertPenStroke(devicePoints: wavy, held: false, pen: PenStyle(color: PenPalette.black, widthPoints: 2))
+        _ = session.debugInsertPenStroke(devicePoints: circle, held: true, pen: PenStyle(color: PenPalette.blue, widthPoints: 4))
+        editorModel.armPen()
+        session.debugCancelAutosave()
+        Self.logScript("ios pen-strokes: elements=\(session.editingScene?.editableElements.count ?? -1) kinds=\(session.editingScene?.editableElements.map { "\($0.kind)" } ?? []) armedPen=\(editorModel.armedPen)")
     }
 
     /// Permission-free in-process capture of the key window (toolbar included), written to
