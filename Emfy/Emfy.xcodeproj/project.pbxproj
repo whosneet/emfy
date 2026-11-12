@@ -20,6 +20,7 @@
 		F3B000000000000000000001 /* DrawingTextExtraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000001 /* DrawingTextExtraction.swift */; };
 		F3B000000000000000000002 /* DrawingTextFind.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000003 /* DrawingTextFind.swift */; };
 		F3B000000000000000000003 /* DrawingSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000005 /* DrawingSpotlight.swift */; };
+		F3B000000000000000000004 /* DrawingOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000007 /* DrawingOCR.swift */; };
 		F1C000000000000000000002 /* DrawingClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000002 /* DrawingClipboard.swift */; };
 		F1B000000000000000000003 /* BatchConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000003 /* BatchConvert.swift */; };
 		F1C000000000000000000003 /* BatchConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000003 /* BatchConvert.swift */; };
@@ -33,6 +34,8 @@
 		F3C000000000000000000004 /* DrawingTextFindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000004 /* DrawingTextFindTests.swift */; };
 		F3C000000000000000000005 /* DrawingSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000005 /* DrawingSpotlight.swift */; };
 		F3C000000000000000000006 /* DrawingSpotlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000006 /* DrawingSpotlightTests.swift */; };
+		F3C000000000000000000007 /* DrawingOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000007 /* DrawingOCR.swift */; };
+		F3C000000000000000000008 /* DrawingOCRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000008 /* DrawingOCRTests.swift */; };
 		F1C000000000000000000007 /* BatchConvertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000007 /* BatchConvertTests.swift */; };
 		B01100000000000000000004 /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
 		B01100000000000000000130 /* EmfyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000130 /* EmfyApp.swift */; };
@@ -292,6 +295,7 @@
 		F3A000000000000000000001 /* DrawingTextExtraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextExtraction.swift; sourceTree = "<group>"; };
 		F3A000000000000000000003 /* DrawingTextFind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextFind.swift; sourceTree = "<group>"; };
 		F3A000000000000000000005 /* DrawingSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSpotlight.swift; sourceTree = "<group>"; };
+		F3A000000000000000000007 /* DrawingOCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingOCR.swift; sourceTree = "<group>"; };
 		F1A000000000000000000003 /* BatchConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchConvert.swift; sourceTree = "<group>"; };
 		F1A000000000000000000004 /* BatchRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchRenderer.swift; sourceTree = "<group>"; };
 		F1A000000000000000000005 /* PrintLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintLayoutTests.swift; sourceTree = "<group>"; };
@@ -299,6 +303,7 @@
 		F3A000000000000000000002 /* DrawingTextExtractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextExtractionTests.swift; sourceTree = "<group>"; };
 		F3A000000000000000000004 /* DrawingTextFindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextFindTests.swift; sourceTree = "<group>"; };
 		F3A000000000000000000006 /* DrawingSpotlightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSpotlightTests.swift; sourceTree = "<group>"; };
+		F3A000000000000000000008 /* DrawingOCRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingOCRTests.swift; sourceTree = "<group>"; };
 		F1A000000000000000000007 /* BatchConvertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchConvertTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
 		B00100000000000000000F40 /* SVGExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGExport.swift; sourceTree = "<group>"; };
@@ -601,6 +606,7 @@
 				F3A000000000000000000001 /* DrawingTextExtraction.swift */,
 				F3A000000000000000000003 /* DrawingTextFind.swift */,
 				F3A000000000000000000005 /* DrawingSpotlight.swift */,
+				F3A000000000000000000007 /* DrawingOCR.swift */,
 				F1A000000000000000000003 /* BatchConvert.swift */,
 				F1A000000000000000000004 /* BatchRenderer.swift */,
 				F1A000000000000000000008 /* ScenePDF.swift */,
@@ -638,6 +644,7 @@
 				F3A000000000000000000002 /* DrawingTextExtractionTests.swift */,
 				F3A000000000000000000004 /* DrawingTextFindTests.swift */,
 				F3A000000000000000000006 /* DrawingSpotlightTests.swift */,
+				F3A000000000000000000008 /* DrawingOCRTests.swift */,
 				F1A000000000000000000007 /* BatchConvertTests.swift */,
 			);
 			path = EmfyTests;
@@ -1037,6 +1044,7 @@
 				F3B000000000000000000001 /* DrawingTextExtraction.swift in Sources */,
 				F3B000000000000000000002 /* DrawingTextFind.swift in Sources */,
 				F3B000000000000000000003 /* DrawingSpotlight.swift in Sources */,
+				F3B000000000000000000004 /* DrawingOCR.swift in Sources */,
 				F1B000000000000000000003 /* BatchConvert.swift in Sources */,
 				F1B000000000000000000004 /* BatchRenderer.swift in Sources */,
 				B01100000000000000000303 /* DiagnosticReport.swift in Sources */,
@@ -1144,6 +1152,7 @@
 				F3C000000000000000000001 /* DrawingTextExtraction.swift in Sources */,
 				F3C000000000000000000003 /* DrawingTextFind.swift in Sources */,
 				F3C000000000000000000005 /* DrawingSpotlight.swift in Sources */,
+				F3C000000000000000000007 /* DrawingOCR.swift in Sources */,
 				F1C000000000000000000003 /* BatchConvert.swift in Sources */,
 				F1C000000000000000000004 /* BatchRenderer.swift in Sources */,
 				F1C000000000000000000005 /* PrintLayoutTests.swift in Sources */,
@@ -1151,6 +1160,7 @@
 				F3C000000000000000000002 /* DrawingTextExtractionTests.swift in Sources */,
 				F3C000000000000000000004 /* DrawingTextFindTests.swift in Sources */,
 				F3C000000000000000000006 /* DrawingSpotlightTests.swift in Sources */,
+				F3C000000000000000000008 /* DrawingOCRTests.swift in Sources */,
 				F1C000000000000000000007 /* BatchConvertTests.swift in Sources */,
 				B01100000000000000000313 /* DiagnosticReport.swift in Sources */,
 				B01100000000000000000314 /* RecentsCapPolicy.swift in Sources */,
