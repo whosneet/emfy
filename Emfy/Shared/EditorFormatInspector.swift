@@ -111,6 +111,12 @@ struct FormatSections: View {
                             proxy.scrollTo("format.text", anchor: .top)
                         }
                     }
+                    if EditorDebugLaunch.scrollInspectorToArrange {
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(500))
+                            proxy.scrollTo("format.arrange", anchor: .bottom)
+                        }
+                    }
                     #endif
                 }
                 .onChange(of: editorModel.selection) { _, _ in syncLiveValues(self.model) }
@@ -136,6 +142,7 @@ struct FormatSections: View {
                     card("Stroke") { strokeRows(model) }
                     card("Opacity") { opacityRows(model) }
                     card("Arrange") { arrangeRows() }
+                        .id("format.arrange")
                     if let text = model.text {
                         card("Text") {
                             TextSectionRows(session: session, text: text, transform: transform(of: text.id))
@@ -344,6 +351,9 @@ struct FormatSections: View {
     private func arrangeButton(_ symbol: String, _ label: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
+                // Explicit accent glyph: the inspector card forces labelColor, which is WHITE
+                // in the Mac dark inspector and vanishes on a white .bordered button (E3e review).
+                .foregroundStyle(enabled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
                 .frame(width: 26, height: 22)
                 .contentShape(Rectangle())
         }

@@ -74,6 +74,10 @@ enum EditorDebugLaunch {
     /// inspector. `@MainActor` since only the SwiftUI panel and the script touch it.
     @MainActor static var forceLayersTab = false
 
+    /// Set by the `align-grid` script so the Format inspector scrolls to its Arrange section
+    /// for the capture (E3e review). Not a launch argument — toggled in-process.
+    @MainActor static var scrollInspectorToArrange = false
+
     /// `-EmfyDebugNewDrawingSheet YES`: open the New Drawing presets sheet at launch and
     /// capture it (E3a screenshot a), then quit. Needs `-EmfyDebugShot <base>`.
     static var newDrawingSheet: Bool { (value(for: "-EmfyDebugNewDrawingSheet") ?? "NO").uppercased() == "YES" }
