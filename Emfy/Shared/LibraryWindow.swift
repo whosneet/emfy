@@ -169,6 +169,11 @@ struct LibraryWindow: View {
             exit(0)
         }
         #endif
+        #if DEBUG && os(macOS) && EMFY_DMG
+        // U1 updater screenshots (first-launch sheet / Settings ▸ Updates), extracted
+        // to a modifier to keep this body type-checkable.
+        .modifier(UpdatesScreenshotModifier())
+        #endif
         #if DEBUG && os(iOS)
         // E3a screenshot (e): present the New Drawing sheet at launch for a simulator
         // capture (the run stays alive; `simctl io screenshot` grabs it).

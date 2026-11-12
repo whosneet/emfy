@@ -82,8 +82,13 @@ enum EditorDebugLaunch {
     /// capture it (E3a screenshot a), then quit. Needs `-EmfyDebugShot <base>`.
     static var newDrawingSheet: Bool { (value(for: "-EmfyDebugNewDrawingSheet") ?? "NO").uppercased() == "YES" }
 
+    /// `-EmfyDebugUpdatesScene <firstlaunch|settings>`: capture a U1 updater surface
+    /// (the first-launch sheet, or the Settings ▸ Updates group seeded "available"
+    /// via `-EmfyDebugUpdateAvailable <version>`) to `-EmfyDebugShot <base>`, then quit.
+    static var updatesScene: String? { value(for: "-EmfyDebugUpdatesScene")?.lowercased() }
+
     /// Whether the launch hook is driving this run.
-    static var isActive: Bool { openPath != nil || script != nil }
+    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil }
 
     /// The temp copy a script run opens, used verbatim so a second launch can re-open the
     /// edited file (proving persistence). It is already a temp copy the driver made, so it

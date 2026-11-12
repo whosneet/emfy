@@ -172,6 +172,40 @@ extension View {
     }
 }
 
+#if DEBUG
+/// DEBUG-only capture of the two updater surfaces (U1 verification a/b): the
+/// first-launch sheet and the Settings ▸ Updates group seeded "Version X available".
+/// Driven by `-EmfyDebugUpdatesScene <firstlaunch|settings>` + `-EmfyDebugShot <base>`;
+/// writes the PNG via the attached-sheet capture, then quits.
+struct UpdatesScreenshotModifier: ViewModifier {
+    @State private var showSettingsShot = false
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $showSettingsShot) {
+                UpdatesSettingsTab().padding(.vertical, 8)
+            }
+            .task { await run() }
+    }
+
+    private func run() async {
+        guard let scene = EditorDebugLaunch.updatesScene,
+              let base = EditorDebugLaunch.screenshotBase else { return }
+        try? await Task.sleep(for: .milliseconds(900))
+        if scene == "settings" {
+            showSettingsShot = true
+            try? await Task.sleep(for: .milliseconds(1400))
+            _ = EditorDebugScreenshot.captureAttachedSheetView(to: base + "-b-updates-settings.png")
+        } else {
+            try? await Task.sleep(for: .milliseconds(500))
+            _ = EditorDebugScreenshot.captureAttachedSheetView(to: base + "-a-first-launch.png")
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(0)
+    }
+}
+#endif
+
 /// Adds "Check for Updates…" to the app menu (DMG build only).
 struct CheckForUpdatesCommands: Commands {
     @State private var controller = UpdateController.shared
