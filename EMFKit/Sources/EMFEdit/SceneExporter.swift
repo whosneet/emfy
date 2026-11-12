@@ -212,7 +212,10 @@ public enum SceneExporter {
         // the overlay, which re-detects the delete and falls back to a byte-identical
         // re-emit when nothing actually changed.
         let emfPlusEMF = format.isEMFFamily && scene.source.format == .emf && scene.source.renderPath == .emfPlus
-        if !isEdited(scene), !emfPlusEMF {
+        // A non-trivial layer structure must be (re)written as markers even when no
+        // element changed — a rename or a reorder leaves `isEdited` false — so such a
+        // scene routes through the overlay rather than a verbatim re-emit (E3d).
+        if !isEdited(scene), !emfPlusEMF, !scene.hasNonTrivialLayers {
             let data = try reEmitUnchanged(scene)
             return ExportResult(data: finalize(data, format), warnings: [])
         }
@@ -723,6 +726,10 @@ public enum SceneExporter {
 
         var body: [[UInt8]] = []
         var warnings: [ExportWarning] = []
+        // Emfy layer markers (E3d): fresh begin/end markers bracket each layer's
+        // emitted drawing content, in z-order. No-op for a trivial single layer,
+        // so existing exports stay byte-identical.
+        var markers = LayerMarkerEmitter(scene)
 
         // Mirror reEmit: re-emit every record[1…] (the EOF keeps its position);
         // drop deleted elements, replace edited ones, insert new ones at z.
@@ -732,9 +739,12 @@ public enum SceneExporter {
         // them (E3a new-document path).
         var startInserted = false
         for i in 1 ..< file.records.count {
+            // Drop the source's OWN Emfy layer markers — fresh ones are injected
+            // around the current layer structure, so a re-save never duplicates them.
+            if scene.layerMarkerIndices.contains(i) { continue }
             let record = file.records[i]
             if i == firstContent || (firstContent == nil && !startInserted && record.type == eofType) {
-                try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings)
+                try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings, &markers)
                 startInserted = true
             }
 
@@ -742,20 +752,23 @@ public enum SceneExporter {
                 if let owner = ownerByIndex[i] {
                     if owner.provenance.edited {
                         if i == owner.provenance.sourceRecordIndices.max() {
-                            try appendEMFBlocks([owner], baseHandle, &body, &warnings)
+                            try appendEMFBlocks([owner], baseHandle, &body, &warnings, &markers)
                         }
                     } else {
+                        markers.enter(owner, into: &body)
                         body.append(try rawOrThrow(bytes, record))
                     }
                 }   // deleted → drop
             } else {
+                if record.type == eofType { markers.close(into: &body) }   // close markers before the terminator
                 body.append(try rawOrThrow(bytes, record))   // structural / state / EOF
             }
-            if let after = insertions.afterRecord[i] { try appendEMFBlocks(after, baseHandle, &body, &warnings) }
+            if let after = insertions.afterRecord[i] { try appendEMFBlocks(after, baseHandle, &body, &warnings, &markers) }
         }
         // A contentless source with no EOF record at all: insert before the
         // canonical EOF the guarantee below appends.
-        if firstContent == nil, !startInserted { try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings) }
+        if firstContent == nil, !startInserted { try appendEMFBlocks(insertions.atStart, baseHandle, &body, &warnings, &markers) }
+        markers.close(into: &body)   // idempotent: closes any still-open markers before the EOF guarantee
 
         // Guarantee a terminating EMR_EOF. The lossless overlay keeps the source's
         // own EOF record in place (it is structural, re-emitted verbatim above), but
@@ -783,11 +796,69 @@ public enum SceneExporter {
         return (Data(out), warnings)
     }
 
-    private static func appendEMFBlocks(_ elements: [Element], _ baseHandle: UInt32, _ body: inout [[UInt8]], _ warnings: inout [ExportWarning]) throws(EMFWriteError) {
+    private static func appendEMFBlocks(_ elements: [Element], _ baseHandle: UInt32, _ body: inout [[UInt8]], _ warnings: inout [ExportWarning], _ markers: inout LayerMarkerEmitter) throws(EMFWriteError) {
         for element in elements where !element.hidden {
+            markers.enter(element, into: &body)
             for payload in SceneSynthesis.emfBlock(for: element, baseHandle: baseHandle, warnings: &warnings) {
                 body.append([UInt8](try EMFRecordEncoder.encode(payload)))
             }
+        }
+    }
+
+    /// Interleaves Emfy layer-begin/end markers (`EMFLayerMarker`) into the overlay
+    /// body as drawing content is emitted, so each layer's records sit between its
+    /// own markers in z-order (E3d, design §1). Active only when the scene carries a
+    /// non-trivial layer structure; otherwise every call is a no-op and the overlay
+    /// output is byte-identical to the pre-E3d path, so the existing suite is
+    /// unaffected. Empty layers (leading, trailing, or between populated ones) still
+    /// get a begin/end pair, so an empty layer round-trips too.
+    ///
+    /// This assumes the overlay emits drawing content in the scene's layer (z) order
+    /// — true for new documents and ordinary edits. A file whose unedited source
+    /// records are emitted out of layer order (a reordered, never-edited import) can
+    /// produce non-contiguous markers; the layer names/attributes still round-trip.
+    struct LayerMarkerEmitter {
+        private let enabled: Bool
+        private let layers: [Layer]
+        private let layerOf: [Int: Int]
+        private var lastLayer = -1
+        private var closed = false
+
+        init(_ scene: Scene) {
+            enabled = scene.hasNonTrivialLayers
+            layers = scene.layers
+            var map: [Int: Int] = [:]
+            for (order, layer) in scene.layers.enumerated() {
+                for element in layer.elements { map[element.id] = order }
+            }
+            layerOf = map
+        }
+
+        private func beginMarker(_ order: Int, into body: inout [[UInt8]]) {
+            let layer = layers[order]
+            body.append(EMFLayerMarker.begin(name: layer.name, hidden: layer.hidden, locked: layer.locked))
+        }
+
+        /// Opens the marker for `element`'s layer before its records are appended,
+        /// closing the previous layer and emitting any skipped empty layers first.
+        mutating func enter(_ element: Element, into body: inout [[UInt8]]) {
+            guard enabled, let target = layerOf[element.id], target != lastLayer, target >= 0 else { return }
+            if lastLayer >= 0 { body.append(EMFLayerMarker.end()) }
+            var k = max(0, lastLayer + 1)
+            while k < target { beginMarker(k, into: &body); body.append(EMFLayerMarker.end()); k += 1 }
+            beginMarker(target, into: &body)
+            lastLayer = target
+        }
+
+        /// Closes the open layer and emits a begin/end pair for every trailing empty
+        /// layer. Idempotent — safe to call before the EOF and again at the tail.
+        mutating func close(into body: inout [[UInt8]]) {
+            guard enabled, !closed else { return }
+            closed = true
+            if lastLayer >= 0 { body.append(EMFLayerMarker.end()) }
+            var k = max(0, lastLayer + 1)
+            while k < layers.count { beginMarker(k, into: &body); body.append(EMFLayerMarker.end()); k += 1 }
+            lastLayer = layers.count
         }
     }
 

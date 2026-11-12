@@ -1,6 +1,7 @@
 import CoreGraphics
 import EMFParse
 import EMFRender
+import EMFWrite
 import Foundation
 
 /// Lifts a metafile (EMF, EMZ, WMF, WMZ) into an editable `Scene`.
@@ -56,14 +57,107 @@ public enum SceneImporter {
             unitCount: observation.unitCount
         )
 
-        let built = buildElements(from: observation)
-        let layer = Layer(id: 0, name: "Imported", elements: built.elements)
+        // Emfy layer markers (private EMR_COMMENT, EMF GDI only). A well-formed
+        // begin/end sequence rebuilds the saved layers; its comment records are
+        // consumed into the layer structure (classified as state, not passthrough
+        // elements). A malformed/foreign set is ignored — the markers stay ordinary
+        // comments and the scene imports as one layer, exactly as before (design §1).
+        let markers = format == .emf ? scanLayerMarkers(opened.data) : []
+        let specs = markers.isEmpty ? nil : layerSpecs(from: markers)
+        let excluded = specs != nil ? Set(markers.map(\.index)) : []
+
+        let built = buildElements(from: observation, excludedCommentIndices: excluded)
+
+        let layers: [Layer]
+        let storedMarkerIndices: Set<Int>
+        if let specs {
+            layers = assignLayers(specs: specs, elements: built.elements)
+            storedMarkerIndices = excluded
+        } else {
+            layers = [Layer(id: 0, name: Scene.defaultLayerName, elements: built.elements)]
+            storedMarkerIndices = []
+        }
         return Scene(
             pageBoundsDevice: prepared.deviceBounds,
-            layers: [layer],
+            layers: layers,
             partition: built.partition,
-            source: source
+            source: source,
+            layerMarkerIndices: storedMarkerIndices
         )
+    }
+
+    // MARK: - Layer markers (E3d)
+
+    /// Every Emfy layer-marker EMR_COMMENT in `data`, as (record index, marker) in
+    /// file order. The record index is into the EMF record stream, which for a GDI
+    /// EMF is 1:1 with the observation's unit indices (so it matches element
+    /// provenance). Fully bounds-checked (§8): a record whose bytes fall outside the
+    /// buffer is skipped, not trapped.
+    private static func scanLayerMarkers(_ data: Data) -> [(index: Int, marker: EMFLayerMarker.Marker)] {
+        guard let file = try? EMFFile.parse(data) else { return [] }
+        let bytes = [UInt8](data)
+        var out: [(index: Int, marker: EMFLayerMarker.Marker)] = []
+        for (i, record) in file.records.enumerated() where record.type == 70 {
+            let start = record.offset
+            let size = Int(record.size)
+            guard start >= 0, size >= 12, size <= bytes.count, start <= bytes.count - size else { continue }
+            if let marker = EMFLayerMarker.decode(recordBytes: Array(bytes[start ..< start + size])) {
+                out.append((i, marker))
+            }
+        }
+        return out
+    }
+
+    /// One layer recovered from a begin/end marker pair: its attributes and the
+    /// record-index range (exclusive) its elements fall within.
+    private struct LayerSpec {
+        var name: String
+        var hidden: Bool
+        var locked: Bool
+        var lo: Int   // begin marker record index
+        var hi: Int   // end marker record index
+    }
+
+    /// Validates the markers form a flat, strictly alternating begin/end sequence
+    /// within the layer cap, and returns one spec per layer — else nil (the import
+    /// falls back to one layer, design §1). §8: a lone end, two begins in a row, or
+    /// more than `maxLayers` layers are all rejected cleanly.
+    private static func layerSpecs(from markers: [(index: Int, marker: EMFLayerMarker.Marker)]) -> [LayerSpec]? {
+        var specs: [LayerSpec] = []
+        var i = 0
+        while i < markers.count {
+            guard markers[i].marker.kind == .begin else { return nil }
+            guard i + 1 < markers.count, markers[i + 1].marker.kind == .end else { return nil }
+            let begin = markers[i].marker
+            specs.append(LayerSpec(name: begin.name, hidden: begin.hidden, locked: begin.locked,
+                                   lo: markers[i].index, hi: markers[i + 1].index))
+            i += 2
+        }
+        guard !specs.isEmpty, specs.count <= EMFLayerMarker.maxLayers else { return nil }
+        return specs
+    }
+
+    /// Distributes `elements` (in z-order) into the layers `specs` describe, by the
+    /// record-index range each element's draw record falls within. Any element
+    /// outside every range (none for a clean Emfy file) goes to a trailing
+    /// "Imported" layer so nothing is ever dropped.
+    private static func assignLayers(specs: [LayerSpec], elements: [Element]) -> [Layer] {
+        var layers = specs.enumerated().map { index, spec in
+            Layer(id: index, name: spec.name, elements: [], hidden: spec.hidden, locked: spec.locked)
+        }
+        var fallback: [Element] = []
+        for element in elements {
+            let key = element.provenance.sourceRecordIndices.max() ?? -1
+            if let li = specs.firstIndex(where: { key > $0.lo && key < $0.hi }) {
+                layers[li].elements.append(element)
+            } else {
+                fallback.append(element)
+            }
+        }
+        if !fallback.isEmpty {
+            layers.append(Layer(id: layers.count, name: Scene.defaultLayerName, elements: fallback))
+        }
+        return layers
     }
 
     // MARK: - Element construction and partition
@@ -73,7 +167,7 @@ public enum SceneImporter {
         var partition: ScenePartition
     }
 
-    private static func buildElements(from observation: PlaybackObservation) -> Built {
+    private static func buildElements(from observation: PlaybackObservation, excludedCommentIndices: Set<Int> = []) -> Built {
         let unitCount = observation.unitCount
         var structural = Set<Int>()
         var state = Set<Int>()
@@ -112,8 +206,14 @@ public enum SceneImporter {
             case .state:
                 state.insert(i)
             case .comment:
-                passthrough.insert(i)
-                pending.append((passthroughElement(indices: [i], reason: .comment, geometry: ScenePath(), transform: .identity), i))
+                if excludedCommentIndices.contains(i) {
+                    // An Emfy layer marker: consumed into the layer structure, never
+                    // an element, so it is not re-emitted as passthrough content.
+                    state.insert(i)
+                } else {
+                    passthrough.insert(i)
+                    pending.append((passthroughElement(indices: [i], reason: .comment, geometry: ScenePath(), transform: .identity), i))
+                }
             case .unknown:
                 passthrough.insert(i)
                 pending.append((passthroughElement(indices: [i], reason: .unknownRecord(type: type), geometry: ScenePath(), transform: .identity), i))
