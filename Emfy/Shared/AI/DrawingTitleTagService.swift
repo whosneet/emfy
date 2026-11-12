@@ -50,6 +50,7 @@ final class DrawingTitleTagService {
 
     private weak var store: RecentsStore?
     private weak var settings: EmfySettings?
+    private weak var providerStore: AIProviderStore?
 
     /// FIFO work queue, processed one id at a time.
     private var order: [UUID] = []
@@ -67,21 +68,34 @@ final class DrawingTitleTagService {
 
     private init() {}
 
-    /// Wires the service to the shared store and settings, and makes new opens trigger a
-    /// (re)check. Idempotent.
-    func activate(store: RecentsStore, settings: EmfySettings) {
+    /// Wires the service to the shared store, settings and provider store, and makes new
+    /// opens trigger a (re)check. Idempotent.
+    func activate(store: RecentsStore, settings: EmfySettings, providerStore: AIProviderStore? = nil) {
         self.store = store
         self.settings = settings
+        self.providerStore = providerStore ?? AIProviderStore.shared
         store.onEntryChanged = { [weak self] id in self?.enqueue(id, force: true) }
     }
 
-    /// Whether generation may run right now.
+    private var onDeviceReady: Bool {
+        (settings?.useOnDeviceAI ?? false) && DrawingAIAvailability.current().isAvailable
+    }
+
+    /// The provider that would generate titles, when the opt-in is on and its own
+    /// titling consent is granted (A2b). Nil when on-device titling (or none) applies.
+    private var titlesProvider: AIProviderConfig? {
+        providerStore?.titlesProvider(onDeviceAvailable: onDeviceReady)
+    }
+
+    /// Whether generation may run right now: not Private mode, and either on-device
+    /// titling is enabled OR a provider titling opt-in is configured and consented.
     private var isEnabled: Bool {
-        guard let settings else { return false }
-        return DrawingTitleTagPolicy.shouldGenerate(
+        guard let settings, !settings.privateMode else { return false }
+        let onDevice = DrawingTitleTagPolicy.shouldGenerate(
             aiEnabled: settings.useOnDeviceAI,
             privateMode: settings.privateMode,
             modelAvailable: DrawingAIAvailability.current().isAvailable)
+        return onDevice || titlesProvider != nil
     }
 
     /// Enqueue every persisted entry that has no title yet (the launch sweep). Idempotent.
@@ -141,16 +155,52 @@ final class DrawingTitleTagService {
             store.setAITitleTags(cached, contentHash: hash, for: id)
             return
         }
-        guard #available(macOS 26, iOS 26, *) else { return }
         let fileName = entry.displayName
         let bundle = await Task.detached(priority: .utility) {
             DrawingAIContextProvider.make(data: data, fileName: fileName, unsupportedNotes: [])
         }.value
-        guard let bundle, let result = await generate(context: bundle.context) else { return }
+        guard let bundle else { return }
+        // Follow the selected engine: a configured, consented provider when the opt-in is
+        // on, else the on-device model.
+        let result: DrawingTitleTags?
+        if let provider = titlesProvider {
+            result = await generateViaProvider(context: bundle.context, config: provider)
+        } else if #available(macOS 26, iOS 26, *) {
+            result = await generate(context: bundle.context)
+        } else {
+            result = nil
+        }
+        guard let result else { return }
         // Settings may have changed during the await.
         guard isEnabled, store.entry(id: id) != nil else { return }
         remember(hash, result)
         store.setAITitleTags(result, contentHash: hash, for: id)
+    }
+
+    /// Generates title/tags with a configured provider (A2b): a non-streaming JSON reply
+    /// through the consent-gated core, parsed and sanitised exactly like the on-device
+    /// output. The provider gate (`titlesProvider`) already checked the titling consent.
+    private func generateViaProvider(context: DrawingAIContext, config: AIProviderConfig) async -> DrawingTitleTags? {
+        guard DrawingTitleTagPolicy.hasEnoughText(characterCount: context.textExcerpt.count) else { return nil }
+        guard let service = providerStore?.service else { return nil }
+        let request = AIProviderRequest(
+            system: DrawingAIPrompt.structuredInstructions,
+            userPrompt: DrawingAIPrompt.titleTagsJSONPrompt(for: context),
+            tools: [],
+            model: config.model,
+            streaming: true)
+        var text = ""
+        do {
+            let stream = try service.stream(config: config, request: request)
+            for try await event in stream {
+                if case .text(let piece) = event { text += piece }
+            }
+        } catch {
+            return nil
+        }
+        guard let parsed = DrawingTitleTagsJSON.parse(text) else { return nil }
+        let sanitised = DrawingTitleTagsSanitizer.sanitize(title: parsed.title, tags: parsed.tags)
+        return sanitised.title.isEmpty ? nil : sanitised
     }
 
     @available(macOS 26, iOS 26, *)

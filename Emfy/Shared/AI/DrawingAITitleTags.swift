@@ -150,4 +150,44 @@ extension DrawingAIPrompt {
         \(dataBlock(for: context))\(truncationInstruction(for: context))
         """
     }
+
+    /// The provider (non-@Generable) variant: the same grounding, but asking for a
+    /// strict JSON object so an arbitrary provider's plain-text reply can be parsed
+    /// into a title and tags.
+    static func titleTagsJSONPrompt(for context: DrawingAIContext) -> String {
+        """
+        Give this drawing a short descriptive title and keyword tags, for a file \
+        library. Respond with ONLY a JSON object, no other text, in exactly this shape:
+        {"title": "A Short Title", "tags": ["tag1", "tag2", "tag3"]}
+        The title names what the drawing is (≤ 6 words, Title Case); the tags are 3 to 5 \
+        lowercase keywords. Base them only on the facts and text below.
+        \(dataBlock(for: context))\(truncationInstruction(for: context))
+        """
+    }
+}
+
+// MARK: - Parsing a provider's JSON title/tags reply (A2b)
+
+/// Extracts `{ "title": …, "tags": [ … ] }` from a provider's plain-text reply,
+/// tolerant of surrounding prose or code fences. Pure, so it is unit-tested without a
+/// provider. Returns nil when no JSON object with a string title is present.
+enum DrawingTitleTagsJSON {
+    static func parse(_ reply: String) -> (title: String, tags: [String])? {
+        guard let start = reply.firstIndex(of: "{"), let end = reply.lastIndex(of: "}"), start < end else {
+            return nil
+        }
+        let slice = String(reply[start ... end])
+        guard let data = slice.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let title = object["title"] as? String else {
+            return nil
+        }
+        let tags: [String]
+        if let array = object["tags"] as? [Any] {
+            tags = array.compactMap { $0 as? String }
+        } else {
+            tags = []
+        }
+        return (title, tags)
+    }
 }

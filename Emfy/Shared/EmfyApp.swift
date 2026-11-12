@@ -44,7 +44,7 @@ struct EmfyApp: App {
         // Wire the background auto title/tags service so new opens trigger generation
         // (A1b); the launch sweep of existing recents runs from the library window's
         // `.task`, one at a time at low priority.
-        DrawingTitleTagService.shared.activate(store: RecentsStore.shared, settings: settings)
+        DrawingTitleTagService.shared.activate(store: RecentsStore.shared, settings: settings, providerStore: AIProviderStore.shared)
     }
 
     var body: some Scene {

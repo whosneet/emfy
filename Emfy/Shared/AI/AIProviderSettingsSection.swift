@@ -65,6 +65,9 @@ struct AISettingsSection: View {
             if case .provider(let config)? = providers.resolvedEngine(onDeviceAvailable: onDeviceAvailable) {
                 Section {
                     Toggle("Also generate titles with \(config.displayName)", isOn: $providers.generateTitlesWithProvider)
+                        .onChange(of: providers.generateTitlesWithProvider) { _, _ in
+                            DrawingTitleTagService.shared.settingsChanged()
+                        }
                 } footer: {
                     Text(AISettingsFooter.titles)
                         .fixedSize(horizontal: false, vertical: true)

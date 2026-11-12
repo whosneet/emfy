@@ -88,3 +88,24 @@ import Testing
         #expect(store.resolvedEngine(onDeviceAvailable: false) == .provider(config()))
     }
 }
+
+// The provider title/tags JSON reply parser (A2b), tolerant of prose and fences.
+@Suite struct DrawingTitleTagsJSONTests {
+    @Test func parsesCleanJSON() {
+        let parsed = DrawingTitleTagsJSON.parse(#"{"title": "Office Floor Plan", "tags": ["floorplan", "layout"]}"#)
+        #expect(parsed?.title == "Office Floor Plan")
+        #expect(parsed?.tags == ["floorplan", "layout"])
+    }
+
+    @Test func parsesJSONWrappedInProseOrFences() {
+        let reply = "Here you go:\n```json\n{\"title\": \"March Invoice\", \"tags\": [\"invoice\", \"finance\"]}\n```"
+        let parsed = DrawingTitleTagsJSON.parse(reply)
+        #expect(parsed?.title == "March Invoice")
+        #expect(parsed?.tags == ["invoice", "finance"])
+    }
+
+    @Test func returnsNilWithoutATitle() {
+        #expect(DrawingTitleTagsJSON.parse("no json here") == nil)
+        #expect(DrawingTitleTagsJSON.parse(#"{"tags": ["x"]}"#) == nil)
+    }
+}

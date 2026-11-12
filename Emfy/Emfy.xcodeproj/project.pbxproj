@@ -38,13 +38,10 @@
 		A2A000000000000000000020 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001F /* AIProviderService.swift */; };
 		A2A000000000000000000021 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001F /* AIProviderService.swift */; };
 		A2B00000000000000000108A /* AIProviderEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000108F /* AIProviderEditorSheet.swift */; };
-		A2B00000000000000000108T /* AIProviderEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000108F /* AIProviderEditorSheet.swift */; };
 		A2B00000000000000000105A /* AIProviderSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000105F /* AIProviderSettingsSection.swift */; };
-		A2B00000000000000000105T /* AIProviderSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000105F /* AIProviderSettingsSection.swift */; };
 		A2B00000000000000000107A /* AIProviderRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000107F /* AIProviderRouting.swift */; };
 		A2B00000000000000000107T /* AIProviderRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000107F /* AIProviderRouting.swift */; };
 		A2B00000000000000000106A /* AIConsentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000106F /* AIConsentSheet.swift */; };
-		A2B00000000000000000106T /* AIConsentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000106F /* AIConsentSheet.swift */; };
 		A2B00000000000000000104A /* AIConsentContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000104F /* AIConsentContent.swift */; };
 		A2B00000000000000000104T /* AIConsentContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000104F /* AIConsentContent.swift */; };
 		A2B00000000000000000103A /* AIEngineSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000103F /* AIEngineSelection.swift */; };
@@ -1498,10 +1495,7 @@
 				A2A00000000000000000001B /* AnthropicProvider.swift in Sources */,
 				A2A00000000000000000001E /* OpenAIProvider.swift in Sources */,
 				A2A000000000000000000021 /* AIProviderService.swift in Sources */,
-				A2B00000000000000000108T /* AIProviderEditorSheet.swift in Sources */,
-				A2B00000000000000000105T /* AIProviderSettingsSection.swift in Sources */,
 				A2B00000000000000000107T /* AIProviderRouting.swift in Sources */,
-				A2B00000000000000000106T /* AIConsentSheet.swift in Sources */,
 				A2B00000000000000000104T /* AIConsentContent.swift in Sources */,
 				A2B00000000000000000103T /* AIEngineSelection.swift in Sources */,
 				A2B00000000000000000102T /* AIProviderStore.swift in Sources */,
