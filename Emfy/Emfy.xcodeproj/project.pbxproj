@@ -162,6 +162,9 @@
 		E2B000000000000000000151 /* SceneTileFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000150 /* SceneTileFilter.swift */; };
 		E2C0000000000000000000A1 /* FormatInspectorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000A0 /* FormatInspectorModel.swift */; };
 		E2C0000000000000000000A2 /* FormatInspectorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000A0 /* FormatInspectorModel.swift */; };
+		F5B0000000000000000000A1 /* RecordInspectorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B0000000000000000000A0 /* RecordInspectorModel.swift */; };
+		F5B0000000000000000000A2 /* RecordInspectorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B0000000000000000000A0 /* RecordInspectorModel.swift */; };
+		F5B0000000000000000000D1 /* RecordInspectorModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B0000000000000000000D0 /* RecordInspectorModelTests.swift */; };
 		E2C0000000000000000000B1 /* EditorFormatInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000B0 /* EditorFormatInspector.swift */; };
 		E2C0000000000000000000C1 /* EditorTextEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000C0 /* EditorTextEditing.swift */; };
 		E2C0000000000000000000D1 /* FormatInspectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000D0 /* FormatInspectorTests.swift */; };
@@ -435,6 +438,8 @@
 		E2B000000000000000000100 /* EditorDebugLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDebugLaunch.swift; sourceTree = "<group>"; };
 		E2B000000000000000000150 /* SceneTileFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneTileFilter.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000A0 /* FormatInspectorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatInspectorModel.swift; sourceTree = "<group>"; };
+		F5B0000000000000000000A0 /* RecordInspectorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordInspectorModel.swift; sourceTree = "<group>"; };
+		F5B0000000000000000000D0 /* RecordInspectorModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordInspectorModelTests.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000B0 /* EditorFormatInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorFormatInspector.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000C0 /* EditorTextEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTextEditing.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000D0 /* FormatInspectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatInspectorTests.swift; sourceTree = "<group>"; };
@@ -662,6 +667,7 @@
 				E2B000000000000000000110 /* EditorGhost.swift */,
 				E2B000000000000000000150 /* SceneTileFilter.swift */,
 				E2C0000000000000000000A0 /* FormatInspectorModel.swift */,
+				F5B0000000000000000000A0 /* RecordInspectorModel.swift */,
 				E2C0000000000000000000B0 /* EditorFormatInspector.swift */,
 				E2C0000000000000000000C0 /* EditorTextEditing.swift */,
 				C00000000000000000000001 /* UpdateVersion.swift */,
@@ -722,6 +728,7 @@
 				E3B000000000000000000070 /* PenToolTests.swift */,
 				E2B0000000000000000000E0 /* EditorToolsTests.swift */,
 				E2C0000000000000000000D0 /* FormatInspectorTests.swift */,
+				F5B0000000000000000000D0 /* RecordInspectorModelTests.swift */,
 				E3D00000000000000000B000 /* E3LayerPanelTests.swift */,
 				E3E0000000000000000000C0 /* E3ArrangeSnapTests.swift */,
 				E4A0000000000000000000D0 /* E4LightEditingTests.swift */,
@@ -1108,6 +1115,7 @@
 				E2B000000000000000000111 /* EditorGhost.swift in Sources */,
 				E2B000000000000000000151 /* SceneTileFilter.swift in Sources */,
 				E2C0000000000000000000A1 /* FormatInspectorModel.swift in Sources */,
+				F5B0000000000000000000A1 /* RecordInspectorModel.swift in Sources */,
 				E2C0000000000000000000B1 /* EditorFormatInspector.swift in Sources */,
 				E2C0000000000000000000C1 /* EditorTextEditing.swift in Sources */,
 				E2B000000000000000000121 /* MacEditableCanvas.swift in Sources */,
@@ -1252,6 +1260,8 @@
 				E2B0000000000000000000D2 /* EditorTransform.swift in Sources */,
 				E2B0000000000000000000E1 /* EditorToolsTests.swift in Sources */,
 				E2C0000000000000000000A2 /* FormatInspectorModel.swift in Sources */,
+				F5B0000000000000000000A2 /* RecordInspectorModel.swift in Sources */,
+				F5B0000000000000000000D1 /* RecordInspectorModelTests.swift in Sources */,
 				E2C0000000000000000000D1 /* FormatInspectorTests.swift in Sources */,
 				B01100000000000000000121 /* OpenRouting.swift in Sources */,
 				B01100000000000000000122 /* ViewerFit.swift in Sources */,
