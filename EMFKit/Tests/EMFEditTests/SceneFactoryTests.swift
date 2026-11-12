@@ -131,6 +131,62 @@ struct SceneFactoryTests {
             || text.contains("<rect") || text.contains("<ellipse") || text.contains("<line"))
     }
 
+    // MARK: - Freehand pen strokes survive every export format (E3b)
+
+    /// An open, stroke-only cubic-bezier path, like the smoothing stage produces.
+    private func sampleStroke(id: Int) -> Element {
+        let geometry = ScenePath(segments: [
+            .move(CGPoint(x: 150, y: 200)),
+            .cubicCurve(to: CGPoint(x: 300, y: 120), control1: CGPoint(x: 200, y: 140), control2: CGPoint(x: 250, y: 120)),
+            .cubicCurve(to: CGPoint(x: 450, y: 260), control1: CGPoint(x: 350, y: 120), control2: CGPoint(x: 420, y: 200)),
+            .cubicCurve(to: CGPoint(x: 600, y: 180), control1: CGPoint(x: 480, y: 320), control2: CGPoint(x: 560, y: 220)),
+        ])
+        let style = SceneFactory.penStyle(color: SceneColor(red: 0, green: 0, blue: 0), widthDevice: 3)
+        return SceneFactory.makeStroke(geometryDevice: geometry, style: style, id: id)
+    }
+
+    @Test(arguments: [EMFEdit.ExportFormat.emf, .emz])
+    func strokeRoundTripsAsPathAndRenders(format: EMFEdit.ExportFormat) throws {
+        var scene = try a4Landscape()
+        scene.insert(sampleStroke(id: SceneFactory.nextElementID(in: scene)), at: 0)
+        let exported = try SceneExporter.export(scene, as: format)
+        let reimported = try SceneImporter.import(data: exported.data)
+        #expect(reimported.editableElements.count == 1)
+        // A freehand stroke re-imports as a path/bezier element (an open stroked curve),
+        // not a filled shape.
+        let element = try #require(reimported.editableElements.first)
+        #expect(element.kind == .path || element.kind == .bezier)
+        #expect(element.style.fill == nil)
+        #expect(element.style.stroke != nil)
+        let image = try #require(SceneRenderer.makeImage(reimported, scale: 0.5))
+        #expect(!isBlank(image))
+    }
+
+    @Test func strokeExportsToWMF() throws {
+        // WMF has no curve record, so the stroke flattens to a polyline — the export
+        // still succeeds (an approximation warning is allowed) and re-imports editably.
+        var scene = try a4Landscape()
+        scene.insert(sampleStroke(id: SceneFactory.nextElementID(in: scene)), at: 0)
+        let exported = try SceneExporter.export(scene, as: .wmf)
+        let reimported = try SceneImporter.import(data: exported.data)
+        #expect(reimported.editableElements.count >= 1)
+    }
+
+    @Test func strokeAppearsInSVGExport() throws {
+        var scene = try a4Landscape()
+        scene.insert(sampleStroke(id: SceneFactory.nextElementID(in: scene)), at: 0)
+        let svg = SceneSVGExporter.export(scene)
+        let text = try #require(String(data: svg.data, encoding: .utf8))
+        #expect(text.contains("<path") || text.contains("<polyline"))
+    }
+
+    @Test func penStyleIsStrokeOnly() {
+        let style = SceneFactory.penStyle(color: SceneColor(red: 1, green: 0, blue: 0), widthDevice: 2.5)
+        #expect(style.fill == nil)
+        #expect(style.stroke?.width == 2.5)
+        #expect(style.stroke?.color == SceneColor(red: 1, green: 0, blue: 0))
+    }
+
     // MARK: - Geometry
 
     @Test func rectGeometryIsAxisAlignedRectangle() {

@@ -89,6 +89,42 @@ public enum SceneFactory {
         red: 10.0 / 255, green: 132.0 / 255, blue: 255.0 / 255
     )
 
+    // MARK: - Freehand pen strokes (E3b)
+
+    /// The paint for a freehand pen stroke: a solid stroke of `color` and `widthDevice`
+    /// (the element's own device units; the tool converts the UI's point width through
+    /// `Scene.deviceUnitsPerPoint`), no fill — an open stroked path. Cap/join are round
+    /// so a hand-drawn curve reads smoothly.
+    public static func penStyle(color: SceneColor, widthDevice: Double) -> SceneStyle {
+        SceneStyle(
+            fill: nil,
+            stroke: SceneStroke(
+                color: color,
+                isCosmetic: false, width: widthDevice, dash: .solid,
+                cap: .round, join: .round, miterLimit: 10
+            )
+        )
+    }
+
+    /// Builds a new freehand-stroke `Element` from a device-space smoothed path: an
+    /// OPEN `.path` element, stroke-only, identity transform (the geometry already lives
+    /// in device space), new/edited and unlocked provenance. The exporter synthesises it
+    /// as a path bracket (EMR_BEGINPATH … MoveToEx/PolyBezierTo … EMR_ENDPATH →
+    /// EMR_STROKEPATH, [MS-EMF] §2.3.10) so the stroke survives save → re-import as a
+    /// `.path` and E2c's inspector can edit its stroke colour and width. A stroke carries
+    /// no fill, so nothing is ever closed or filled.
+    public static func makeStroke(geometryDevice: ScenePath, style: SceneStyle, id: Int) -> Element {
+        Element(
+            id: id,
+            kind: .path,
+            geometryDevice: geometryDevice,
+            transform: .identity,
+            style: style,
+            provenance: Provenance(sourceRecordIndices: [], edited: true),
+            locked: false
+        )
+    }
+
     /// Builds a new shape `Element` of `kind` filling `rectDevice` (device space),
     /// with `style` and the given `id`. Geometry matches the kind the synthesiser
     /// re-emits (RECTANGLE, ELLIPSE, POLYGON, POLYLINE), so the shape survives
