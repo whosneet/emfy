@@ -33,6 +33,8 @@
 		A2A000000000000000000018 /* AIProviderTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000016 /* AIProviderTools.swift */; };
 		A2A00000000000000000001A /* AnthropicProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000019 /* AnthropicProvider.swift */; };
 		A2A00000000000000000001B /* AnthropicProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000019 /* AnthropicProvider.swift */; };
+		A2A00000000000000000001D /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001C /* OpenAIProvider.swift */; };
+		A2A00000000000000000001E /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001C /* OpenAIProvider.swift */; };
 		A1A000000000000000000106 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
 		A1A0000000000000B1B00008A /* DrawingExplainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00008F /* DrawingExplainModel.swift */; };
 		A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00008F /* DrawingExplainModel.swift */; };
@@ -404,6 +406,7 @@
 		A2A000000000000000000010 /* AITransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AITransport.swift"; sourceTree = "<group>"; };
 		A2A000000000000000000016 /* AIProviderTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderTools.swift"; sourceTree = "<group>"; };
 		A2A000000000000000000019 /* AnthropicProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AnthropicProvider.swift"; sourceTree = "<group>"; };
+		A2A00000000000000000001C /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/OpenAIProvider.swift"; sourceTree = "<group>"; };
 		A1A0000000000000B1B00008F /* DrawingExplainModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingExplainModel.swift"; sourceTree = "<group>"; };
 		A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingRecordPurpose.swift"; sourceTree = "<group>"; };
 		A1A0000000000000EVAL000F /* DrawingAIEvalSuite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIEvalSuite.swift"; sourceTree = "<group>"; };
@@ -839,6 +842,7 @@
 				A2A000000000000000000010 /* AITransport.swift */,
 				A2A000000000000000000016 /* AIProviderTools.swift */,
 				A2A000000000000000000019 /* AnthropicProvider.swift */,
+				A2A00000000000000000001C /* OpenAIProvider.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -1213,6 +1217,7 @@
 				A2A000000000000000000011 /* AITransport.swift in Sources */,
 				A2A000000000000000000017 /* AIProviderTools.swift in Sources */,
 				A2A00000000000000000001A /* AnthropicProvider.swift in Sources */,
+				A2A00000000000000000001D /* OpenAIProvider.swift in Sources */,
 				A1A0000000000000B1B00008A /* DrawingExplainModel.swift in Sources */,
 				A1A0000000000000RECP000A /* DrawingRecordPurpose.swift in Sources */,
 				A1A0000000000000EVAL000A /* DrawingAIEvalSuite.swift in Sources */,
@@ -1416,6 +1421,7 @@
 				A2A000000000000000000012 /* AITransport.swift in Sources */,
 				A2A000000000000000000018 /* AIProviderTools.swift in Sources */,
 				A2A00000000000000000001B /* AnthropicProvider.swift in Sources */,
+				A2A00000000000000000001E /* OpenAIProvider.swift in Sources */,
 				A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */,
 				A1A0000000000000RECP000T /* DrawingRecordPurpose.swift in Sources */,
 				A1A0000000000000B1B00006T /* LibrarySearch.swift in Sources */,
