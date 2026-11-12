@@ -83,12 +83,19 @@ enum DrawingTitleTagsSanitizer {
         return out
     }
 
-    /// Removes control (Cc) and format (Cf) characters.
+    /// Removes control (Cc) and format (Cf) characters, but keeps whitespace controls
+    /// (tab, newline) as a space so adjacent words aren't merged; `collapseWhitespace`
+    /// then normalises the spacing.
     static func stripControl(_ raw: String) -> String {
         var scalars = String.UnicodeScalarView()
-        for scalar in raw.unicodeScalars
-        where !CharacterSet.controlCharacters.contains(scalar) && scalar.properties.generalCategory != .format {
-            scalars.append(scalar)
+        for scalar in raw.unicodeScalars {
+            let isControl = CharacterSet.controlCharacters.contains(scalar)
+            let isFormat = scalar.properties.generalCategory == .format
+            if isControl || isFormat {
+                if scalar.properties.isWhitespace { scalars.append(" ") }
+            } else {
+                scalars.append(scalar)
+            }
         }
         return String(scalars)
     }
