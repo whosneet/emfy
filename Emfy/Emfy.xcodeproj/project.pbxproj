@@ -99,6 +99,15 @@
 		E3A0000000000000000000C1 /* NewDrawingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000C0 /* NewDrawingSheet.swift */; };
 		E3A0000000000000000000A2 /* NewDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000A0 /* NewDrawing.swift */; };
 		E3A0000000000000000000B2 /* ShapeTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000B0 /* ShapeTool.swift */; };
+		E3B000000000000000000011 /* StrokeSmoothing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000010 /* StrokeSmoothing.swift */; };
+		E3B000000000000000000012 /* StrokeSmoothing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000010 /* StrokeSmoothing.swift */; };
+		E3B000000000000000000021 /* ShapeRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000020 /* ShapeRecognizer.swift */; };
+		E3B000000000000000000022 /* ShapeRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000020 /* ShapeRecognizer.swift */; };
+		E3B000000000000000000031 /* PenTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000030 /* PenTool.swift */; };
+		E3B000000000000000000032 /* PenTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000030 /* PenTool.swift */; };
+		E3B000000000000000000051 /* StrokeSmoothingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000050 /* StrokeSmoothingTests.swift */; };
+		E3B000000000000000000061 /* ShapeRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000060 /* ShapeRecognizerTests.swift */; };
+		E3B000000000000000000071 /* PenToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B000000000000000000070 /* PenToolTests.swift */; };
 		E2B000000000000000000111 /* EditorGhost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000110 /* EditorGhost.swift */; };
 		E2B000000000000000000121 /* MacEditableCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000120 /* MacEditableCanvas.swift */; platformFilters = (macos, ); };
 		E2B000000000000000000131 /* EditorDebugScreenshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000130 /* EditorDebugScreenshot.swift */; platformFilters = (macos, ); };
@@ -275,6 +284,12 @@
 		E2B0000000000000000000F0 /* EditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorModel.swift; sourceTree = "<group>"; };
 		E3A0000000000000000000A0 /* NewDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewDrawing.swift; sourceTree = "<group>"; };
 		E3A0000000000000000000B0 /* ShapeTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeTool.swift; sourceTree = "<group>"; };
+		E3B000000000000000000010 /* StrokeSmoothing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrokeSmoothing.swift; sourceTree = "<group>"; };
+		E3B000000000000000000020 /* ShapeRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeRecognizer.swift; sourceTree = "<group>"; };
+		E3B000000000000000000030 /* PenTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PenTool.swift; sourceTree = "<group>"; };
+		E3B000000000000000000050 /* StrokeSmoothingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrokeSmoothingTests.swift; sourceTree = "<group>"; };
+		E3B000000000000000000060 /* ShapeRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeRecognizerTests.swift; sourceTree = "<group>"; };
+		E3B000000000000000000070 /* PenToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PenToolTests.swift; sourceTree = "<group>"; };
 		E3A0000000000000000000C0 /* NewDrawingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewDrawingSheet.swift; sourceTree = "<group>"; };
 		E2B000000000000000000110 /* EditorGhost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorGhost.swift; sourceTree = "<group>"; };
 		E2B000000000000000000120 /* MacEditableCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEditableCanvas.swift; sourceTree = "<group>"; };
@@ -456,6 +471,9 @@
 				E2B0000000000000000000F0 /* EditorModel.swift */,
 				E3A0000000000000000000A0 /* NewDrawing.swift */,
 				E3A0000000000000000000B0 /* ShapeTool.swift */,
+				E3B000000000000000000010 /* StrokeSmoothing.swift */,
+				E3B000000000000000000020 /* ShapeRecognizer.swift */,
+				E3B000000000000000000030 /* PenTool.swift */,
 				E3A0000000000000000000C0 /* NewDrawingSheet.swift */,
 				E2B000000000000000000110 /* EditorGhost.swift */,
 				E2B000000000000000000150 /* SceneTileFilter.swift */,
@@ -479,6 +497,9 @@
 				B00100000000000000000F41 /* SVGExportTests.swift */,
 				E2A0000000000000000000C0 /* DocumentEditingTests.swift */,
 				E3A0000000000000000000D0 /* E3ShapeToolTests.swift */,
+				E3B000000000000000000050 /* StrokeSmoothingTests.swift */,
+				E3B000000000000000000060 /* ShapeRecognizerTests.swift */,
+				E3B000000000000000000070 /* PenToolTests.swift */,
 				E2B0000000000000000000E0 /* EditorToolsTests.swift */,
 				E2C0000000000000000000D0 /* FormatInspectorTests.swift */,
 			);
@@ -823,6 +844,9 @@
 				E2B0000000000000000000F1 /* EditorModel.swift in Sources */,
 				E3A0000000000000000000A1 /* NewDrawing.swift in Sources */,
 				E3A0000000000000000000B1 /* ShapeTool.swift in Sources */,
+				E3B000000000000000000011 /* StrokeSmoothing.swift in Sources */,
+				E3B000000000000000000021 /* ShapeRecognizer.swift in Sources */,
+				E3B000000000000000000031 /* PenTool.swift in Sources */,
 				E3A0000000000000000000C1 /* NewDrawingSheet.swift in Sources */,
 				E2B000000000000000000111 /* EditorGhost.swift in Sources */,
 				E2B000000000000000000151 /* SceneTileFilter.swift in Sources */,
@@ -907,6 +931,9 @@
 				E2A0000000000000000000B2 /* DocumentEditingSupport.swift in Sources */,
 				E2A0000000000000000000C2 /* DocumentEditingTests.swift in Sources */,
 				E3A0000000000000000000D1 /* E3ShapeToolTests.swift in Sources */,
+				E3B000000000000000000051 /* StrokeSmoothingTests.swift in Sources */,
+				E3B000000000000000000061 /* ShapeRecognizerTests.swift in Sources */,
+				E3B000000000000000000071 /* PenToolTests.swift in Sources */,
 				E2B0000000000000000000A2 /* EditorCanvasMapping.swift in Sources */,
 				E2B0000000000000000000B2 /* EditorHitTest.swift in Sources */,
 				E2B0000000000000000000C2 /* EditorSelection.swift in Sources */,
@@ -942,6 +969,9 @@
 				B01100000000000000000407 /* SharedRenderSettings.swift in Sources */,
 				E3A0000000000000000000A2 /* NewDrawing.swift in Sources */,
 				E3A0000000000000000000B2 /* ShapeTool.swift in Sources */,
+				E3B000000000000000000012 /* StrokeSmoothing.swift in Sources */,
+				E3B000000000000000000022 /* ShapeRecognizer.swift in Sources */,
+				E3B000000000000000000032 /* PenTool.swift in Sources */,
 				B01100000000000000000408 /* QuickLookSettingsTests.swift in Sources */,
 				B01100000000000000000F41 /* SVGExport.swift in Sources */,
 				B01100000000000000000F42 /* SVGExportTests.swift in Sources */,
