@@ -217,15 +217,16 @@ enum UpdateProcess {
         process.standardError = err
 
         // Drain both pipes on their own concurrent tasks so neither blocks the other.
+        // The collected bytes live in a Sendable, lock-guarded box, so the queue
+        // closures never mutate a captured `var` (Swift 6 concurrency).
         let queue = DispatchQueue(label: "com.avneetsingh.emfy.update.proc", attributes: .concurrent)
         let drain = DispatchGroup()
-        let lock = NSLock()
-        var outData = Data(), errData = Data()
+        let collected = CollectedOutput()
         func drainPipe(_ pipe: Pipe, isOut: Bool) {
             drain.enter()
             queue.async {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                lock.lock(); if isOut { outData = data } else { errData = data }; lock.unlock()
+                collected.store(data, isOut: isOut)
                 drain.leave()
             }
         }
@@ -252,11 +253,29 @@ enum UpdateProcess {
             try? err.fileHandleForReading.close()
             _ = drain.wait(timeout: .now() + 2)
         }
-        lock.lock(); let o = outData, e = errData; lock.unlock()
+        let (o, e) = collected.snapshot()
         return Result(
             exitCode: process.terminationStatus,
             stdout: String(decoding: o, as: UTF8.self),
             stderr: String(decoding: e, as: UTF8.self))
+    }
+
+    /// A lock-guarded, Sendable box for the stdout/stderr bytes the concurrent drain
+    /// tasks collect — so no captured `var` is mutated in the queue closures.
+    private final class CollectedOutput: @unchecked Sendable {
+        private let lock = NSLock()
+        private var out = Data()
+        private var err = Data()
+
+        func store(_ data: Data, isOut: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            if isOut { out = data } else { err = data }
+        }
+
+        func snapshot() -> (Data, Data) {
+            lock.lock(); defer { lock.unlock() }
+            return (out, err)
+        }
     }
 }
 #endif
