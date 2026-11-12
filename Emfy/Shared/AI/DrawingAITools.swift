@@ -20,11 +20,14 @@ import FoundationModels
 final class DrawingAIToolUsage: @unchecked Sendable {
     private let lock = NSLock()
     private var names: [String] = []
+    private var total = 0
 
-    /// Records `name` once (first-use order preserved).
+    /// Records `name` once for display (first-use order preserved), and counts every
+    /// call including repeats (so a "call findText 1000 times" injection is detectable).
     func record(_ name: String) {
         lock.lock()
         defer { lock.unlock() }
+        total += 1
         if !names.contains(name) { names.append(name) }
     }
 
@@ -35,11 +38,19 @@ final class DrawingAIToolUsage: @unchecked Sendable {
         return names
     }
 
+    /// The total number of tool calls, including repeats of the same tool.
+    func callCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return total
+    }
+
     /// Clears the record before a new answer.
     func reset() {
         lock.lock()
         defer { lock.unlock() }
         names.removeAll(keepingCapacity: true)
+        total = 0
     }
 }
 

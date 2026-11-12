@@ -110,14 +110,25 @@ struct DrawingAIContext: Equatable, Sendable {
     }
 
     /// Strips control and formatting characters (Cc/Cf) from a single line — the
-    /// same class `DrawingTextExtractor.sanitize` removes, applied here so the
-    /// excerpt is safe even if a run slipped through unsanitised.
+    /// same class `DrawingTextExtractor.sanitize` removes — and neutralises any
+    /// data-fence markers the untrusted text contains, applied here so the excerpt is
+    /// safe even if a run slipped through unsanitised. Neutralising the markers closes
+    /// the fence-escape injection (CLAUDE.md §8 / axiom-security): a drawing whose text
+    /// is a literal `</drawing-content>` can't end the data region early, because the
+    /// only real markers left in the prompt are the ones `dataBlock` adds.
     static func sanitizeLine(_ raw: String) -> String {
         var scalars = String.UnicodeScalarView()
         for scalar in raw.unicodeScalars where !CharacterSet.controlCharacters.contains(scalar) {
             scalars.append(scalar)
         }
-        return String(scalars).trimmingCharacters(in: .whitespaces)
+        return neutraliseFenceMarkers(String(scalars)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Replaces any literal data-fence marker in untrusted text with a harmless token,
+    /// so untrusted content cannot forge the boundary of the data region.
+    static func neutraliseFenceMarkers(_ raw: String) -> String {
+        raw.replacingOccurrences(of: DrawingAIPrompt.openMarker, with: "[fence]")
+            .replacingOccurrences(of: DrawingAIPrompt.closeMarker, with: "[fence]")
     }
 
     // MARK: Facts block
