@@ -217,7 +217,19 @@ struct LibraryWindow: View {
                 try? await Task.sleep(for: .milliseconds(200))
                 exit(0)
             }
+            // F3d screenshot (i): the "Show drawings in Spotlight" toggle on the General tab,
+            // captured offscreen in-process.
+            if EditorDebugLaunch.settingsScene == "general", let base = EditorDebugLaunch.screenshotBase {
+                try? await Task.sleep(for: .milliseconds(900))
+                _ = SettingsSceneScreenshot.captureGeneralTab(store: store, settings: settings, to: base + "-i-spotlight-toggle.png")
+                try? await Task.sleep(for: .milliseconds(200))
+                exit(0)
+            }
         }
+        // F3d: the real Core Spotlight round-trip (index + CSSearchQuery), logging the hit
+        // count then quitting; and the Translate-menu stand-in (screenshot g).
+        .task { await SpotlightDebug.runSpotlightCheckIfRequested(settings: settings) }
+        .task { await SpotlightDebug.runTranslateMenuIfRequested() }
         #endif
         #if DEBUG && os(macOS) && EMFY_DMG
         // U1 updater screenshots (first-launch sheet / Settings ▸ Updates), extracted

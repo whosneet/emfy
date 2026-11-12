@@ -94,7 +94,8 @@ final class SpotlightService {
     }
 
     /// The content UTI for a metafile name, so a Spotlight result carries the right type.
-    static func contentTypeIdentifier(for fileName: String) -> String {
+    /// `nonisolated` so the off-main item builder can call it.
+    nonisolated static func contentTypeIdentifier(for fileName: String) -> String {
         switch (fileName as NSString).pathExtension.lowercased() {
         case "emf": return "com.microsoft.emf"
         case "wmf": return "com.microsoft.wmf"

@@ -185,6 +185,7 @@
 		E2B000000000000000000111 /* EditorGhost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000110 /* EditorGhost.swift */; };
 		E2B000000000000000000121 /* MacEditableCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000120 /* MacEditableCanvas.swift */; platformFilters = (macos, ); };
 		E2B000000000000000000131 /* EditorDebugScreenshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B000000000000000000130 /* EditorDebugScreenshot.swift */; platformFilters = (macos, ); };
+		F3B000000000000000000060 /* SpotlightDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000060 /* SpotlightDebug.swift */; platformFilters = (macos, ); };
 		E2B0000000000000000000A1 /* EditorCanvasMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000A0 /* EditorCanvasMapping.swift */; };
 		E2B0000000000000000000A2 /* EditorCanvasMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000A0 /* EditorCanvasMapping.swift */; };
 		E2B0000000000000000000B1 /* EditorHitTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000B0 /* EditorHitTest.swift */; };
@@ -434,6 +435,7 @@
 		E2B000000000000000000110 /* EditorGhost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorGhost.swift; sourceTree = "<group>"; };
 		E2B000000000000000000120 /* MacEditableCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEditableCanvas.swift; sourceTree = "<group>"; };
 		E2B000000000000000000130 /* EditorDebugScreenshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDebugScreenshot.swift; sourceTree = "<group>"; };
+		F3A000000000000000000060 /* SpotlightDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightDebug.swift; sourceTree = "<group>"; };
 		B00100000000000000000111 /* OpenRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouting.swift; sourceTree = "<group>"; };
 		B00100000000000000000112 /* ViewerFit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerFit.swift; sourceTree = "<group>"; };
 		B00200000000000000000004 /* EmfyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EmfyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -714,6 +716,7 @@
 				B00100000000000000000141 /* MacMetafileScrollView.swift */,
 				E2B000000000000000000120 /* MacEditableCanvas.swift */,
 				E2B000000000000000000130 /* EditorDebugScreenshot.swift */,
+				F3A000000000000000000060 /* SpotlightDebug.swift */,
 				B00100000000000000000154 /* ViewerCommands.swift */,
 				B00100000000000000000155 /* MacViewerExporter.swift */,
 				B00100000000000000000004 /* EMFExport.swift */,
@@ -1072,6 +1075,7 @@
 				E2C0000000000000000000C1 /* EditorTextEditing.swift in Sources */,
 				E2B000000000000000000121 /* MacEditableCanvas.swift in Sources */,
 				E2B000000000000000000131 /* EditorDebugScreenshot.swift in Sources */,
+				F3B000000000000000000060 /* SpotlightDebug.swift in Sources */,
 				B01100000000000000000111 /* OpenRouting.swift in Sources */,
 				B01100000000000000000112 /* ViewerFit.swift in Sources */,
 				B01100000000000000000150 /* WhatsNew.swift in Sources */,

@@ -137,10 +137,23 @@ enum EditorDebugLaunch {
     /// via `-EmfyDebugUpdateAvailable <version>`) to `-EmfyDebugShot <base>`, then quit.
     static var updatesScene: String? { value(for: "-EmfyDebugUpdatesScene")?.lowercased() }
 
-    /// `-EmfyDebugSettingsScene viewer`: on Mac, host a Settings tab in a sheet and capture
-    /// it to `-EmfyDebugShot <base>`, then quit — used for the F3c "Recognise text in
-    /// pictures" toggle screenshot. Currently only `viewer` is defined.
+    /// `-EmfyDebugSettingsScene viewer|general`: on Mac, host a Settings tab in an offscreen
+    /// window and capture it to `-EmfyDebugShot <base>`, then quit — `viewer` shows the
+    /// "Recognise text in pictures" toggle (F3c), `general` the "Show drawings in Spotlight"
+    /// toggle (F3d).
     static var settingsScene: String? { value(for: "-EmfyDebugSettingsScene")?.lowercased() }
+
+    /// `-EmfyDebugTranslateMenu YES`: on Mac, render a stand-in of the viewer context menu
+    /// (with Translate…) to `-EmfyDebugShot <base>` and log whether the Edit menu carries a
+    /// Translate… item, then quit (F3d screenshot g — a live menu can't be captured).
+    static var translateMenu: Bool { (value(for: "-EmfyDebugTranslateMenu") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugSpotlightCheck <path>`: index the file at `<path>` into Core Spotlight,
+    /// query `CSSearchQuery` for `-EmfyDebugSpotlightQuery` (default "Emfy") polling up to
+    /// 30 s, log the hit count, clean up and exit (F3d real Spotlight check).
+    static var spotlightCheckPath: String? { value(for: "-EmfyDebugSpotlightCheck") }
+    /// The word the Spotlight check queries for (default "Emfy").
+    static var spotlightCheckQuery: String { value(for: "-EmfyDebugSpotlightQuery") ?? "Emfy" }
 
     /// `-EmfyDebugPictureFixture YES`: synthesise a one-page EMF whose only content is an
     /// embedded picture of rendered "INVOICE 2026" text (scene → EMF export,
@@ -150,7 +163,7 @@ enum EditorDebugLaunch {
     static var pictureFixture: Bool { (value(for: "-EmfyDebugPictureFixture") ?? "NO").uppercased() == "YES" }
 
     /// Whether the launch hook is driving this run.
-    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect || findQuery != nil || findMenuAudit || pictureFixture || settingsScene != nil }
+    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect || findQuery != nil || findMenuAudit || pictureFixture || settingsScene != nil || translateMenu || spotlightCheckPath != nil }
 
     /// Builds the `-EmfyDebugPictureFixture` EMF and returns its temp path, or nil when the
     /// flag is off or synthesis fails. The picture is an EMF+ compressed-PNG bitmap of

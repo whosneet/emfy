@@ -1058,9 +1058,23 @@ enum SettingsSceneScreenshot {
     @MainActor
     @discardableResult
     static func captureViewerTab(settings: EmfySettings, to path: String) -> Bool {
-        let host = NSHostingView(rootView: MacViewerTab().environment(settings).padding(.vertical, 8))
+        return capture(view: MacViewerTab().environment(settings).padding(.vertical, 8), to: path)
+    }
+
+    /// F3d screenshot (i): hosts the Mac General settings tab (which carries the "Show
+    /// drawings in Spotlight" toggle) in an offscreen window and captures it, so the toggle
+    /// can be shot in-process with no Screen Recording permission.
+    @MainActor
+    @discardableResult
+    static func captureGeneralTab(store: RecentsStore, settings: EmfySettings, to path: String) -> Bool {
+        capture(view: MacGeneralTab().environment(store).environment(settings).padding(.vertical, 8), to: path)
+    }
+
+    @MainActor
+    private static func capture<V: View>(view: V, to path: String) -> Bool {
+        let host = NSHostingView(rootView: view)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 520),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.title = "Settings"
         window.contentView = host
