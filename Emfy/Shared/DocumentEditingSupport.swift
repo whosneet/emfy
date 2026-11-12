@@ -198,6 +198,7 @@ enum WMFLimitationWording {
         case .droppedContent: return "dropped content"
         case .rasterized: return "rasterised content"
         case .downlevelStale: return "older-reader fidelity"
+        case .layers: return "layers"
         }
     }
 
@@ -212,6 +213,7 @@ enum WMFLimitationWording {
         case .droppedContent: return "some content can’t be kept at all"
         case .rasterized: return "some content is turned into a picture"
         case .downlevelStale: return "an older reader may see the pre-edit drawing"
+        case .layers: return "layers are flattened into one"
         }
     }
 }

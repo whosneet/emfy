@@ -571,6 +571,41 @@ final class DocumentSession {
         insertImage(data: data, centreDevice: centreDevice)
     }
 
+    /// The id of the layer named `name`, for the E3d `layers` script.
+    func debugLayerID(named name: String) -> Int? { editingScene?.layers.first { $0.name == name }?.id }
+
+    /// Adds a layer named `name` directly above the layer with `aboveLayer` (or on top when
+    /// nil), returning the new layer's id, for the E3d `layers` script. Routes through the
+    /// SAME `.addLayer` command the panel's "+" uses.
+    func debugAddLayer(name: String, aboveLayer activeID: Int?) -> Int? {
+        guard editing == .editing, let scene = editingScene else { return nil }
+        let order = activeID.flatMap { scene.layerOrder(ofLayer: $0) }.map { $0 + 1 } ?? scene.layers.count
+        let newID = scene.nextLayerID
+        apply(.addLayer(name: name, at: order))
+        return editingScene?.layers.contains { $0.id == newID } == true ? newID : nil
+    }
+
+    /// Inserts a shape into a SPECIFIC layer (by id), for the E3d `layers` script, through the
+    /// same `ShapeToolInsertion` style and the `.insertInLayer` command the active-layer insert
+    /// uses. Returns the new element's id.
+    func debugInsertShape(_ kind: ShapeToolKind, rectDevice: CGRect, inLayer layerID: Int) -> Int? {
+        guard editing == .editing, let scene = editingScene, let order = scene.layerOrder(ofLayer: layerID),
+              case .insert(let element, _) = ShapeToolInsertion.command(kind: kind, rectDevice: rectDevice, in: scene).command
+        else { return nil }
+        let z = scene.layers[order].elements.count
+        apply(.insertInLayer(element: element, at: z, layer: order))
+        return element.id
+    }
+
+    /// Hides/shows a layer through the panel's `.setLayerHidden` command, for the `layers` script.
+    func debugSetLayerHidden(_ id: Int, _ hidden: Bool) { apply(.setLayerHidden(id: id, hidden)) }
+    /// Locks/unlocks a layer through the panel's `.setLayerLocked` command, for the `layers` script.
+    func debugSetLayerLocked(_ id: Int, _ locked: Bool) { apply(.setLayerLocked(id: id, locked)) }
+    /// The ordered layer names (back-to-front), for the `layers` script's log line.
+    func debugLayerNames() -> [String] { editingScene?.layers.map(\.name) ?? [] }
+    /// Whether the layer with `id` is hidden, for the `layers` script's log line.
+    func debugLayerHidden(_ id: Int) -> Bool { editingScene?.layers.first { $0.id == id }?.hidden ?? false }
+
     /// The current edited scene exported as EMF, so an iOS script can write it to a host
     /// path a plain relaunch reopens (the in-place save targets a sandboxed imported copy).
     func debugExportEMF() -> Data? { sceneExportData(as: .emf) }
@@ -662,6 +697,11 @@ final class DocumentSession {
     /// and the undo stack untouched. AI edits will route through here too.
     func apply(_ command: SceneCommand, coalescing key: SceneCoalescingKey? = nil) {
         guard editing == .editing, var updated = history else { return }
+        // Route a freshly-built creation `.insert` into the active layer (E3d). Every other
+        // command — and every `.insert` that undo/redo replays internally (those never reach
+        // here) — passes through unchanged; with one layer the target is layer 0, so E3a–c
+        // inserts are untouched.
+        let command = ActiveLayerInsert.route(command, activeLayerID: activeLayerIDProvider?(), in: updated.scene)
         let beforeSteps = updated.undoCount
         do {
             try updated.apply(command, coalescing: key)
@@ -697,10 +737,11 @@ final class DocumentSession {
     /// `commitInsertedText`s or `cancelInsertedText`s. A no-op when read-only.
     func beginInsertText(_ element: Element) {
         guard editing == .editing, var updated = history, let scene = editingScene else { return }
-        let z = scene.layers.first?.elements.count ?? 0
+        // Insert into the active layer, like every other creation tool (E3d).
+        let insert = ActiveLayerInsert.route(.insert(element: element, at: 0), activeLayerID: activeLayerIDProvider?(), in: scene)
         updated.beginGroup(name: .group("edit.action.insertText"))
         do {
-            try updated.apply(.insert(element: element, at: z))
+            try updated.apply(insert)
         } catch {
             updated.abortGroup()
             history = updated
@@ -759,6 +800,20 @@ final class DocumentSession {
     /// hostless test unless the test wants to observe the restored ids (design call
     /// E2c-4). `@ObservationIgnored` — it is a wiring hook, not observable state.
     @ObservationIgnored var selectionRestore: ((Set<Int>) -> Void)?
+
+    /// Resolves the active layer's id for the current scene, wired by the canvas to the
+    /// per-window `EditorModel.resolvedActiveLayerID(in:)` (E3d). `nil` (the default) or a
+    /// `nil` return routes a new insert to the scene's default active (top) layer — the
+    /// pre-E3d behaviour. `@ObservationIgnored` — a wiring hook, not observable state.
+    @ObservationIgnored var activeLayerIDProvider: (() -> Int?)?
+
+    /// Reorders the selected elements within their own layer (Arrange, E3d). One
+    /// `.arrange` undo each; a no-op at the z-order edges. Exposed as four plain methods so
+    /// the EMFEdit-free Mac pane can drive the Arrange menu without naming `SceneArrange`.
+    func bringSelectionToFront(_ ids: Set<Int>) { apply(.arrange(ids: ids, .toFront)) }
+    func bringSelectionForward(_ ids: Set<Int>) { apply(.arrange(ids: ids, .forward)) }
+    func sendSelectionBackward(_ ids: Set<Int>) { apply(.arrange(ids: ids, .backward)) }
+    func sendSelectionToBack(_ ids: Set<Int>) { apply(.arrange(ids: ids, .toBack)) }
 
     /// Deletes the selected elements as ONE undoable step and clears the selection
     /// (design call E2c-4). Undo restores both the elements (through `SceneHistory`)
@@ -875,6 +930,17 @@ final class DocumentSession {
         case .changeOpacity: return "Change Opacity"
         case .changeText: return "Edit Text"
         case .changeFont: return "Change Font"
+        case .addLayer: return "Add Layer"
+        case .deleteLayer: return "Delete Layer"
+        case .renameLayer: return "Rename Layer"
+        case .reorderLayers: return "Reorder Layers"
+        case .showHideLayer: return "Show/Hide Layer"
+        case .lockUnlockLayer: return "Lock/Unlock Layer"
+        case .moveToLayer: return "Move to Layer"
+        case .bringToFront: return "Bring to Front"
+        case .bringForward: return "Bring Forward"
+        case .sendBackward: return "Send Backward"
+        case .sendToBack: return "Send to Back"
         case .group(let key): return key
         }
     }

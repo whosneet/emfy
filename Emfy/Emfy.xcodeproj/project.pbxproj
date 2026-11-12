@@ -96,6 +96,9 @@
 		E2C0000000000000000000D1 /* FormatInspectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000D0 /* FormatInspectorTests.swift */; };
 		E2B0000000000000000000F1 /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000F0 /* EditorModel.swift */; };
 		E2B0000000000000000000F2 /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B0000000000000000000F0 /* EditorModel.swift */; };
+		E3D00000000000000000A001 /* LayerEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D00000000000000000A000 /* LayerEditing.swift */; };
+		E3D00000000000000000A002 /* LayerEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D00000000000000000A000 /* LayerEditing.swift */; };
+		E3D00000000000000000B001 /* E3LayerPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D00000000000000000B000 /* E3LayerPanelTests.swift */; };
 		E3A0000000000000000000A1 /* NewDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000A0 /* NewDrawing.swift */; };
 		E3A0000000000000000000B1 /* ShapeTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A0000000000000000000B0 /* ShapeTool.swift */; };
 		E3C0000000000000000000A1 /* TextImageTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C0000000000000000000A0 /* TextImageTools.swift */; };
@@ -287,6 +290,8 @@
 		E2C0000000000000000000C0 /* EditorTextEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTextEditing.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000D0 /* FormatInspectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatInspectorTests.swift; sourceTree = "<group>"; };
 		E2B0000000000000000000F0 /* EditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorModel.swift; sourceTree = "<group>"; };
+		E3D00000000000000000A000 /* LayerEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerEditing.swift; sourceTree = "<group>"; };
+		E3D00000000000000000B000 /* E3LayerPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = E3LayerPanelTests.swift; sourceTree = "<group>"; };
 		E3A0000000000000000000A0 /* NewDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewDrawing.swift; sourceTree = "<group>"; };
 		E3A0000000000000000000B0 /* ShapeTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShapeTool.swift; sourceTree = "<group>"; };
 		E3C0000000000000000000A0 /* TextImageTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextImageTools.swift; sourceTree = "<group>"; };
@@ -475,6 +480,7 @@
 				E2B0000000000000000000D0 /* EditorTransform.swift */,
 				E2B000000000000000000100 /* EditorDebugLaunch.swift */,
 				E2B0000000000000000000F0 /* EditorModel.swift */,
+				E3D00000000000000000A000 /* LayerEditing.swift */,
 				E3A0000000000000000000A0 /* NewDrawing.swift */,
 				E3A0000000000000000000B0 /* ShapeTool.swift */,
 				E3C0000000000000000000A0 /* TextImageTools.swift */,
@@ -510,6 +516,7 @@
 				E3B000000000000000000070 /* PenToolTests.swift */,
 				E2B0000000000000000000E0 /* EditorToolsTests.swift */,
 				E2C0000000000000000000D0 /* FormatInspectorTests.swift */,
+				E3D00000000000000000B000 /* E3LayerPanelTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -806,6 +813,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E3D00000000000000000A001 /* LayerEditing.swift in Sources */,
 				B01100000000000000000130 /* EmfyApp.swift in Sources */,
 				B01100000000000000000131 /* LibraryWindow.swift in Sources */,
 				B01100000000000000000132 /* LibraryWindowValue.swift in Sources */,
@@ -928,6 +936,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				B011000000000000000000F0 /* EmfyTests.swift in Sources */,
+				E3D00000000000000000A002 /* LayerEditing.swift in Sources */,
+				E3D00000000000000000B001 /* E3LayerPanelTests.swift in Sources */,
 				B011000000000000000000FA /* RecentEntry.swift in Sources */,
 				B011000000000000000000FB /* RecentsStore.swift in Sources */,
 				B011000000000000000000FC /* MetafileLoader.swift in Sources */,

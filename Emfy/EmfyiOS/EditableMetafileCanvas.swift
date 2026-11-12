@@ -53,8 +53,15 @@ struct MetafileEditingContainer: View {
         .onChange(of: session.editVersion) { _, _ in
             if let scene = session.editingScene { editorModel.selection.prune(to: scene) }
         }
-        // Undo/redo of a delete restores the selection (design call E2c-4).
-        .onAppear { session.selectionRestore = { ids in editorModel.selection.replace(with: ids) } }
+        // Undo/redo of a delete restores the selection (design call E2c-4), and a new insert
+        // goes into the active layer resolved against the live scene (E3d).
+        .onAppear {
+            session.selectionRestore = { ids in editorModel.selection.replace(with: ids) }
+            session.activeLayerIDProvider = {
+                guard let scene = session.editingScene else { return nil }
+                return editorModel.resolvedActiveLayerID(in: scene)
+            }
+        }
         // The double-tap text-edit popover, anchored to the run via a UnitPoint (E2c-5).
         .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center), arrowEdge: .top) { request in
             TextEditPopover(

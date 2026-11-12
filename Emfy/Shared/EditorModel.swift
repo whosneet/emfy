@@ -1,4 +1,5 @@
 import CoreGraphics
+import EMFEdit
 import Observation
 import SwiftUI
 
@@ -46,6 +47,21 @@ final class EditorModel {
     /// Whether the pen palette popover is showing (iPad: opened by the Pencil squeeze or the
     /// Pen button's menu; design call 3/5). Observed so the screen presents it.
     var penPalettePresented = false
+
+    /// The layer new elements go into (E3d). `nil` means "use the scene's default active
+    /// (top) layer" — the state of every document before the user touches the Layers panel,
+    /// so with a single layer this is equivalent to the pre-E3d behaviour. Selecting a row in
+    /// the Layers panel, or adding a layer, sets it; a stale id (a deleted layer) resolves
+    /// back to the default. Observed so the panel highlights the active row.
+    var activeLayerID: Int?
+
+    /// The active layer's id resolved against `scene`: the chosen id when it still exists,
+    /// otherwise the scene's default active (top) layer. `nil` only when the scene has no
+    /// layers. New elements and the "add layer above" action key off this.
+    func resolvedActiveLayerID(in scene: EMFEdit.Scene) -> Int? {
+        if let id = activeLayerID, scene.layers.contains(where: { $0.id == id }) { return id }
+        return scene.defaultActiveLayerID
+    }
 
     /// Arms the pen and disarms every other creation tool (a single armed tool).
     func armPen() { armedPen = true; armedShapeTool = nil; armedTextTool = false }
