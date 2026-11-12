@@ -226,10 +226,14 @@ struct LibraryWindow: View {
                 exit(0)
             }
         }
-        // F3d: the real Core Spotlight round-trip (index + CSSearchQuery), logging the hit
-        // count then quitting; and the Translate-menu stand-in (screenshot g).
-        .task { await SpotlightDebug.runSpotlightCheckIfRequested(settings: settings) }
+        // F3d: the Translate-menu stand-in (screenshot g).
         .task { await SpotlightDebug.runTranslateMenuIfRequested() }
+        #endif
+        #if DEBUG
+        // F3d: the real Core Spotlight round-trip (index + CSSearchQuery), cross-platform so
+        // it can run where the index is reachable (the iOS Simulator); logs the hit count then
+        // quits.
+        .task { await SpotlightCheck.runIfRequested(settings: settings) }
         #endif
         #if DEBUG && os(macOS) && EMFY_DMG
         // U1 updater screenshots (first-launch sheet / Settings ▸ Updates), extracted

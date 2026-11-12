@@ -57,6 +57,7 @@
 		F3B000000000000000000051 /* RecentsSpotlightBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000051 /* RecentsSpotlightBridge.swift */; };
 		F3C000000000000000000051 /* RecentsSpotlightBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000051 /* RecentsSpotlightBridge.swift */; };
 		F3B000000000000000000052 /* SpotlightService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000052 /* SpotlightService.swift */; };
+		F3B000000000000000000061 /* SpotlightCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000061 /* SpotlightCheck.swift */; };
 		F3C000000000000000000053 /* RecentsSpotlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000053 /* RecentsSpotlightTests.swift */; };
 		F3C000000000000000000040 /* DrawingTranslation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000040 /* DrawingTranslation.swift */; };
 		F3B000000000000000000041 /* DrawingTranslationModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000041 /* DrawingTranslationModifier.swift */; };
@@ -345,6 +346,7 @@
 		F3A000000000000000000050 /* CoreSpotlightIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSpotlightIndex.swift; sourceTree = "<group>"; };
 		F3A000000000000000000051 /* RecentsSpotlightBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsSpotlightBridge.swift; sourceTree = "<group>"; };
 		F3A000000000000000000052 /* SpotlightService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightService.swift; sourceTree = "<group>"; };
+		F3A000000000000000000061 /* SpotlightCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightCheck.swift; sourceTree = "<group>"; };
 		F3A000000000000000000053 /* RecentsSpotlightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsSpotlightTests.swift; sourceTree = "<group>"; };
 		F3A000000000000000000041 /* DrawingTranslationModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTranslationModifier.swift; sourceTree = "<group>"; };
 		F3A000000000000000000042 /* DrawingTranslationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTranslationTests.swift; sourceTree = "<group>"; };
@@ -661,6 +663,7 @@
 				F3A000000000000000000050 /* CoreSpotlightIndex.swift */,
 				F3A000000000000000000051 /* RecentsSpotlightBridge.swift */,
 				F3A000000000000000000052 /* SpotlightService.swift */,
+				F3A000000000000000000061 /* SpotlightCheck.swift */,
 				F3A000000000000000000041 /* DrawingTranslationModifier.swift */,
 				F1A000000000000000000003 /* BatchConvert.swift */,
 				F1A000000000000000000004 /* BatchRenderer.swift */,
@@ -1118,6 +1121,7 @@
 				F3B000000000000000000050 /* CoreSpotlightIndex.swift in Sources */,
 				F3B000000000000000000051 /* RecentsSpotlightBridge.swift in Sources */,
 				F3B000000000000000000052 /* SpotlightService.swift in Sources */,
+				F3B000000000000000000061 /* SpotlightCheck.swift in Sources */,
 				F3B000000000000000000041 /* DrawingTranslationModifier.swift in Sources */,
 				F3B000000000000000000015 /* MenuShortcutAudit.swift in Sources */,
 				F3B000000000000000000019 /* MacFindBar.swift in Sources */,
