@@ -118,7 +118,7 @@ enum DrawingAIDebugProbe {
             let notes = loaded.couldNotShowNotes
             log.append("\(name): \(notes.count) missing-content note(s)")
             guard !notes.isEmpty else { continue }
-            let items = DrawingMissingItems.list(from: notes)
+            let items = DrawingMissingItems.list(from: loaded.diagnostics)
             log.append("items:\n" + items.map { "  - \($0)" }.joined(separator: "\n"))
             guard status.isAvailable, #available(macOS 26, iOS 26, *) else {
                 log.append("(model unavailable — items only)"); break

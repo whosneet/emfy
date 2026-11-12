@@ -198,7 +198,7 @@ struct MetafileInfoView: View {
             explainModel.resetIfChanged(key: aiInputs?.contentID ?? 0)
             explainModel.explain(
                 key: aiInputs?.contentID ?? 0,
-                items: DrawingMissingItems.list(from: couldNotShowNotes))
+                items: DrawingMissingItems.list(from: diagnostics))
         } label: {
             Label(title, systemImage: "sparkles")
         }

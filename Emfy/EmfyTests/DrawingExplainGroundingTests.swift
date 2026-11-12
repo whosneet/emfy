@@ -1,13 +1,21 @@
+import EMFRender
 import Foundation
 import Testing
 
 // A1b Part 3: the explain-what's-missing grounding — the prompt contains ONLY the
 // diagnostics data (fenced) and forbids speculation; no drawing content leaks in.
+// A1c Part 2: each skipped record is named with a spec-derived purpose.
 
 @Suite struct DrawingExplainGroundingTests {
 
     private func note(_ summary: String, _ detail: String) -> DiagnosticNote {
         DiagnosticNote(summary: summary, technicalDetail: detail)
+    }
+
+    private func diagnostics(renderLog: [EMFRenderLog.Entry]) -> ViewerDiagnostics {
+        ViewerDiagnostics(
+            kind: .emf, embeddedEMF: .absent, renderLog: renderLog,
+            parserDiagnostics: [], frontDoorDiagnostics: [], wasDecompressed: false)
     }
 
     @Test func missingItemsPairSummaryWithRecordNameAndDeduplicate() {
@@ -52,5 +60,63 @@ import Testing
         let prompt = DrawingAIPrompt.explainMissingPrompt(items: items)
         #expect(prompt.contains("only this item"))
         #expect(!prompt.contains("<drawing-content>only")) // items are newline-listed, fenced cleanly
+    }
+
+    // MARK: - A1c Part 2: named records with spec-derived purposes
+
+    @Test func recordPurposeResolvesEMFNameAndPurpose() {
+        let gradient = DrawingRecordPurpose.emf(type: 118)   // EMR_GRADIENTFILL
+        #expect(gradient?.name == "EMR_GRADIENTFILL")
+        #expect(gradient?.purpose.lowercased().contains("gradient") == true)
+        // An undefined type id has no name.
+        #expect(DrawingRecordPurpose.emf(type: 9999) == nil)
+    }
+
+    @Test func recordPurposeResolvesEMFPlusNameAndPurpose() {
+        let fillPath = DrawingRecordPurpose.emfPlus(type: 0x4014)   // EmfPlusFillPath
+        #expect(fillPath.name == "EmfPlusFillPath")
+        #expect(fillPath.purpose.lowercased().contains("fill") == true)
+        // An unknown EMF+ type still names itself by hex, with the generic purpose.
+        let unknown = DrawingRecordPurpose.emfPlus(type: 0x40FF)
+        #expect(unknown.name == "0x40FF")
+        #expect(unknown.purpose == DrawingRecordPurpose.genericEMFPlusPurpose)
+    }
+
+    @Test func diagnosticsListNamesEachSkippedRecord() {
+        let diag = diagnostics(renderLog: [
+            .unimplementedRecord(type: 118, count: 3),   // EMR_GRADIENTFILL
+            .emfPlusUnsupportedRecord(type: 0x4014, count: 1),  // EmfPlusFillPath
+        ])
+        let items = DrawingMissingItems.list(from: diag)
+        let joined = items.joined(separator: "\n")
+        #expect(joined.contains("EMR_GRADIENTFILL"))
+        #expect(joined.lowercased().contains("gradient"))
+        #expect(joined.contains("skipped 3 times"))
+        #expect(joined.contains("EmfPlusFillPath"))
+    }
+
+    @Test func unknownEMFRecordIsReportedByNumber() {
+        let diag = diagnostics(renderLog: [.unimplementedRecord(type: 9999, count: 1)])
+        let items = DrawingMissingItems.list(from: diag)
+        #expect(items.contains { $0.contains("9999") })
+    }
+
+    @Test func stockFontNotesAreNotMissingContent() {
+        // A stock-font fallback still draws the text, so it must not appear in the
+        // "what's missing" list (parity with couldNotShowNotes filtering).
+        let diag = diagnostics(renderLog: [.stockFontUsed(rawValue: 17, count: 2)])
+        #expect(DrawingMissingItems.list(from: diag).isEmpty)
+    }
+
+    @Test func namedItemsFlowIntoTheFencedPrompt() {
+        let diag = diagnostics(renderLog: [.unimplementedRecord(type: 118, count: 1)])
+        let items = DrawingMissingItems.list(from: diag)
+        let prompt = DrawingAIPrompt.explainMissingPrompt(items: items)
+        #expect(prompt.contains("EMR_GRADIENTFILL"))
+        // The named record sits inside the data markers.
+        let open = prompt.range(of: DrawingAIPrompt.openMarker)!
+        let close = prompt.range(of: DrawingAIPrompt.closeMarker)!
+        let name = prompt.range(of: "EMR_GRADIENTFILL")!
+        #expect(name.lowerBound > open.upperBound && name.upperBound < close.lowerBound)
     }
 }
