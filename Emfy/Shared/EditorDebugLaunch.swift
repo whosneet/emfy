@@ -82,13 +82,59 @@ enum EditorDebugLaunch {
     /// capture it (E3a screenshot a), then quit. Needs `-EmfyDebugShot <base>`.
     static var newDrawingSheet: Bool { (value(for: "-EmfyDebugNewDrawingSheet") ?? "NO").uppercased() == "YES" }
 
+    /// `-EmfyDebugBatchSheet YES`: open the Batch Convert sheet at launch, pre-filled
+    /// with `-EmfyDebugBatchFiles` (temp-copied in-process), and capture it
+    /// (F1 screenshot b) to `-EmfyDebugShot <base>`, then quit.
+    static var batchSheet: Bool { (value(for: "-EmfyDebugBatchSheet") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugBatchReport YES`: in addition to `batchSheet`, run the conversion and
+    /// capture the resulting report sheet (F1 screenshot c), then quit.
+    static var batchReport: Bool { (value(for: "-EmfyDebugBatchReport") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugBatchFiles <p1,p2,…>`: metafile paths the Batch Convert capture
+    /// pre-fills (each is copied into the app's own temp first, as `safeCopiedOpenPath`
+    /// does, so a DEBUG run never converts a tracked file in place).
+    static var batchFiles: [String] {
+        (value(for: "-EmfyDebugBatchFiles") ?? "").split(separator: ",").map(String.init).filter { !$0.isEmpty }
+    }
+
+    /// `-EmfyDebugMenuAudit YES`: after launch, log how many Edit-menu items carry the
+    /// ⌘C key equivalent (must be exactly one — the system Copy), then quit. Needs
+    /// `-EmfyDebugShot <base>` (the count is written to `<base>-menu-audit.txt`).
+    static var menuAudit: Bool { (value(for: "-EmfyDebugMenuAudit") ?? "NO").uppercased() == "YES" }
+
     /// `-EmfyDebugUpdatesScene <firstlaunch|settings>`: capture a U1 updater surface
     /// (the first-launch sheet, or the Settings ▸ Updates group seeded "available"
     /// via `-EmfyDebugUpdateAvailable <version>`) to `-EmfyDebugShot <base>`, then quit.
     static var updatesScene: String? { value(for: "-EmfyDebugUpdatesScene")?.lowercased() }
 
     /// Whether the launch hook is driving this run.
-    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil }
+    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit }
+
+    /// Copies `batchFiles` into the app's own temp (so a DEBUG batch run never touches a
+    /// tracked file in place) and returns the copies' URLs.
+    static func safeCopiedBatchFiles() -> [URL] {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyDebugBatch-\(UUID().uuidString)", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return [] }
+        var copies: [URL] = []
+        for path in batchFiles {
+            let source = URL(fileURLWithPath: path)
+            let destination = directory.appendingPathComponent(source.lastPathComponent)
+            if (try? FileManager.default.copyItem(at: source, to: destination)) != nil, !destination.path.contains("/corpus/") {
+                copies.append(destination)
+            }
+        }
+        return copies
+    }
+
+    /// A fresh app-temp directory for a DEBUG batch run's output.
+    static func batchOutputDirectory() -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyDebugBatchOut-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
 
     /// The temp copy a script run opens, used verbatim so a second launch can re-open the
     /// edited file (proving persistence). It is already a temp copy the driver made, so it

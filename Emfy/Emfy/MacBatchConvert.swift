@@ -60,6 +60,28 @@ struct MacBatchConvertSheet: View {
                 }
             }
         }
+        #if DEBUG
+        // F1 screenshots (b)/(c): pre-fill from temp-copied files, capture the sheet (or,
+        // with batchReport, run it and capture the report), then quit. Window capture
+        // (cacheDisplay) renders the real segmented Picker and the report List, unlike
+        // ImageRenderer.
+        .task {
+            guard EditorDebugLaunch.batchSheet, let base = EditorDebugLaunch.screenshotBase else { return }
+            controller.add(EditorDebugLaunch.safeCopiedBatchFiles())
+            controller.destinationFolder = EditorDebugLaunch.batchOutputDirectory()
+            try? await Task.sleep(for: .milliseconds(900))
+            if EditorDebugLaunch.batchReport {
+                controller.run(settings: settings)
+                for _ in 0..<100 where controller.report == nil { try? await Task.sleep(for: .milliseconds(100)) }
+                try? await Task.sleep(for: .milliseconds(900))
+                _ = EditorDebugScreenshot.captureNestedAttachedSheetView(to: base + "-c-batch-report.png")
+            } else {
+                _ = EditorDebugScreenshot.captureAttachedSheetView(to: base + "-b-batch-sheet.png")
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+            exit(0)
+        }
+        #endif
     }
 
     // MARK: - Sources

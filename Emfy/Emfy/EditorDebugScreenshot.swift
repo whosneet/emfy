@@ -106,6 +106,42 @@ enum EditorDebugScreenshot {
         return (try? data.write(to: URL(fileURLWithPath: path))) != nil
     }
 
+    /// Captures a sheet presented ON a sheet (e.g. the batch report over the batch
+    /// sheet) via `cacheDisplay`, so a nested SwiftUI `.sheet` renders faithfully and
+    /// upright without compositing the sheets behind it. Returns whether it wrote.
+    @MainActor
+    @discardableResult
+    static func captureNestedAttachedSheetView(to path: String) -> Bool {
+        guard let sheet = libraryWindow()?.attachedSheet?.attachedSheet, let view = sheet.contentView else { return false }
+        view.layoutSubtreeIfNeeded()
+        sheet.displayIfNeeded()
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0,
+              let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return false }
+        view.cacheDisplay(in: bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
+    /// Counts how many menu items in the whole main menu carry the ⌘C key equivalent,
+    /// to prove the drawing Copy did not add a second one (F1 correction 1). `-1` when
+    /// no main menu exists yet.
+    @MainActor
+    static func commandCItemCount() -> Int {
+        guard let menu = NSApp.mainMenu else { return -1 }
+        return countCommandC(in: menu)
+    }
+
+    @MainActor
+    private static func countCommandC(in menu: NSMenu) -> Int {
+        var count = 0
+        for item in menu.items {
+            if item.keyEquivalent == "c", item.keyEquivalentModifierMask == [.command] { count += 1 }
+            if let submenu = item.submenu { count += countCommandC(in: submenu) }
+        }
+        return count
+    }
+
     /// Writes a PNG of the largest non-panel window's content view EVEN IF the window is
     /// not on-screen. A headless raw-exec launch (no active GUI session, used when
     /// LaunchServices `open` can't be used because a lingering same-bundle instance makes

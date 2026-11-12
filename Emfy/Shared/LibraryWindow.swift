@@ -173,6 +173,23 @@ struct LibraryWindow: View {
             try? await Task.sleep(for: .milliseconds(200))
             exit(0)
         }
+        // F1 screenshots (b)/(c): present the Batch Convert sheet at launch; the sheet's
+        // own task pre-fills, (optionally) runs, captures and quits.
+        .task {
+            guard EditorDebugLaunch.batchSheet else { return }
+            try? await Task.sleep(for: .milliseconds(700))
+            showBatchConvert = true
+        }
+        // F1 correction 1 proof: count the ⌘C menu items (must be exactly 1), write it
+        // next to the shots, then quit.
+        .task {
+            guard EditorDebugLaunch.menuAudit, let base = EditorDebugLaunch.screenshotBase else { return }
+            try? await Task.sleep(for: .milliseconds(1200))
+            let count = EditorDebugScreenshot.commandCItemCount()
+            try? "command-C menu items: \(count)\n".write(toFile: base + "-menu-audit.txt", atomically: true, encoding: .utf8)
+            try? await Task.sleep(for: .milliseconds(150))
+            exit(0)
+        }
         #endif
         #if DEBUG && os(macOS) && EMFY_DMG
         // U1 updater screenshots (first-launch sheet / Settings ▸ Updates), extracted
