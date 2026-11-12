@@ -46,6 +46,9 @@ struct MetafileViewerScreen: View {
     #endif
     #endif
 
+    // Translate (F3d): the system Translate overlay presentation.
+    @State private var showTranslation = false
+
     @State private var chromeHidden = false
     @State private var showInspector = false
     @State private var bannerDismissed = false
@@ -241,6 +244,9 @@ struct MetafileViewerScreen: View {
         // Image insert (E3c design call 2): the Photos / Files pickers and the failure
         // toast, hung off a zero-size overlay so the main body stays type-checkable.
         .overlay { imageInsertControls }
+        // Translate (F3d): the system overlay for the current Find match, else the drawing's
+        // text. Isolated in one gated modifier (macOS 14.4 / iOS 17.4).
+        .modifier(DrawingTranslationModifier(isPresented: $showTranslation, text: translationText))
     }
 
     /// The alerts, confirmations and transient overlays layered over `sheetsLayer`.
@@ -1337,6 +1343,17 @@ struct MetafileViewerScreen: View {
             }
             .disabled(!findModel.hasText)
             .accessibilityIdentifier("copyAllText")
+            // Translate… (F3d): the system overlay for the current Find match or the drawing's
+            // text. Hidden below iOS 17.4; disabled when the drawing has no text.
+            if #available(iOS 17.4, *) {
+                Button {
+                    showTranslation = true
+                } label: {
+                    Label("Translate…", systemImage: "translate")
+                }
+                .disabled(!findModel.hasText)
+                .accessibilityIdentifier("translateDrawing")
+            }
             Divider()
             Button {
                 DiagnosticReportAction.copyFileReport(
@@ -1511,6 +1528,12 @@ struct MetafileViewerScreen: View {
         guard !text.isEmpty else { return }
         UIPasteboard.general.string = text
         toast.show("Copied all text", systemImage: "doc.on.doc")
+    }
+
+    /// The text handed to the Translate overlay (F3d): the current Find match's run text when
+    /// one exists, else the drawing's text in Copy All Text order, truncated at a word boundary.
+    private var translationText: String {
+        DrawingTranslation.text(currentMatch: findModel.currentMatchRunText, allText: findModel.copyAllText())
     }
 
     /// The viewer actions published to the scene for the shared iOS View menu (K1):

@@ -178,6 +178,12 @@ struct EditMenuCommands: Commands {
             // the drawing has no text.
             Button("Copy All Text") { actions?.copyAllText?() }
                 .disabled(actions?.copyAllText == nil)
+            // Translate… (F3d): the system Translate overlay for the current Find match or the
+            // drawing's text. Hidden below macOS 14.4; disabled when no document/text is shown.
+            if #available(macOS 14.4, *) {
+                Button("Translate…") { actions?.translate?() }
+                    .disabled(actions?.translate == nil)
+            }
             // Find ▸ Find… / Find Next / Find Previous (F3b), the standard Find submenu.
             // The single ⌘F/⌘G/⇧⌘G owners — a menu audit confirms no duplicates.
             Menu("Find") {

@@ -63,6 +63,15 @@ final class DrawingFindModel {
         return matches[current]
     }
 
+    /// The text of the run containing the current match, in reading order, for Translate
+    /// (F3d). `nil` when there is no current match, so Translate falls back to all text.
+    var currentMatchRunText: String? {
+        guard let match = activeMatch else { return nil }
+        let ordered = DrawingTextExtractor.readingOrder(allRuns)
+        guard ordered.indices.contains(match.runIndex) else { return nil }
+        return ordered[match.runIndex].text
+    }
+
     // MARK: Runs
 
     /// Hands the model the drawing's runs. When the drawing is unchanged (`contentID`

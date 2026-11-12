@@ -51,6 +51,10 @@
 		F3B000000000000000000019 /* MacFindBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000019 /* MacFindBar.swift */; platformFilters = (macos, ); };
 		F3B000000000000000000021 /* IOSFindBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000021 /* IOSFindBar.swift */; platformFilters = (ios, ); };
 		F3B000000000000000000023 /* DrawingTextBounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000023 /* DrawingTextBounds.swift */; };
+		F3B000000000000000000040 /* DrawingTranslation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000040 /* DrawingTranslation.swift */; };
+		F3C000000000000000000040 /* DrawingTranslation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000040 /* DrawingTranslation.swift */; };
+		F3B000000000000000000041 /* DrawingTranslationModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000041 /* DrawingTranslationModifier.swift */; };
+		F3C000000000000000000042 /* DrawingTranslationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000042 /* DrawingTranslationTests.swift */; };
 		F3C000000000000000000023 /* DrawingTextBounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000023 /* DrawingTextBounds.swift */; };
 		F1C000000000000000000007 /* BatchConvertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000007 /* BatchConvertTests.swift */; };
 		B01100000000000000000004 /* EMFExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000004 /* EMFExport.swift */; };
@@ -330,6 +334,9 @@
 		F3A000000000000000000019 /* MacFindBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFindBar.swift; sourceTree = "<group>"; };
 		F3A000000000000000000021 /* IOSFindBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSFindBar.swift; sourceTree = "<group>"; };
 		F3A000000000000000000023 /* DrawingTextBounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextBounds.swift; sourceTree = "<group>"; };
+		F3A000000000000000000040 /* DrawingTranslation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTranslation.swift; sourceTree = "<group>"; };
+		F3A000000000000000000041 /* DrawingTranslationModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTranslationModifier.swift; sourceTree = "<group>"; };
+		F3A000000000000000000042 /* DrawingTranslationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTranslationTests.swift; sourceTree = "<group>"; };
 		F1A000000000000000000007 /* BatchConvertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchConvertTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000004 /* EMFExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMFExport.swift; sourceTree = "<group>"; };
 		B00100000000000000000F40 /* SVGExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGExport.swift; sourceTree = "<group>"; };
@@ -638,6 +645,8 @@
 				F3A000000000000000000011 /* DrawingFindModel.swift */,
 				F3A000000000000000000013 /* FindHighlightGeometry.swift */,
 				F3A000000000000000000023 /* DrawingTextBounds.swift */,
+				F3A000000000000000000040 /* DrawingTranslation.swift */,
+				F3A000000000000000000041 /* DrawingTranslationModifier.swift */,
 				F1A000000000000000000003 /* BatchConvert.swift */,
 				F1A000000000000000000004 /* BatchRenderer.swift */,
 				F1A000000000000000000008 /* ScenePDF.swift */,
@@ -674,6 +683,7 @@
 				F1A000000000000000000006 /* DrawingClipboardTests.swift */,
 				F3A000000000000000000002 /* DrawingTextExtractionTests.swift */,
 				F3A000000000000000000004 /* DrawingTextFindTests.swift */,
+				F3A000000000000000000042 /* DrawingTranslationTests.swift */,
 				F3A000000000000000000006 /* DrawingSpotlightTests.swift */,
 				F3A000000000000000000008 /* DrawingOCRTests.swift */,
 				F3A000000000000000000032 /* DrawingOCRServiceTests.swift */,
@@ -1086,6 +1096,8 @@
 				F3B000000000000000000011 /* DrawingFindModel.swift in Sources */,
 				F3B000000000000000000013 /* FindHighlightGeometry.swift in Sources */,
 				F3B000000000000000000023 /* DrawingTextBounds.swift in Sources */,
+				F3B000000000000000000040 /* DrawingTranslation.swift in Sources */,
+				F3B000000000000000000041 /* DrawingTranslationModifier.swift in Sources */,
 				F3B000000000000000000015 /* MenuShortcutAudit.swift in Sources */,
 				F3B000000000000000000019 /* MacFindBar.swift in Sources */,
 				F3B000000000000000000021 /* IOSFindBar.swift in Sources */,
@@ -1211,6 +1223,8 @@
 				F3C000000000000000000011 /* DrawingFindModel.swift in Sources */,
 				F3C000000000000000000013 /* FindHighlightGeometry.swift in Sources */,
 				F3C000000000000000000023 /* DrawingTextBounds.swift in Sources */,
+				F3C000000000000000000040 /* DrawingTranslation.swift in Sources */,
+				F3C000000000000000000042 /* DrawingTranslationTests.swift in Sources */,
 				F3C000000000000000000015 /* MenuShortcutAudit.swift in Sources */,
 				F3C000000000000000000017 /* DrawingFindUITests.swift in Sources */,
 				F1C000000000000000000007 /* BatchConvertTests.swift in Sources */,

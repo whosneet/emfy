@@ -48,6 +48,11 @@ struct ViewerActions {
     var findPrevious: (() -> Void)? = nil
     var copyAllText: (() -> Void)? = nil
 
+    // Translate (F3d): the system Translate overlay for the current Find match or the
+    // drawing's text. `nil` disables (and below macOS 14.4 the Edit-menu item is hidden) —
+    // set only when a document with text is shown on macOS 14.4+.
+    var translate: (() -> Void)? = nil
+
     // Editing (E2a): Mac File ▸ Save and Revert to Opened Version. `nil` disables the
     // menu item — Save is `nil` unless there are unsaved edits; Revert is `nil` unless
     // an opened-version snapshot exists and the Settings toggle is on.

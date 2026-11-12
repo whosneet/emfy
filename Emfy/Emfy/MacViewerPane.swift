@@ -32,6 +32,8 @@ struct MacViewerPane: View {
     @State private var showInspector = false
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
+    // Translate (F3d): the system Translate overlay presentation.
+    @State private var showTranslation = false
     #if DEBUG
     @State private var debugLaunchRan = false
     #endif
@@ -41,6 +43,11 @@ struct MacViewerPane: View {
     var body: some View {
         @Bindable var exporter = exporter
         content
+            // The viewer context menu's Translate… (F3d), alongside the Edit menu item.
+            .contextMenu { translateMenuItem }
+            // Translate (F3d): the system overlay for the current Find match or the drawing's
+            // text, in one gated modifier (macOS 14.4).
+            .modifier(DrawingTranslationModifier(isPresented: $showTranslation, text: translationText))
             .navigationTitle(entry?.baseName ?? "Metafile")
             // Format · size under the title, using the shared helper (G6).
             .navigationSubtitle(subtitle)
@@ -1467,6 +1474,34 @@ struct MacViewerPane: View {
         toast.show("Copied all text", systemImage: "doc.on.doc")
     }
 
+    // MARK: - Translate (F3d)
+
+    /// The text handed to the Translate overlay: the current Find match's run text when one
+    /// exists, else the drawing's text in Copy All Text order, truncated at a word boundary.
+    private var translationText: String {
+        DrawingTranslation.text(currentMatch: findModel.currentMatchRunText, allText: findModel.copyAllText())
+    }
+
+    /// Whether Translate is offered: macOS 14.4+, a document is shown, and it has text (F3d).
+    private var translateEnabled: Bool {
+        guard loaded != nil, findModel.hasText else { return false }
+        if #available(macOS 14.4, *) { return true } else { return false }
+    }
+
+    /// The Translate… item shared by the Edit menu (via `translate`) and the viewer context
+    /// menu. Hidden below macOS 14.4; disabled when no document/text is shown.
+    @ViewBuilder
+    private var translateMenuItem: some View {
+        if #available(macOS 14.4, *) {
+            Button {
+                showTranslation = true
+            } label: {
+                Label("Translate…", systemImage: "translate")
+            }
+            .disabled(loaded == nil || !findModel.hasText)
+        }
+    }
+
     /// The per-window actions published to the menu bar. Recomputed each body pass,
     /// so the closures always target the current document.
     private var viewerActions: ViewerActions {
@@ -1489,6 +1524,7 @@ struct MacViewerPane: View {
             findNext: loaded != nil ? { findModel.present(); findModel.goNext() } : nil,
             findPrevious: loaded != nil ? { findModel.present(); findModel.goPrevious() } : nil,
             copyAllText: findModel.hasText ? { copyAllText() } : nil,
+            translate: translateEnabled ? { showTranslation = true } : nil,
             save: (session.editing == .editing && session.isDirty) ? { Task { await session.save() } } : nil,
             revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil,
             selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,
