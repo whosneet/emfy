@@ -135,6 +135,7 @@ struct FormatSections: View {
                     card("Fill") { fillRows(model) }
                     card("Stroke") { strokeRows(model) }
                     card("Opacity") { opacityRows(model) }
+                    card("Arrange") { arrangeRows() }
                     if let text = model.text {
                         card("Text") {
                             TextSectionRows(session: session, text: text, transform: transform(of: text.id))
@@ -176,6 +177,7 @@ struct FormatSections: View {
                 Section("Fill") { fillRows(model) }
                 Section("Stroke") { strokeRows(model) }
                 Section("Opacity") { opacityRows(model) }
+                Section("Arrange") { arrangeRows() }
                 if let text = model.text {
                     TextSection(session: session, text: text, transform: transform(of: text.id))
                         .id("format.text")
@@ -312,6 +314,43 @@ struct FormatSections: View {
         case .dashDotDot: return "Dash-dot-dot"
         case .userStyle: return "Custom"
         }
+    }
+
+    // MARK: Arrange (E3e)
+
+    /// Align (6) and distribute (2) icon buttons. Align uses the selection's union bounds
+    /// for 2+ elements, the page for a single one; distribute needs 3+ (disabled below).
+    @ViewBuilder
+    private func arrangeRows() -> some View {
+        let ids = editorModel.selection.ids
+        let canDistribute = ids.count >= 3
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                arrangeButton("align.horizontal.left", "Align Left") { session.alignSelection(ids, .left) }
+                arrangeButton("align.horizontal.center", "Align Centre") { session.alignSelection(ids, .centreHorizontal) }
+                arrangeButton("align.horizontal.right", "Align Right") { session.alignSelection(ids, .right) }
+                Divider().frame(height: 18)
+                arrangeButton("align.vertical.top", "Align Top") { session.alignSelection(ids, .top) }
+                arrangeButton("align.vertical.center", "Align Middle") { session.alignSelection(ids, .centreVertical) }
+                arrangeButton("align.vertical.bottom", "Align Bottom") { session.alignSelection(ids, .bottom) }
+            }
+            HStack(spacing: 6) {
+                arrangeButton("distribute.horizontal", "Distribute Horizontally", enabled: canDistribute) { session.distributeSelection(ids, .horizontal) }
+                arrangeButton("distribute.vertical", "Distribute Vertically", enabled: canDistribute) { session.distributeSelection(ids, .vertical) }
+            }
+        }
+    }
+
+    private func arrangeButton(_ symbol: String, _ label: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .frame(width: 26, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .disabled(!enabled)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     // MARK: Opacity
