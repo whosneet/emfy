@@ -11,8 +11,11 @@ import Foundation
 //
 // Private mode hides everything (owner, S1a-5): the query returns nothing while
 // Private is on, and session-only Private entries are never surfaced even when
-// it is off. F4b (Apple Intelligence: IndexedEntity / assistant schemas) layers
-// onto this type without changing its stored shape.
+// it is off. F4b (Apple Intelligence) conforms this type to `IndexedEntity` in
+// `DrawingEntityIndexing.swift`; the only stored-shape change there is the
+// optional `textSummary` below, which is nil on the light query path and is
+// populated only where the extracted text is already in hand (the F3 Spotlight
+// item), so building a batch of entities still never parses or renders.
 
 /// One remembered drawing, as an App Intents entity.
 struct DrawingEntity: AppEntity {
@@ -31,6 +34,11 @@ struct DrawingEntity: AppEntity {
     /// entity's display representation; never decoded in-process beyond what the
     /// framework needs to render the row.
     let thumbnailPath: String?
+    /// A short reading-order summary of the drawing's text (capped by
+    /// `DrawingEntityAttributes.maxSummaryCharacters`), for the `IndexedEntity`
+    /// attribute set that feeds Siri / Apple Intelligence semantic search. Nil on
+    /// the light query path (no parse); set only when the text is already extracted.
+    var textSummary: String? = nil
 
     var displayRepresentation: DisplayRepresentation {
         let image: DisplayRepresentation.Image

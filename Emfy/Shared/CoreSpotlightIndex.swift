@@ -1,3 +1,4 @@
+import AppIntents
 import CoreSpotlight
 import Foundation
 import UniformTypeIdentifiers
@@ -48,6 +49,12 @@ struct CoreSpotlightIndex: DrawingSpotlightIndex {
         attributes.textContent = item.textContent
         if let thumbnail = item.thumbnailData {
             attributes.thumbnailData = thumbnail
+        }
+        // F4b: on macOS 15 / iOS 18+, link this single indexed item to its App Intents
+        // entity so Siri / Apple Intelligence can act on the result — associating rather
+        // than indexing the entity a second time (DrawingEntityIndexing.swift).
+        if #available(macOS 15, iOS 18, *), let entity = DrawingEntityIndexing.entity(forSpotlight: item) {
+            attributes.associateAppEntity(entity)
         }
         return CSSearchableItem(
             uniqueIdentifier: item.id,
