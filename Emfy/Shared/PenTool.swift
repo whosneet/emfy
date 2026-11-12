@@ -1,6 +1,13 @@
 import CoreGraphics
 import EMFEdit
 import Foundation
+import SwiftUI
+
+extension SceneColor {
+    /// This EMF colour as a SwiftUI `Color`, for the pen palette swatches (so the
+    /// EMFEdit-free Mac/iOS panes never name `SceneColor` themselves).
+    var swiftUIColor: Color { Color(red: Double(red), green: Double(green), blue: Double(blue)) }
+}
 
 /// The pen's current colour and width (E3b design call 3). Held on `EditorModel`, so the
 /// choice persists for the editing session. Width is in typographic points; the tool
@@ -39,14 +46,14 @@ enum PenPalette {
 /// auto-selected (the pen stays armed), so the caller just applies the command.
 enum PenToolInsertion {
     /// Resolves the pen style to a device-space stroke style for `scene`.
-    static func strokeStyle(_ pen: PenStyle, in scene: Scene) -> SceneStyle {
+    static func strokeStyle(_ pen: PenStyle, in scene: EMFEdit.Scene) -> SceneStyle {
         let widthDevice = Double(ShapeToolGeometry.pointsToDevice(pen.widthPoints, deviceUnitsPerPoint: scene.deviceUnitsPerPoint))
         return SceneFactory.penStyle(color: pen.color, widthDevice: widthDevice)
     }
 
     /// The insert command for a smoothed freehand stroke (`geometryDevice` in device space),
     /// plus its new id. Goes at the top of the z-order in the first editable layer.
-    static func strokeCommand(geometryDevice: ScenePath, pen: PenStyle, in scene: Scene) -> (command: SceneCommand, id: Int) {
+    static func strokeCommand(geometryDevice: ScenePath, pen: PenStyle, in scene: EMFEdit.Scene) -> (command: SceneCommand, id: Int) {
         let id = SceneFactory.nextElementID(in: scene)
         let element = SceneFactory.makeStroke(geometryDevice: geometryDevice, style: strokeStyle(pen, in: scene), id: id)
         let topZ = scene.layers.first?.elements.count ?? 0
@@ -55,7 +62,7 @@ enum PenToolInsertion {
 
     /// The insert command for a snapped-to-shape stroke: the perfect shape, built with the
     /// PEN's stroke and no fill (design call 4). Reuses `SceneFactory.makeShape`.
-    static func snappedShapeCommand(kind: ShapeToolKind, rectDevice: CGRect, pen: PenStyle, in scene: Scene) -> (command: SceneCommand, id: Int) {
+    static func snappedShapeCommand(kind: ShapeToolKind, rectDevice: CGRect, pen: PenStyle, in scene: EMFEdit.Scene) -> (command: SceneCommand, id: Int) {
         let id = SceneFactory.nextElementID(in: scene)
         let element = SceneFactory.makeShape(kind: kind.elementKind, rectDevice: rectDevice, style: strokeStyle(pen, in: scene), id: id)
         let topZ = scene.layers.first?.elements.count ?? 0
@@ -75,7 +82,7 @@ enum PenCommit {
     static func command(
         rawDevicePoints: [CGPoint], held: Bool,
         minSpacing: CGFloat, rdpTolerance: CGFloat,
-        pen: PenStyle, in scene: Scene
+        pen: PenStyle, in scene: EMFEdit.Scene
     ) -> (command: SceneCommand, id: Int)? {
         guard rawDevicePoints.count >= 2 else { return nil }
         if held, let match = ShapeRecognizer.recognize(points: rawDevicePoints, rdpTolerance: rdpTolerance) {

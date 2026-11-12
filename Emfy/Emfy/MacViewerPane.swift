@@ -654,6 +654,7 @@ struct MacViewerPane: View {
             ToolbarItem { editButton }
             if session.editing == .editing {
                 ToolbarItem { shapesMenu }
+                ToolbarItem { penMenu }
             }
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
@@ -672,6 +673,7 @@ struct MacViewerPane: View {
                 editButton
                 if session.editing == .editing {
                     shapesMenu
+                    penMenu
                 }
                 zoomOutButton
                 MacZoomPercentLabel(controller: controller)
@@ -690,7 +692,7 @@ struct MacViewerPane: View {
         Menu {
             ForEach(ShapeToolKind.allCases) { kind in
                 Button {
-                    editorModel.armedShapeTool = kind
+                    editorModel.armShape(kind)
                 } label: {
                     Label(kind.title, systemImage: kind.systemImage)
                 }
@@ -701,6 +703,46 @@ struct MacViewerPane: View {
         .help("Shapes")
         .symbolVariant(editorModel.armedShapeTool != nil ? .fill : .none)
         .foregroundStyle(editorModel.armedShapeTool != nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+    }
+
+    /// The Pen tool (E3b design call 1/3), present only in edit mode. Tapping the button
+    /// arms/disarms the pen (it STAYS armed until Esc or re-tap, unlike Shapes); the
+    /// menu offers the 6 colours and 3 widths, which persist on `EditorModel`. A tint
+    /// marks the armed state.
+    private var penMenu: some View {
+        Menu {
+            Section("Colour") {
+                ForEach(PenPalette.colors.indices, id: \.self) { i in
+                    let swatch = PenPalette.colors[i]
+                    Button {
+                        editorModel.penStyle.color = swatch.color
+                    } label: {
+                        Label {
+                            Text(swatch.name)
+                        } icon: {
+                            Image(systemName: editorModel.penStyle.color == swatch.color ? "checkmark.circle.fill" : "circle.fill")
+                                .foregroundStyle(swatch.color.swiftUIColor)
+                        }
+                    }
+                }
+            }
+            Section("Width") {
+                ForEach(PenPalette.widths, id: \.self) { width in
+                    Button {
+                        editorModel.penStyle.widthPoints = width
+                    } label: {
+                        Label("\(Int(width)) pt", systemImage: editorModel.penStyle.widthPoints == width ? "checkmark" : "pencil.tip")
+                    }
+                }
+            }
+        } label: {
+            Label("Pen", systemImage: "pencil.tip")
+        } primaryAction: {
+            if editorModel.armedPen { editorModel.armedPen = false } else { editorModel.armPen() }
+        }
+        .help("Pen")
+        .symbolVariant(editorModel.armedPen ? .fill : .none)
+        .foregroundStyle(editorModel.armedPen ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
     }
 
     /// The Edit toggle (design call E2b-1), modelled on Preview's Markup button:
@@ -721,7 +763,7 @@ struct MacViewerPane: View {
     private func toggleEditMode() {
         if session.editing == .editing {
             editorModel.selection.clear()
-            editorModel.armedShapeTool = nil
+            editorModel.disarmTools()
             Task { await session.endEditing() }
         } else {
             Task {

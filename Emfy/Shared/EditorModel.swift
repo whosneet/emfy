@@ -27,6 +27,29 @@ final class EditorModel {
     /// shows a crosshair, a drag draws it, and committing one disarms the tool
     /// (Keynote behaviour). Observed so the toolbar reflects the armed state.
     var armedShapeTool: ShapeToolKind?
+
+    /// Whether the freehand pen tool is armed (E3b design call 1). Unlike a shape, the pen
+    /// STAYS armed until Esc, another tool, or tapping the Pen button again (Freeform/
+    /// Keynote behaviour). On the iPad an Apple Pencil draws the pen even while unarmed, so
+    /// the canvas reads touch type separately; this flag only governs finger drawing and the
+    /// toolbar's active state.
+    var armedPen = false
+
+    /// The pen's colour and width, persisted for the editing session (E3b design call 3).
+    var penStyle = PenStyle.default
+
+    /// Whether the pen palette popover is showing (iPad: opened by the Pencil squeeze or the
+    /// Pen button's menu; design call 3/5). Observed so the screen presents it.
+    var penPalettePresented = false
+
+    /// Arms the pen and disarms any shape tool (the two creation tools are exclusive).
+    func armPen() { armedPen = true; armedShapeTool = nil }
+
+    /// Arms a shape tool and disarms the pen.
+    func armShape(_ kind: ShapeToolKind) { armedShapeTool = kind; armedPen = false }
+
+    /// Disarms every creation tool (Esc, leaving edit mode).
+    func disarmTools() { armedShapeTool = nil; armedPen = false }
 }
 
 /// The state driving the text-edit popover: which text element, the point to anchor the

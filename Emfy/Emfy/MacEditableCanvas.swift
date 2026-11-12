@@ -25,9 +25,10 @@ struct MacEditingContainer: View {
             if let scene = session.editingScene {
                 MacEditableCanvas(
                     scene: scene, editorModel: editorModel, controller: controller,
-                    // Reading the armed tool here makes the container observe it, so the
-                    // canvas's cursor refreshes the moment a shape is armed or disarmed.
+                    // Reading the armed tools here makes the container observe them, so the
+                    // canvas's cursor refreshes the moment a shape or pen is armed/disarmed.
                     armedTool: editorModel.armedShapeTool,
+                    armedPen: editorModel.armedPen,
                     pageShadow: pageShadow, tilePaint: tilePaint, options: options,
                     apply: { command, key in session.apply(command, coalescing: key) },
                     delete: { ids in session.deleteSelection(ids) },
@@ -79,6 +80,8 @@ struct MacEditableCanvas: NSViewRepresentable {
     /// and refreshes the canvas cursor (crosshair when armed); the coordinator reads
     /// the live value from `editorModel`.
     var armedTool: ShapeToolKind? = nil
+    /// Whether the pen is armed (E3b). Stored for the same cursor-refresh reason.
+    var armedPen: Bool = false
     var pageShadow: Bool = true
     var tilePaint: TilePaint = .plain
     var options: RenderOptions = .default
@@ -321,6 +324,17 @@ struct MacEditableCanvas: NSViewRepresentable {
                 return
             }
 
+            // 0b. The armed pen draws a freehand stroke (E3b); it stays armed on release.
+            if parent.editorModel.armedPen {
+                var state = DragState(kind: .pen, start: viewPoint, current: viewPoint, baseSelection: selection)
+                state.penPoints = [viewPoint]
+                drag = state
+                lastPenPoint = viewPoint
+                penHoldSeq += 1
+                overlay?.needsDisplay = true
+                return
+            }
+
             // 1. A handle under the cursor starts a resize (or ⌘ = rotate) of the
             //    current selection.
             if !selection.isEmpty, let handle = handle(at: viewPoint) {
@@ -369,6 +383,9 @@ struct MacEditableCanvas: NSViewRepresentable {
                         kind: kind, start: state.start, current: viewPoint, shift: shift, fromCentre: option
                     )
                 }
+            case .pen:
+                appendPenPoint(viewPoint)
+                return   // appendPenPoint redraws; skip the shared redraw below
             case .move, .resize, .rotate:
                 updateLiveTransform(state: state, shift: shift, option: option)
             }
@@ -383,6 +400,8 @@ struct MacEditableCanvas: NSViewRepresentable {
                 break   // selection already updated live
             case .shape:
                 commitShape(state: state, end: viewPoint, shift: shift, option: option)
+            case .pen:
+                commitPenStroke(state: state)
             case .move, .resize, .rotate:
                 if let (command, key) = committedCommand(state: state, end: viewPoint, shift: shift, option: option) {
                     markDirtyRegion(old: state.startViewBounds ?? selectionViewBounds(),
@@ -422,6 +441,75 @@ struct MacEditableCanvas: NSViewRepresentable {
                 x: viewRect.origin.x + viewRect.size.width, y: viewRect.origin.y + viewRect.size.height))
             return CGRect(origin: originDevice,
                           size: CGSize(width: farDevice.x - originDevice.x, height: farDevice.y - originDevice.y))
+        }
+
+        // MARK: Pen (E3b)
+
+        /// Whether the freehand pen is armed.
+        var isPenArmed: Bool { parent.editorModel.armedPen }
+
+        /// Monotonic counter: a hold check only fires if no newer real move superseded it.
+        private var penHoldSeq = 0
+        private var lastPenPoint: CGPoint = .zero
+        private static let penHoldDelay: TimeInterval = 0.5
+
+        /// The de-dup / RDP tolerances in device units for the current zoom: about 1 and
+        /// 1.5 screen points (design call 2), floored so they never collapse to zero.
+        private var penMinSpacingDevice: CGFloat { max(0.5, mapping.deviceLength(fromViewLength: 1 / magnification)) }
+        private var penRdpToleranceDevice: CGFloat { max(0.75, mapping.deviceLength(fromViewLength: 1.5 / magnification)) }
+
+        /// The pen's preview colour (its own colour) as a CGColor.
+        func penPreviewColor() -> CGColor {
+            let c = parent.editorModel.penStyle.color
+            return CGColor(red: CGFloat(c.red), green: CGFloat(c.green), blue: CGFloat(c.blue), alpha: 1)
+        }
+        /// The pen stroke width in device units, for the live preview (overlay space == device).
+        var penPreviewWidthDevice: CGFloat {
+            ShapeToolGeometry.pointsToDevice(parent.editorModel.penStyle.widthPoints, deviceUnitsPerPoint: scene.deviceUnitsPerPoint)
+        }
+
+        /// Appends a freehand sample, tracks the end-of-stroke hold, and schedules the
+        /// 0.5 s snap check after motion settles (design call 4).
+        private func appendPenPoint(_ p: CGPoint) {
+            guard var state = drag, state.kind == .pen else { return }
+            state.penPoints.append(p)
+            // A real move resets the hold: clear any snap preview and re-arm the timer so the
+            // check fires 0.5 s after the pointer last moved.
+            if hypot(p.x - lastPenPoint.x, p.y - lastPenPoint.y) > 2 / magnification {
+                lastPenPoint = p
+                state.penHoldElapsed = false
+                state.penSnapPreview = nil
+                penHoldSeq += 1
+                let seq = penHoldSeq
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.penHoldDelay) { [weak self] in
+                    self?.evaluatePenHold(seq: seq)
+                }
+            }
+            drag = state
+            overlay?.needsDisplay = true
+        }
+
+        /// After the pointer settles for 0.5 s mid-stroke: mark the hold and, if the stroke
+        /// so far recognises as a shape, show that shape live (it commits on release).
+        private func evaluatePenHold(seq: Int) {
+            guard penHoldSeq == seq, var state = drag, state.kind == .pen else { return }
+            state.penHoldElapsed = true
+            let devicePoints = state.penPoints.map { mapping.devicePoint(fromView: $0) }
+            state.penSnapPreview = ShapeRecognizer.recognize(points: devicePoints, rdpTolerance: penRdpToleranceDevice)
+            drag = state
+            overlay?.needsDisplay = true
+        }
+
+        /// Commits one `.insert` for a finished stroke: the smoothed curve, or the snapped
+        /// shape when the pointer held. The pen stays armed and the stroke is NOT selected
+        /// (design call 1).
+        private func commitPenStroke(state: DragState) {
+            let devicePoints = state.penPoints.map { mapping.devicePoint(fromView: $0) }
+            guard let insertion = PenCommit.command(
+                rawDevicePoints: devicePoints, held: state.penHoldElapsed,
+                minSpacing: penMinSpacingDevice, rdpTolerance: penRdpToleranceDevice,
+                pen: parent.editorModel.penStyle, in: scene) else { return }
+            parent.apply(insertion.command, nil)
         }
 
         /// Invalidate only the region a committed edit touches — the union of the
@@ -535,7 +623,7 @@ struct MacEditableCanvas: NSViewRepresentable {
                 guard let box = state.startViewBounds else { return .identity }
                 let centre = CGPoint(x: box.midX, y: box.midY)
                 return EditorTransform.rotationTransform(center: centre, from: state.start, to: state.current)
-            case .marquee, .shape:
+            case .marquee, .shape, .pen:
                 return .identity
             }
         }
@@ -570,10 +658,10 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Esc cancels a drag or clears the selection; ⌘A selects all.
         func keyDown(_ event: NSEvent) -> Bool {
             if event.keyCode == 53 {   // Esc
-                // An armed shape tool disarms first (cancelling any in-progress draw).
-                if isShapeToolArmed {
+                // An armed creation tool (shape or pen) disarms first, cancelling any draw.
+                if isShapeToolArmed || isPenArmed {
                     cancelDrag()
-                    parent.editorModel.armedShapeTool = nil
+                    parent.editorModel.disarmTools()
                     if let overlay { overlay.window?.invalidateCursorRects(for: overlay) }
                     return true
                 }
@@ -607,7 +695,7 @@ struct MacEditableCanvas: NSViewRepresentable {
 
     /// The transient state of a drag.
     fileprivate struct DragState {
-        enum Kind { case marquee, move, resize, rotate, shape }
+        enum Kind { case marquee, move, resize, rotate, shape, pen }
         var kind: Kind
         var start: CGPoint
         var current: CGPoint
@@ -621,6 +709,12 @@ struct MacEditableCanvas: NSViewRepresentable {
         var shapeKind: ShapeToolKind?
         /// The constrained preview rect (view space) the overlay draws while sweeping.
         var shapePreviewRect: CGRect?
+        /// The freehand sample points (overlay/view space) while `kind == .pen`.
+        var penPoints: [CGPoint] = []
+        /// Whether the pointer paused ≥ 0.5 s before release (snap-to-shape window).
+        var penHoldElapsed = false
+        /// The snapped shape preview (view-space rect) shown live during a hold, or nil.
+        var penSnapPreview: ShapeRecognizer.Match?
     }
 }
 
@@ -865,6 +959,26 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
             Self.strokeShapePreview(kind: kind, rect: rect, into: context, lineWidth: 1.5 / mag, accent: accent, cornerRadius: cornerRadius)
         }
 
+        // Live pen preview (view space, design call 1/4): the snapped shape during a hold,
+        // else the raw freehand trace, both in the pen's own colour.
+        if let drag = coordinator.drag, drag.kind == .pen {
+            let penColor = coordinator.penPreviewColor()
+            if let match = drag.penSnapPreview {
+                let viewRect = Self.penSnapViewRect(match, mapping: coordinator.mapping)
+                let penNSColor = NSColor(cgColor: penColor) ?? accent
+                Self.strokeShapePreview(kind: match.kind, rect: viewRect, into: context, lineWidth: coordinator.penPreviewWidthDevice, accent: penNSColor, cornerRadius: 0)
+            } else if drag.penPoints.count > 1 {
+                context.setStrokeColor(penColor)
+                context.setLineWidth(coordinator.penPreviewWidthDevice)
+                context.setLineCap(.round)
+                context.setLineJoin(.round)
+                context.beginPath()
+                context.move(to: drag.penPoints[0])
+                for p in drag.penPoints.dropFirst() { context.addLine(to: p) }
+                context.strokePath()
+            }
+        }
+
         // Per-element selection outlines (thin accent box of each element's bounds).
         let draggingTransform = coordinator.drag.flatMap { $0.kind == .marquee ? nil : $0.liveTransform }
         context.saveGState()
@@ -957,11 +1071,20 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
         }
     }
 
+    /// The view-space rect for a snapped-shape preview, keeping a line's drawn direction by
+    /// mapping its two endpoints individually.
+    static func penSnapViewRect(_ match: ShapeRecognizer.Match, mapping: EditorCanvasMapping) -> CGRect {
+        guard match.kind == .line else { return mapping.viewRect(fromDevice: match.rect) }
+        let origin = mapping.viewPoint(fromDevice: match.rect.origin)
+        let far = mapping.viewPoint(fromDevice: CGPoint(x: match.rect.origin.x + match.rect.width, y: match.rect.origin.y + match.rect.height))
+        return CGRect(origin: origin, size: CGSize(width: far.x - origin.x, height: far.y - origin.y))
+    }
+
     // MARK: Cursors
 
     override func resetCursorRects() {
-        // An armed shape tool shows a crosshair across the whole canvas (design call 5).
-        if coordinator?.isShapeToolArmed == true {
+        // An armed creation tool (shape or pen) shows a crosshair across the canvas.
+        if coordinator?.isShapeToolArmed == true || coordinator?.isPenArmed == true {
             addCursorRect(bounds, cursor: .crosshair)
             return
         }
