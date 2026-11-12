@@ -402,6 +402,8 @@ struct MacViewerPane: View {
         let id2 = session.debugInsertPenStroke(devicePoints: circle, held: true, pen: bluePen)
         let id3 = session.debugInsertPenStroke(devicePoints: rect, held: true, pen: redPen)
         let id4 = session.debugInsertPenStroke(devicePoints: scribble, held: false, pen: greenPen)
+        // Arm the pen so the capture shows the toolbar Pen button active (design call 1).
+        editorModel.armPen()
         session.debugCancelAutosave()
         try? await Task.sleep(for: .milliseconds(1000))
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-a-strokes.png")
