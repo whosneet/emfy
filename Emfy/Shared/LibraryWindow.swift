@@ -59,8 +59,18 @@ struct LibraryWindow: View {
     @SceneStorage("library.selection") private var storedSelection: String?
 
     var body: some View {
+        // The body is split into chained `some View` layers grouped by concern (the split
+        // view, the DEBUG hooks, the reactions) so each is a small type-check expression —
+        // the whole modifier chain had reached the Swift type-checker's limit (F3d). The
+        // modifier order is unchanged, so this is behaviour-neutral: `reactionsLayer` wraps
+        // `debugLayer` wraps `splitLayer`.
+        reactionsLayer
+    }
+
+    /// The navigation split view with its environment, importer and "couldn't open" alert.
+    private var splitLayer: some View {
         @Bindable var model = model
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        return NavigationSplitView(columnVisibility: $columnVisibility) {
             // Inject the window's observable environment INSIDE each column, not as a
             // modifier on the whole split view. `NavigationSplitView` hosts its columns
             // in separate UIKit containers; the app-switcher snapshot re-lays those
@@ -160,6 +170,11 @@ struct LibraryWindow: View {
             }
             #endif
         }
+    }
+
+    /// The DEBUG screenshot hooks and (DMG) updater surfaces layered over `splitLayer`.
+    private var debugLayer: some View {
+        splitLayer
         #if DEBUG && os(macOS)
         // E3a screenshot (a): open the New Drawing sheet at launch and capture the SHEET
         // itself via its layer tree (not captureAllWindows, which composites the parent
@@ -215,6 +230,12 @@ struct LibraryWindow: View {
             showNewDrawing = true
         }
         #endif
+    }
+
+    /// The window's state reactions: selection reconciliation, external opens, the focused
+    /// actions and sheets, layered over `debugLayer`.
+    private var reactionsLayer: some View {
+        debugLayer
         .onAppear { toastCenter.reduceMotion = reduceMotion }
         .onChange(of: reduceMotion) { _, newValue in toastCenter.reduceMotion = newValue }
         // Reconcile selection when the shown entry is removed — here or in another

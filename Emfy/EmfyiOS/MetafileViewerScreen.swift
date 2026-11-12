@@ -137,6 +137,17 @@ struct MetafileViewerScreen: View {
     }
 
     var body: some View {
+        // The body is split into chained `some View` layers grouped by concern (chrome,
+        // find/inspector, sheets, alerts, reactions) so each is a separate, small
+        // type-check expression — the whole modifier chain as one expression had reached
+        // the Swift type-checker's limit (F3d). The modifier order is unchanged, so this
+        // is behaviour-neutral: `reactionsLayer` wraps `alertsLayer` wraps `sheetsLayer`
+        // wraps `findLayer` wraps `baseLayer`.
+        reactionsLayer
+    }
+
+    /// The drawing plus the navigation title, toolbars, status bar and top overlays.
+    private var baseLayer: some View {
         ZStack {
             backgroundColor
                 .ignoresSafeArea()
@@ -163,6 +174,11 @@ struct MetafileViewerScreen: View {
         .toolbar(effectiveChromeHidden ? .hidden : .visible, for: .bottomBar)
         .statusBarHidden(effectiveChromeHidden)
         .overlay(alignment: .top) { topOverlays }
+    }
+
+    /// The find bar (F3b) and the file-details inspector layered over `baseLayer`.
+    private var findLayer: some View {
+        baseLayer
         // The find bar + its highlight/scroll plumbing (F3b), collapsed into one modifier so
         // the already-large body stays type-checkable.
         .metafileFindBar(
@@ -185,6 +201,11 @@ struct MetafileViewerScreen: View {
         // A fixed width so the drawing's reserved trailing space matches it exactly.
         .inspector(isPresented: $showInspector) { inspectorContent }
         .inspectorColumnWidth(min: inspectorWidth, ideal: inspectorWidth, max: inspectorWidth)
+    }
+
+    /// The sheets and the image-insert pickers layered over `findLayer`.
+    private var sheetsLayer: some View {
+        findLayer
         .sheet(item: shareSheetBinding, onDismiss: { exporter.cleanupTemp() }) { payload in
             ShareSheet(items: payload.items)
                 .presentationDetents([.medium, .large])   // G5
@@ -220,6 +241,11 @@ struct MetafileViewerScreen: View {
         // Image insert (E3c design call 2): the Photos / Files pickers and the failure
         // toast, hung off a zero-size overlay so the main body stays type-checkable.
         .overlay { imageInsertControls }
+    }
+
+    /// The alerts, confirmations and transient overlays layered over `sheetsLayer`.
+    private var alertsLayer: some View {
+        sheetsLayer
         .alert(
             "Export Failed",
             isPresented: shareErrorBinding,
@@ -276,6 +302,12 @@ struct MetafileViewerScreen: View {
                 ExportProgressOverlay { exporter.cancelExport() }
             }
         }
+    }
+
+    /// The viewer's state reactions: keyboard commands, the published actions, the load
+    /// task and the settings/save/scene observers, layered over `alertsLayer`.
+    private var reactionsLayer: some View {
+        alertsLayer
         .background(keyboardCommands)
         // Publish the viewer's actions to the scene so the shared iOS View menu drives
         // zoom / controls / Info even while the sidebar holds first responder (K1).
