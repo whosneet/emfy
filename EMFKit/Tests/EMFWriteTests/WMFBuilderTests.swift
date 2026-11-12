@@ -65,7 +65,7 @@ struct WMFBuilderTests {
                 created += 1
             }
             Issue.record("expected an object-table overflow")
-        } catch let error as WMFWriteError {
+        } catch {
             #expect(error == .objectTableOverflow(slot: 65535))
             #expect(created == 65535, "filled \(created) slots before overflow")
         }
