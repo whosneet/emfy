@@ -10,19 +10,27 @@ import SwiftUI
 // selected record. Selecting Records swaps the viewer's canvas for the dedicated
 // replay view (handled by the host), so this panel only drives the model.
 
-/// Which panel the read-only viewer inspector shows.
-enum ViewerInspectorTab: Hashable { case info, records }
+/// Which panel the read-only viewer inspector shows. `ask` appears only when
+/// on-device AI is available (A1a).
+enum ViewerInspectorTab: Hashable { case info, records, ask }
 
-/// The read-only viewer inspector: an Info | Records segmented control over the
-/// caller's Info view or the Records inspector. Mirrors `EditorInspectorPanel`'s
-/// shape so both inspectors read the same on either platform.
+/// The read-only viewer inspector: an Info | Records (| Ask) segmented control over
+/// the caller's Info view, the Records inspector, or the Ask chat. Mirrors
+/// `EditorInspectorPanel`'s shape so both inspectors read the same on either
+/// platform.
 struct ViewerInspectorPanel<Info: View>: View {
     @Binding var tab: ViewerInspectorTab
     let model: RecordInspectorModel
     let summaries: [Int: String]
     let diagnostics: ViewerDiagnostics
     let onClose: () -> Void
+    /// The Ask chat model + inputs (A1a). Non-nil only when on-device AI is
+    /// available, which is also when the Ask segment is offered.
+    var askModel: DrawingAskModel? = nil
+    var aiInputs: DrawingAIInspectorInputs? = nil
     @ViewBuilder let info: () -> Info
+
+    private var aiAvailable: Bool { askModel != nil && aiInputs != nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,6 +38,9 @@ struct ViewerInspectorPanel<Info: View>: View {
                 Picker("", selection: $tab) {
                     Text("Info").tag(ViewerInspectorTab.info)
                     Text("Records").tag(ViewerInspectorTab.records)
+                    if aiAvailable {
+                        Text("Ask").tag(ViewerInspectorTab.ask)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -44,6 +55,12 @@ struct ViewerInspectorPanel<Info: View>: View {
             switch tab {
             case .info: info()
             case .records: RecordsInspectorPanel(model: model, summaries: summaries, diagnostics: diagnostics)
+            case .ask:
+                if let askModel, let aiInputs {
+                    DrawingAskView(model: askModel, inputs: aiInputs)
+                } else {
+                    info()
+                }
             }
         }
     }

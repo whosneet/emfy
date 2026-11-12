@@ -34,6 +34,10 @@ struct MacViewerPane: View {
     @State private var viewerInspectorTab: ViewerInspectorTab = .info
     @State private var recordModel = RecordInspectorModel()
     @State private var replayDriver = RecordReplayDriver()
+    // On-device AI (A1a): Describe + alt text + Ask.
+    @State private var describeModel = DrawingDescribeModel()
+    @State private var askModel = DrawingAskModel()
+    @State private var altTextStore = DrawingAltTextStore()
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
     // Translate (F3d): the system Translate overlay presentation.
@@ -87,6 +91,9 @@ struct MacViewerPane: View {
             // content changes, render each selection off-main, and rebuild on an
             // options change that keeps the same content id.
             .task(id: recordsConfigKey) { configureRecordsIfNeeded() }
+            // On-device AI (A1a): reset the models and seed alt text when the drawing
+            // changes (or edit mode flips, which hides/affects the AI inputs).
+            .task(id: "\(session.loadedContentID)·\(session.editing == .editing)") { configureAIForCurrentDrawing() }
             .onChange(of: recordModel.selectedIndex) { _, index in
                 replayDriver.request(index: index, model: recordModel)
             }
@@ -975,7 +982,7 @@ struct MacViewerPane: View {
             MacMetafileScrollView(
                 prepared: model.prepared,
                 naturalSize: model.displaySize,
-                drawingLabel: "Drawing: \(entry?.baseName ?? "Metafile")",
+                drawingLabel: canvasAccessibilityLabel,
                 controller: controller,
                 defaultZoom: settings.defaultZoomOnOpen,
                 pageShadow: settings.pageShadow,
@@ -1065,7 +1072,9 @@ struct MacViewerPane: View {
                 model: recordModel,
                 summaries: replayDriver.summaries,
                 diagnostics: loaded.diagnostics,
-                onClose: { showInspector = false }
+                onClose: { showInspector = false },
+                askModel: aiInputs != nil ? askModel : nil,
+                aiInputs: aiInputs
             ) {
                 infoView
             }
@@ -1122,7 +1131,11 @@ struct MacViewerPane: View {
                 onClose: { showInspector = false },
                 // Route the inspector's export rows through the hoisted exporter, so
                 // both surfaces share one path and the fileExporter presentation.
-                onExport: { format in export(format) }
+                onExport: { format in export(format) },
+                // On-device Describe (A1a) — only when AI is available.
+                aiInputs: aiInputs,
+                describeModel: aiInputs != nil ? describeModel : nil,
+                altTextStore: aiInputs != nil ? altTextStore : nil
             )
         } else {
             ContentUnavailableView("No details yet", systemImage: "info.circle")
@@ -1686,6 +1699,59 @@ struct MacViewerPane: View {
 
     private var entry: RecentEntry? {
         store.entry(id: session.entryID)
+    }
+
+    // MARK: - On-device AI (A1a)
+
+    /// Whether on-device AI is both available and switched on. The AI surface (the
+    /// Describe section, the Ask segment, alt text) appears only when this is true.
+    private var aiEnabled: Bool {
+        settings.useOnDeviceAI && DrawingAIAvailability.current().isAvailable
+    }
+
+    /// The AI inputs for this drawing, or `nil` when AI is off or there's nothing to
+    /// describe. Read-only viewing only (edit mode has its own inspector).
+    private var aiInputs: DrawingAIInspectorInputs? {
+        guard aiEnabled, session.editing != .editing, let loaded, let entry else { return nil }
+        let store = self.store
+        return DrawingAIInspectorInputs(
+            contentID: session.loadedContentID,
+            fileName: entry.displayName,
+            unsupportedNotes: loaded.couldNotShowNotes.map(\.summary),
+            dataProvider: { [weak store] in
+                guard let store else { return nil }
+                return try? await store.resolveData(for: entry)
+            }
+        )
+    }
+
+    /// The canvas accessibility label: on-device alt text when it exists, else
+    /// "Drawing, <file name>" (A1a).
+    private var canvasAccessibilityLabel: String {
+        let fallback = "Drawing: \(entry?.baseName ?? "Metafile")"
+        guard aiEnabled else { return fallback }
+        return altTextStore.label(for: session.loadedContentID, fileName: entry?.displayName ?? "")
+    }
+
+    /// Resets the AI models when the open drawing changes, and seeds alt text when
+    /// VoiceOver is running (A1a).
+    private func configureAIForCurrentDrawing() {
+        describeModel.resetIfDrawingChanged(contentID: session.loadedContentID)
+        guard let inputs = aiInputs else { return }
+        askModel.prepare(
+            contentID: inputs.contentID,
+            dataProvider: inputs.dataProvider,
+            fileName: inputs.fileName,
+            unsupportedNotes: inputs.unsupportedNotes
+        )
+        if NSWorkspace.shared.isVoiceOverEnabled {
+            altTextStore.generateIfNeeded(
+                contentID: inputs.contentID,
+                dataProvider: inputs.dataProvider,
+                fileName: inputs.fileName,
+                unsupportedNotes: inputs.unsupportedNotes
+            )
+        }
     }
 
     /// Format · size for the navigation subtitle, via the shared helper (G6), with an

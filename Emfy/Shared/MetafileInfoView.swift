@@ -32,6 +32,11 @@ struct MetafileInfoView: View {
     /// row's − / + buttons (C4a A14, owner decision). `nil` on the Mac, which keeps
     /// the read-only row and its toolbar buttons.
     var onZoomStep: ((CGFloat) -> Void)? = nil
+    /// The on-device Describe section's inputs + models (A1a). All non-nil only when
+    /// on-device AI is available; nil hides the section entirely.
+    var aiInputs: DrawingAIInspectorInputs? = nil
+    var describeModel: DrawingDescribeModel? = nil
+    var altTextStore: DrawingAltTextStore? = nil
 
     @Environment(ToastCenter.self) private var toast
     @Environment(EmfySettings.self) private var settings
@@ -83,6 +88,11 @@ struct MetafileInfoView: View {
                     Label("Copy Diagnostic Report", systemImage: "doc.on.clipboard")
                 }
                 .accessibilityIdentifier("copyDiagnosticReport")
+            }
+
+            // Describe this drawing (A1a) — only when on-device AI is available.
+            if let aiInputs, let describeModel, let altTextStore {
+                DrawingDescribeSection(model: describeModel, altTextStore: altTextStore, inputs: aiInputs)
             }
         }
         #if os(macOS)

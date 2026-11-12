@@ -55,6 +55,10 @@ struct MetafileViewerScreen: View {
     @State private var viewerInspectorTab: ViewerInspectorTab = .info
     @State private var recordModel = RecordInspectorModel()
     @State private var replayDriver = RecordReplayDriver()
+    // On-device AI (A1a): Describe + alt text + Ask.
+    @State private var describeModel = DrawingDescribeModel()
+    @State private var askModel = DrawingAskModel()
+    @State private var altTextStore = DrawingAltTextStore()
     @State private var bannerDismissed = false
     @State private var pillVisible = false
     @State private var pillHideTask: Task<Void, Never>?
@@ -211,6 +215,9 @@ struct MetafileViewerScreen: View {
         // Records inspector (F5c): configure when the segment is shown or the content
         // changes, render each selection off-main, rebuild on an options change.
         .task(id: recordsConfigKey) { configureRecordsIfNeeded() }
+        // On-device AI (A1a): reset the models and seed alt text when the drawing
+        // changes (or edit mode flips).
+        .task(id: "\(session.loadedContentID)·\(session.editing == .editing)") { configureAIForCurrentDrawing() }
         .onChange(of: recordModel.selectedIndex) { _, index in
             replayDriver.request(index: index, model: recordModel)
         }
@@ -851,7 +858,7 @@ struct MetafileViewerScreen: View {
                 prepared: model.prepared,
                 naturalSize: model.displaySize,
                 displayScale: displayScale,
-                drawingLabel: "Drawing: \(entry?.baseName ?? "Metafile")",
+                drawingLabel: canvasAccessibilityLabel,
                 controller: controller,
                 reduceMotion: reduceMotion,
                 chromeHidden: effectiveChromeHidden,
@@ -1739,7 +1746,9 @@ struct MetafileViewerScreen: View {
                 model: recordModel,
                 summaries: replayDriver.summaries,
                 diagnostics: loaded.diagnostics,
-                onClose: { closeInspector() }
+                onClose: { closeInspector() },
+                askModel: aiInputs != nil ? askModel : nil,
+                aiInputs: aiInputs
             ) {
                 infoInspector
             }
@@ -1797,7 +1806,11 @@ struct MetafileViewerScreen: View {
                 // (P2).
                 zoomProvider: { Int((controller.zoom * 100).rounded()) },
                 onClose: { closeInspector() },
-                onZoomStep: { delta in controller.step(by: delta) }
+                onZoomStep: { delta in controller.step(by: delta) },
+                // On-device Describe (A1a) — only when AI is available.
+                aiInputs: aiInputs,
+                describeModel: aiInputs != nil ? describeModel : nil,
+                altTextStore: aiInputs != nil ? altTextStore : nil
             )
             // At compact width the inspector is a sheet — a separate hosting view that
             // reads ToastCenter and EmfySettings — so re-inject them rather than rely on
@@ -1859,6 +1872,58 @@ struct MetafileViewerScreen: View {
 
     private var entry: RecentEntry? {
         store.entry(id: session.entryID)
+    }
+
+    // MARK: - On-device AI (A1a)
+
+    /// Whether on-device AI is both available and switched on.
+    private var aiEnabled: Bool {
+        settings.useOnDeviceAI && DrawingAIAvailability.current().isAvailable
+    }
+
+    /// The AI inputs for this drawing, or `nil` when AI is off or there's nothing to
+    /// describe. Read-only viewing only.
+    private var aiInputs: DrawingAIInspectorInputs? {
+        guard aiEnabled, session.editing != .editing, let loaded, let entry else { return nil }
+        let store = self.store
+        return DrawingAIInspectorInputs(
+            contentID: session.loadedContentID,
+            fileName: entry.displayName,
+            unsupportedNotes: loaded.couldNotShowNotes.map(\.summary),
+            dataProvider: { [weak store] in
+                guard let store else { return nil }
+                return try? await store.resolveData(for: entry)
+            }
+        )
+    }
+
+    /// The canvas accessibility label: on-device alt text when it exists, else
+    /// "Drawing, <file name>" (A1a).
+    private var canvasAccessibilityLabel: String {
+        let fallback = "Drawing: \(entry?.baseName ?? "Metafile")"
+        guard aiEnabled else { return fallback }
+        return altTextStore.label(for: session.loadedContentID, fileName: entry?.displayName ?? "")
+    }
+
+    /// Resets the AI models when the drawing changes, and seeds alt text when
+    /// VoiceOver is running (A1a).
+    private func configureAIForCurrentDrawing() {
+        describeModel.resetIfDrawingChanged(contentID: session.loadedContentID)
+        guard let inputs = aiInputs else { return }
+        askModel.prepare(
+            contentID: inputs.contentID,
+            dataProvider: inputs.dataProvider,
+            fileName: inputs.fileName,
+            unsupportedNotes: inputs.unsupportedNotes
+        )
+        if UIAccessibility.isVoiceOverRunning {
+            altTextStore.generateIfNeeded(
+                contentID: inputs.contentID,
+                dataProvider: inputs.dataProvider,
+                fileName: inputs.fileName,
+                unsupportedNotes: inputs.unsupportedNotes
+            )
+        }
     }
 
     private var subtitle: String {
