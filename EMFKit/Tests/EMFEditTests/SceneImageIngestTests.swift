@@ -39,14 +39,14 @@ struct SceneImageIngestTests {
     @Test func overLongSideImageIsDownsampled() throws {
         // A 5000 × 100 source → the long side clamps to 4096.
         let png = try pngFixture(width: 5000, height: 100)
-        let cg = try #require(try SceneImageImport.decode(png).get())
+        let cg = try SceneImageImport.decode(png).get()
         #expect(max(cg.width, cg.height) <= SceneImageImport.maxLongSide)
         #expect(cg.width < 5000)
     }
 
     @Test func withinCapImageDecodesAtFullSize() throws {
         let png = try pngFixture(width: 320, height: 200)
-        let cg = try #require(try SceneImageImport.decode(png).get())
+        let cg = try SceneImageImport.decode(png).get()
         #expect(cg.width == 320)
         #expect(cg.height == 200)
     }
@@ -58,7 +58,7 @@ struct SceneImageIngestTests {
         let jpeg = try jpegWithGPS(width: 64, height: 48)
         #expect(gpsPresent(in: jpeg))
 
-        let cg = try #require(try SceneImageImport.decode(jpeg).get())
+        let cg = try SceneImageImport.decode(jpeg).get()
         let element = try #require(SceneFactory.makeImage(cgImage: cg, destRectDevice: CGRect(x: 0, y: 0, width: 64, height: 48), id: 0))
         let plus = try #require(element.image?.emfPlusImage)
         guard case .bitmap(let header, let storedPNG) = plus.content else {

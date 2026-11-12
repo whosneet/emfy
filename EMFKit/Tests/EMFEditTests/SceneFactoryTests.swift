@@ -192,7 +192,7 @@ struct SceneFactoryTests {
     @Test func rectGeometryIsAxisAlignedRectangle() {
         let shape = SceneFactory.makeShape(kind: .rect, rectDevice: CGRect(x: 10, y: 20, width: 100, height: 60),
                                            style: SceneFactory.defaultShapeStyle, id: 0)
-        let box = try? #require(SceneSynthesis.axisAlignedRect(shape.geometryDevice))
+        let box = SceneSynthesis.axisAlignedRect(shape.geometryDevice)
         #expect(box?.width == 100)
         #expect(box?.height == 60)
     }
