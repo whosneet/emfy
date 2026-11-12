@@ -41,6 +41,14 @@ struct FileMenuCommands: Commands {
             OpenRecentMenu(store: store, coordinator: coordinator)
         }
 
+        // Print… (⌘P), F1. Prints the drawing as vector through the renderer; disabled
+        // until a document is shown.
+        CommandGroup(replacing: .printItem) {
+            Button("Print…") { actions?.printDocument?() }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(actions?.printDocument == nil)
+        }
+
         // Save in place and Revert to Opened Version (E2a). Save owns ⌘S; both read as
         // disabled until there are unsaved edits / an opened-version snapshot exists.
         CommandGroup(replacing: .saveItem) {
@@ -137,6 +145,14 @@ struct EditMenuCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
+            // Copy the drawing (F1). ⌘C copies the whole drawing (viewer or edit mode)
+            // as PDF + PNG — plus the original EMF when it cleanly applies — or, with a
+            // canvas selection in edit mode, just the selected elements. Disabled until a
+            // document is shown.
+            Button("Copy") { actions?.copyDrawing?() }
+                .keyboardShortcut("c", modifiers: .command)
+                .disabled(actions?.copyDrawing == nil)
+            Divider()
             // Delete the selection (E2c). No key equivalent: the canvas handles the
             // bare Delete/Backspace key itself (so a focused text field keeps its own
             // backspace); this item is for discoverability and when the canvas isn't

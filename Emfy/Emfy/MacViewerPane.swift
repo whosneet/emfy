@@ -1221,6 +1221,30 @@ struct MacViewerPane: View {
         exporter.shareOriginal(entry: entry, store: store)
     }
 
+    /// File ▸ Print… (⌘P), F1. Prints the whole drawing as vector — the edited scene
+    /// when editing has diverged, else the original — through the same renderer the PDF
+    /// export uses, with the Scale accessory and auto orientation.
+    private func printDocument() {
+        guard let loaded, let entry else { return }
+        let source = OutputSource.wholeDrawing(
+            isEditing: session.editing == .editing, hasDiverged: session.hasDivergedFromOpened)
+        guard let pdf = MacPrint.makePDFData(
+            source: source, prepared: loaded.prepared,
+            editedScene: session.editedScene, options: settings.renderOptions) else { return }
+        MacPrint.present(
+            pdfData: pdf, naturalSize: loaded.prepared.naturalSize,
+            jobName: entry.displayName, window: NSApp.keyWindow)
+    }
+
+    /// Edit ▸ Copy (⌘C), F1. Copies the drawing (or, in edit mode, the selection) to the
+    /// pasteboard as vector PDF + PNG, plus the original EMF when it cleanly applies.
+    private func copyDrawing() {
+        guard let loaded, let entry else { return }
+        MacDrawingCopy.copy(
+            session: session, prepared: loaded.prepared, entry: entry, store: store,
+            settings: settings, selection: editorModel.selection.ids, toast: toast)
+    }
+
     /// Builds the privacy-safe diagnostic report for the current file, copies it to
     /// the clipboard and confirms with a toast (S1a-6). Published to the Help menu
     /// via `ViewerActions` and called by the Info inspector's own button.
@@ -1251,6 +1275,8 @@ struct MacViewerPane: View {
             sharePDF: { share(.pdf) },
             shareSVG: { shareSVG() },
             copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil,
+            printDocument: loaded != nil ? { printDocument() } : nil,
+            copyDrawing: loaded != nil ? { copyDrawing() } : nil,
             save: (session.editing == .editing && session.isDirty) ? { Task { await session.save() } } : nil,
             revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil,
             selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,

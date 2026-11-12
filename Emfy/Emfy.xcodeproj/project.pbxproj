@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F1B000000000000000000010 /* MacDrawingCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000010 /* MacDrawingCopy.swift */; platformFilters = (macos, ); };
+		F1B000000000000000000008 /* ScenePDF.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000008 /* ScenePDF.swift */; };
+		F1B000000000000000000009 /* MacPrint.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000009 /* MacPrint.swift */; platformFilters = (macos, ); };
 		F1B000000000000000000001 /* PrintLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000001 /* PrintLayout.swift */; };
 		F1C000000000000000000001 /* PrintLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000001 /* PrintLayout.swift */; };
 		F1B000000000000000000002 /* DrawingClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000002 /* DrawingClipboard.swift */; };
@@ -264,6 +267,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F1A000000000000000000010 /* MacDrawingCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDrawingCopy.swift; sourceTree = "<group>"; };
+		F1A000000000000000000008 /* ScenePDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePDF.swift; sourceTree = "<group>"; };
+		F1A000000000000000000009 /* MacPrint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPrint.swift; sourceTree = "<group>"; };
 		F1A000000000000000000001 /* PrintLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintLayout.swift; sourceTree = "<group>"; };
 		F1A000000000000000000002 /* DrawingClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingClipboard.swift; sourceTree = "<group>"; };
 		F1A000000000000000000003 /* BatchConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchConvert.swift; sourceTree = "<group>"; };
@@ -571,6 +577,7 @@
 				F1A000000000000000000002 /* DrawingClipboard.swift */,
 				F1A000000000000000000003 /* BatchConvert.swift */,
 				F1A000000000000000000004 /* BatchRenderer.swift */,
+				F1A000000000000000000008 /* ScenePDF.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -625,6 +632,8 @@
 				B00100000000000000000006 /* Info.plist */,
 				B00100000000000000000007 /* Emfy.entitlements */,
 				B001000000000000000000D0 /* PrivacyInfo.xcprivacy */,
+				F1A000000000000000000009 /* MacPrint.swift */,
+				F1A000000000000000000010 /* MacDrawingCopy.swift */,
 			);
 			path = Emfy;
 			sourceTree = "<group>";
@@ -983,6 +992,9 @@
 				B01100000000000000000300 /* EmfySettings.swift in Sources */,
 				B01100000000000000000301 /* RecentSort.swift in Sources */,
 				B01100000000000000000302 /* ExportScale.swift in Sources */,
+				F1B000000000000000000010 /* MacDrawingCopy.swift in Sources */,
+				F1B000000000000000000008 /* ScenePDF.swift in Sources */,
+				F1B000000000000000000009 /* MacPrint.swift in Sources */,
 				F1B000000000000000000001 /* PrintLayout.swift in Sources */,
 				F1B000000000000000000002 /* DrawingClipboard.swift in Sources */,
 				F1B000000000000000000003 /* BatchConvert.swift in Sources */,
