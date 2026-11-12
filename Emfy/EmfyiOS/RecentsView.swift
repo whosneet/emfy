@@ -22,6 +22,9 @@ struct RecentsGrid: View {
     @Binding var selection: UUID?
 
     @State private var isSelecting = false
+    /// The files picked in Select mode, for Batch Convert (F1). Cleared on exit.
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var showConvert = false
     @State private var isImporting = false
     @State private var activeSheet: RecentsSheet?
     /// The fold-aware column count (27.1+), or `nil` to use the adaptive grid.
@@ -87,6 +90,20 @@ struct RecentsGrid: View {
             .onChange(of: selection) { _, id in
                 if id != nil { isSelecting = false }
             }
+            // Leaving Select mode drops the multi-selection (F1).
+            .onChange(of: isSelecting) { _, selecting in
+                if !selecting { selectedIDs.removeAll() }
+            }
+            .sheet(isPresented: $showConvert) {
+                IOSBatchConvertSheet(entries: selectedConvertEntries, store: store)
+                    .environment(settings)
+            }
+    }
+
+    /// The entries chosen in Select mode, for Batch Convert (newest-first, matching the
+    /// grid order).
+    private var selectedConvertEntries: [RecentEntry] {
+        store.entries.filter { selectedIDs.contains($0.id) }
     }
 
     // MARK: - Content
@@ -136,7 +153,9 @@ struct RecentsGrid: View {
                             entry: entry,
                             isSelecting: isSelecting,
                             onOpen: { selection = entry.id },
-                            onRemove: { removal.requestRemoval(id: entry.id, store: store, toast: toast) }
+                            onRemove: { removal.requestRemoval(id: entry.id, store: store, toast: toast) },
+                            isSelected: selectedIDs.contains(entry.id),
+                            onToggleSelect: isSelecting ? { toggleSelected(entry.id) } : nil
                         )
                     }
                 } header: {
@@ -200,9 +219,25 @@ struct RecentsGrid: View {
     @ViewBuilder
     private func tile(for entry: RecentEntry) -> some View {
         if isSelecting {
-            // The tile removes through the shared coordinator from the environment,
-            // so it no longer takes a per-entry closure (P3).
-            RecentTileView(entry: entry, isSelecting: true, isPrivate: store.isSessionPrivate(entry.id))
+            // Select mode is a multi-selection for Batch Convert (F1): a tap toggles the
+            // file's membership, shown by a checkmark badge.
+            Button {
+                toggleSelected(entry.id)
+            } label: {
+                RecentTileView(entry: entry, isSelecting: false, isPrivate: store.isSessionPrivate(entry.id))
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: selectedIDs.contains(entry.id) ? "checkmark.circle.fill" : "circle")
+                            .font(.title2)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, selectedIDs.contains(entry.id) ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            .padding(6)
+                            .shadow(radius: 1)
+                    }
+                    .opacity(selectedIDs.contains(entry.id) ? 1 : 0.85)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(entry.baseName)
+            .accessibilityAddTraits(selectedIDs.contains(entry.id) ? [.isSelected, .isButton] : .isButton)
         } else {
             // A Button that sets the shared selection, pushing the viewer on compact
             // width. Assigning (not toggling) makes a rapid double tap idempotent.
@@ -249,6 +284,26 @@ struct RecentsGrid: View {
                 onClear: { removal.requestClear(store: store) }
             )
         }
+        // Batch Convert bottom bar (F1), shown only in Select mode.
+        if isSelecting {
+            ToolbarItemGroup(placement: .bottomBar) {
+                Button {
+                    showConvert = true
+                } label: {
+                    Label("Convert…", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(selectedIDs.isEmpty)
+                Spacer()
+                Text(selectedIDs.isEmpty ? "Select files to convert" : "\(selectedIDs.count) selected")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Toggles a file's membership in the Select-mode multi-selection (F1).
+    private func toggleSelected(_ id: UUID) {
+        if selectedIDs.contains(id) { selectedIDs.remove(id) } else { selectedIDs.insert(id) }
     }
 
     /// On iOS 26.0–26.x, Select and More both land in `.topBarTrailing` and merge

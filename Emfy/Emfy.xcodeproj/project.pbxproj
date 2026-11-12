@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F1B000000000000000000014 /* IOSBatchConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000014 /* IOSBatchConvert.swift */; platformFilters = (ios, ); };
 		F1B000000000000000000012 /* BatchConvertController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000012 /* BatchConvertController.swift */; };
 		F1B000000000000000000013 /* MacBatchConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000013 /* MacBatchConvert.swift */; platformFilters = (macos, ); };
 		F1B000000000000000000011 /* MacDrawingDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000011 /* MacDrawingDrag.swift */; platformFilters = (macos, ); };
@@ -270,6 +271,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F1A000000000000000000014 /* IOSBatchConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSBatchConvert.swift; sourceTree = "<group>"; };
 		F1A000000000000000000012 /* BatchConvertController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchConvertController.swift; sourceTree = "<group>"; };
 		F1A000000000000000000013 /* MacBatchConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBatchConvert.swift; sourceTree = "<group>"; };
 		F1A000000000000000000011 /* MacDrawingDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacDrawingDrag.swift; sourceTree = "<group>"; };
@@ -714,6 +716,7 @@
 				B00100000000000000000079 /* Info.plist */,
 				B00100000000000000000330 /* EmfyiOS.entitlements */,
 				B001000000000000000000D3 /* PrivacyInfo.xcprivacy */,
+				F1A000000000000000000014 /* IOSBatchConvert.swift */,
 			);
 			path = EmfyiOS;
 			sourceTree = "<group>";
@@ -1001,6 +1004,7 @@
 				B01100000000000000000300 /* EmfySettings.swift in Sources */,
 				B01100000000000000000301 /* RecentSort.swift in Sources */,
 				B01100000000000000000302 /* ExportScale.swift in Sources */,
+				F1B000000000000000000014 /* IOSBatchConvert.swift in Sources */,
 				F1B000000000000000000012 /* BatchConvertController.swift in Sources */,
 				F1B000000000000000000013 /* MacBatchConvert.swift in Sources */,
 				F1B000000000000000000011 /* MacDrawingDrag.swift in Sources */,

@@ -133,6 +133,10 @@ struct RecentListRow: View {
     let isSelecting: Bool
     let onOpen: () -> Void
     let onRemove: () -> Void
+    /// Batch Convert multi-select (F1): when `onToggleSelect` is set, Select mode toggles
+    /// the row's membership (checkmark) instead of showing the remove badge.
+    var isSelected: Bool = false
+    var onToggleSelect: (() -> Void)? = nil
 
     @State private var loadedThumbnail: CGImage?
 
@@ -165,7 +169,26 @@ struct RecentListRow: View {
 
     @ViewBuilder
     private var rowContent: some View {
-        if isSelecting {
+        if isSelecting, let onToggleSelect {
+            // Batch Convert multi-select (F1): a tap toggles membership, shown by a
+            // leading checkmark.
+            Button(action: onToggleSelect) {
+                HStack(spacing: 12) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .frame(width: 32)
+                    rowBody
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+        } else if isSelecting {
             // Select mode: the remove badge is its OWN labelled element (not absorbed by
             // the row), so Voice Control can target "Remove <file>" and it keeps a full
             // 44 pt hit area (A-M5); the row body is a separate, non-interactive label.
