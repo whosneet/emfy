@@ -103,7 +103,8 @@ enum DrawingAIScreenshots {
         captureSemanticSearch(base: base)
 
         // (f) Explain what's missing — driven live against a file with skipped records.
-        if #available(macOS 26, iOS 26, *), let explainSource {
+        // The enclosing `capture(all:)` already guards macOS 26 / iOS 26.
+        if let explainSource {
             await captureExplain(base: base, explainSource: explainSource)
         }
     }
