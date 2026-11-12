@@ -126,4 +126,72 @@ struct SceneLayerRoundTripTests {
         let image = try #require(MetafileRenderer.makeImage(opened, scale: 1, background: .white)?.0)
         return image
     }
+
+    // MARK: - Arrange / move reach the saved file for UNEDITED source elements (fix 2)
+
+    /// Two overlapping rectangles — a red one drawn first, a blue one on top — as a
+    /// real EMF, so importing yields two UNEDITED source elements.
+    private static func twoRectEMF() -> Data {
+        func u32(_ v: UInt32) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8((v >> 24) & 0xFF)] }
+        func i32(_ v: Int32) -> [UInt8] { u32(UInt32(bitPattern: v)) }
+        func u16(_ v: UInt16) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF)] }
+        var records: [[UInt8]] = []
+        var header: [UInt8] = []
+        header += u32(1) + u32(88)
+        header += i32(0) + i32(0) + i32(99) + i32(99)          // rclBounds
+        header += i32(0) + i32(0) + i32(2645) + i32(2645)      // rclFrame
+        header += u32(0x464D_4520) + u32(0x0001_0000)
+        header += u32(228) + u32(8)                            // nBytes, nRecords (advisory)
+        header += u16(3) + u16(0)                              // nHandles
+        header += u32(0) + u32(0) + u32(0)
+        header += i32(1920) + i32(1080)
+        header += i32(320) + i32(240)
+        records.append(header)
+        // Red brush (ih 1) → select → rect (10,10)-(60,60).
+        records.append(u32(39) + u32(24) + u32(1) + u32(0) + [255, 0, 0, 0] + u32(0))
+        records.append(u32(37) + u32(12) + u32(1))
+        records.append(u32(43) + u32(24) + i32(10) + i32(10) + i32(60) + i32(60))
+        // Blue brush (ih 2) → select → rect (40,40)-(90,90), drawn on top.
+        records.append(u32(39) + u32(24) + u32(2) + u32(0) + [0, 0, 255, 0] + u32(0))
+        records.append(u32(37) + u32(12) + u32(2))
+        records.append(u32(43) + u32(24) + i32(40) + i32(40) + i32(90) + i32(90))
+        records.append(u32(14) + u32(20) + u32(0) + u32(0) + u32(20))
+        return Data(records.flatMap { $0 })
+    }
+
+    /// The RGBA of the device-space overlap centre (~50,50) in a 100×100 render.
+    private static func overlapPixel(_ image: CGImage) throws -> (r: Int, g: Int, b: Int) {
+        let px = try #require(PixelImage(image))
+        try #require(px.width == 100 && px.height == 100)
+        let o = (50 * px.width + 50) * 4
+        return (Int(px.pixels[o]), Int(px.pixels[o + 1]), Int(px.pixels[o + 2]))
+    }
+
+    @Test func bringToFrontOfUneditedElementReachesTheSavedFile() throws {
+        var history = SceneHistory(scene: try SceneImporter.import(data: Self.twoRectEMF()))
+        let els = history.scene.elements
+        try #require(els.count == 2)
+        // The source element provenance is unedited.
+        #expect(els.allSatisfy { !$0.provenance.edited })
+        // Overlap starts blue (the second rect is on top).
+        let before = try Self.overlapPixel(try Self.render(SceneExporter.export(history.scene, as: .emf).data))
+        #expect(before.b > before.r)
+
+        // Bring the first (bottom, red) element to the front, save, re-render.
+        try history.apply(.arrange(ids: [els[0].id], .toFront))
+        let after = try Self.overlapPixel(try Self.render(SceneExporter.export(history.scene, as: .emf).data))
+        #expect(after.r > after.b)   // red is now on top
+    }
+
+    @Test func moveToLayerOfUneditedElementReachesTheSavedFile() throws {
+        var history = SceneHistory(scene: try SceneImporter.import(data: Self.twoRectEMF()))
+        let els = history.scene.elements
+        try #require(els.count == 2)
+        // Add a top layer and move the red (bottom) element into it; a higher layer
+        // draws later, so red ends on top.
+        try history.apply(.addLayer(name: "Top", at: 1))
+        try history.apply(.moveElementsToLayer(ids: [els[0].id], layer: 1))
+        let after = try Self.overlapPixel(try Self.render(SceneExporter.export(history.scene, as: .emf).data))
+        #expect(after.r > after.b)
+    }
 }

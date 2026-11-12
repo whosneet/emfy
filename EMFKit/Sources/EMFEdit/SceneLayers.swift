@@ -117,7 +117,25 @@ extension Scene {
         for li in layers.indices {
             layers[li].elements.removeAll { ids.contains($0.id) }
         }
+        // Detach the moved elements from their source records so the exporter
+        // synthesises them at their NEW layer/z-position and drops the originals
+        // (review fix 2). The overlay replaces an *edited* source element in place at
+        // its source position, so only a source-less (new) element actually moves in
+        // z; undo restores the original provenance from the layers snapshot.
+        for i in moved.indices { moved[i] = repositioned(moved[i]) }
         layers[order].elements.append(contentsOf: moved)
+    }
+
+    /// Returns `element` detached from its source records (new, edited), so the
+    /// exporter re-synthesises it at its current scene position rather than re-emitting
+    /// a source element verbatim at its original place. Already-new elements are
+    /// unchanged. Fidelity cost: a reordered element is re-synthesised, not kept
+    /// byte-verbatim — the inherent cost of moving an element's z/layer (review fix 2).
+    private func repositioned(_ element: Element) -> Element {
+        guard !element.provenance.sourceRecordIndices.isEmpty else { return element }
+        var copy = element
+        copy.provenance = Provenance(sourceRecordIndices: [], edited: true)
+        return copy
     }
 
     /// Inserts `element` at z-index `z` within the layer at order index `layer`
@@ -139,9 +157,18 @@ extension Scene {
     public mutating func arrange(_ ids: Set<Int>, _ direction: SceneArrange.Direction) {
         guard !ids.isEmpty else { return }
         for li in layers.indices {
-            let layerSelected = Set(layers[li].elements.filter { ids.contains($0.id) }.map(\.id))
+            let old = layers[li].elements
+            let layerSelected = Set(old.filter { ids.contains($0.id) }.map(\.id))
             guard !layerSelected.isEmpty else { continue }
-            layers[li].elements = SceneArrange.reorder(layers[li].elements, selected: layerSelected, direction)
+            let reordered = SceneArrange.reorder(old, selected: layerSelected, direction)
+            // A no-op reorder (already at the edge) keeps every element verbatim.
+            guard reordered.map(\.id) != old.map(\.id) else { continue }
+            layers[li].elements = reordered
+            // Detach the reordered elements from their source records so the exporter
+            // re-synthesises them at their new z-position (review fix 2).
+            for ei in layers[li].elements.indices where layerSelected.contains(layers[li].elements[ei].id) {
+                layers[li].elements[ei] = repositioned(layers[li].elements[ei])
+            }
         }
     }
 }
