@@ -5,6 +5,7 @@ import EMFRender
 import Foundation
 import os
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The macOS edit-mode detail content. It reads the editing `Scene` from the session
 /// (keyed on `editVersion` so each mutation re-pushes it) and hosts the interactive
@@ -36,6 +37,12 @@ struct MacEditingContainer: View {
                     // Opens the coalesced "Insert Text" group; the popover's commit/cancel
                     // closes it (E3c design call 1).
                     beginInsertText: { element in session.beginInsertText(element) },
+                    // A drag-and-dropped image inserts centred at the drop point (E3c).
+                    insertImageData: { data, centreDevice in
+                        if let id = session.insertImage(data: data, centreDevice: centreDevice) {
+                            editorModel.selection.replace(with: id)
+                        }
+                    },
                     // The scene's undo manager, handled by the overlay as first responder so
                     // Edit ▸ Undo/Redo and ⌘Z/⇧⌘Z reach SceneHistory (E2d).
                     sceneUndoManager: session.undoManager
@@ -99,6 +106,8 @@ struct MacEditableCanvas: NSViewRepresentable {
     let delete: (Set<Int>) -> Void
     /// Begins the coalesced insert-text undo group for a new text element (E3c).
     let beginInsertText: (EMFEdit.Element) -> Void
+    /// Inserts a drag-and-dropped image's bytes centred at a DEVICE-space point (E3c).
+    let insertImageData: (Data, CGPoint) -> Void
     /// The scene's undo manager, handled by the overlay as first responder (E2d).
     let sceneUndoManager: UndoManager
 
@@ -140,6 +149,8 @@ struct MacEditableCanvas: NSViewRepresentable {
         overlay.autoresizingMask = [.width, .height]
         overlay.coordinator = context.coordinator
         overlay.sceneUndoManager = sceneUndoManager
+        // Accept dragged image files (Finder) and image data (other apps) onto the canvas.
+        overlay.registerForDraggedTypes([.fileURL, .tiff, .png])
         paper.addSubview(overlay)
 
         scrollView.documentView = paper
@@ -617,6 +628,14 @@ struct MacEditableCanvas: NSViewRepresentable {
             parent.delete(selection.ids)
         }
 
+        // MARK: Drag-and-drop image (E3c)
+
+        /// Inserts dropped image `data` centred at the drop point, mapped to device space
+        /// through the SAME mapping the click tools use.
+        func handleImageDrop(_ data: Data, at viewPoint: CGPoint) {
+            parent.insertImageData(data, mapping.devicePoint(fromView: viewPoint))
+        }
+
         // MARK: Drag kinds
 
         private func beginMove(at viewPoint: CGPoint) {
@@ -1077,6 +1096,36 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
     override func keyDown(with event: NSEvent) {
         if coordinator?.keyDown(event) == true { return }
         super.keyDown(with: event)
+    }
+
+    // MARK: Drag-and-drop image (E3c)
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        Self.droppableImageData(sender) != nil ? .copy : []
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        Self.droppableImageData(sender) != nil ? .copy : []
+    }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let data = Self.droppableImageData(sender) else { return false }
+        coordinator?.handleImageDrop(data, at: convert(sender.draggingLocation, from: nil))
+        return true
+    }
+
+    /// The image bytes for a drop: a dragged image FILE's contents (preferred, so the
+    /// capped, metadata-stripping ingest sees the real file), else an image rendition on
+    /// the pasteboard.
+    private static func droppableImageData(_ sender: NSDraggingInfo) -> Data? {
+        let pb = sender.draggingPasteboard
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true,
+            .urlReadingContentsConformToTypes: [UTType.image.identifier],
+        ]
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
+           let url = urls.first, let data = try? Data(contentsOf: url) {
+            return data
+        }
+        return pb.data(forType: .png) ?? pb.data(forType: .tiff)
     }
 
     /// Strokes (and lightly fills, for closed kinds) the shape-tool preview outline in

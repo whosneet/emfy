@@ -68,6 +68,25 @@ import UniformTypeIdentifiers
         #expect(failure == .undecodable)
     }
 
+    @Test func droppedImageCentresAtTheMappedDevicePoint() throws {
+        // A drop goes through the SAME view→device mapping the click/tap tools use, then the
+        // image is centred on that device point (E3c drag-and-drop).
+        let scene = try blankScene()
+        let page = scene.pageBoundsDevice
+        let mapping = EditorCanvasMapping(
+            pageBoundsDevice: page,
+            target: CGRect(origin: .zero, size: CGSize(width: page.width * 2, height: page.height * 2)))
+        let dropView = CGPoint(x: 420, y: 260)
+        let dropDevice = mapping.devicePoint(fromView: dropView)
+
+        let png = try pngFixture(width: 200, height: 200)
+        let result = ImageInsertTool.element(imageData: png, pageBoundsDevice: page, centreDevice: dropDevice, in: scene)
+        guard case .success(let inserted) = result else { Issue.record("expected success"); return }
+        let rect = inserted.element.image?.destRectDevice ?? .zero
+        #expect(abs(rect.midX - dropDevice.x) < 0.5)
+        #expect(abs(rect.midY - dropDevice.y) < 0.5)
+    }
+
     private func pngFixture(width: Int, height: Int) throws -> Data {
         let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
         let ctx = try #require(CGContext(

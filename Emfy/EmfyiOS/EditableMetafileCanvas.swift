@@ -5,6 +5,7 @@ import Foundation
 import os
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// The iPad edit-mode detail content: it reads the editing `Scene` from the session
 /// (keyed on `editVersion`) and hosts the interactive canvas, kept here so the
@@ -33,6 +34,12 @@ struct MetafileEditingContainer: View {
                     // Opens the coalesced "Insert Text" group; the popover's commit/cancel
                     // closes it (E3c design call 1).
                     beginInsertText: { element in session.beginInsertText(element) },
+                    // A dropped image inserts centred at the drop point (E3c).
+                    insertImageData: { data, centreDevice in
+                        if let id = session.insertImage(data: data, centreDevice: centreDevice) {
+                            editorModel.selection.replace(with: id)
+                        }
+                    },
                     // The scene's undo manager, vended by the overlay as first responder so
                     // ⌘Z/⇧⌘Z and the three-finger undo/redo gestures drive SceneHistory (E2d).
                     sceneUndoManager: session.undoManager,
@@ -81,6 +88,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     let delete: (Set<Int>) -> Void
     /// Begins the coalesced insert-text undo group for a new text element (E3c).
     let beginInsertText: (EMFEdit.Element) -> Void
+    /// Inserts a dropped image's bytes centred at a DEVICE-space point (E3c).
+    let insertImageData: (Data, CGPoint) -> Void
     /// The scene's undo manager, vended by the overlay as first responder (E2d).
     let sceneUndoManager: UndoManager
     /// Trailing width the inspector overlay occupies (E2c item 4).
@@ -156,7 +165,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     // MARK: - Coordinator
 
     @MainActor
-    final class Coordinator: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    final class Coordinator: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate, UIDropInteractionDelegate {
         var parent: EditableMetafileCanvas
         fileprivate weak var scrollView: UIScrollView?
         fileprivate weak var paper: UIView?
@@ -292,6 +301,9 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
             overlay.addGestureRecognizer(hover)
 
+            // Drag-and-drop an image onto the canvas → insert at the drop point (E3c).
+            overlay.addInteraction(UIDropInteraction(delegate: self))
+
             // Pencil double-tap and squeeze (design call 5): mapped to pure decisions.
             let pencil = UIPencilInteraction()
             pencil.delegate = self
@@ -414,6 +426,31 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         func deleteSelection() {
             guard !selection.ids.isEmpty else { return }
             parent.delete(selection.ids)
+        }
+
+        // MARK: Drag-and-drop image (E3c)
+
+        func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+            session.hasItemsConforming(toTypeIdentifiers: [UTType.image.identifier])
+        }
+        func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
+            UIDropProposal(operation: .copy)
+        }
+        func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+            guard let overlay, let provider = session.items.first?.itemProvider else { return }
+            let location = session.location(in: overlay)
+            // Load the raw image bytes so the capped, metadata-stripping ingest sees the
+            // original file; the completion runs off the main actor.
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { [weak self] data, _ in
+                guard let data else { return }
+                Task { @MainActor in self?.handleImageDrop(data, at: location) }
+            }
+        }
+
+        /// Inserts dropped image `data` centred at the drop point, mapped to device space
+        /// through the SAME mapping the tap tools use.
+        func handleImageDrop(_ data: Data, at viewPoint: CGPoint) {
+            parent.insertImageData(data, mapping.devicePoint(fromView: viewPoint))
         }
 
         @objc private func handlePan(_ g: UIPanGestureRecognizer) {
