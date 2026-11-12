@@ -195,6 +195,61 @@ import AppKit
         #expect(model.copyAllText() == "first line\nsecond line")
     }
 
+    // MARK: Picture (OCR) run merging (F3c)
+
+    @MainActor
+    @Test func pictureRunsMergeIntoMatchesAndCopy() {
+        let model = DrawingFindModel()
+        model.setRuns([run("invoice heading", CGRect(x: 0, y: 0, width: 40, height: 10))], contentID: 7)
+        model.query = "invoice"
+        model.applyQuery()
+        #expect(model.matches.count == 1)
+
+        // OCR finds another "invoice" inside a picture; it merges into the matches.
+        model.beginReadingPictures()
+        #expect(model.isReadingPictures)
+        model.setPictureRuns([run("INVOICE 2026", CGRect(x: 0, y: 50, width: 60, height: 12), .picture)], contentID: 7)
+        #expect(!model.isReadingPictures)
+        #expect(model.matches.count == 2)
+        // The picture match is tagged so the bar can show "in picture".
+        #expect(model.matches.contains { $0.source == .picture })
+        // Copy All Text groups picture text under its heading.
+        #expect(model.copyAllText() == "invoice heading\n\nText in pictures:\nINVOICE 2026")
+    }
+
+    @MainActor
+    @Test func stalePictureRunsForAnotherDrawingAreIgnored() {
+        let model = DrawingFindModel()
+        model.setRuns([run("page one", CGRect(x: 0, y: 0, width: 40, height: 10))], contentID: 1)
+        // A late OCR result keyed to a DIFFERENT drawing must not leak in.
+        model.setPictureRuns([run("stale", CGRect(x: 0, y: 0, width: 10, height: 10), .picture)], contentID: 99)
+        #expect(model.pictureRuns.isEmpty)
+    }
+
+    @MainActor
+    @Test func changingDrawingDropsPreviousPictureRuns() {
+        let model = DrawingFindModel()
+        model.setRuns([run("first", CGRect(x: 0, y: 0, width: 40, height: 10))], contentID: 1)
+        model.setPictureRuns([run("pic", CGRect(x: 0, y: 30, width: 20, height: 10), .picture)], contentID: 1)
+        #expect(!model.pictureRuns.isEmpty)
+        // A new drawing clears the old picture text immediately.
+        model.setRuns([run("second", CGRect(x: 0, y: 0, width: 40, height: 10))], contentID: 2)
+        #expect(model.pictureRuns.isEmpty)
+    }
+
+    @MainActor
+    @Test func clearingPictureRunsReMatchesDrawingTextAlone() {
+        let model = DrawingFindModel()
+        model.setRuns([run("report total", CGRect(x: 0, y: 0, width: 40, height: 10))], contentID: 1)
+        model.setPictureRuns([run("TOTAL 99", CGRect(x: 0, y: 30, width: 30, height: 10), .picture)], contentID: 1)
+        model.query = "total"
+        model.applyQuery()
+        #expect(model.matches.count == 2)
+        model.clearPictureRuns()   // the toggle turned OCR off
+        #expect(model.matches.count == 1)
+        #expect(model.pictureRuns.isEmpty)
+    }
+
     // MARK: Menu audit (⌘F / ⌘G)
 
     #if os(macOS)

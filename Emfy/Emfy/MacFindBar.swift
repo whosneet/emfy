@@ -25,6 +25,7 @@ struct MacFindBar: View {
                 .onSubmit { model.goNext() }
 
             statusLabel
+            readingHint
 
             HStack(spacing: 2) {
                 Button { model.goPrevious() } label: { Image(systemName: "chevron.up") }
@@ -59,12 +60,32 @@ struct MacFindBar: View {
     @ViewBuilder
     private var statusLabel: some View {
         if !model.statusText.isEmpty {
-            Text(model.statusText)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-        } else if !model.query.isEmpty {
+            HStack(spacing: 4) {
+                Text(model.statusText)
+                    .monospacedDigit()
+                if model.isCurrentMatchInPicture {
+                    Text("in picture")
+                        .font(.caption)
+                }
+            }
+            .foregroundStyle(.secondary)
+        } else if !model.query.isEmpty, !model.isReadingPictures {
             Text("Not found")
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// A small progress hint shown while the picture-OCR pass is still running (F3c), so a
+    /// user searching a scanned drawing knows more matches may still appear.
+    @ViewBuilder
+    private var readingHint: some View {
+        if model.isReadingPictures {
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.small)
+                Text("Reading text in pictures…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

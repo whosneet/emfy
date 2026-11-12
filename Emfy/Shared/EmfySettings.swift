@@ -53,6 +53,12 @@ final class EmfySettings {
     var showPartialSupportBanner: Bool {
         didSet { defaults.set(showPartialSupportBanner, forKey: Keys.showPartialSupportBanner) }
     }
+    /// Whether Find and Copy All Text also recognise text inside embedded pictures with
+    /// Vision OCR (F3c). Default ON. Off means no OCR runs and nothing new is cached; turning
+    /// it off also clears the in-memory OCR cache (handled by the viewer).
+    var recognizeTextInPictures: Bool {
+        didSet { defaults.set(recognizeTextInPictures, forKey: Keys.recognizeTextInPictures) }
+    }
 
     // MARK: Viewer extras
 
@@ -216,6 +222,7 @@ final class EmfySettings {
         defaultZoomOnOpen = Self.string(defaults, Keys.defaultZoomOnOpen, default: .fit)
         pageBackground = Self.string(defaults, Keys.pageBackground, default: .whitePage)
         showPartialSupportBanner = Self.bool(defaults, Keys.showPartialSupportBanner, default: true)
+        recognizeTextInPictures = Self.bool(defaults, Keys.recognizeTextInPictures, default: true)
         darkPageMode = Self.string(defaults, Keys.darkPageMode, default: .off)
         pageShadow = Self.bool(defaults, Keys.pageShadow, default: true)
         openFilesIn = Self.string(defaults, Keys.openFilesIn, default: .frontWindow)
@@ -323,6 +330,7 @@ final class EmfySettings {
         static let defaultZoomOnOpen = "settings.viewer.defaultZoomOnOpen"
         static let pageBackground = "settings.viewer.pageBackground"
         static let showPartialSupportBanner = "settings.viewer.showPartialSupportBanner"
+        static let recognizeTextInPictures = "settings.viewer.recognizeTextInPictures"
         static let darkPageMode = "settings.viewer.darkPageMode"
         static let pageShadow = "settings.viewer.pageShadow"
         static let openFilesIn = "settings.viewer.openFilesIn"

@@ -56,6 +56,16 @@ struct MacViewerPane: View {
             // Keep the find model's runs current: the renderer observation in viewer mode,
             // the edited scene in edit mode (F3b). Recomputed only when the drawing changes.
             .task(id: findRunsKey) { await refreshFindRuns() }
+            // Toggling "Recognise text in pictures" (F3c): off drops picture matches and
+            // clears the in-memory cache; on re-runs the find pass so OCR starts.
+            .onChange(of: settings.recognizeTextInPictures) { _, enabled in
+                if enabled {
+                    Task { await refreshFindRuns() }
+                } else {
+                    findModel.clearPictureRuns()
+                    Task { await DrawingOCRService.shared.clearMemoryCache() }
+                }
+            }
             // Scroll the current match into view as Find Next/Previous or a live query moves
             // it (F3b).
             .onChange(of: findModel.current) { _, _ in scrollToCurrentMatch() }
@@ -1392,20 +1402,40 @@ struct MacViewerPane: View {
     /// edit mode (cheap), the renderer observation in viewer mode (off the main actor). The
     /// model keeps the open query and re-matches against the new runs.
     private func refreshFindRuns() async {
+        let contentID = findRunsKey.hashValue
+        let ocrEnabled = settings.recognizeTextInPictures
         if session.editing == .editing, let scene = session.editedScene {
-            findModel.setRuns(DrawingTextExtractor.extract(from: scene), contentID: findRunsKey.hashValue)
+            findModel.setRuns(DrawingTextExtractor.extract(from: scene), contentID: contentID)
+            startPictureOCR(ocrEnabled ? DrawingPictureEnumerator.pictures(from: scene) : [], contentID: contentID)
             return
         }
         guard let loaded else {
-            findModel.setRuns([], contentID: findRunsKey.hashValue)
+            findModel.setRuns([], contentID: contentID)
             return
         }
         let prepared = loaded.prepared
         let options = settings.renderOptions
-        let runs = await Task.detached(priority: .userInitiated) {
-            DrawingTextExtractor.extract(from: MetafileRenderer.observe(prepared, options: options))
+        let (runs, pictures) = await Task.detached(priority: .userInitiated) {
+            let observation = MetafileRenderer.observe(prepared, options: options)
+            let runs = DrawingTextExtractor.extract(from: observation)
+            let pictures = ocrEnabled ? DrawingPictureEnumerator.pictures(from: observation) : []
+            return (runs, pictures)
         }.value
-        findModel.setRuns(runs, contentID: findRunsKey.hashValue)
+        findModel.setRuns(runs, contentID: contentID)
+        startPictureOCR(pictures, contentID: contentID)
+    }
+
+    /// Kicks off the embedded-picture OCR pass for the current drawing (F3c). Drawing text is
+    /// already searchable; the recognised picture text merges into the matches when it
+    /// completes, off the main actor, so the UI never blocks. No pictures (or OCR disabled) →
+    /// nothing to do.
+    private func startPictureOCR(_ pictures: [EmbeddedPicture], contentID: Int) {
+        guard !pictures.isEmpty else { return }
+        findModel.beginReadingPictures()
+        Task {
+            let runs = await DrawingOCRService.shared.recognize(pictures: pictures)
+            findModel.setPictureRuns(runs, contentID: contentID)
+        }
     }
 
     /// Scrolls the current match into view through the active scroll view (F3b).

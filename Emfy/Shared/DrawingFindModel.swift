@@ -24,9 +24,16 @@ final class DrawingFindModel {
     /// by the UI); clearing it empties the matches.
     var query = ""
 
-    /// The drawing's text runs (drawing text, plus OCR picture text later). Set by the
-    /// viewer; find and Copy All Text both read it.
+    /// The drawing's own text runs (GDI/EMF+ text). Set by the viewer; find and Copy All
+    /// Text read it alongside `pictureRuns`.
     private(set) var runs: [DrawingTextRun] = []
+    /// Text recognised inside embedded pictures (OCR, `source == .picture`). Arrives
+    /// asynchronously after `runs`, merged into the matches when it does (F3c).
+    private(set) var pictureRuns: [DrawingTextRun] = []
+    /// True while the OCR pass for the current drawing is still running, so the find bar can
+    /// show a "Reading text in pictures…" hint. Cleared when the picture runs arrive or the
+    /// drawing changes.
+    var isReadingPictures = false
     /// The matches for the current query, in reading order. Empty when the query is empty
     /// or nothing matches.
     private(set) var matches: [DrawingTextFind.Match] = []
@@ -37,9 +44,15 @@ final class DrawingFindModel {
     /// drawing's runs is a no-op (it doesn't reset the query or the current match).
     @ObservationIgnored private var runsContentID: Int?
 
+    /// Drawing text and picture text together — the universe Find and Copy All Text search.
+    private var allRuns: [DrawingTextRun] { runs + pictureRuns }
+
     /// Whether the drawing carries any extractable text — drives Copy All Text enablement
     /// and whether Find has anything to search.
-    var hasText: Bool { !runs.isEmpty }
+    var hasText: Bool { !runs.isEmpty || !pictureRuns.isEmpty }
+
+    /// Whether the current match was recognised inside a picture (shown as "in picture").
+    var isCurrentMatchInPicture: Bool { activeMatch?.source == .picture }
 
     /// The "n of m" status for the bar, or "" when there are no matches.
     var statusText: String { DrawingTextFind.status(current: current, total: matches.count) }
@@ -62,12 +75,38 @@ final class DrawingFindModel {
         runs = newRuns
         runsContentID = contentID
         if drawingChanged {
-            // A brand-new drawing: recompute from the first match.
+            // A brand-new drawing: its predecessor's picture text no longer applies.
+            pictureRuns = []
+            isReadingPictures = false
             recompute(resetToFirst: true)
         } else {
             // The same drawing edited: keep the user's place when it still exists.
             recompute(resetToFirst: false)
         }
+    }
+
+    /// Marks the picture-OCR pass as running for the current drawing, so the bar shows the
+    /// progress hint until `setPictureRuns` (or a drawing change) clears it.
+    func beginReadingPictures() { isReadingPictures = true }
+
+    /// Merges the OCR picture runs into the matches, if they still belong to the current
+    /// drawing (`contentID` matches). A stale result from a previous drawing is ignored. The
+    /// user's current match is kept when it still exists.
+    func setPictureRuns(_ newRuns: [DrawingTextRun], contentID: Int) {
+        guard runsContentID == contentID else { return }
+        isReadingPictures = false
+        guard newRuns != pictureRuns else { return }
+        pictureRuns = newRuns
+        recompute(resetToFirst: false)
+    }
+
+    /// Drops the picture runs (the Settings toggle turning OCR off), re-matching the drawing
+    /// text alone.
+    func clearPictureRuns() {
+        isReadingPictures = false
+        guard !pictureRuns.isEmpty else { return }
+        pictureRuns = []
+        recompute(resetToFirst: false)
     }
 
     // MARK: Presentation
@@ -97,7 +136,7 @@ final class DrawingFindModel {
     func goPrevious() { current = DrawingTextFind.previous(current: current, total: matches.count) }
 
     private func recompute(resetToFirst: Bool) {
-        matches = DrawingTextFind.matches(of: query, in: runs)
+        matches = DrawingTextFind.matches(of: query, in: allRuns)
         if matches.isEmpty {
             current = nil
         } else if resetToFirst {
@@ -113,5 +152,5 @@ final class DrawingFindModel {
 
     /// Every run's text in reading order as plain text (drawing text, then picture text),
     /// for the "Copy All Text" command. Empty when the drawing has no text.
-    func copyAllText() -> String { DrawingTextExtractor.copyAllText(runs) }
+    func copyAllText() -> String { DrawingTextExtractor.copyAllText(allRuns) }
 }
