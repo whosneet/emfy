@@ -775,6 +775,7 @@ private struct IOSSettingsForm: View {
 
     var body: some View {
         @Bindable var settings = settings
+        ScrollViewReader { proxy in
         Form {
             Section("Viewer") {
                 IOSOptionRow(title: "Default zoom on open", value: $settings.defaultZoomOnOpen)
@@ -810,6 +811,7 @@ private struct IOSSettingsForm: View {
                 } footer: {
                     Text(SettingsFooter.fullEditorOnIPhone)
                 }
+                .id("settings.editing")
             }
             Section {
                 IOSOptionRow(title: "Default PNG scale", value: $settings.defaultPNGScale)
@@ -866,6 +868,18 @@ private struct IOSSettingsForm: View {
             store.setPrivate(on)
         }
         .capReduction(cap, store: store, settings: settings)
+        #if DEBUG
+        // The `iphone-settings` screenshot script scrolls to the Editing section so the
+        // capture shows the Full-editor toggle and its footer (E4 verification d).
+        .onAppear {
+            guard EditorDebugLaunch.script == "iphone-settings", !supportsMultipleWindows else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                withAnimation { proxy.scrollTo("settings.editing", anchor: .center) }
+            }
+        }
+        #endif
+        }
     }
 }
 

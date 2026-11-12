@@ -464,16 +464,18 @@ struct MetafileViewerScreen: View {
         case .colour:
             showColorSheet = true
         case .edited:
-            session.debugApplyLightColor(ids: [shapeID], red: 0.85, green: 0.16, blue: 0.16)
+            // Recolour the selected shape through the light Colour path (a visibly
+            // different purple), delete a different visible shape, and lay down one
+            // Markup stroke — so the capture shows all three edits.
+            session.debugApplyLightColor(ids: [shapeID], red: 0.55, green: 0.17, blue: 0.78)
+            let victim = session.allEditableIDs().subtracting([shapeID]).sorted().last
             let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
             let stroke = (0 ... 40).map { i -> CGPoint in
                 CGPoint(x: page.width * 0.18 + Double(i) * (page.width * 0.5 / 40),
                         y: page.height * 0.62 + sin(Double(i) * 0.5) * page.height * 0.05)
             }
             _ = session.debugInsertPenStroke(devicePoints: stroke, held: false, pen: PenStyle(color: PenPalette.blue, widthPoints: 3))
-            if let victim = session.allEditableIDs().subtracting([shapeID]).sorted().first {
-                session.deleteSelection([victim])
-            }
+            if let victim { session.deleteSelection([victim]) }
             editorModel.selection.replace(with: shapeID)   // keep the recoloured shape selected
         }
         session.debugCancelAutosave()
