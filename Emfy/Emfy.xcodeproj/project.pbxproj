@@ -15,6 +15,10 @@
 		A1A000000000000000000102 /* DrawingAIAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000101 /* DrawingAIAvailability.swift */; };
 		A1A000000000000000000103 /* DrawingAIAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000101 /* DrawingAIAvailability.swift */; };
 		A1A000000000000000000105 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
+		A2A000000000000000000002 /* AIProviderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000001 /* AIProviderModel.swift */; };
+		A2A000000000000000000003 /* AIProviderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000001 /* AIProviderModel.swift */; };
+		A2A000000000000000000005 /* AIKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000004 /* AIKeychainStore.swift */; };
+		A2A000000000000000000006 /* AIKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000004 /* AIKeychainStore.swift */; };
 		A1A000000000000000000106 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
 		A1A0000000000000B1B00008A /* DrawingExplainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00008F /* DrawingExplainModel.swift */; };
 		A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00008F /* DrawingExplainModel.swift */; };
@@ -377,6 +381,8 @@
 		A1A0000000000000FACE0001 /* DrawingAIDebugProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIDebugProbe.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000101 /* DrawingAIAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIAvailability.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000104 /* DrawingAIContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIContext.swift"; sourceTree = "<group>"; };
+		A2A000000000000000000001 /* AIProviderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderModel.swift"; sourceTree = "<group>"; };
+		A2A000000000000000000004 /* AIKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIKeychainStore.swift"; sourceTree = "<group>"; };
 		A1A0000000000000B1B00008F /* DrawingExplainModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingExplainModel.swift"; sourceTree = "<group>"; };
 		A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingRecordPurpose.swift"; sourceTree = "<group>"; };
 		A1A0000000000000EVAL000F /* DrawingAIEvalSuite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIEvalSuite.swift"; sourceTree = "<group>"; };
@@ -803,6 +809,8 @@
 				A1A0000000000000B1B00001F /* DrawingAITitleTags.swift */,
 				A1A0000000000000FACE0001 /* DrawingAIDebugProbe.swift */,
 				A1A0000000000000FACE0003 /* DrawingAIScreenshots.swift */,
+				A2A000000000000000000001 /* AIProviderModel.swift */,
+				A2A000000000000000000004 /* AIKeychainStore.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -1168,6 +1176,8 @@
 				A1A0000000000000FACE0002 /* DrawingAIDebugProbe.swift in Sources */,
 				A1A000000000000000000102 /* DrawingAIAvailability.swift in Sources */,
 				A1A000000000000000000105 /* DrawingAIContext.swift in Sources */,
+				A2A000000000000000000002 /* AIProviderModel.swift in Sources */,
+				A2A000000000000000000005 /* AIKeychainStore.swift in Sources */,
 				A1A0000000000000B1B00008A /* DrawingExplainModel.swift in Sources */,
 				A1A0000000000000RECP000A /* DrawingRecordPurpose.swift in Sources */,
 				A1A0000000000000EVAL000A /* DrawingAIEvalSuite.swift in Sources */,
@@ -1362,6 +1372,8 @@
 			files = (
 				A1A000000000000000000103 /* DrawingAIAvailability.swift in Sources */,
 				A1A000000000000000000106 /* DrawingAIContext.swift in Sources */,
+				A2A000000000000000000003 /* AIProviderModel.swift in Sources */,
+				A2A000000000000000000006 /* AIKeychainStore.swift in Sources */,
 				A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */,
 				A1A0000000000000RECP000T /* DrawingRecordPurpose.swift in Sources */,
 				A1A0000000000000B1B00006T /* LibrarySearch.swift in Sources */,
