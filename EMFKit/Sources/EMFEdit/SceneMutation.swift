@@ -14,6 +14,14 @@ public enum SceneEditError: Error, Sendable, Equatable {
     case elementLocked(id: Int)
     /// `setText`/`setFont` named an element that is not a text run.
     case notTextElement(id: Int)
+    /// No layer carries `id` (E3d).
+    case layerNotFound(id: Int)
+    /// A reorder/active-layer op named a layer order index outside `0..<layers.count` (E3d).
+    case layerIndexOutOfRange(index: Int)
+    /// The only layer cannot be deleted — a scene always keeps at least one layer (E3d).
+    case cannotDeleteOnlyLayer
+    /// A reorder did not name every existing layer exactly once (E3d).
+    case invalidLayerOrder
 }
 
 // MARK: - Element-level edit helpers (internal)

@@ -198,12 +198,18 @@ public struct Scene: Sendable, Equatable {
     public var layers: [Layer]
     public var partition: ScenePartition
     public var source: SceneSource
+    /// Source record indices (into the EMF record stream) that held Emfy layer
+    /// markers when this scene was imported (E3d). The exporter strips these on
+    /// rewrite and injects fresh markers, so a re-save never duplicates them.
+    /// Empty for a file without markers (every existing scene).
+    public var layerMarkerIndices: Set<Int>
 
-    public init(pageBoundsDevice: CGRect, layers: [Layer], partition: ScenePartition, source: SceneSource) {
+    public init(pageBoundsDevice: CGRect, layers: [Layer], partition: ScenePartition, source: SceneSource, layerMarkerIndices: Set<Int> = []) {
         self.pageBoundsDevice = pageBoundsDevice
         self.layers = layers
         self.partition = partition
         self.source = source
+        self.layerMarkerIndices = layerMarkerIndices
     }
 
     /// Page size in DEVICE pixels (the source's natural size).
@@ -224,6 +230,39 @@ public struct Scene: Sendable, Equatable {
         var counts: [ElementKind: Int] = [:]
         for element in elements { counts[element.kind, default: 0] += 1 }
         return counts
+    }
+
+    // MARK: - Layers (E3d)
+
+    /// The name a single imported/blank layer carries when a file has no markers.
+    public static let defaultLayerName = "Imported"
+
+    /// The default active layer for new elements: the TOP layer (last in the
+    /// back-to-front array, shown first in the panel). With one layer that is the
+    /// only layer, so E3a–E3c's single-layer insert stays equivalent (design §3).
+    public var defaultActiveLayerID: Int? { layers.last?.id }
+
+    /// The order index of the layer with `id`, or nil.
+    public func layerOrder(ofLayer id: Int) -> Int? {
+        layers.firstIndex { $0.id == id }
+    }
+
+    /// The order index of the layer that contains element `id`, or nil.
+    public func layerOrder(ofElement id: Int) -> Int? {
+        layers.firstIndex { $0.elements.contains { $0.id == id } }
+    }
+
+    /// The smallest unused layer id, so a new layer never collides.
+    public var nextLayerID: Int { (layers.map(\.id).max() ?? -1) + 1 }
+
+    /// True when the layer structure carries information a save must persist as
+    /// markers: more than one layer, any hidden/locked layer, or a single layer
+    /// renamed from the default. A plain single "Imported" layer (every existing
+    /// scene) is trivial and saves byte-for-byte as before.
+    public var hasNonTrivialLayers: Bool {
+        if layers.count != 1 { return true }
+        let only = layers[0]
+        return only.hidden || only.locked || only.name != Scene.defaultLayerName || !layerMarkerIndices.isEmpty
     }
 
     // MARK: - Physical resolution (E3a)

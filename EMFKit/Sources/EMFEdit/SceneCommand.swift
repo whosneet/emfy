@@ -16,6 +16,18 @@ public enum SceneActionName: Sendable, Equatable, Hashable {
     case changeOpacity
     case changeText
     case changeFont
+    // Layers and arrange (E3d).
+    case addLayer
+    case deleteLayer
+    case renameLayer
+    case reorderLayers
+    case showHideLayer
+    case lockUnlockLayer
+    case moveToLayer
+    case bringToFront
+    case bringForward
+    case sendBackward
+    case sendToBack
     /// A caller-named group (e.g. "Recolour", "Paste"). The payload is the
     /// localisation key.
     case group(String)
@@ -32,6 +44,17 @@ public enum SceneActionName: Sendable, Equatable, Hashable {
         case .changeOpacity: return "edit.action.changeOpacity"
         case .changeText: return "edit.action.changeText"
         case .changeFont: return "edit.action.changeFont"
+        case .addLayer: return "edit.action.addLayer"
+        case .deleteLayer: return "edit.action.deleteLayer"
+        case .renameLayer: return "edit.action.renameLayer"
+        case .reorderLayers: return "edit.action.reorderLayers"
+        case .showHideLayer: return "edit.action.showHideLayer"
+        case .lockUnlockLayer: return "edit.action.lockUnlockLayer"
+        case .moveToLayer: return "edit.action.moveToLayer"
+        case .bringToFront: return "edit.action.bringToFront"
+        case .bringForward: return "edit.action.bringForward"
+        case .sendBackward: return "edit.action.sendBackward"
+        case .sendToBack: return "edit.action.sendToBack"
         case .group(let key): return key
         }
     }
@@ -69,6 +92,26 @@ public enum SceneCommand: Sendable, Equatable {
     case setText(id: Int, String)
     case setFont(id: Int, family: String, size: Int32, bold: Bool, italic: Bool)
 
+    // MARK: Layers and arrange (E3d)
+
+    /// Adds a new empty layer named `name` at order index `at` (back-to-front).
+    case addLayer(name: String, at: Int)
+    /// Deletes the layer with `id` and its elements (confirm first if non-empty — a
+    /// UI concern; the command always deletes). Refused for the only layer.
+    case deleteLayer(id: Int)
+    case renameLayer(id: Int, String)
+    /// Reorders the layers to the given back-to-front list of layer ids.
+    case reorderLayers([Int])
+    case setLayerHidden(id: Int, Bool)
+    case setLayerLocked(id: Int, Bool)
+    /// Moves the named elements to the top of the layer at order index `layer`.
+    case moveElementsToLayer(ids: Set<Int>, layer: Int)
+    /// Inserts a new element at z-index `at` within the layer at order index
+    /// `layer` (the active layer).
+    case insertInLayer(element: Element, at: Int, layer: Int)
+    /// Reorders the named elements within their own layer (Bring to Front, etc.).
+    case arrange(ids: Set<Int>, SceneArrange.Direction)
+
     /// The default menu name for this command (the caller may override per apply).
     public var actionName: SceneActionName {
         switch self {
@@ -81,6 +124,21 @@ public enum SceneCommand: Sendable, Equatable {
         case .setOpacity: return .changeOpacity
         case .setText: return .changeText
         case .setFont: return .changeFont
+        case .addLayer: return .addLayer
+        case .deleteLayer: return .deleteLayer
+        case .renameLayer: return .renameLayer
+        case .reorderLayers: return .reorderLayers
+        case .setLayerHidden: return .showHideLayer
+        case .setLayerLocked: return .lockUnlockLayer
+        case .moveElementsToLayer: return .moveToLayer
+        case .insertInLayer: return .insert
+        case .arrange(_, let direction):
+            switch direction {
+            case .toFront: return .bringToFront
+            case .forward: return .bringForward
+            case .backward: return .sendBackward
+            case .toBack: return .sendToBack
+            }
         }
     }
 }
@@ -106,6 +164,11 @@ enum SceneChange: Sendable, Equatable {
     /// `inserted` (each with its layer/index). `restoreToEmptyLayers` marks the
     /// edge case where an insert created the scene's sole layer.
     case structural(removed: [PlacedElement], inserted: [PlacedElement], restoreToEmptyLayers: Bool)
+    /// A layer-structural edit (add/delete/rename/reorder/hidden/locked/move/
+    /// arrange, E3d): the whole `layers` array before and after. Copy-on-write
+    /// makes an attribute-only change cheap (unchanged layers share storage); these
+    /// are rare, explicit actions, never coalesced.
+    case layers(before: [Layer], after: [Layer])
 }
 
 /// The prior and posterior value of one in-place-edited element.
@@ -179,6 +242,53 @@ extension Scene {
             let befores = elementsByID([id])
             try setFont(id, family: family, size: size, bold: bold, italic: italic)
             return editChange(ids: [id], befores: befores)
+
+        // MARK: Layers and arrange (E3d) — whole-layers snapshot inverse
+
+        case .addLayer(let name, let order):
+            let before = layers
+            addLayer(name: name, at: order)
+            return .layers(before: before, after: layers)
+
+        case .deleteLayer(let id):
+            let before = layers
+            try deleteLayer(id)
+            return .layers(before: before, after: layers)
+
+        case .renameLayer(let id, let name):
+            let before = layers
+            try renameLayer(id, name)
+            return .layers(before: before, after: layers)
+
+        case .reorderLayers(let order):
+            let before = layers
+            try reorderLayers(order)
+            return .layers(before: before, after: layers)
+
+        case .setLayerHidden(let id, let hidden):
+            let before = layers
+            try setLayerHidden(id, hidden)
+            return .layers(before: before, after: layers)
+
+        case .setLayerLocked(let id, let locked):
+            let before = layers
+            try setLayerLocked(id, locked)
+            return .layers(before: before, after: layers)
+
+        case .moveElementsToLayer(let ids, let order):
+            let before = layers
+            try moveElements(ids, toLayer: order)
+            return .layers(before: before, after: layers)
+
+        case .insertInLayer(let element, let z, let order):
+            let before = layers
+            try insert(element, at: z, inLayer: order)
+            return .layers(before: before, after: layers)
+
+        case .arrange(let ids, let direction):
+            let before = layers
+            arrange(ids, direction)
+            return .layers(before: before, after: layers)
         }
     }
 
@@ -192,6 +302,8 @@ extension Scene {
             removeByID(Set(inserted.map { $0.element.id }))
             if restoreToEmptyLayers { layers = [] }
             reinsert(removed)
+        case .layers(let before, _):
+            layers = before
         }
     }
 
@@ -203,6 +315,8 @@ extension Scene {
         case .structural(let removed, let inserted, let restoreToEmptyLayers):
             removeByID(Set(removed.map { $0.element.id }))
             reinsert(inserted, createLayerIfEmpty: restoreToEmptyLayers)
+        case .layers(_, let after):
+            layers = after
         }
     }
 
