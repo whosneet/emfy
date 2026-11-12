@@ -25,6 +25,10 @@
 		A2A00000000000000000000C /* ProviderError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000000A /* ProviderError.swift */; };
 		A2A000000000000000000014 /* AIProviderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000013 /* AIProviderClient.swift */; };
 		A2A000000000000000000015 /* AIProviderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000013 /* AIProviderClient.swift */; };
+		A2A00000000000000000000E /* SSEParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000000D /* SSEParser.swift */; };
+		A2A00000000000000000000F /* SSEParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000000D /* SSEParser.swift */; };
+		A2A000000000000000000011 /* AITransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000010 /* AITransport.swift */; };
+		A2A000000000000000000012 /* AITransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A000000000000000000010 /* AITransport.swift */; };
 		A1A000000000000000000106 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
 		A1A0000000000000B1B00008A /* DrawingExplainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00008F /* DrawingExplainModel.swift */; };
 		A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00008F /* DrawingExplainModel.swift */; };
@@ -392,6 +396,8 @@
 		A2A000000000000000000007 /* AIConsentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIConsentStore.swift"; sourceTree = "<group>"; };
 		A2A00000000000000000000A /* ProviderError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/ProviderError.swift"; sourceTree = "<group>"; };
 		A2A000000000000000000013 /* AIProviderClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderClient.swift"; sourceTree = "<group>"; };
+		A2A00000000000000000000D /* SSEParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/SSEParser.swift"; sourceTree = "<group>"; };
+		A2A000000000000000000010 /* AITransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AITransport.swift"; sourceTree = "<group>"; };
 		A1A0000000000000B1B00008F /* DrawingExplainModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingExplainModel.swift"; sourceTree = "<group>"; };
 		A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingRecordPurpose.swift"; sourceTree = "<group>"; };
 		A1A0000000000000EVAL000F /* DrawingAIEvalSuite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIEvalSuite.swift"; sourceTree = "<group>"; };
@@ -823,6 +829,8 @@
 				A2A000000000000000000007 /* AIConsentStore.swift */,
 				A2A00000000000000000000A /* ProviderError.swift */,
 				A2A000000000000000000013 /* AIProviderClient.swift */,
+				A2A00000000000000000000D /* SSEParser.swift */,
+				A2A000000000000000000010 /* AITransport.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -1193,6 +1201,8 @@
 				A2A000000000000000000008 /* AIConsentStore.swift in Sources */,
 				A2A00000000000000000000B /* ProviderError.swift in Sources */,
 				A2A000000000000000000014 /* AIProviderClient.swift in Sources */,
+				A2A00000000000000000000E /* SSEParser.swift in Sources */,
+				A2A000000000000000000011 /* AITransport.swift in Sources */,
 				A1A0000000000000B1B00008A /* DrawingExplainModel.swift in Sources */,
 				A1A0000000000000RECP000A /* DrawingRecordPurpose.swift in Sources */,
 				A1A0000000000000EVAL000A /* DrawingAIEvalSuite.swift in Sources */,
@@ -1392,6 +1402,8 @@
 				A2A000000000000000000009 /* AIConsentStore.swift in Sources */,
 				A2A00000000000000000000C /* ProviderError.swift in Sources */,
 				A2A000000000000000000015 /* AIProviderClient.swift in Sources */,
+				A2A00000000000000000000F /* SSEParser.swift in Sources */,
+				A2A000000000000000000012 /* AITransport.swift in Sources */,
 				A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */,
 				A1A0000000000000RECP000T /* DrawingRecordPurpose.swift in Sources */,
 				A1A0000000000000B1B00006T /* LibrarySearch.swift in Sources */,

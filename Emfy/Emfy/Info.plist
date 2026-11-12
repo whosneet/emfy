@@ -24,6 +24,16 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- AI providers (A2a): remote providers are reached over HTTPS only; this
+	     allows plain-http to a LOCAL network endpoint (Ollama / LM Studio on
+	     localhost). NSAllowsArbitraryLoads stays off — no cleartext to the
+	     internet; the transport layer additionally rejects http to any
+	     non-loopback host. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.graphics-design</string>
 	<key>LSMultipleInstancesProhibited</key>

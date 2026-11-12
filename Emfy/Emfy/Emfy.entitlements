@@ -4,6 +4,12 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- AI providers the user configures (v3-plan §10): the App Store build may
+	     make outbound connections, used ONLY for a configured AI provider behind
+	     the explicit per-provider consent gate. The DMG build is unsandboxed and
+	     needs no entitlement; the Quick Look extensions get none. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
