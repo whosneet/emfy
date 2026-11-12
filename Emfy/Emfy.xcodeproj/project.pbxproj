@@ -13,6 +13,8 @@
 		A1A000000000000000000103 /* DrawingAIAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000101 /* DrawingAIAvailability.swift */; };
 		A1A000000000000000000105 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
 		A1A000000000000000000106 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
+		A1A0000000000000B1B00001A /* DrawingAITitleTags.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00001F /* DrawingAITitleTags.swift */; };
+		A1A0000000000000B1B00001T /* DrawingAITitleTags.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00001F /* DrawingAITitleTags.swift */; };
 		A1A000000000000000000108 /* DrawingAITools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000107 /* DrawingAITools.swift */; };
 		A1A000000000000000000109 /* DrawingAITools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000107 /* DrawingAITools.swift */; };
 		A1A00000000000000000010B /* DrawingAIEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000010A /* DrawingAIEngine.swift */; };
@@ -27,6 +29,7 @@
 		A1A00000000000000000011A /* AppleIntelligenceSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000119 /* AppleIntelligenceSettingsSection.swift */; };
 		A1A00000000000000000011C /* DrawingAIAvailabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000011B /* DrawingAIAvailabilityTests.swift */; };
 		A1A00000000000000000011E /* DrawingAIContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000011D /* DrawingAIContextTests.swift */; };
+		A1A0000000000000B1B00002A /* DrawingAITitleTagsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00002F /* DrawingAITitleTagsTests.swift */; };
 		A1A000000000000000000120 /* DrawingAIToolsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000011F /* DrawingAIToolsTests.swift */; };
 		A1A000000000000000000122 /* DrawingAIAltTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000121 /* DrawingAIAltTextTests.swift */; };
 		F1B000000000000000000014 /* IOSBatchConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000014 /* IOSBatchConvert.swift */; platformFilters = (ios, ); };
@@ -360,6 +363,7 @@
 		A1A0000000000000FACE0001 /* DrawingAIDebugProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIDebugProbe.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000101 /* DrawingAIAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIAvailability.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000104 /* DrawingAIContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIContext.swift"; sourceTree = "<group>"; };
+		A1A0000000000000B1B00001F /* DrawingAITitleTags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAITitleTags.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000107 /* DrawingAITools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAITools.swift"; sourceTree = "<group>"; };
 		A1A00000000000000000010A /* DrawingAIEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIEngine.swift"; sourceTree = "<group>"; };
 		A1A00000000000000000010D /* DrawingAIContextProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIContextProvider.swift"; sourceTree = "<group>"; };
@@ -372,6 +376,7 @@
 		A1A00000000000000000011D /* DrawingAIContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIContextTests.swift; sourceTree = "<group>"; };
 		A1A00000000000000000011F /* DrawingAIToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIToolsTests.swift; sourceTree = "<group>"; };
 		A1A000000000000000000121 /* DrawingAIAltTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIAltTextTests.swift; sourceTree = "<group>"; };
+		A1A0000000000000B1B00002F /* DrawingAITitleTagsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAITitleTagsTests.swift; sourceTree = "<group>"; };
 		F1A000000000000000000014 /* IOSBatchConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSBatchConvert.swift; sourceTree = "<group>"; };
 		F1A000000000000000000012 /* BatchConvertController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchConvertController.swift; sourceTree = "<group>"; };
 		F1A000000000000000000013 /* MacBatchConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBatchConvert.swift; sourceTree = "<group>"; };
@@ -766,6 +771,7 @@
 				A1A000000000000000000115 /* DrawingAskModel.swift */,
 				A1A000000000000000000117 /* DrawingAIInspectorViews.swift */,
 				A1A000000000000000000119 /* AppleIntelligenceSettingsSection.swift */,
+				A1A0000000000000B1B00001F /* DrawingAITitleTags.swift */,
 				A1A0000000000000FACE0001 /* DrawingAIDebugProbe.swift */,
 				A1A0000000000000FACE0003 /* DrawingAIScreenshots.swift */,
 			);
@@ -816,6 +822,7 @@
 				A1A00000000000000000011D /* DrawingAIContextTests.swift */,
 				A1A00000000000000000011F /* DrawingAIToolsTests.swift */,
 				A1A000000000000000000121 /* DrawingAIAltTextTests.swift */,
+				A1A0000000000000B1B00002F /* DrawingAITitleTagsTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -1129,6 +1136,7 @@
 				A1A0000000000000FACE0002 /* DrawingAIDebugProbe.swift in Sources */,
 				A1A000000000000000000102 /* DrawingAIAvailability.swift in Sources */,
 				A1A000000000000000000105 /* DrawingAIContext.swift in Sources */,
+				A1A0000000000000B1B00001A /* DrawingAITitleTags.swift in Sources */,
 				A1A000000000000000000108 /* DrawingAITools.swift in Sources */,
 				A1A00000000000000000010B /* DrawingAIEngine.swift in Sources */,
 				A1A00000000000000000010E /* DrawingAIContextProvider.swift in Sources */,
@@ -1316,12 +1324,14 @@
 			files = (
 				A1A000000000000000000103 /* DrawingAIAvailability.swift in Sources */,
 				A1A000000000000000000106 /* DrawingAIContext.swift in Sources */,
+				A1A0000000000000B1B00001T /* DrawingAITitleTags.swift in Sources */,
 				A1A000000000000000000109 /* DrawingAITools.swift in Sources */,
 				A1A00000000000000000010C /* DrawingAIEngine.swift in Sources */,
 				A1A00000000000000000010F /* DrawingAIContextProvider.swift in Sources */,
 				A1A000000000000000000112 /* DrawingAIAltText.swift in Sources */,
 				A1A00000000000000000011C /* DrawingAIAvailabilityTests.swift in Sources */,
 				A1A00000000000000000011E /* DrawingAIContextTests.swift in Sources */,
+				A1A0000000000000B1B00002A /* DrawingAITitleTagsTests.swift in Sources */,
 				A1A000000000000000000120 /* DrawingAIToolsTests.swift in Sources */,
 				A1A000000000000000000122 /* DrawingAIAltTextTests.swift in Sources */,
 				B011000000000000000000F0 /* EmfyTests.swift in Sources */,
