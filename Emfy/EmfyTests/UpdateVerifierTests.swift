@@ -21,6 +21,25 @@ struct UpdateVerifierTests {
         #expect(hex == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
     }
 
+    @Test func wrongDigestIsHardFailureBeforeMount() throws {
+        // A mismatched SHA-256 must fail at the digest step — before any mount — so a
+        // tampered download never reaches signature/notarisation checks and nothing is
+        // installed. Uses a real file (not a DMG); the digest check runs first.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EmfyDigestTest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("fake.dmg")
+        try Data("not a real dmg".utf8).write(to: file)
+        let wrongHex = String(repeating: "0", count: 64)
+        #expect(throws: UpdateError.digestMismatch) {
+            try SecurityUpdateVerifier().verify(
+                dmg: file, expectedSHA256: wrongHex,
+                expectedBundleID: "com.avneetsingh.emfy",
+                current: AppVersion(core: [3, 0, 0], build: 5))
+        }
+    }
+
     @Test func unsignedBundleFailsSignatureCheck() throws {
         // Build a minimal, UNSIGNED .app in a temp dir. The designated-requirement
         // validity check must throw .signatureInvalid — it never installs an app that
