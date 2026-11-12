@@ -22,6 +22,9 @@
 		F3B000000000000000000003 /* DrawingSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000005 /* DrawingSpotlight.swift */; };
 		F4B000000000000000000001 /* DrawingEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A000000000000000000001 /* DrawingEntity.swift */; };
 		F4B000000000000000000002 /* DrawingIntentsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A000000000000000000002 /* DrawingIntentsCore.swift */; };
+		F4B000000000000000000020 /* ConvertServicePlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A000000000000000000020 /* ConvertServicePlanner.swift */; };
+		F4C000000000000000000020 /* ConvertServicePlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A000000000000000000020 /* ConvertServicePlanner.swift */; };
+		F4C000000000000000000022 /* ConvertServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A000000000000000000022 /* ConvertServiceTests.swift */; };
 		F4B000000000000000000003 /* OpenDrawingIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A000000000000000000003 /* OpenDrawingIntent.swift */; };
 		F4B000000000000000000004 /* EmfyShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A000000000000000000004 /* EmfyShortcuts.swift */; };
 		F4B000000000000000000010 /* DrawingEntityIndexing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A000000000000000000010 /* DrawingEntityIndexing.swift */; };
@@ -335,6 +338,8 @@
 		F3A000000000000000000005 /* DrawingSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSpotlight.swift; sourceTree = "<group>"; };
 		F4A000000000000000000001 /* DrawingEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingEntity.swift; sourceTree = "<group>"; };
 		F4A000000000000000000002 /* DrawingIntentsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingIntentsCore.swift; sourceTree = "<group>"; };
+		F4A000000000000000000020 /* ConvertServicePlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvertServicePlanner.swift; sourceTree = "<group>"; };
+		F4A000000000000000000022 /* ConvertServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvertServiceTests.swift; sourceTree = "<group>"; };
 		F4A000000000000000000003 /* OpenDrawingIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenDrawingIntent.swift; sourceTree = "<group>"; };
 		F4A000000000000000000004 /* EmfyShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmfyShortcuts.swift; sourceTree = "<group>"; };
 		F4A000000000000000000005 /* AppIntentsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentsTests.swift; sourceTree = "<group>"; };
@@ -688,6 +693,7 @@
 				F1A000000000000000000012 /* BatchConvertController.swift */,
 				F4A000000000000000000001 /* DrawingEntity.swift */,
 				F4A000000000000000000002 /* DrawingIntentsCore.swift */,
+				F4A000000000000000000020 /* ConvertServicePlanner.swift */,
 				F4A000000000000000000003 /* OpenDrawingIntent.swift */,
 				F4A000000000000000000004 /* EmfyShortcuts.swift */,
 				F4A000000000000000000010 /* DrawingEntityIndexing.swift */,
@@ -732,6 +738,7 @@
 				F1A000000000000000000007 /* BatchConvertTests.swift */,
 				F4A000000000000000000005 /* AppIntentsTests.swift */,
 				F4A000000000000000000011 /* IndexedEntityTests.swift */,
+				F4A000000000000000000022 /* ConvertServiceTests.swift */,
 			);
 			path = EmfyTests;
 			sourceTree = "<group>";
@@ -1137,6 +1144,7 @@
 				F3B000000000000000000003 /* DrawingSpotlight.swift in Sources */,
 				F4B000000000000000000001 /* DrawingEntity.swift in Sources */,
 				F4B000000000000000000002 /* DrawingIntentsCore.swift in Sources */,
+				F4B000000000000000000020 /* ConvertServicePlanner.swift in Sources */,
 				F4B000000000000000000003 /* OpenDrawingIntent.swift in Sources */,
 				F4B000000000000000000004 /* EmfyShortcuts.swift in Sources */,
 				F4B000000000000000000010 /* DrawingEntityIndexing.swift in Sources */,
@@ -1264,6 +1272,8 @@
 				F3C000000000000000000005 /* DrawingSpotlight.swift in Sources */,
 				F4C000000000000000000001 /* DrawingEntity.swift in Sources */,
 				F4C000000000000000000002 /* DrawingIntentsCore.swift in Sources */,
+				F4C000000000000000000020 /* ConvertServicePlanner.swift in Sources */,
+				F4C000000000000000000022 /* ConvertServiceTests.swift in Sources */,
 				F4C000000000000000000005 /* AppIntentsTests.swift in Sources */,
 				F4C000000000000000000010 /* DrawingEntityIndexing.swift in Sources */,
 				F4C000000000000000000011 /* IndexedEntityTests.swift in Sources */,
