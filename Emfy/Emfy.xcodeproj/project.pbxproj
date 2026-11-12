@@ -168,6 +168,8 @@
 		F5C00000000000000000D011 /* RecordsInspectorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D010 /* RecordsInspectorPanel.swift */; };
 		F5C00000000000000000D021 /* MacRecordReplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D020 /* MacRecordReplayView.swift */; platformFilters = (macos, ); };
 		F5C00000000000000000D031 /* RecordReplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D030 /* RecordReplayView.swift */; platformFilters = (ios, ); };
+		F5C00000000000000000D002 /* RecordReplayDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D000 /* RecordReplayDriver.swift */; };
+		F5C00000000000000000D041 /* RecordReplayLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C00000000000000000D040 /* RecordReplayLogicTests.swift */; };
 		F5B0000000000000000000D1 /* RecordInspectorModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5B0000000000000000000D0 /* RecordInspectorModelTests.swift */; };
 		E2C0000000000000000000B1 /* EditorFormatInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000B0 /* EditorFormatInspector.swift */; };
 		E2C0000000000000000000C1 /* EditorTextEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C0000000000000000000C0 /* EditorTextEditing.swift */; };
@@ -447,6 +449,7 @@
 		F5C00000000000000000D010 /* RecordsInspectorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsInspectorPanel.swift; sourceTree = "<group>"; };
 		F5C00000000000000000D020 /* MacRecordReplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacRecordReplayView.swift; sourceTree = "<group>"; };
 		F5C00000000000000000D030 /* RecordReplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordReplayView.swift; sourceTree = "<group>"; };
+		F5C00000000000000000D040 /* RecordReplayLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordReplayLogicTests.swift; sourceTree = "<group>"; };
 		F5B0000000000000000000D0 /* RecordInspectorModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordInspectorModelTests.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000B0 /* EditorFormatInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorFormatInspector.swift; sourceTree = "<group>"; };
 		E2C0000000000000000000C0 /* EditorTextEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTextEditing.swift; sourceTree = "<group>"; };
@@ -739,6 +742,7 @@
 				E2B0000000000000000000E0 /* EditorToolsTests.swift */,
 				E2C0000000000000000000D0 /* FormatInspectorTests.swift */,
 				F5B0000000000000000000D0 /* RecordInspectorModelTests.swift */,
+				F5C00000000000000000D040 /* RecordReplayLogicTests.swift */,
 				E3D00000000000000000B000 /* E3LayerPanelTests.swift */,
 				E3E0000000000000000000C0 /* E3ArrangeSnapTests.swift */,
 				E4A0000000000000000000D0 /* E4LightEditingTests.swift */,
@@ -1278,6 +1282,8 @@
 				E2C0000000000000000000A2 /* FormatInspectorModel.swift in Sources */,
 				F5B0000000000000000000A2 /* RecordInspectorModel.swift in Sources */,
 				F5B0000000000000000000D1 /* RecordInspectorModelTests.swift in Sources */,
+				F5C00000000000000000D002 /* RecordReplayDriver.swift in Sources */,
+				F5C00000000000000000D041 /* RecordReplayLogicTests.swift in Sources */,
 				E2C0000000000000000000D1 /* FormatInspectorTests.swift in Sources */,
 				B01100000000000000000121 /* OpenRouting.swift in Sources */,
 				B01100000000000000000122 /* ViewerFit.swift in Sources */,

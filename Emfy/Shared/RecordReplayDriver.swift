@@ -14,6 +14,26 @@ import Observation
 // latest completed render is applied, so dragging the scrubber across a large file
 // renders just the frames that land.
 
+/// Pure replay-render decisions, so the "render once per index" rule is unit-tested
+/// without the actor/player.
+enum RecordReplayLogic {
+    /// Whether a step request should actually render: only when it targets a different
+    /// record than the one already requested/shown (so repeated same-index requests —
+    /// from a layout pass, an observation change, or a re-selection — do not re-render).
+    static func shouldRender(requested: Int, lastRequested: Int?) -> Bool {
+        requested != lastRequested
+    }
+
+    /// A replay render scale capped so the raster's long side stays ≤ `maxLongSide`
+    /// pixels, regardless of the requested scale (defensive: a huge device page must
+    /// not drive a huge replay bitmap). Never below a thin floor.
+    static func cappedScale(_ scale: CGFloat, deviceLongSide: CGFloat, maxLongSide: CGFloat = 4096) -> CGFloat {
+        guard deviceLongSide > 0, scale > 0 else { return max(scale, 0.01) }
+        let ceiling = maxLongSide / deviceLongSide
+        return max(0.01, min(scale, ceiling))
+    }
+}
+
 /// The one-time data the inspector needs for a loaded drawing: the record list, the
 /// drawing-record indices and per-record device outlines (from `observe`), whether
 /// per-record stepping is available, and the replay canvas pixel/device geometry.
@@ -127,6 +147,9 @@ final class RecordReplayDriver {
     @ObservationIgnored private var perRecordDeviceBounds: [Int: CGRect] = [:]
     @ObservationIgnored private(set) var summaries: [Int: String] = [:]
     @ObservationIgnored private var generation = 0
+    /// The record index the latest render was requested for, so a repeated request for
+    /// the same index is a no-op (just the outline) rather than a fresh render.
+    @ObservationIgnored private var requestedIndex: Int?
     /// Median step time (ms) and first→last span (ms), for the WS-A perf log.
     @ObservationIgnored private var stepTimesMS: [Double] = []
 
@@ -142,10 +165,16 @@ final class RecordReplayDriver {
     ) {
         guard self.contentID != contentID else { return }
         self.contentID = contentID
-        let engine = RecordReplayEngine(prepared: prepared, options: options, scale: scale)
+        // Cap the replay raster: the step image's long side stays ≤ 4096 px regardless
+        // of the device page size, so a huge page can't drive a huge bitmap per step.
+        let cappedScale = RecordReplayLogic.cappedScale(
+            scale, deviceLongSide: max(prepared.deviceBounds.width, prepared.deviceBounds.height)
+        )
+        let engine = RecordReplayEngine(prepared: prepared, options: options, scale: cappedScale)
         self.engine = engine
         deviceBounds = prepared.deviceBounds
         image = nil
+        requestedIndex = nil
         stepTimesMS = []
         Task { [weak self, weak model] in
             let data = await engine.prepareData()
@@ -170,7 +199,12 @@ final class RecordReplayDriver {
     /// the background render lands.
     func request(index: Int, model: RecordInspectorModel?) {
         guard let engine else { return }
+        // The outline is cheap and always follows the selection.
         outlineDeviceRect = perRecordDeviceBounds[index]
+        // Render once per index: a repeated request for the same index (a layout pass,
+        // an observation change, a re-selection) does not re-run the player.
+        guard RecordReplayLogic.shouldRender(requested: index, lastRequested: requestedIndex) else { return }
+        requestedIndex = index
         generation &+= 1
         let token = generation
         Task { [weak self, weak model] in
@@ -191,7 +225,7 @@ final class RecordReplayDriver {
 
     /// Forces the next `configure` to rebuild (e.g. after a render-options change that
     /// keeps the same content id).
-    func invalidate() { contentID = nil }
+    func invalidate() { contentID = nil; requestedIndex = nil }
 
     #if DEBUG
     /// Steps through every record once, sequentially, timing each — the WS-A step-through
