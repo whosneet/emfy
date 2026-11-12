@@ -554,6 +554,23 @@ final class DocumentSession {
         return insertion.id
     }
 
+    /// Inserts a text element through the SAME path the text tool uses (`beginInsertText`
+    /// + the popover's commit), returning its id, for the E3c `text-image` script.
+    func debugInsertText(_ string: String, originDevice: CGPoint) -> Int? {
+        guard editing == .editing, let scene = editingScene else { return nil }
+        let insertion = TextToolInsertion.element(originDevice: originDevice, in: scene)
+        beginInsertText(insertion.element)
+        commitInsertedText(id: insertion.id, string: string)
+        return insertion.id
+    }
+
+    /// Ingests image bytes and inserts them through the SAME path the image tool uses
+    /// (`insertImage` → ingest/cap/strip → `apply(.insert)`), returning the id, for the
+    /// E3c `text-image` script.
+    func debugInsertImage(_ data: Data, centreDevice: CGPoint?) -> Int? {
+        insertImage(data: data, centreDevice: centreDevice)
+    }
+
     /// Cancels any armed autosave, so a DEBUG capture run never writes on its way out.
     func debugCancelAutosave() { autosave.cancel() }
 
@@ -654,6 +671,83 @@ final class DocumentSession {
             registerSystemUndo(name: updated.undoActionName ?? command.actionName)
         }
         afterMutation(markDirty: true)
+    }
+
+    // MARK: - Editing: insert text + image (E3c)
+
+    /// A brand-new text element whose insert is held in an open undo group until the
+    /// text popover commits ("Insert Text", one undo) or cancels (removed, no undo).
+    @ObservationIgnored private var pendingTextInsertID: Int?
+
+    /// Set when an image insert failed — over the §8 caps or undecodable — so the viewer
+    /// toasts "This image couldn't be added" then clears it (design call 2). Observed.
+    private(set) var imageInsertFailed = false
+    func clearImageInsertFailed() { imageInsertFailed = false }
+    /// Flags an image-insert failure that happened before the decode (an unreadable file
+    /// URL, or a Photos item that couldn't be loaded), so the viewer toasts it too.
+    func markImageInsertFailed() { imageInsertFailed = true }
+
+    /// Inserts a new text `element` and opens a coalesced undo group ("Insert Text"), so
+    /// the text popover's first `setText` (and any font tweak) merges into ONE undo step
+    /// (design call 1). The element shows immediately; the popover then
+    /// `commitInsertedText`s or `cancelInsertedText`s. A no-op when read-only.
+    func beginInsertText(_ element: Element) {
+        guard editing == .editing, var updated = history, let scene = editingScene else { return }
+        let z = scene.layers.first?.elements.count ?? 0
+        updated.beginGroup(name: .group("edit.action.insertText"))
+        do {
+            try updated.apply(.insert(element: element, at: z))
+        } catch {
+            updated.abortGroup()
+            history = updated
+            return
+        }
+        history = updated
+        pendingTextInsertID = element.id
+        afterMutation(markDirty: true)
+    }
+
+    /// Commits the (sanitised) string of a just-inserted text element, closing its group
+    /// as one "Insert Text" undo entry. For an existing element (a double-click edit,
+    /// not pending) it is a plain `setText` (the previous behaviour).
+    func commitInsertedText(id: Int, string: String) {
+        guard editing == .editing, pendingTextInsertID == id, var updated = history else {
+            apply(.setText(id: id, string))
+            return
+        }
+        try? updated.apply(.setText(id: id, string))
+        updated.endGroup()
+        history = updated
+        pendingTextInsertID = nil
+        registerSystemUndo(name: .group("edit.action.insertText"))
+        afterMutation(markDirty: true)
+    }
+
+    /// Cancels a just-inserted text element (the popover dismissed with no commit on a
+    /// brand-new element): rolls the insert back with nothing recorded (design call 1).
+    /// A no-op for an existing element.
+    func cancelInsertedText(id: Int) {
+        guard editing == .editing, pendingTextInsertID == id, var updated = history else { return }
+        updated.abortGroup()
+        history = updated
+        pendingTextInsertID = nil
+        afterMutation(markDirty: nil)
+    }
+
+    /// Decodes-and-inserts an image (one `.insert` undo) centred on the page, or at
+    /// `centreDevice` for a drop, returning the new element's id so the caller selects it
+    /// (design call 2). Untrusted input is decoded with the §8 caps and re-encoded pixels-
+    /// only; a typed failure sets `imageInsertFailed` for a toast and returns nil.
+    func insertImage(data: Data, centreDevice: CGPoint? = nil) -> Int? {
+        guard editing == .editing, let scene = editingScene else { return nil }
+        switch ImageInsertTool.element(imageData: data, pageBoundsDevice: scene.pageBoundsDevice, centreDevice: centreDevice, in: scene) {
+        case .failure:
+            imageInsertFailed = true
+            return nil
+        case .success(let inserted):
+            apply(.insert(element: inserted.element, at: scene.layers.first?.elements.count ?? 0))
+            return inserted.id
+        }
     }
 
     /// Restores the editor's selection after an undo/redo of a delete. Set by the

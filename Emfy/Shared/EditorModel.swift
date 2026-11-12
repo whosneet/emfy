@@ -28,6 +28,11 @@ final class EditorModel {
     /// (Keynote behaviour). Observed so the toolbar reflects the armed state.
     var armedShapeTool: ShapeToolKind?
 
+    /// Whether the text-creation tool is armed (E3c design call 1). A click/tap on the
+    /// canvas inserts a new text element and opens the popover; the tool then disarms
+    /// after one insert (Keynote). Observed so the toolbar reflects the active state.
+    var armedTextTool = false
+
     /// Whether the freehand pen tool is armed (E3b design call 1). Unlike a shape, the pen
     /// STAYS armed until Esc, another tool, or tapping the Pen button again (Freeform/
     /// Keynote behaviour). On the iPad an Apple Pencil draws the pen even while unarmed, so
@@ -42,14 +47,17 @@ final class EditorModel {
     /// Pen button's menu; design call 3/5). Observed so the screen presents it.
     var penPalettePresented = false
 
-    /// Arms the pen and disarms any shape tool (the two creation tools are exclusive).
-    func armPen() { armedPen = true; armedShapeTool = nil }
+    /// Arms the pen and disarms every other creation tool (a single armed tool).
+    func armPen() { armedPen = true; armedShapeTool = nil; armedTextTool = false }
 
-    /// Arms a shape tool and disarms the pen.
-    func armShape(_ kind: ShapeToolKind) { armedShapeTool = kind; armedPen = false }
+    /// Arms a shape tool and disarms the pen and text tools.
+    func armShape(_ kind: ShapeToolKind) { armedShapeTool = kind; armedPen = false; armedTextTool = false }
 
-    /// Disarms every creation tool (Esc, leaving edit mode).
-    func disarmTools() { armedShapeTool = nil; armedPen = false }
+    /// Arms the text tool and disarms the pen and shape tools (E3c design call 3).
+    func armText() { armedTextTool = true; armedShapeTool = nil; armedPen = false }
+
+    /// Disarms every creation tool (Esc, leaving edit mode, arming an image insert).
+    func disarmTools() { armedShapeTool = nil; armedPen = false; armedTextTool = false }
 }
 
 /// The state driving the text-edit popover: which text element, the point to anchor the

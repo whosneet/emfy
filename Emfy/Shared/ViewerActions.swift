@@ -49,6 +49,10 @@ struct ViewerActions {
     // (`nil` disables the menu item).
     var deleteSelection: (() -> Void)? = nil
 
+    // Editing (E3c): Insert ▸ Image…, present only while editing (`nil` disables the
+    // menu item). Opens the image file picker and inserts the chosen image.
+    var insertImage: (() -> Void)? = nil
+
     // iOS/iPadOS immersive chrome + the Info inspector, surfaced in the iOS View menu
     // (K1). `nil` on the Mac, which has its own View toggles and toolbar.
     var toggleChrome: (() -> Void)? = nil
