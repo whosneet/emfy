@@ -98,6 +98,20 @@ struct RecentsGrid: View {
                 IOSBatchConvertSheet(entries: selectedConvertEntries, store: store)
                     .environment(settings)
             }
+            #if DEBUG
+            // F1 simulator screenshots (e1/e2/e3): enter Select mode, select the seeded
+            // files, and (optionally) present the Batch Convert sheet.
+            .task {
+                guard EditorDebugLaunch.iosSelect else { return }
+                for _ in 0..<40 where store.entries.isEmpty { try? await Task.sleep(for: .milliseconds(100)) }
+                isSelecting = true
+                selectedIDs = Set(store.entries.prefix(3).map(\.id))
+                if EditorDebugLaunch.iosConvert {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    showConvert = true
+                }
+            }
+            #endif
     }
 
     /// The entries chosen in Select mode, for Batch Convert (newest-first, matching the

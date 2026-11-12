@@ -32,6 +32,12 @@ struct IOSBatchConvertSheet: View {
                 .sheet(item: $sharePayload) { payload in
                     ShareSheet(items: payload.urls)
                 }
+                #if DEBUG
+                // F1 simulator screenshot (e3): auto-run so the report shows.
+                .task {
+                    if EditorDebugLaunch.iosConvertRun, phase == .configure { startRun() }
+                }
+                #endif
         }
     }
 

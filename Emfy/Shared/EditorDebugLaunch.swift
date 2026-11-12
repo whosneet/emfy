@@ -103,13 +103,29 @@ enum EditorDebugLaunch {
     /// `-EmfyDebugShot <base>` (the count is written to `<base>-menu-audit.txt`).
     static var menuAudit: Bool { (value(for: "-EmfyDebugMenuAudit") ?? "NO").uppercased() == "YES" }
 
+    /// `-EmfyDebugIOSSelect YES`: on iOS, enter the recents Select mode and select the
+    /// first (seeded) files, for the F1 screenshot of the multi-selection.
+    static var iosSelect: Bool { (value(for: "-EmfyDebugIOSSelect") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugIOSConvert YES`: additionally present the Batch Convert sheet.
+    static var iosConvert: Bool { (value(for: "-EmfyDebugIOSConvert") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugIOSConvertRun YES`: additionally run the conversion so the report shows.
+    static var iosConvertRun: Bool { (value(for: "-EmfyDebugIOSConvertRun") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugShareDialog YES`: on iOS, after a file opens, present the viewer's
+    /// share actions (Print, Copy, …) as a system dialog, so a Simulator screenshot can
+    /// show Print and Copy (a SwiftUI `Menu` popover can't be opened without a tap, which
+    /// `simctl` can't do). The dialog hosts the SAME items as the share Menu.
+    static var shareDialog: Bool { (value(for: "-EmfyDebugShareDialog") ?? "NO").uppercased() == "YES" }
+
     /// `-EmfyDebugUpdatesScene <firstlaunch|settings>`: capture a U1 updater surface
     /// (the first-launch sheet, or the Settings ▸ Updates group seeded "available"
     /// via `-EmfyDebugUpdateAvailable <version>`) to `-EmfyDebugShot <base>`, then quit.
     static var updatesScene: String? { value(for: "-EmfyDebugUpdatesScene")?.lowercased() }
 
     /// Whether the launch hook is driving this run.
-    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit }
+    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect }
 
     /// Copies `batchFiles` into the app's own temp (so a DEBUG batch run never touches a
     /// tracked file in place) and returns the copies' URLs.

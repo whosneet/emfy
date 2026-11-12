@@ -38,6 +38,11 @@ struct MetafileViewerScreen: View {
     @State private var editorModel = EditorModel()
     #if DEBUG
     @State private var debugLaunchRan = false
+    #if DEBUG
+    /// F1 screenshot (d): presents the share actions (Print, Copy, …) as a system dialog
+    /// for a Simulator capture, since a SwiftUI Menu popover can't be opened without a tap.
+    @State private var debugShareDialog = false
+    #endif
     #endif
 
     @State private var chromeHidden = false
@@ -165,6 +170,12 @@ struct MetafileViewerScreen: View {
             ShareSheet(items: payload.items)
                 .presentationDetents([.medium, .large])   // G5
         }
+        #if DEBUG
+        // F1 screenshot (d): the share actions in a system dialog (same actions as the
+        // Menu — a SwiftUI Menu popover can't be opened without a tap). One modifier, so
+        // the already-large body stays type-checkable.
+        .modifier(DebugShareDialogModifier(loaded: isLoaded, isPresented: $debugShareDialog) { debugRunShareAction($0) })
+        #endif
         // The pen palette, shown by a Pencil squeeze or double-tap-to-palette (design
         // call 5); the Pen toolbar menu offers the same choices on a long-press.
         .sheet(isPresented: penPaletteBinding) {
@@ -1151,6 +1162,30 @@ struct MetafileViewerScreen: View {
         }
     }
 
+    #if DEBUG
+    /// The share actions the F1 screenshot (d) dialog can run — the same ones the share
+    /// Menu offers, routed to the same exporter calls.
+    enum DebugShareAction { case print, copy, copyImage, sharePNG, sharePDF }
+
+    /// Runs a share action for the DEBUG dialog (screenshot d).
+    private func debugRunShareAction(_ action: DebugShareAction) {
+        guard let model = loaded, let entry else { return }
+        let opts = ExportScale.pngOptions(for: model.prepared.naturalSize, settings: settings)
+        switch action {
+        case .print:
+            exporter.printDrawing(prepared: model.prepared, options: settings.renderOptions, jobName: entry.displayName)
+        case .copy:
+            exporter.copyDrawing(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)
+        case .copyImage:
+            exporter.copyImage(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)
+        case .sharePNG:
+            exporter.share(.png, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background, options: settings.renderOptions)
+        case .sharePDF:
+            exporter.share(.pdf, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background, options: settings.renderOptions)
+        }
+    }
+    #endif
+
     private var shareMenu: some View {
         Menu {
             shareMenuItems
@@ -1599,3 +1634,29 @@ private struct PenPaletteSheet: View {
         }
     }
 }
+
+#if DEBUG
+/// Hosts the F1 screenshot (d) share dialog as one modifier, so the viewer's large body
+/// stays type-checkable. Presents the same actions the share Menu offers once the file
+/// has loaded and `-EmfyDebugShareDialog` is set.
+private struct DebugShareDialogModifier: ViewModifier {
+    let loaded: Bool
+    @Binding var isPresented: Bool
+    let perform: (MetafileViewerScreen.DebugShareAction) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog("Share", isPresented: $isPresented, titleVisibility: .visible) {
+                Button("Print…") { perform(.print) }
+                Button("Copy") { perform(.copy) }
+                Button("Copy Image") { perform(.copyImage) }
+                Button("Share as PNG") { perform(.sharePNG) }
+                Button("Share as PDF") { perform(.sharePDF) }
+            }
+            .onChange(of: loaded) { _, now in
+                guard now, EditorDebugLaunch.shareDialog else { return }
+                Task { try? await Task.sleep(for: .milliseconds(700)); isPresented = true }
+            }
+    }
+}
+#endif
