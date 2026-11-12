@@ -103,6 +103,16 @@ enum EditorDebugLaunch {
     /// `-EmfyDebugShot <base>` (the count is written to `<base>-menu-audit.txt`).
     static var menuAudit: Bool { (value(for: "-EmfyDebugMenuAudit") ?? "NO").uppercased() == "YES" }
 
+    /// `-EmfyDebugFind <query>`: after the file loads, open the find bar and search for
+    /// `<query>` so a capture shows the find bar, the "n of m" and the highlights (F3b).
+    /// Combine with `-EmfyDebugEdit YES` to capture the same in edit mode.
+    static var findQuery: String? { value(for: "-EmfyDebugFind") }
+
+    /// `-EmfyDebugFindMenuAudit YES`: after launch, count the Find ⌘F / Find Next ⌘G /
+    /// Find Previous ⇧⌘G menu items (each must be exactly one) and write the counts next to
+    /// the shots, then quit (F3b, the ⌘C audit's Find counterpart). Needs `-EmfyDebugShot`.
+    static var findMenuAudit: Bool { (value(for: "-EmfyDebugFindMenuAudit") ?? "NO").uppercased() == "YES" }
+
     /// `-EmfyDebugIOSSelect YES`: on iOS, enter the recents Select mode and select the
     /// first (seeded) files, for the F1 screenshot of the multi-selection.
     static var iosSelect: Bool { (value(for: "-EmfyDebugIOSSelect") ?? "NO").uppercased() == "YES" }
@@ -125,7 +135,7 @@ enum EditorDebugLaunch {
     static var updatesScene: String? { value(for: "-EmfyDebugUpdatesScene")?.lowercased() }
 
     /// Whether the launch hook is driving this run.
-    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect }
+    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect || findQuery != nil || findMenuAudit }
 
     /// Copies `batchFiles` into the app's own temp (so a DEBUG batch run never touches a
     /// tracked file in place) and returns the copies' URLs.

@@ -348,6 +348,7 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "iphone-light-edited" { await runIPhoneLightScript(stage: .edited); return }
         if EditorDebugLaunch.script == "iphone-settings" { await runIPhoneSettingsScript(); return }
         if EditorDebugLaunch.script == "iphone-full" { await runIPhoneFullScript(); return }
+        if EditorDebugLaunch.findQuery != nil { await runFindScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -461,6 +462,23 @@ struct MetafileViewerScreen: View {
         session.debugCancelAutosave()
         let tops = ids.compactMap { id in session.editingScene?.elements.first { $0.id == id }?.selectionBoundsDevice.minY }
         Self.logScript("ios align-grid: tops=\(tops.map { Int($0) }) grid=\(editorModel.showGrid)")
+    }
+
+    /// F3b: opens the find bar and searches `EditorDebugLaunch.findQuery` (in edit mode too
+    /// when `-EmfyDebugEdit YES`), scrolling the first match into view, then stays on screen
+    /// so `simctl io screenshot` captures the bar, "n of m" and the highlights.
+    @MainActor
+    private func runFindScript() async {
+        if EditorDebugLaunch.editOnOpen { await session.beginEditing() }
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(500))
+        await refreshFindRuns()
+        presentFind()
+        findModel.query = EditorDebugLaunch.findQuery ?? ""
+        findModel.applyQuery()
+        try? await Task.sleep(for: .milliseconds(300))
+        scrollToCurrentMatch()
+        Self.logScript("ios find: query=\"\(findModel.query)\" status=\"\(findModel.statusText)\" matches=\(findModel.matches.count)")
     }
 
     /// The stage an `iphone-light` capture sets up (E4 verification a/b/c).
@@ -1188,7 +1206,7 @@ struct MetafileViewerScreen: View {
     #if DEBUG
     /// The share actions the F1 screenshot (d) dialog can run — the same ones the share
     /// Menu offers, routed to the same exporter calls.
-    enum DebugShareAction { case print, copy, copyImage, sharePNG, sharePDF }
+    enum DebugShareAction { case print, copy, copyImage, copyAllText, sharePNG, sharePDF }
 
     /// Runs a share action for the DEBUG dialog (screenshot d).
     private func debugRunShareAction(_ action: DebugShareAction) {
@@ -1201,6 +1219,8 @@ struct MetafileViewerScreen: View {
             exporter.copyDrawing(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)
         case .copyImage:
             exporter.copyImage(prepared: model.prepared, scale: opts.scale, background: opts.background, options: settings.renderOptions, toast: toast)
+        case .copyAllText:
+            copyAllText()
         case .sharePNG:
             exporter.share(.png, prepared: model.prepared, baseName: entry.baseName, scale: opts.scale, background: opts.background, options: settings.renderOptions)
         case .sharePDF:
@@ -1757,6 +1777,7 @@ private struct DebugShareDialogModifier: ViewModifier {
                 Button("Print…") { perform(.print) }
                 Button("Copy") { perform(.copy) }
                 Button("Copy Image") { perform(.copyImage) }
+                Button("Copy All Text") { perform(.copyAllText) }
                 Button("Share as PNG") { perform(.sharePNG) }
                 Button("Share as PDF") { perform(.sharePDF) }
             }

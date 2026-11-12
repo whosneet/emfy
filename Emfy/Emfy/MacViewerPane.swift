@@ -192,6 +192,15 @@ struct MacViewerPane: View {
         debugLaunchRan = true
         for _ in 0..<80 { if session.loaded != nil { break }; try? await Task.sleep(for: .milliseconds(100)) }
         guard session.loaded != nil else { return }
+        // F3b: the find menu audit (⌘F/⌘G counts) and the find-bar screenshot flows.
+        if EditorDebugLaunch.findMenuAudit, let base = EditorDebugLaunch.screenshotBase {
+            await runFindMenuAudit(base: base)
+            return
+        }
+        if EditorDebugLaunch.findQuery != nil, let base = EditorDebugLaunch.screenshotBase {
+            await runFindCapture(base: base)
+            return
+        }
         // A scripted end-to-end gate flow (E2d) takes a distinct path.
         if let script = EditorDebugLaunch.script {
             await runDebugScript(script)
@@ -235,6 +244,47 @@ struct MacViewerPane: View {
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-moved.png")
         try? await Task.sleep(for: .milliseconds(200))
         NSApp.terminate(nil)
+    }
+
+    /// F3b: opens the find bar, searches `EditorDebugLaunch.findQuery` (in edit mode too
+    /// when `-EmfyDebugEdit YES`), scrolls the first match into view and captures the window
+    /// (so the bar, "n of m" and the yellow highlights show), then quits.
+    @MainActor
+    private func runFindCapture(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        if EditorDebugLaunch.editOnOpen { await session.beginEditing() }
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(600))
+        await refreshFindRuns()
+        findModel.present()
+        findModel.query = EditorDebugLaunch.findQuery ?? ""
+        findModel.applyQuery()
+        try? await Task.sleep(for: .milliseconds(300))
+        scrollToCurrentMatch()
+        try? await Task.sleep(for: .milliseconds(900))
+        let path = base + (EditorDebugLaunch.editOnOpen ? "-edit.png" : "-viewer.png")
+        if !EditorDebugScreenshot.captureLibraryWindow(to: path) {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: path)
+        }
+        Self.logScript("find: query=\"\(findModel.query)\" status=\"\(findModel.statusText)\" matches=\(findModel.matches.count) editing=\(session.editing == .editing)")
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(0)
+    }
+
+    /// F3b: counts the Find ⌘F / Find Next ⌘G / Find Previous ⇧⌘G menu items (each must be
+    /// exactly one) and writes the counts next to the shots, then quits.
+    @MainActor
+    private func runFindMenuAudit(base: String) async {
+        try? await Task.sleep(for: .milliseconds(800))
+        let menu = NSApp.mainMenu ?? NSMenu()
+        let f = MenuShortcutAudit.count(key: "f", modifiers: [.command], in: menu)
+        let g = MenuShortcutAudit.count(key: "g", modifiers: [.command], in: menu)
+        let gShift = MenuShortcutAudit.count(key: "g", modifiers: [.command, .shift], in: menu)
+        try? "command-F items: \(f)\ncommand-G items: \(g)\nshift-command-G items: \(gShift)\n"
+            .write(toFile: base + "-find-menu-audit.txt", atomically: true, encoding: .utf8)
+        try? await Task.sleep(for: .milliseconds(150))
+        exit(0)
     }
 
     /// The E2c single-shot capture: fits, opens the Format inspector / applies a
