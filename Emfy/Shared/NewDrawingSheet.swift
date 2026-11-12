@@ -25,6 +25,10 @@ struct NewDrawingSheet: View {
                     }
                 }
             }
+            // Grouped style gives the standard inset sheet spacing on macOS (the row
+            // content and the section header are no longer flush to the edge) and the
+            // familiar inset-grouped list on iPad.
+            .formStyle(.grouped)
             .navigationTitle("New Drawing")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
