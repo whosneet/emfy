@@ -133,6 +133,17 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
     }
     #endif
 
+    /// Registers the Finder "Convert … with Emfy" Service provider (F4c). The provider
+    /// handles the three NSServices entries in Info.plist; `NSUpdateDynamicServices`
+    /// nudges the system to pick up the registration this launch.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.servicesProvider = MacConvertService.shared
+        NSUpdateDynamicServices()
+        #if DEBUG
+        MacConvertService.runDebugHookIfNeeded()
+        #endif
+    }
+
     #if EMFY_DMG
     /// Hand off to the swap-on-quit helper if a verified update is staged and the
     /// mode/intent call for it — GitHub/DMG build only (U1). Runs on every real

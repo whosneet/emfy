@@ -35,6 +35,70 @@
 Copyright © 2026 Arrley Pty Ltd. MIT licensed.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Finder ▸ right-click ▸ Services / Quick Actions ▸ "Convert to … with Emfy"
+	     (F4c). Each entry runs in the app process via NSApp.servicesProvider; the
+	     NSMessage is the first keyword of the provider selector
+	     (convertToPDF:userData:error: …). NSSendFileTypes lists the four UTTypes Emfy
+	     declares, so Finder offers the Service only for a selection of those files —
+	     which is the Finder-file-selection scoping an NSRequiredContext would add, so
+	     none is needed. -->
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Convert to PDF with Emfy</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>convertToPDF</string>
+			<key>NSPortName</key>
+			<string>Emfy</string>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>com.microsoft.emf</string>
+				<string>com.microsoft.wmf</string>
+				<string>com.microsoft.emz</string>
+				<string>com.microsoft.wmz</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Convert to PNG with Emfy</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>convertToPNG</string>
+			<key>NSPortName</key>
+			<string>Emfy</string>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>com.microsoft.emf</string>
+				<string>com.microsoft.wmf</string>
+				<string>com.microsoft.emz</string>
+				<string>com.microsoft.wmz</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Convert to SVG with Emfy</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>convertToSVG</string>
+			<key>NSPortName</key>
+			<string>Emfy</string>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>com.microsoft.emf</string>
+				<string>com.microsoft.wmf</string>
+				<string>com.microsoft.emz</string>
+				<string>com.microsoft.wmz</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
