@@ -397,9 +397,9 @@ extension Scene {
                 layers[placement.layer].elements.insert(placement.element, at: index)
             } else if createLayerIfEmpty && layers.isEmpty && placement.layer == 0 {
                 // Mirrors Scene.insert's empty-scene behaviour.
-                layers = [Layer(id: 0, name: "Imported", elements: [placement.element])]
+                layers = [Layer(id: 0, name: Scene.defaultLayerName, elements: [placement.element])]
             } else if layers.isEmpty {
-                layers = [Layer(id: 0, name: "Imported", elements: [placement.element])]
+                layers = [Layer(id: 0, name: Scene.defaultLayerName, elements: [placement.element])]
             } else {
                 layers[layers.count - 1].elements.append(placement.element)
             }

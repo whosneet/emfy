@@ -140,7 +140,7 @@ public enum SceneImporter {
     /// Distributes `elements` (in z-order) into the layers `specs` describe, by the
     /// record-index range each element's draw record falls within. Any element
     /// outside every range (none for a clean Emfy file) goes to a trailing
-    /// "Imported" layer so nothing is ever dropped.
+    /// default-named layer so nothing is ever dropped.
     private static func assignLayers(specs: [LayerSpec], elements: [Element]) -> [Layer] {
         var layers = specs.enumerated().map { index, spec in
             Layer(id: index, name: spec.name, elements: [], hidden: spec.hidden, locked: spec.locked)

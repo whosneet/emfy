@@ -235,7 +235,7 @@ public struct Scene: Sendable, Equatable {
     // MARK: - Layers (E3d)
 
     /// The name a single imported/blank layer carries when a file has no markers.
-    public static let defaultLayerName = "Imported"
+    public static let defaultLayerName = "Layer 1"
 
     /// The default active layer for new elements: the TOP layer (last in the
     /// back-to-front array, shown first in the panel). With one layer that is the
@@ -257,7 +257,7 @@ public struct Scene: Sendable, Equatable {
 
     /// True when the layer structure carries information a save must persist as
     /// markers: more than one layer, any hidden/locked layer, or a single layer
-    /// renamed from the default. A plain single "Imported" layer (every existing
+    /// renamed from the default. A plain single default layer (every existing
     /// scene) is trivial and saves byte-for-byte as before.
     public var hasNonTrivialLayers: Bool {
         if layers.count != 1 { return true }

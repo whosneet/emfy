@@ -151,7 +151,7 @@ extension Scene {
     /// the last drawing record. `z` is clamped to the layer's bounds.
     public mutating func insert(_ element: Element, at z: Int) {
         guard !layers.isEmpty else {
-            layers = [Layer(id: 0, name: "Imported", elements: [element])]
+            layers = [Layer(id: 0, name: Scene.defaultLayerName, elements: [element])]
             return
         }
         let clamped = Swift.max(0, Swift.min(z, layers[0].elements.count))
