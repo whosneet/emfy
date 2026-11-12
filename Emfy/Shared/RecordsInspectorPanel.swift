@@ -135,10 +135,23 @@ struct RecordsInspectorPanel: View {
     @ViewBuilder
     private func recordList(unsupported: Set<String>) -> some View {
         let indices = model.filteredIndices
+        ScrollViewReader { proxy in
+            list(indices, unsupported: unsupported)
+                // Keep the current record visible as the step index moves (scrubber,
+                // ‹ ›, Home/End, or the arrow keys), so the list follows the replay.
+                .onChange(of: model.selectedIndex) { _, index in
+                    withAnimation(.easeInOut(duration: 0.15)) { proxy.scrollTo(index, anchor: .center) }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func list(_ indices: [Int], unsupported: Set<String>) -> some View {
         List(selection: Binding<Int?>(get: { model.selectedIndex }, set: { if let value = $0 { model.select(value) } })) {
             ForEach(indices, id: \.self) { index in
                 recordRow(index, unsupported: unsupported)
                     .tag(index)
+                    .id(index)
             }
         }
         #if os(macOS)
