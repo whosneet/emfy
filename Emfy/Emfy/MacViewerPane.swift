@@ -30,6 +30,10 @@ struct MacViewerPane: View {
     @State private var editorModel = EditorModel()
     @State private var findModel = DrawingFindModel()
     @State private var showInspector = false
+    // Records inspector + step-through replay (F5c).
+    @State private var viewerInspectorTab: ViewerInspectorTab = .info
+    @State private var recordModel = RecordInspectorModel()
+    @State private var replayDriver = RecordReplayDriver()
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
     // Translate (F3d): the system Translate overlay presentation.
@@ -78,6 +82,17 @@ struct MacViewerPane: View {
             .onChange(of: findModel.current) { _, _ in scrollToCurrentMatch() }
             .inspector(isPresented: $showInspector) {
                 inspector
+            }
+            // Records inspector (F5c): (re)configure when the segment is shown or the
+            // content changes, render each selection off-main, and rebuild on an
+            // options change that keeps the same content id.
+            .task(id: recordsConfigKey) { configureRecordsIfNeeded() }
+            .onChange(of: recordModel.selectedIndex) { _, index in
+                replayDriver.request(index: index, model: recordModel)
+            }
+            .onChange(of: settings.renderOptions) { _, _ in
+                replayDriver.invalidate()
+                configureRecordsIfNeeded()
             }
             // Export is hoisted out of the inspector so it works when the inspector
             // is closed (C3b scope 5); the inspector rows call the same path.
@@ -209,6 +224,11 @@ struct MacViewerPane: View {
         debugLaunchRan = true
         for _ in 0..<80 { if session.loaded != nil { break }; try? await Task.sleep(for: .milliseconds(100)) }
         guard session.loaded != nil else { return }
+        // F5c: the Records inspector perf log and screenshot flows.
+        if EditorDebugLaunch.recordsPerf { await runRecordsPerf(); return }
+        if EditorDebugLaunch.recordsInspector, let base = EditorDebugLaunch.screenshotBase {
+            await runRecordsCapture(base: base); return
+        }
         // F3b: the find menu audit (⌘F/⌘G counts) and the find-bar screenshot flows.
         if EditorDebugLaunch.findMenuAudit, let base = EditorDebugLaunch.screenshotBase {
             await runFindMenuAudit(base: base)
@@ -261,6 +281,48 @@ struct MacViewerPane: View {
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-moved.png")
         try? await Task.sleep(for: .milliseconds(200))
         NSApp.terminate(nil)
+    }
+
+    /// F5c: opens the inspector on the Records segment, steps to the requested record
+    /// (default: the last, the full drawing), waits for the off-main render to land, then
+    /// captures the window (the list, scrubber, DC panel and outlined replay) and quits.
+    @MainActor
+    private func runRecordsCapture(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        showInspector = true
+        viewerInspectorTab = .records
+        configureRecordsIfNeeded()
+        for _ in 0..<120 where !recordModel.hasRecords { try? await Task.sleep(for: .milliseconds(100)) }
+        let index = EditorDebugLaunch.recordIndex ?? max(0, recordModel.recordCount - 1)
+        recordModel.select(index)
+        for _ in 0..<80 {
+            if replayDriver.image != nil || !recordModel.supportsPartial { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        try? await Task.sleep(for: .milliseconds(1400))
+        Self.logScript("records: count=\(recordModel.recordCount) index=\(recordModel.selectedIndex) supportsPartial=\(recordModel.supportsPartial) image=\(replayDriver.image != nil)")
+        if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-records.png") {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-records.png")
+        }
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(0)
+    }
+
+    /// F5c: steps through every record of the opened (WS-A) file once, measuring each,
+    /// then logs the median step and first→last span by label only — never the filename.
+    @MainActor
+    private func runRecordsPerf() async {
+        showInspector = true
+        viewerInspectorTab = .records
+        configureRecordsIfNeeded()
+        for _ in 0..<300 where !recordModel.hasRecords { try? await Task.sleep(for: .milliseconds(100)) }
+        let perf = await replayDriver.runPerf(count: recordModel.recordCount)
+        Self.logScript("records-perf \(EditorDebugLaunch.recordsLabel) records=\(recordModel.recordCount) medianStepMs=\(String(format: "%.3f", perf.median)) firstToLastMs=\(String(format: "%.1f", perf.span)) steps=\(perf.count) supportsPartial=\(recordModel.supportsPartial)")
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(100))
+        exit(0)
     }
 
     /// F3b: opens the find bar, searches `EditorDebugLaunch.findQuery` (in edit mode too
@@ -890,6 +952,19 @@ struct MacViewerPane: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .underPageBackgroundColor))
         case .loaded(let model):
+            if showsReplayCanvas {
+                MacRecordReplayView(
+                    image: replayDriver.image,
+                    pixelSize: replayDriver.pixelSize,
+                    deviceBounds: replayDriver.deviceBounds,
+                    outlineDeviceRect: replayDriver.outlineDeviceRect,
+                    contentToken: replayDriver.contentToken,
+                    onArrowStep: { forward, option in
+                        if option { recordModel.jumpDrawing(forward: forward) } else { recordModel.step(by: forward ? 1 : -1) }
+                    }
+                )
+                .ignoresSafeArea()
+            } else {
             MacMetafileScrollView(
                 prepared: model.prepared,
                 naturalSize: model.displaySize,
@@ -914,6 +989,7 @@ struct MacViewerPane: View {
             // (option 4) rebuilds with the new content, while the render-time options
             // redraw the existing tiles (S1b).
             .id(ViewerContentID(model: model, content: session.loadedContentID))
+            }
         case .failed(let reason):
             failedView(reason)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -975,8 +1051,52 @@ struct MacViewerPane: View {
             EditorInspectorPanel(session: session, editorModel: editorModel, onClose: { showInspector = false }) {
                 infoView
             }
+        } else if let loaded, entry != nil {
+            // Read-only viewing: the Info | Records segment (F5c).
+            ViewerInspectorPanel(
+                tab: $viewerInspectorTab,
+                model: recordModel,
+                summaries: replayDriver.summaries,
+                diagnostics: loaded.diagnostics,
+                onClose: { showInspector = false }
+            ) {
+                infoView
+            }
         } else {
             infoView
+        }
+    }
+
+    /// Whether the dedicated step-through replay canvas replaces the live tiled viewer:
+    /// the Records segment is active in read-only viewing and this drawing supports
+    /// per-record stepping (an EMF+ drawing / WMF keeps the live viewer).
+    private var showsReplayCanvas: Bool {
+        showInspector && viewerInspectorTab == .records
+            && session.editing != .editing && recordModel.supportsPartial
+    }
+
+    /// Populates the Records model for the loaded drawing: the step-through engine for
+    /// an EMF (off-main via the driver), or a list-only load for a WMF program.
+    /// A change in this key re-runs `configureRecordsIfNeeded` (content, inspector
+    /// visibility, the active segment, or edit mode changed).
+    private var recordsConfigKey: String {
+        "\(session.loadedContentID)·\(showInspector)·\(viewerInspectorTab == .records)·\(session.editing == .editing)"
+    }
+
+    private func configureRecordsIfNeeded() {
+        guard showInspector, viewerInspectorTab == .records else { return }
+        guard let loaded, session.editing != .editing else { return }
+        let contentID = session.loadedContentID
+        if loaded.prepared.kind == .wmfRecords {
+            recordModel.setContent(
+                refs: loaded.prepared.recordRefs(), drawingIndices: [],
+                supportsPartial: false, isEMF: false, contentID: contentID
+            )
+        } else {
+            replayDriver.configure(
+                prepared: loaded.prepared, options: settings.renderOptions,
+                scale: 2, contentID: contentID, model: recordModel
+            )
         }
     }
 

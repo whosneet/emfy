@@ -162,6 +162,24 @@ enum EditorDebugLaunch {
     /// Combine with `-EmfyDebugFind` and `-EmfyDebugShot`.
     static var pictureFixture: Bool { (value(for: "-EmfyDebugPictureFixture") ?? "NO").uppercased() == "YES" }
 
+    /// `-EmfyDebugRecords YES`: after the file loads, open the inspector on the Records
+    /// segment and (when steppable) show the dedicated replay canvas, so a capture shows
+    /// the record list, the scrubber, the DC panel and the outlined partial drawing (F5c).
+    static var recordsInspector: Bool { (value(for: "-EmfyDebugRecords") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugRecordIndex <n>`: the record to step to for the Records capture
+    /// (default: the last record, i.e. the full drawing).
+    static var recordIndex: Int? { value(for: "-EmfyDebugRecordIndex").flatMap(Int.init) }
+
+    /// `-EmfyDebugRecordsPerf YES`: step through every record of the opened file once,
+    /// measuring each step, then log the median step and first→last span (by label only)
+    /// and exit — the WS-A step-through perf log (F5c).
+    static var recordsPerf: Bool { (value(for: "-EmfyDebugRecordsPerf") ?? "NO").uppercased() == "YES" }
+
+    /// `-EmfyDebugRecordsLabel <label>`: the anonymised label the perf log prints for the
+    /// opened file (default "WS-A"), so a work-sourced filename never reaches a log.
+    static var recordsLabel: String { value(for: "-EmfyDebugRecordsLabel") ?? "WS-A" }
+
     /// Whether the launch hook is driving this run.
     static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect || findQuery != nil || findMenuAudit || pictureFixture || settingsScene != nil || translateMenu || spotlightCheckPath != nil }
 

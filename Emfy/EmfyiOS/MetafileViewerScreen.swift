@@ -51,6 +51,10 @@ struct MetafileViewerScreen: View {
 
     @State private var chromeHidden = false
     @State private var showInspector = false
+    // Records inspector + step-through replay (F5c).
+    @State private var viewerInspectorTab: ViewerInspectorTab = .info
+    @State private var recordModel = RecordInspectorModel()
+    @State private var replayDriver = RecordReplayDriver()
     @State private var bannerDismissed = false
     @State private var pillVisible = false
     @State private var pillHideTask: Task<Void, Never>?
@@ -204,6 +208,16 @@ struct MetafileViewerScreen: View {
         // A fixed width so the drawing's reserved trailing space matches it exactly.
         .inspector(isPresented: $showInspector) { inspectorContent }
         .inspectorColumnWidth(min: inspectorWidth, ideal: inspectorWidth, max: inspectorWidth)
+        // Records inspector (F5c): configure when the segment is shown or the content
+        // changes, render each selection off-main, rebuild on an options change.
+        .task(id: recordsConfigKey) { configureRecordsIfNeeded() }
+        .onChange(of: recordModel.selectedIndex) { _, index in
+            replayDriver.request(index: index, model: recordModel)
+        }
+        .onChange(of: settings.renderOptions) { _, _ in
+            replayDriver.invalidate()
+            configureRecordsIfNeeded()
+        }
     }
 
     /// The sheets and the image-insert pickers layered over `findLayer`.
@@ -398,6 +412,7 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "iphone-settings" { await runIPhoneSettingsScript(); return }
         if EditorDebugLaunch.script == "iphone-full" { await runIPhoneFullScript(); return }
         if EditorDebugLaunch.findQuery != nil { await runFindScript(); return }
+        if EditorDebugLaunch.recordsInspector { await runRecordsScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -516,6 +531,24 @@ struct MetafileViewerScreen: View {
     /// F3b: opens the find bar and searches `EditorDebugLaunch.findQuery` (in edit mode too
     /// when `-EmfyDebugEdit YES`), scrolling the first match into view, then stays on screen
     /// so `simctl io screenshot` captures the bar, "n of m" and the highlights.
+    /// F5c (iPad): opens the inspector on the Records segment, steps to the requested
+    /// record (default: the last), waits for the off-main render, and stays on screen so
+    /// `simctl io screenshot` captures the list, scrubber, DC panel and outlined replay.
+    @MainActor
+    private func runRecordsScript() async {
+        showInspector = true
+        viewerInspectorTab = .records
+        configureRecordsIfNeeded()
+        for _ in 0..<120 where !recordModel.hasRecords { try? await Task.sleep(for: .milliseconds(100)) }
+        let index = EditorDebugLaunch.recordIndex ?? max(0, recordModel.recordCount - 1)
+        recordModel.select(index)
+        for _ in 0..<80 {
+            if replayDriver.image != nil || !recordModel.supportsPartial { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        Self.logScript("ios records: count=\(recordModel.recordCount) index=\(recordModel.selectedIndex) supportsPartial=\(recordModel.supportsPartial) image=\(replayDriver.image != nil)")
+    }
+
     @MainActor
     private func runFindScript() async {
         if EditorDebugLaunch.editOnOpen { await session.beginEditing() }
@@ -797,6 +830,16 @@ struct MetafileViewerScreen: View {
                 .accessibilityLabel("Loading drawing")   // A10
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .loaded(let model):
+            if showsReplayCanvas {
+                RecordReplayView(
+                    image: replayDriver.image,
+                    pixelSize: replayDriver.pixelSize,
+                    deviceBounds: replayDriver.deviceBounds,
+                    outlineDeviceRect: replayDriver.outlineDeviceRect,
+                    contentToken: replayDriver.contentToken
+                )
+                .ignoresSafeArea()
+            } else {
             ZoomableMetafileView(
                 prepared: model.prepared,
                 naturalSize: model.displaySize,
@@ -836,6 +879,7 @@ struct MetafileViewerScreen: View {
             // (option 4) rebuilds with the new content, while the render-time options
             // redraw the existing tiles (S1b).
             .id(ViewerContentID(model: model, content: session.loadedContentID))
+            }
         case .failed(let reason):
             failedView(reason)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1681,9 +1725,54 @@ struct MetafileViewerScreen: View {
             }
             .environment(toast)
             .environment(settings)
+        } else if let loaded, entry != nil {
+            // Read-only viewing: the Info | Records segment (F5c).
+            ViewerInspectorPanel(
+                tab: $viewerInspectorTab,
+                model: recordModel,
+                summaries: replayDriver.summaries,
+                diagnostics: loaded.diagnostics,
+                onClose: { closeInspector() }
+            ) {
+                infoInspector
+            }
+            .environment(toast)
+            .environment(settings)
         } else {
             infoInspector
         }
+    }
+
+    /// Whether the dedicated step-through replay canvas replaces the live tiled viewer
+    /// (F5c): the Records segment is active in read-only viewing and this drawing
+    /// supports per-record stepping.
+    private var showsReplayCanvas: Bool {
+        showInspector && viewerInspectorTab == .records
+            && session.editing != .editing && recordModel.supportsPartial
+    }
+
+    /// Populates the Records model for the loaded drawing: the step-through engine for
+    /// an EMF (off-main via the driver), or a list-only load for a WMF program.
+    private func configureRecordsIfNeeded() {
+        guard showInspector, viewerInspectorTab == .records else { return }
+        guard let loaded, session.editing != .editing else { return }
+        let contentID = session.loadedContentID
+        if loaded.prepared.kind == .wmfRecords {
+            recordModel.setContent(
+                refs: loaded.prepared.recordRefs(), drawingIndices: [],
+                supportsPartial: false, isEMF: false, contentID: contentID
+            )
+        } else {
+            replayDriver.configure(
+                prepared: loaded.prepared, options: settings.renderOptions,
+                scale: 2, contentID: contentID, model: recordModel
+            )
+        }
+    }
+
+    /// A change in this key re-runs `configureRecordsIfNeeded`.
+    private var recordsConfigKey: String {
+        "\(session.loadedContentID)·\(showInspector)·\(viewerInspectorTab == .records)·\(session.editing == .editing)"
     }
 
     @ViewBuilder
