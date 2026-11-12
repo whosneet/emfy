@@ -271,6 +271,7 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "pen-strokes" { await runPenStrokesScript(); return }
         if EditorDebugLaunch.script == "text-image" { await runTextImageScript(); return }
         if EditorDebugLaunch.script == "text-popover" { await runTextPopoverScript(); return }
+        if EditorDebugLaunch.script == "layers" { await runLayersScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -332,6 +333,35 @@ struct MetafileViewerScreen: View {
         if let lastID { editorModel.selection.replace(with: lastID) }
         session.debugCancelAutosave()
         Self.logScript("ios new-shapes: elements=\(session.editingScene?.editableElements.count ?? -1) selected=\(lastID ?? -1)")
+    }
+
+    /// iPad layers proof (E3d): blank drawing → edit mode → rename the base layer Background,
+    /// add Shapes and Notes with a shape in each → hide Notes, lock Background → select the
+    /// Shapes shape and Bring to Front → open the Layers tab → stay on screen so a simulator
+    /// screenshot shows the panel (3 named layers, Notes eye-off, Background locked, the
+    /// footnote) and the hidden Notes shape not drawn.
+    @MainActor
+    private func runLayersScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing, let backgroundID = session.editingScene?.layers.first?.id else {
+            Self.logScript("ios layers: begin editing failed"); return
+        }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        session.debugRenameLayer(backgroundID, "Background")
+        let shapesID = session.debugAddLayer(name: "Shapes", aboveLayer: backgroundID)
+        let notesID = shapesID.flatMap { session.debugAddLayer(name: "Notes", aboveLayer: $0) }
+        _ = session.debugInsertShape(.rect, rectDevice: CGRect(x: page.width * 0.10, y: page.height * 0.14, width: page.width * 0.52, height: page.height * 0.34), inLayer: backgroundID)
+        let shapesShape = shapesID.flatMap { session.debugInsertShape(.ellipse, rectDevice: CGRect(x: page.width * 0.34, y: page.height * 0.30, width: page.width * 0.34, height: page.height * 0.26), inLayer: $0) }
+        _ = notesID.flatMap { session.debugInsertShape(.triangle, rectDevice: CGRect(x: page.width * 0.58, y: page.height * 0.50, width: page.width * 0.30, height: page.height * 0.30), inLayer: $0) }
+        if let notesID { session.debugSetLayerHidden(notesID, true) }
+        session.debugSetLayerLocked(backgroundID, true)
+        if let shapesShape { editorModel.selection.replace(with: shapesShape) }
+        if let shapesID { editorModel.activeLayerID = shapesID }
+        session.bringSelectionToFront(editorModel.selection.ids)
+        EditorDebugLaunch.forceLayersTab = true
+        showInspector = true
+        session.debugCancelAutosave()
+        Self.logScript("ios layers: names=\(session.debugLayerNames()) notesHidden=\(notesID.map { session.debugLayerHidden($0) } ?? false)")
     }
 
     /// iPad pen proof (E3b): blank drawing → edit mode → feed a couple of synthetic strokes

@@ -597,6 +597,8 @@ final class DocumentSession {
         return element.id
     }
 
+    /// Renames a layer through the panel's `.renameLayer` command, for the `layers` script.
+    func debugRenameLayer(_ id: Int, _ name: String) { apply(.renameLayer(id: id, name)) }
     /// Hides/shows a layer through the panel's `.setLayerHidden` command, for the `layers` script.
     func debugSetLayerHidden(_ id: Int, _ hidden: Bool) { apply(.setLayerHidden(id: id, hidden)) }
     /// Locks/unlocks a layer through the panel's `.setLayerLocked` command, for the `layers` script.

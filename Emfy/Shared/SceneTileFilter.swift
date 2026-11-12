@@ -12,6 +12,10 @@ enum SceneTileFilter {
     /// size); `flipY` matches the tiled view's y convention (Mac y-up = true, iOS
     /// y-down = false).
     static func subscene(_ scene: EMFEdit.Scene, viewRect: CGRect, target: CGRect, flipY: Bool) -> EMFEdit.Scene {
+        // A hidden layer never draws in Emfy's own editor (design §2); its elements are
+        // still saved and drawn by other readers, so this empties them only for the live
+        // render, not the scene. Done before the tile guard so it always applies.
+        let scene = withHiddenLayersEmptied(scene)
         let mapping = EditorCanvasMapping(pageBoundsDevice: scene.pageBoundsDevice, target: target, flipY: flipY)
         let deviceRegion = mapping.deviceRect(fromView: viewRect).standardized
         guard deviceRegion.minX.isFinite, deviceRegion.minY.isFinite,
@@ -29,6 +33,15 @@ enum SceneTileFilter {
             if layers[layerIndex].elements.count != before { dropped = true }
         }
         guard dropped else { return scene }
+        return EMFEdit.Scene(pageBoundsDevice: scene.pageBoundsDevice, layers: layers, partition: scene.partition, source: scene.source)
+    }
+
+    /// Returns `scene` with every hidden layer's elements removed, so the editor's renderer
+    /// skips them (design §2). Unchanged when no layer is hidden (the common path).
+    static func withHiddenLayersEmptied(_ scene: EMFEdit.Scene) -> EMFEdit.Scene {
+        guard scene.layers.contains(where: \.hidden) else { return scene }
+        var layers = scene.layers
+        for i in layers.indices where layers[i].hidden { layers[i].elements = [] }
         return EMFEdit.Scene(pageBoundsDevice: scene.pageBoundsDevice, layers: layers, partition: scene.partition, source: scene.source)
     }
 }

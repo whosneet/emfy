@@ -271,6 +271,7 @@ struct MacViewerPane: View {
         case "pen-strokes": await runPenStrokesScript(base: base)
         case "text-image": await runTextImageScript(base: base)
         case "text-popover": await runTextPopoverScript(base: base)
+        case "layers": await runLayersScript(base: base)
         default: Self.logScript("unknown script \(script)"); exit(1)
         }
     }
@@ -472,6 +473,63 @@ struct MacViewerPane: View {
         Self.logScript("text-popover: id=\(insertion.id) popoverOpen=\(editorModel.textEdit != nil)")
         try? await Task.sleep(for: .milliseconds(200))
         exit(0)
+    }
+
+    /// `layers` (E3d): a blank drawing → edit mode → rename the base layer Background, add
+    /// Shapes and Notes, put one shape in each → hide Notes, lock Background → select the
+    /// Shapes shape and Bring to Front → open the Layers tab → screenshot (a) → save → exit.
+    /// A `plain` relaunch proves the hidden Notes shape still draws in other readers (b).
+    @MainActor
+    private func runLayersScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing, let backgroundID = session.editingScene?.layers.first?.id else {
+            Self.logScript("layers: begin editing failed"); exit(2)
+        }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        session.debugRenameLayer(backgroundID, "Background")
+        let shapesID = session.debugAddLayer(name: "Shapes", aboveLayer: backgroundID)
+        let notesID = shapesID.flatMap { session.debugAddLayer(name: "Notes", aboveLayer: $0) }
+        // A shape in each layer, in distinct spots.
+        _ = session.debugInsertShape(.rect, rectDevice: CGRect(x: page.width * 0.10, y: page.height * 0.14, width: page.width * 0.52, height: page.height * 0.34), inLayer: backgroundID)
+        let shapesShape = shapesID.flatMap { session.debugInsertShape(.ellipse, rectDevice: CGRect(x: page.width * 0.34, y: page.height * 0.30, width: page.width * 0.34, height: page.height * 0.26), inLayer: $0) }
+        _ = notesID.flatMap { session.debugInsertShape(.triangle, rectDevice: CGRect(x: page.width * 0.58, y: page.height * 0.50, width: page.width * 0.30, height: page.height * 0.30), inLayer: $0) }
+        if let notesID { session.debugSetLayerHidden(notesID, true) }
+        session.debugSetLayerLocked(backgroundID, true)
+        // Select the Shapes shape, make Shapes the active layer, Bring to Front.
+        if let shapesShape { editorModel.selection.replace(with: shapesShape) }
+        if let shapesID { editorModel.activeLayerID = shapesID }
+        session.bringSelectionToFront(editorModel.selection.ids)
+        // Open the Layers tab for the capture.
+        EditorDebugLaunch.forceLayersTab = true
+        showInspector = true
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(1400))
+        if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-a-layers.png") {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-a-layers.png")
+        }
+        await session.save()
+        try? await Task.sleep(for: .milliseconds(500))
+        session.debugCancelAutosave()
+        Self.logScript("layers: names=\(session.debugLayerNames()) notesHidden=\(notesID.map { session.debugLayerHidden($0) } ?? false) savedPath=\(resolvedEntryPath() ?? "?") saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil")")
+        // (b): leave edit mode and reload the saved file into the plain read-only viewer —
+        // the same render path a relaunch uses. The hidden Notes layer is saved and drawn by
+        // any plain reader, so its shape now appears (other-apps semantics).
+        EditorDebugLaunch.forceLayersTab = false
+        showInspector = false
+        await session.endEditing()
+        await session.load()
+        try? await Task.sleep(for: .milliseconds(1000))
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(700))
+        if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-b-plain.png") {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-b-plain.png")
+        }
+        Self.logScript("layers: reloaded plain loaded=\(session.loaded != nil) recordKinds=\(session.loaded?.prepared.recordKinds.count ?? -1)")
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(session.lastSaveError == nil ? 0 : 3)
     }
 
     /// A small in-process gradient PNG, so the image-insert script needs no external file.
