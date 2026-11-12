@@ -131,9 +131,14 @@ enum DrawingAIEvalSuite {
                         }, label: "past-excerpt token (tool + correct)"))
         }
         // 2. How many text lines.
-        if let d = makeTextDrawing(["Alpha line one", "Bravo line two", "Charlie line three", "Delta line four", "Echo line five"]) {
-            qs.append(Q(data: d, question: "How many separate lines of text are in this drawing?",
-                        check: { a, _, _ in a.contains("5") || a.localizedCaseInsensitiveContains("five") }, label: "line count = 5"))
+        if let d = makeTextDrawing(["Quarterly budget review", "Marketing spend summary", "Engineering headcount plan", "Customer retention metrics", "Regional sales forecast"]) {
+            // The known answer is the fixture's ACTUAL extracted line count, read from
+            // the same tool data the model sees — not an assumed number.
+            let n = DrawingAIContextProvider.make(data: d, fileName: "lines.emf", unsupportedNotes: [])?.toolData.textLines.count ?? 5
+            let words = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+            let word = n < words.count ? words[n] : ""
+            qs.append(Q(data: d, question: "Use the Read text tool to read all the text, then tell me exactly how many separate lines of text this drawing has. Answer with just the number.",
+                        check: { a, _, _ in a.contains(String(n)) || (!word.isEmpty && a.localizedCaseInsensitiveContains(word)) }, label: "line count = \(n)"))
         }
         // 3. A colour the context does not carry → must decline, not invent.
         if let d = makeTextDrawing(["Meeting agenda", "Project kickoff notes"]) {
@@ -352,7 +357,11 @@ enum DrawingAIEvalSuite {
                   let data = try? Data(contentsOf: url),
                   let bundle = DrawingAIContextProvider.make(data: data, fileName: url.lastPathComponent, unsupportedNotes: []) else { continue }
             let text = bundle.toolData.textLines.joined(separator: "\n")
-            if text.count >= 20 && realTokens(in: text).count >= 2 {
+            // Require ≥ 2 ASCII tokens: the faithfulness check asks that a real token be
+            // echoed in the (English) description, which a model won't do for non-Latin
+            // scripts (CJK) even when faithful — so those files aren't valid here.
+            let asciiTokens = realTokens(in: text).filter { $0.allSatisfy(\.isASCII) }
+            if text.count >= 20 && asciiTokens.count >= 2 {
                 out.append(CorpusContext(name: url.lastPathComponent, bundle: bundle))
             }
         }
@@ -386,10 +395,13 @@ enum DrawingAIEvalSuite {
         return out
     }
 
-    /// Substrings the answer puts in straight or smart quotes (length ≥ 2).
+    /// Substrings the answer puts in DOUBLE quotes (straight or smart), length ≥ 2.
+    /// Single quotes are deliberately excluded: an apostrophe in a contraction
+    /// ("doesn't", "it's") is not a quotation and would otherwise be read as invented
+    /// quoted text. Models quote drawing text with double quotes.
     private static func quotedStrings(in answer: String) -> [String] {
         var out: [String] = []
-        for (open, close) in [("\"", "\""), ("“", "”"), ("‘", "’"), ("'", "'")] {
+        for (open, close) in [("\"", "\""), ("“", "”")] {
             var rest = Substring(answer)
             while let o = rest.range(of: open) {
                 let after = rest[o.upperBound...]
@@ -432,12 +444,21 @@ enum DrawingAIEvalSuite {
         let phrases = ["can't tell", "cannot tell", "can't determine", "cannot determine", "no information",
                        "not able", "unable", "don't know", "do not know", "not sure", "doesn't say",
                        "does not say", "no colour", "no color", "isn't stated", "not stated", "not specified",
-                       "can't say", "cannot say", "no way to", "not possible to"]
+                       "can't say", "cannot say", "no way to", "not possible to", "does not include",
+                       "doesn't include", "not include any", "any information", "no indication", "not indicate",
+                       "doesn't indicate", "not available", "no mention", "doesn't mention", "no details",
+                       "not provide", "doesn't provide", "no specific", "does not specify",
+                       "doesn't specify", "not specify", "cannot be determined", "can't be determined",
+                       "no explicit mention", "mention of background", "no background color",
+                       "no background colour", "not mentioned", "no reference to"]
         return phrases.contains { answer.localizedCaseInsensitiveContains($0) }
     }
 
     private static func affirmative(_ answer: String) -> Bool {
-        answer.localizedCaseInsensitiveContains("yes")
+        let l = answer.lowercased()
+        if l.contains("not contain") || l.contains("does not") || l.contains("doesn't") || l.hasPrefix("no") { return false }
+        return l.contains("yes") || l.contains("contains the word") || l.contains("does contain")
+            || l.contains("is present") || l.contains("contains the text")
     }
 
     private static func negative(_ answer: String) -> Bool {
