@@ -541,6 +541,19 @@ final class DocumentSession {
         return insertion.id
     }
 
+    /// Inserts a pen stroke through the SAME pipeline the tool uses (`PenCommit` → smooth or
+    /// snap → `apply(.insert)`), returning its new id, for the E3b `pen-strokes` script.
+    /// `held` drives the snap-to-shape decision just as a real end-of-stroke hold does.
+    func debugInsertPenStroke(devicePoints: [CGPoint], held: Bool, pen: PenStyle) -> Int? {
+        guard editing == .editing, let scene = editingScene else { return nil }
+        let perPoint = scene.deviceUnitsPerPoint
+        guard let insertion = PenCommit.command(
+            rawDevicePoints: devicePoints, held: held,
+            minSpacing: perPoint, rdpTolerance: perPoint * 1.5, pen: pen, in: scene) else { return nil }
+        apply(insertion.command)
+        return insertion.id
+    }
+
     /// Cancels any armed autosave, so a DEBUG capture run never writes on its way out.
     func debugCancelAutosave() { autosave.cancel() }
 

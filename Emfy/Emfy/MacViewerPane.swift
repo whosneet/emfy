@@ -268,6 +268,7 @@ struct MacViewerPane: View {
         case "close-dirty": await runCloseDirtyScript(base: base)
         case "undo-redo": await runUndoRedoScript(base: base)
         case "new-shapes": await runNewShapesScript(base: base)
+        case "pen-strokes": await runPenStrokesScript(base: base)
         default: Self.logScript("unknown script \(script)"); exit(1)
         }
     }
@@ -374,6 +375,78 @@ struct MacViewerPane: View {
         Self.logScript("new-shapes: savedPath=\(resolvedEntryPath() ?? "?") saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil") elements=\(session.editingScene?.editableElements.count ?? -1)")
         try? await Task.sleep(for: .milliseconds(200))
         exit(session.lastSaveError == nil ? 0 : 3)
+    }
+
+    /// `pen-strokes` (E3b): a blank drawing → edit mode → feed four synthetic strokes through
+    /// the SAME pipeline the pen tool uses (`DocumentSession.debugInsertPenStroke` → PenCommit):
+    /// a wavy freehand line (no hold → curve), a wobbly circle WITH a hold (→ ellipse), a
+    /// wobbly rectangle WITH a hold (→ rect) and a scribble (no hold → curve) → screenshot (a)
+    /// → explicit save → exit. A `plain` relaunch proves the strokes persisted (screenshot b).
+    @MainActor
+    private func runPenStrokesScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("pen-strokes: begin editing failed"); exit(2) }
+
+        let wavyLine = Self.wavyLineStroke()
+        let circle = Self.wobblyCircleStroke()
+        let rect = Self.wobblyRectStroke()
+        let scribble = Self.scribbleStroke()
+        let line = PenStyle(color: PenPalette.black, widthPoints: 2)
+        let bluePen = PenStyle(color: PenPalette.blue, widthPoints: 4)
+        let redPen = PenStyle(color: PenPalette.red, widthPoints: 4)
+        let greenPen = PenStyle(color: PenPalette.green, widthPoints: 2)
+        let id1 = session.debugInsertPenStroke(devicePoints: wavyLine, held: false, pen: line)
+        let id2 = session.debugInsertPenStroke(devicePoints: circle, held: true, pen: bluePen)
+        let id3 = session.debugInsertPenStroke(devicePoints: rect, held: true, pen: redPen)
+        let id4 = session.debugInsertPenStroke(devicePoints: scribble, held: false, pen: greenPen)
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(1000))
+        _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-a-strokes.png")
+        await session.save()
+        try? await Task.sleep(for: .milliseconds(500))
+        session.debugCancelAutosave()
+        let kinds = session.editingScene?.editableElements.map { "\($0.kind)" }.joined(separator: ",") ?? "?"
+        Self.logScript("pen-strokes: ids=\(id1 ?? -1),\(id2 ?? -1),\(id3 ?? -1),\(id4 ?? -1) kinds=[\(kinds)] savedPath=\(resolvedEntryPath() ?? "?") saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil")")
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(session.lastSaveError == nil ? 0 : 3)
+    }
+
+    /// A wavy open freehand line (top-left): too wavy to be a straight line, and no hold, so
+    /// it stays a smoothed curve.
+    private static func wavyLineStroke() -> [CGPoint] {
+        (0 ... 50).map { i in CGPoint(x: 90 + Double(i) * 8, y: 150 + sin(Double(i) * 0.35) * 45) }
+    }
+    /// A hand-drawn-ish wobbly circle (top-right) that snaps to an ellipse on a hold.
+    private static func wobblyCircleStroke() -> [CGPoint] {
+        var pts = (0 ... 72).map { i -> CGPoint in
+            let a = Double(i) / 72 * 2 * .pi
+            return CGPoint(x: 820 + cos(a) * 150 + sin(Double(i) * 0.9) * 4, y: 230 + sin(a) * 150 + cos(Double(i) * 0.9) * 4)
+        }
+        pts.append(pts[0])
+        return pts
+    }
+    /// A wobbly rectangle (bottom-left) that snaps to a rect on a hold.
+    private static func wobblyRectStroke() -> [CGPoint] {
+        let corners = [CGPoint(x: 90, y: 430), CGPoint(x: 520, y: 430), CGPoint(x: 520, y: 700), CGPoint(x: 90, y: 700)]
+        var pts: [CGPoint] = []
+        for edge in 0 ..< 4 {
+            let p0 = corners[edge], p1 = corners[(edge + 1) % 4]
+            for i in 0 ..< 16 {
+                let t = Double(i) / 16
+                pts.append(CGPoint(x: p0.x + (p1.x - p0.x) * t + sin(Double(i) * 0.9) * 2.5,
+                                   y: p0.y + (p1.y - p0.y) * t + cos(Double(i) * 0.9) * 2.5))
+            }
+        }
+        pts.append(corners[0])
+        return pts
+    }
+    /// A scribble (bottom-right): open and far from any chord, so no hold could snap it; it
+    /// stays a curve.
+    private static func scribbleStroke() -> [CGPoint] {
+        (0 ... 60).map { i in CGPoint(x: 640 + Double(i) * 7, y: 560 + sin(Double(i) * 0.8) * 110) }
     }
 
     /// `plain`: open the (already edited) temp copy read-only → screenshot (b) → log the
