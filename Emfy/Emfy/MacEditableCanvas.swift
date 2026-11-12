@@ -219,7 +219,11 @@ struct MacEditableCanvas: NSViewRepresentable {
         fileprivate weak var overlay: EditorOverlayView?
 
         private var hasSetInitialZoom = false
-        private var lastViewportSize: CGSize = .zero
+        /// The last UNOBSCURED region the page was fitted to. Tracking the available region
+        /// (not just the viewport size) is what makes an inspector open/close re-fit: the
+        /// inspector changes the scroll view's trailing SAFE-AREA INSET, not its frame size,
+        /// so a plain size comparison never saw it (E3e fix B review).
+        private var lastAvailableSize: CGSize = .zero
         private static let fitMargin: CGFloat = 24
 
         /// Live drag state. `nil` between drags.
@@ -237,6 +241,26 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// The most recently created editing coordinator, so the E3e `align-grid` capture
         /// script can drive a live snapped drag it can't produce with a synthetic pointer.
         static weak var debugActive: Coordinator?
+
+        /// Numbers for the fix-B fit debugging (E3e review): the visible region, the page
+        /// rect in that region's coordinates, and the magnification vs the fit.
+        func debugFitReport() -> String {
+            guard let scrollView else { return "no scrollView" }
+            let viewport = scrollView.bounds.size
+            let insets = ViewerFit.Insets(
+                top: scrollView.safeAreaInsets.top, leading: scrollView.safeAreaInsets.left,
+                bottom: scrollView.safeAreaInsets.bottom, trailing: scrollView.safeAreaInsets.right)
+            let fit = ViewerFit.fitScale(content: parent.pageSize, viewport: viewport, insets: insets, margin: Self.fitMargin, minScale: 0.01, maxScale: ZoomMath.maxZoom)
+            let visible = scrollView.documentVisibleRect
+            let paper = scrollView.documentView?.frame ?? .zero
+            let fits = visible.insetBy(dx: Self.fitMargin, dy: Self.fitMargin).contains(paper)
+            return String(format: "scrollFrame=%@ clip=%@ visibleDoc=%@ paper=%@ safeInsets(t%.0f l%.0f b%.0f r%.0f) mag=%.4f min=%.4f max=%.4f fitForViewport=%.4f pageInsideVisible=%@",
+                NSStringFromRect(scrollView.frame), NSStringFromRect(scrollView.contentView.bounds),
+                NSStringFromRect(visible), NSStringFromRect(paper),
+                insets.top, insets.leading, insets.bottom, insets.trailing,
+                scrollView.magnification, scrollView.minMagnification, scrollView.maxMagnification, fit,
+                fits ? "YES" : "NO")
+        }
 
         /// Starts a live MOVE drag of `moveID` and drags its centre to within ~3 view-pt of
         /// `towardID`'s centre so the smart-guide snap engages, leaving the drag ACTIVE for a
@@ -301,11 +325,15 @@ struct MacEditableCanvas: NSViewRepresentable {
             // first layout, on an inspector open/close, and on a window resize, while a
             // manual zoom is left alone (the overflow clause still snaps back to fit when a
             // shrink would cut the page off), exactly as the iPad does.
+            // Re-fit when the UNOBSCURED region changes — a viewport resize OR an inspector/
+            // sidebar inset change (fix B review): the inspector only shifts the safe-area
+            // insets, so comparing region sizes is what catches it.
+            let available = ViewerFit.availableSize(viewport: viewport, insets: insets, margin: Self.fitMargin)
             let refit = ViewerFit.editorRefitScale(
                 content: natural, viewport: viewport, insets: insets, margin: Self.fitMargin,
                 minScale: 0.01, maxScale: ZoomMath.maxZoom,
                 currentMagnification: scrollView.magnification, previousFitScale: parent.controller.fitScale,
-                hasFittedBefore: hasSetInitialZoom, viewportChanged: viewport != lastViewportSize)
+                hasFittedBefore: hasSetInitialZoom, viewportChanged: available != lastAvailableSize)
             let fit = ViewerFit.fitScale(content: natural, viewport: viewport, insets: insets, margin: Self.fitMargin, minScale: 0.01, maxScale: ZoomMath.maxZoom)
             scrollView.minMagnification = ZoomMath.minMagnification(fit: fit)
             scrollView.maxMagnification = ZoomMath.maxMagnification(fit: fit)
@@ -321,7 +349,7 @@ struct MacEditableCanvas: NSViewRepresentable {
                     }
                 }
             }
-            lastViewportSize = viewport
+            lastAvailableSize = available
             if parent.controller.zoom != scrollView.magnification { parent.controller.zoom = scrollView.magnification }
             overlay?.needsDisplay = true
         }
@@ -1226,8 +1254,10 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
         let fine = major / CGFloat(subdivisions)
         guard fine > 0, page.width / fine < 5000 else { return }   // never flood on a huge page
 
-        let minor = NSColor.separatorColor.withAlphaComponent(0.5)
-        let majorColor = NSColor.separatorColor
+        // Fixed neutral ink, independent of the window appearance — the paper is always
+        // white, so a semantic colour (which goes light in Dark Mode) would vanish (E3e review).
+        let minor = NSColor(white: 0, alpha: 0.06)
+        let majorColor = NSColor(white: 0, alpha: 0.12)
         let topView = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.minY)).y
         let bottomView = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: page.maxY)).y
 

@@ -540,6 +540,12 @@ struct MacViewerPane: View {
     @MainActor
     private func runAlignGridScript(base: String) async {
         NSApp.activate(ignoringOtherApps: true)
+        // A roomy, on-screen window so the fitted page + the open inspector are both clearly
+        // visible in the capture (fix B review).
+        if let window = NSApp.windows.first(where: { !($0 is NSPanel) && ($0.contentView?.bounds.height ?? 0) > 200 }) {
+            window.setContentSize(NSSize(width: 1500, height: 950))
+            window.makeKeyAndOrderFront(nil)
+        }
         controller.fit()
         try? await Task.sleep(for: .milliseconds(400))
         await session.beginEditing()
@@ -555,11 +561,13 @@ struct MacViewerPane: View {
         session.alignSelection(ids, .top)
         session.distributeSelection(ids, .horizontal)
         editorModel.showGrid = true
+        EditorDebugLaunch.scrollInspectorToArrange = true   // bring the Arrange buttons into view
         showInspector = true
         session.debugCancelAutosave()
         try? await Task.sleep(for: .milliseconds(350))
         controller.fit()   // re-fit with the inspector open (fix B)
         try? await Task.sleep(for: .milliseconds(1100))
+        Self.logScript("align-grid FIT(before): \(MacEditableCanvas.Coordinator.debugActive?.debugFitReport() ?? "no coordinator")")
         if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-a.png") {
             _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-a.png")
         }
