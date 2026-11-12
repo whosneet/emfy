@@ -1105,10 +1105,10 @@ struct MetafileViewerScreen: View {
 
     @ViewBuilder
     private var inspectorContent: some View {
-        // In edit mode with a selection, the Format panel replaces Info (a Format | Info
-        // segmented control switches between them); otherwise Info as today (E2c design
-        // call 1).
-        if session.editing == .editing, !editorModel.selection.isEmpty, loaded != nil, entry != nil {
+        // In edit mode the segmented Format | Layers | Info panel replaces Info (E2c design
+        // call 1; Layers added E3d). It shows even with no selection so the Layers tab is
+        // always reachable; Format then reads "No Selection".
+        if session.editing == .editing, loaded != nil, entry != nil {
             EditorInspectorPanel(session: session, editorModel: editorModel, onClose: { closeInspector() }) {
                 infoInspector
             }

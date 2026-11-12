@@ -435,6 +435,23 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             parent.delete(selection.ids)
         }
 
+        // MARK: Context menu (E3d) — Arrange + Move Selection to Layer
+
+        func arrange(_ direction: SceneArrange.Direction) {
+            guard !selection.ids.isEmpty else { return }
+            parent.apply(.arrange(ids: selection.ids, direction), nil)
+        }
+
+        func moveSelection(toLayer order: Int) {
+            guard !selection.ids.isEmpty else { return }
+            parent.apply(.moveElementsToLayer(ids: selection.ids, layer: order), nil)
+        }
+
+        /// The layer names (top-first) paired with their order index, for the move submenu.
+        var layersTopFirst: [(order: Int, name: String)] {
+            scene.layers.indices.reversed().map { (order: $0, name: scene.layers[$0].name) }
+        }
+
         // MARK: Drag-and-drop image (E3c)
 
         func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
@@ -1018,10 +1035,27 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
         guard let coordinator, let box = coordinator.selectionViewBounds(), box.contains(location) else { return nil }
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            // Arrange (reorder within the layer, E3d).
+            let arrange = UIMenu(title: "Arrange", image: UIImage(systemName: "square.3.layers.3d"), children: [
+                UIAction(title: "Bring to Front", image: UIImage(systemName: "square.3.layers.3d.top.filled")) { _ in coordinator.arrange(.toFront) },
+                UIAction(title: "Bring Forward", image: UIImage(systemName: "square.2.layers.3d.top.filled")) { _ in coordinator.arrange(.forward) },
+                UIAction(title: "Send Backward", image: UIImage(systemName: "square.2.layers.3d.bottom.filled")) { _ in coordinator.arrange(.backward) },
+                UIAction(title: "Send to Back", image: UIImage(systemName: "square.3.layers.3d.bottom.filled")) { _ in coordinator.arrange(.toBack) },
+            ])
+            var children: [UIMenuElement] = [arrange]
+            // Move Selection to Layer, when there's more than one layer (E3d).
+            let layers = coordinator.layersTopFirst
+            if layers.count > 1 {
+                let moveItems = layers.map { entry in
+                    UIAction(title: entry.name) { _ in coordinator.moveSelection(toLayer: entry.order) }
+                }
+                children.append(UIMenu(title: "Move Selection to Layer", image: UIImage(systemName: "rectangle.stack"), children: moveItems))
+            }
             let delete = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
                 coordinator.deleteSelection()
             }
-            return UIMenu(children: [delete])
+            children.append(delete)
+            return UIMenu(children: children)
         }
     }
 
