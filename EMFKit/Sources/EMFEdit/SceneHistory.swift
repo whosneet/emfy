@@ -125,6 +125,17 @@ public struct SceneHistory: Sendable {
         redoStack.removeAll()
     }
 
+    /// Discards the open group WITHOUT recording anything, rolling back every change it
+    /// applied so far — the brand-new-text cancel path (E3c): inserting a text element
+    /// opens a group, and cancelling the popover on it must leave no element and no undo
+    /// entry. A no-op when no group is open. Unlike `endGroup`, nothing reaches the undo
+    /// stack and the scene returns to the pre-group state; the redo stack is untouched.
+    public mutating func abortGroup() {
+        guard let group = openGroup else { return }
+        for change in group.changes.reversed() { scene.undoChange(change) }
+        openGroup = nil
+    }
+
     /// Runs `body` as one atomic undo step. If `body` throws, every change it
     /// applied so far is rolled back, nothing is recorded, and the error is
     /// rethrown — so a multi-command operation is all-or-nothing.

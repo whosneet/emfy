@@ -193,6 +193,95 @@ public enum SceneFactory {
         }
     }
 
+    // MARK: - Text (E3c)
+
+    /// TA_LEFT | TA_BASELINE (0x18, [MS-EMF] §2.3.11.25): the run's reference point is
+    /// its left edge on the text baseline — the E3c text-tool default, so a click/tap
+    /// drops the baseline under the pointer.
+    public static let baselineLeftAlign: UInt32 = 0x0018
+
+    /// Builds a new GDI text `Element` reading `string`, with its baseline-left
+    /// reference at `originDevice` (device space, identity transform so device ==
+    /// logical). `pointSize` is a typographic point size (1/72 inch) converted to the
+    /// run's LOGFONT em height through `deviceUnitsPerPoint` (from
+    /// `Scene.deviceUnitsPerPoint`), stored NEGATIVE as the character/em height
+    /// ([MS-EMF] §2.2.13, matching `Scene.setFont`). The exporter synthesises it as
+    /// EMR_EXTCREATEFONTINDIRECTW + EMR_EXTTEXTOUTW (and the EMF+/WMF/SVG equivalents),
+    /// and E2c's inspector and the text popover edit it like any imported run.
+    public static func makeText(
+        string: String,
+        originDevice: CGPoint,
+        family: String,
+        pointSize: Double,
+        color: SceneColor,
+        id: Int,
+        deviceUnitsPerPoint: CGFloat
+    ) -> Element {
+        let em = max(1, (Double(deviceUnitsPerPoint) * pointSize).rounded())
+        let logicalHeight = -SceneNumeric.int32(em)
+        let text = SceneText(
+            string: string, fontFamily: family, logicalHeight: logicalHeight,
+            color: color, referenceLogical: originDevice, alignRawValue: baselineLeftAlign)
+        let geometry = ScenePath(CGPath(rect: textBox(string: string, referenceDevice: originDevice, em: em, alignRawValue: baselineLeftAlign), transform: nil))
+        return Element(
+            id: id, kind: .text, geometryDevice: geometry, transform: .identity,
+            text: text, provenance: Provenance(sourceRecordIndices: [], edited: true), locked: false
+        )
+    }
+
+    /// A device-space box around a GDI text run for the element's cached bounds (the
+    /// tight selection box is recomputed from the run's metrics by the app). Mirrors
+    /// the horizontal-anchor and vertical-band estimate `SceneRasterize`/`EditorTextBounds`
+    /// use: a left/centre/right anchor from the alignment flags, a one-em horizontal
+    /// margin, and a 2.8-em vertical band centred near the baseline.
+    private static func textBox(string: String, referenceDevice: CGPoint, em: Double, alignRawValue: UInt32) -> CGRect {
+        let count = max(1, string.utf16.count)
+        let width = Double(count) * em
+        let refX = Double(referenceDevice.x)
+        let x0: Double
+        switch alignRawValue & 0x6 {
+        case 0x2: x0 = refX - width            // TA_RIGHT
+        case 0x6: x0 = refX - width / 2        // TA_CENTER
+        default:  x0 = refX                    // TA_LEFT
+        }
+        let margin = em
+        return CGRect(x: x0 - margin, y: Double(referenceDevice.y) - em * 1.4, width: width + 2 * margin, height: em * 2.8)
+    }
+
+    // MARK: - Images (E3c)
+
+    /// Builds a new image `Element` whose pixels are `cgImage`, placed axis-aligned at
+    /// `destRectDevice` (device space, identity transform). The pixels are re-encoded to
+    /// a compressed PNG (`SceneImageCoding`), which both strips source metadata
+    /// (EXIF/GPS; §8) and is the carrier the exporter already knows (E1's compressed-PNG
+    /// EMF+ bitmap → STRETCHDIBITS GDI fallback, WMF image, SVG data URI). Nil when the
+    /// pixels cannot be PNG-encoded.
+    public static func makeImage(cgImage: CGImage, destRectDevice: CGRect, id: Int) -> Element? {
+        guard let plus = SceneImageCoding.compressedPNGImage(fromCGImage: cgImage) else { return nil }
+        let rect = destRectDevice.standardized
+        let image = SceneImage(emfPlusImage: plus, destRectDevice: rect)
+        let geometry = ScenePath(CGPath(rect: rect, transform: nil))
+        return Element(
+            id: id, kind: .image, geometryDevice: geometry, transform: .identity,
+            image: image, provenance: Provenance(sourceRecordIndices: [], edited: true), locked: false
+        )
+    }
+
+    /// The axis-aligned device rectangle a newly-inserted image fills: it fits within
+    /// 50% of the page's smaller dimension, preserves the image's aspect ratio, and
+    /// centres on the page — or on `centreDevice` when inserted at a drop point (E3c
+    /// image placement). Degenerate inputs clamp so nothing traps (§8).
+    public static func fitImageRect(imagePixelSize: CGSize, pageBoundsDevice: CGRect, centreDevice: CGPoint? = nil) -> CGRect {
+        let imgW = max(1, Double(imagePixelSize.width))
+        let imgH = max(1, Double(imagePixelSize.height))
+        let maxDim = max(1, 0.5 * Double(min(pageBoundsDevice.width, pageBoundsDevice.height)))
+        let scale = min(maxDim / imgW, maxDim / imgH)
+        let w = imgW * scale
+        let h = imgH * scale
+        let centre = centreDevice ?? CGPoint(x: pageBoundsDevice.midX, y: pageBoundsDevice.midY)
+        return CGRect(x: Double(centre.x) - w / 2, y: Double(centre.y) - h / 2, width: w, height: h)
+    }
+
     // MARK: - Unique ids
 
     /// The next free element id for `scene` — one past the largest id in any layer,

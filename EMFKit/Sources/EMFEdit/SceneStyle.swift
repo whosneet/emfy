@@ -297,6 +297,44 @@ public struct SceneText: Sendable, Equatable {
         self.advancesLogical = []
         self.isEMFPlus = true
     }
+
+    /// A new GDI text run authored from scratch — the E3c text tool. Stores the GDI
+    /// engine defaults (no EMF+ fields): a signed LOGFONT em `logicalHeight` ([MS-EMF]
+    /// §2.2.13; negative = character/em height, matching `Scene.setFont`),
+    /// `requestedFamily == fontFamily` (the face is both asked-for and resolved), and
+    /// the raw alignment flags the synthesiser passes to SetTextAlign ([MS-EMF]
+    /// §2.3.11.25). The exporter re-emits it as EMR_EXTCREATEFONTINDIRECTW +
+    /// EMR_EXTTEXTOUTW ([MS-EMF] §2.3.7.11, §2.3.5.7).
+    public init(
+        string: String,
+        fontFamily: String,
+        logicalHeight: Int32,
+        color: SceneColor,
+        referenceLogical: CGPoint,
+        alignRawValue: UInt32,
+        bold: Bool = false,
+        italic: Bool = false
+    ) {
+        self.string = string
+        self.fontFamily = fontFamily
+        self.requestedFamily = fontFamily
+        self.logicalHeight = logicalHeight
+        self.emSize = 0
+        self.emSizeUnit = 0
+        self.bold = bold
+        self.italic = italic
+        self.underline = false
+        self.strikeOut = false
+        self.escapementTenths = 0
+        self.color = color
+        self.referenceLogical = referenceLogical
+        self.alignRawValue = alignRawValue
+        self.layoutReference = .null
+        self.lineAlignRawValue = 0
+        self.stringFormatFlags = 0
+        self.advancesLogical = []
+        self.isEMFPlus = false
+    }
 }
 
 /// An editable image reference. The source DIB bytes are retained so E1b can
@@ -350,6 +388,23 @@ public struct SceneImage: Sendable, Equatable {
         self.emfPlusImage = plus.image
         self.srcRect = plus.srcRect
         self.srcUnit = plus.srcUnit
+    }
+
+    /// A new image authored from scratch — the E3c image insert. Its pixels are held
+    /// as `emfPlusImage` (a compressed-PNG EmfPlusBitmap, metadata-stripped; §8),
+    /// placed axis-aligned at `destRectDevice` with an identity element transform, so
+    /// device == logical. The GDI/WMF export decodes the PNG to a STRETCHDIBITS DIB;
+    /// the EMF+ export writes the bitmap directly.
+    public init(emfPlusImage: EMFPlusImage, destRectDevice: CGRect) {
+        let rect = destRectDevice.standardized
+        self.destRectDevice = rect
+        self.destOriginLogical = rect.origin
+        self.destSizeLogical = rect.size
+        self.destCornersDevice = nil
+        self.sourceDIB = nil
+        self.emfPlusImage = emfPlusImage
+        self.srcRect = .null
+        self.srcUnit = 0
     }
 }
 

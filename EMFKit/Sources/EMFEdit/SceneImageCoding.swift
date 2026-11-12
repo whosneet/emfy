@@ -49,6 +49,20 @@ enum SceneImageCoding {
         return EMFPlusImage(version: graphicsVersion, content: .bitmap(header, data: png))
     }
 
+    /// A compressed-PNG `EMFPlusImage` (bitmap content, `bitmapDataType` = 1) built
+    /// directly from an arbitrary `CGImage` — the E3c image insert. Re-encoding PIXELS
+    /// ONLY through PNG strips every source metadata block (EXIF, GPS, maker notes), so
+    /// the stored bytes carry no camera or location data (§8/privacy). Nil when the
+    /// pixels cannot be PNG-encoded. The header `Width`/`Height` are the native pixel
+    /// dimensions; `Stride`/`PixelFormat` are 0 (unused for a compressed stream).
+    static func compressedPNGImage(fromCGImage cg: CGImage) -> EMFPlusImage? {
+        guard let png = pngData(cg) else { return nil }
+        let header = EMFPlusImageBitmapHeader(
+            width: Int32(clamping: cg.width), height: Int32(clamping: cg.height),
+            stride: 0, pixelFormat: 0, bitmapDataType: 1)
+        return EMFPlusImage(version: graphicsVersion, content: .bitmap(header, data: png))
+    }
+
     /// A copy of `image` with every pixel's alpha multiplied by `opacity` (0…1),
     /// drawn into a premultiplied sRGB context and read back as straight alpha the
     /// PNG encoder preserves. Nil on a bitmap allocation failure.
