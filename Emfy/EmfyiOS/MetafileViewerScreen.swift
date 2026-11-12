@@ -1,7 +1,9 @@
 import CoreGraphics
 import EMFRender
+import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// The iOS library window's detail column: the Photos-style viewer, now driven by
 /// a per-window `DocumentSession` (v3-plan §11.2) rather than loading the file
@@ -46,6 +48,11 @@ struct MetafileViewerScreen: View {
     // Editing (E2a review #6).
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
+
+    // Image insert (E3c): Photos picker + Files importer presentation.
+    @State private var photoItem: PhotosPickerItem?
+    @State private var photoPickerPresented = false
+    @State private var imageImporterPresented = false
 
     private enum Phase {
         case loading
@@ -129,6 +136,9 @@ struct MetafileViewerScreen: View {
             PenPaletteSheet(editorModel: editorModel)
                 .presentationDetents([.height(240), .medium])
         }
+        // Image insert (E3c design call 2): the Photos / Files pickers and the failure
+        // toast, hung off a zero-size overlay so the main body stays type-checkable.
+        .overlay { imageInsertControls }
         .alert(
             "Export Failed",
             isPresented: shareErrorBinding,
@@ -259,6 +269,8 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "undo-redo" { await runUndoRedoScript(); return }
         if EditorDebugLaunch.script == "new-shapes" { await runNewShapesScript(); return }
         if EditorDebugLaunch.script == "pen-strokes" { await runPenStrokesScript(); return }
+        if EditorDebugLaunch.script == "text-image" { await runTextImageScript(); return }
+        if EditorDebugLaunch.script == "text-popover" { await runTextPopoverScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -343,6 +355,58 @@ struct MetafileViewerScreen: View {
         editorModel.armPen()
         session.debugCancelAutosave()
         Self.logScript("ios pen-strokes: elements=\(session.editingScene?.editableElements.count ?? -1) kinds=\(session.editingScene?.editableElements.map { "\($0.kind)" } ?? []) armedPen=\(editorModel.armedPen)")
+    }
+
+    /// iPad text + image proof (E3c): blank drawing → edit mode → insert a text element
+    /// "Hello Emfy" and an in-process gradient image through the SAME tool commit paths
+    /// (`debugInsertText` / `debugInsertImage`) → select the image → SAVE in place (so a
+    /// plain relaunch proves persistence) → stay on screen so a simulator screenshot
+    /// shows the text, the image and the image's selection handles.
+    @MainActor
+    private func runTextImageScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios text-image: begin editing failed"); return }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        let textID = session.debugInsertText("Hello Emfy", originDevice: CGPoint(x: page.width * 0.12, y: page.height * 0.2))
+        let imageID = session.debugInsertImage(Self.debugGradientPNG(), centreDevice: CGPoint(x: page.width * 0.5, y: page.height * 0.6))
+        if let imageID { editorModel.selection.replace(with: imageID) }
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.save()
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(300))
+        Self.logScript("ios text-image: textID=\(textID ?? -1) imageID=\(imageID ?? -1) elements=\(session.editingScene?.editableElements.count ?? -1) kinds=\(session.editingScene?.editableElements.map { "\($0.kind)" } ?? []) saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil")")
+    }
+
+    /// iPad text-popover proof (E3c): blank drawing → edit mode → insert a text element and
+    /// open its popover (the SAME popover a text-tool tap opens), then stay on screen so a
+    /// simulator screenshot shows the popover on a freshly inserted text.
+    @MainActor
+    private func runTextPopoverScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing, let scene = session.editingScene else { Self.logScript("ios text-popover: begin editing failed"); return }
+        let page = scene.pageSizeDevice
+        let origin = CGPoint(x: page.width * 0.2, y: page.height * 0.35)
+        let insertion = TextToolInsertion.element(originDevice: origin, in: scene)
+        session.beginInsertText(insertion.element)
+        editorModel.selection.replace(with: insertion.id)
+        editorModel.textEdit = TextEditRequest(id: insertion.id, anchor: UnitPoint(x: 0.2, y: 0.35), initialText: insertion.element.text?.string ?? "Text")
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(300))
+        Self.logScript("ios text-popover: id=\(insertion.id) popoverOpen=\(editorModel.textEdit != nil)")
+    }
+
+    /// A small in-process gradient PNG, so the image-insert script needs no external file.
+    @MainActor
+    private static func debugGradientPNG() -> Data {
+        let size = CGSize(width: 240, height: 160)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.pngData { context in
+            let cg = context.cgContext
+            let colors = [UIColor.systemBlue.cgColor, UIColor.systemOrange.cgColor] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+                cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+            }
+        }
     }
 
     /// Permission-free in-process capture of the key window (toolbar included), written to
@@ -605,6 +669,96 @@ struct MetafileViewerScreen: View {
             ToolbarItem(placement: .topBarLeading) {
                 penMenu
             }
+            ToolbarItem(placement: .topBarLeading) {
+                textButton
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                imageMenu
+            }
+        }
+    }
+
+    /// The Text tool (E3c design call 1): iPad (regular width) only. A tap arms it; the
+    /// next canvas tap inserts a text element and opens its popover, then the tool
+    /// disarms. An accent tint marks the armed state.
+    private var textButton: some View {
+        Button {
+            if editorModel.armedTextTool { editorModel.disarmTools() } else { editorModel.armText() }
+        } label: {
+            Label("Text", systemImage: "textformat")
+        }
+        .tint(editorModel.armedTextTool ? Color.accentColor : nil)
+        .accessibilityIdentifier("viewerText")
+    }
+
+    /// The Image menu (E3c design call 2): iPad (regular width) only. It offers Photos
+    /// (the system photo picker) and Files (the document picker), both images-only;
+    /// opening either disarms the other creation tools.
+    private var imageMenu: some View {
+        Menu {
+            Button {
+                editorModel.disarmTools()
+                photoPickerPresented = true
+            } label: {
+                Label("Photos", systemImage: "photo.on.rectangle")
+            }
+            Button {
+                editorModel.disarmTools()
+                imageImporterPresented = true
+            } label: {
+                Label("Files", systemImage: "folder")
+            }
+        } label: {
+            Label("Image", systemImage: "photo")
+        }
+        .accessibilityIdentifier("viewerImage")
+    }
+
+    /// The Photos picker, Files importer and the image-insert failure toast, isolated on a
+    /// zero-size, non-interactive overlay so the main view body stays type-checkable.
+    private var imageInsertControls: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .photosPicker(isPresented: $photoPickerPresented, selection: $photoItem, matching: .images)
+            .onChange(of: photoItem) { _, item in
+                guard let item else { return }
+                Task { await insertPickedPhoto(item); photoItem = nil }
+            }
+            .fileImporter(isPresented: $imageImporterPresented, allowedContentTypes: [.image], allowsMultipleSelection: false) { result in
+                handleImageImport(result)
+            }
+            .onChange(of: session.imageInsertFailed) { _, failed in
+                if failed {
+                    toast.show("This image couldn’t be added", systemImage: "photo.badge.exclamationmark")
+                    session.clearImageInsertFailed()
+                }
+            }
+    }
+
+    /// Loads a picked Photos item's bytes and inserts it through the session's capped,
+    /// metadata-stripping image path, selecting the new element (design call 2).
+    private func insertPickedPhoto(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            session.markImageInsertFailed(); return
+        }
+        insertImageData(data)
+    }
+
+    /// Reads an imported file URL's bytes (security-scoped) and inserts them.
+    private func handleImageImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { session.markImageInsertFailed(); return }
+        insertImageData(data)
+    }
+
+    /// Inserts decoded image bytes centred on the page and selects the new element; a
+    /// decode/cap failure sets `imageInsertFailed`, which the body observer toasts.
+    private func insertImageData(_ data: Data) {
+        if let id = session.insertImage(data: data) {
+            editorModel.selection.replace(with: id)
         }
     }
 

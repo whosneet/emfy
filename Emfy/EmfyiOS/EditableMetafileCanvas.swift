@@ -30,6 +30,9 @@ struct MetafileEditingContainer: View {
                     displayScale: displayScale, tilePaint: tilePaint, options: options,
                     apply: { command, key in session.apply(command, coalescing: key) },
                     delete: { ids in session.deleteSelection(ids) },
+                    // Opens the coalesced "Insert Text" group; the popover's commit/cancel
+                    // closes it (E3c design call 1).
+                    beginInsertText: { element in session.beginInsertText(element) },
                     // The scene's undo manager, vended by the overlay as first responder so
                     // ⌘Z/⇧⌘Z and the three-finger undo/redo gestures drive SceneHistory (E2d).
                     sceneUndoManager: session.undoManager,
@@ -49,8 +52,10 @@ struct MetafileEditingContainer: View {
         .popover(item: $editorModel.textEdit, attachmentAnchor: .point(editorModel.textEdit?.anchor ?? .center), arrowEdge: .top) { request in
             TextEditPopover(
                 request: request,
-                onCommit: { string in session.apply(.setText(id: request.id, string)) },
-                onCancel: {},
+                // Routes through the insert-text group for a brand-new text (one "Insert
+                // Text" undo); a plain `setText` for an existing element (E3c).
+                onCommit: { string in session.commitInsertedText(id: request.id, string: string) },
+                onCancel: { session.cancelInsertedText(id: request.id) },
                 onClose: { editorModel.textEdit = nil }
             )
         }
@@ -74,6 +79,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
     let apply: (SceneCommand, SceneCoalescingKey?) -> Void
     /// Deletes the given ids as one undoable step (design call E2c-4).
     let delete: (Set<Int>) -> Void
+    /// Begins the coalesced insert-text undo group for a new text element (E3c).
+    let beginInsertText: (EMFEdit.Element) -> Void
     /// The scene's undo manager, vended by the overlay as first responder (E2d).
     let sceneUndoManager: UndoManager
     /// Trailing width the inspector overlay occupies (E2c item 4).
@@ -325,6 +332,14 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         @objc private func handleTap(_ g: UITapGestureRecognizer) {
             guard let overlay else { return }
             let p = g.location(in: overlay)
+            // The armed text tool: a tap inserts a new text element at the tap, opens its
+            // popover, selects it and disarms (E3c design call 1).
+            if parent.editorModel.armedTextTool {
+                insertText(at: p)
+                overlay.becomeFirstResponder()
+                overlay.setNeedsDisplay()
+                return
+            }
             // An armed shape tool: a tap (no drag) inserts the 100 × 100 pt default
             // shape centred at the tap, selects it and disarms (design call 5).
             if let kind = parent.editorModel.armedShapeTool {
@@ -351,6 +366,21 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                   let element = scene.elements.first(where: { $0.id == id }),
                   element.kind == .text else { return }
             presentTextEdit(for: id)
+        }
+
+        /// Inserts a new text element at the tapped device point, selects it, opens the
+        /// text popover on it (one coalesced "Insert Text" undo), and disarms the tool.
+        /// The popover anchors to the just-built element directly — the coordinator's
+        /// `scene` snapshot has not yet been refreshed with the insert this frame.
+        private func insertText(at viewPoint: CGPoint) {
+            let origin = mapping.devicePoint(fromView: viewPoint)
+            let insertion = TextToolInsertion.element(originDevice: origin, in: scene)
+            parent.beginInsertText(insertion.element)
+            selection = selection.afterClick(hit: insertion.id, additive: false)
+            parent.editorModel.armedTextTool = false
+            parent.editorModel.textEdit = TextEditRequest(
+                id: insertion.id, anchor: anchor(for: insertion.element),
+                initialText: insertion.element.text?.string ?? TextToolInsertion.placeholder)
         }
 
         /// Opens the text-edit popover for a text element, anchored to the run. Shared by
