@@ -372,6 +372,11 @@ struct MetafileViewerScreen: View {
         if let imageID { editorModel.selection.replace(with: imageID) }
         try? await Task.sleep(for: .milliseconds(400))
         await session.save()
+        // The in-place save targets a sandboxed imported copy; also write the exported EMF
+        // to the host scriptFile so a plain relaunch can reopen exactly what was persisted.
+        if let data = session.debugExportEMF(), let path = EditorDebugLaunch.scriptFile {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
         session.debugCancelAutosave()
         try? await Task.sleep(for: .milliseconds(300))
         Self.logScript("ios text-image: textID=\(textID ?? -1) imageID=\(imageID ?? -1) elements=\(session.editingScene?.editableElements.count ?? -1) kinds=\(session.editingScene?.editableElements.map { "\($0.kind)" } ?? []) saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil")")

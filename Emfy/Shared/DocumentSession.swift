@@ -571,6 +571,10 @@ final class DocumentSession {
         insertImage(data: data, centreDevice: centreDevice)
     }
 
+    /// The current edited scene exported as EMF, so an iOS script can write it to a host
+    /// path a plain relaunch reopens (the in-place save targets a sandboxed imported copy).
+    func debugExportEMF() -> Data? { sceneExportData(as: .emf) }
+
     /// Cancels any armed autosave, so a DEBUG capture run never writes on its way out.
     func debugCancelAutosave() { autosave.cancel() }
 
