@@ -76,9 +76,12 @@ struct MetafileInfoView: View {
                     ForEach(couldNotShowNotes) { note in
                         noteRow(note)
                     }
-                    // Explain what's missing (A1b Part 3) — only when on-device AI is on;
-                    // grounded strictly in the diagnostics list above.
-                    if aiInputs != nil {
+                    // Explain what's missing (A1b Part 3) — only when on-device AI is on
+                    // AND a VISUAL record was actually skipped (A1c): structural-only
+                    // skips (HEADER/EOF/COMMENT) would otherwise offer to explain a
+                    // non-existent loss on nearly every file. Grounded strictly in the
+                    // named diagnostics list.
+                    if aiInputs != nil, !explainableItems.isEmpty {
                         explainMissingRows
                     }
                 }
@@ -165,6 +168,13 @@ struct MetafileInfoView: View {
         }
     }
 
+    /// The named, visual "what's missing" items the on-device Explain speaks to
+    /// (A1c). Empty when only structural records (HEADER/EOF/COMMENT) were skipped, so
+    /// the Explain button then hides rather than explaining a non-existent loss.
+    private var explainableItems: [String] {
+        DrawingMissingItems.list(from: diagnostics)
+    }
+
     /// The "Explain what's missing" button and its streamed answer (A1b Part 3).
     @ViewBuilder
     private var explainMissingRows: some View {
@@ -198,7 +208,7 @@ struct MetafileInfoView: View {
             explainModel.resetIfChanged(key: aiInputs?.contentID ?? 0)
             explainModel.explain(
                 key: aiInputs?.contentID ?? 0,
-                items: DrawingMissingItems.list(from: diagnostics))
+                items: explainableItems)
         } label: {
             Label(title, systemImage: "sparkles")
         }

@@ -25,6 +25,15 @@ enum DrawingMissingItems {
     /// Each item is capped to this many characters.
     static let maxItemCharacters = 200
 
+    /// EMR types the render log reports as "unimplemented" but which carry NO visible
+    /// drawing, so a skip of them means nothing is missing: EMR_HEADER (1) and EMR_EOF
+    /// (14) are structure EMFParse decodes separately (F5's 286b99f excludes the same
+    /// pair from the Records "skipped" badge), and EMR_COMMENT (70) is private/metadata
+    /// — its EMF+ payload, when unsupported, is reported through the emfPlus* entries
+    /// instead. Excluded from the named Explain list so the feature doesn't offer to
+    /// explain a non-existent loss on nearly every file.
+    static let structuralEMFTypes: Set<UInt32> = [1, 14, 70]
+
     static func list(from notes: [DiagnosticNote]) -> [String] {
         var out: [String] = []
         var seen = Set<String>()
@@ -63,12 +72,14 @@ enum DrawingMissingItems {
         for entry in diagnostics.renderLog {
             switch entry {
             case .unimplementedRecord(let type, let count):
+                guard !Self.structuralEMFTypes.contains(type) else { break }
                 if let r = DrawingRecordPurpose.emf(type: type) {
                     add("\(r.name) (\(r.purpose)) — \(times(count)).")
                 } else {
                     add("An unsupported EMF record (type \(type)) — \(times(count)).")
                 }
             case .malformedRecord(let type):
+                guard !Self.structuralEMFTypes.contains(type) else { break }
                 let name = EMFRecordType.name(for: type) ?? "EMF record type \(type)"
                 add("A damaged \(name) record was skipped.")
             case .emfPlusUnsupportedRecord(let type, let count),

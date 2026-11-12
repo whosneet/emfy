@@ -101,6 +101,30 @@ import Testing
         #expect(items.contains { $0.contains("9999") })
     }
 
+    @Test func structuralOnlySkipsGiveNoItems() {
+        // Every metafile logs HEADER (1), EOF (14) and often COMMENT (70) as
+        // "unimplemented" even though they draw nothing, so a file whose only skipped
+        // records are structural must yield an EMPTY list (and therefore no Explain
+        // button) — A1c.
+        let diag = diagnostics(renderLog: [
+            .unimplementedRecord(type: 1, count: 1),    // EMR_HEADER
+            .unimplementedRecord(type: 14, count: 1),   // EMR_EOF
+            .unimplementedRecord(type: 70, count: 3),   // EMR_COMMENT
+        ])
+        #expect(DrawingMissingItems.list(from: diag).isEmpty)
+    }
+
+    @Test func aVisualSkipAmongStructuralOnesStillLists() {
+        // A real drawing-record skip survives even when structural skips are present.
+        let diag = diagnostics(renderLog: [
+            .unimplementedRecord(type: 14, count: 1),    // EMR_EOF (excluded)
+            .unimplementedRecord(type: 118, count: 2),   // EMR_GRADIENTFILL (kept)
+        ])
+        let items = DrawingMissingItems.list(from: diag)
+        #expect(items.count == 1)
+        #expect(items[0].contains("EMR_GRADIENTFILL"))
+    }
+
     @Test func stockFontNotesAreNotMissingContent() {
         // A stock-font fallback still draws the text, so it must not appear in the
         // "what's missing" list (parity with couldNotShowNotes filtering).

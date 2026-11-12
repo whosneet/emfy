@@ -115,21 +115,30 @@ enum DrawingAIScreenshots {
     @MainActor
     private static func captureExplain(base: String, explainSource: String) async {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: explainSource)),
-              let loaded = try? MetafileLoader.load(data), !loaded.couldNotShowNotes.isEmpty else { return }
+              let loaded = try? MetafileLoader.load(data) else { return }
+        let items = DrawingMissingItems.list(from: loaded.diagnostics)
+        guard !items.isEmpty else { return }
         let notes = loaded.couldNotShowNotes
         let model = DrawingExplainModel()
-        model.explain(key: 1, items: DrawingMissingItems.list(from: loaded.diagnostics))
+        model.explain(key: 1, items: items)
         await wait(timeout: .seconds(90)) {
             switch model.phase { case .done, .failed: return true; default: return false }
         }
+        // Cap the notes shown so the Explain answer stays on-screen for files with many
+        // skips (the shipping inspector scrolls; a capture can't). The Explain text is
+        // the point of this shot.
+        let shownNotes = Array(notes.prefix(3))
         let view = Form {
             Section("What Emfy couldn't show") {
-                ForEach(notes) { note in
+                ForEach(shownNotes) { note in
                     Label {
                         Text(note.summary).fixedSize(horizontal: false, vertical: true)
                     } icon: {
                         Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                     }
+                }
+                if notes.count > shownNotes.count {
+                    Text("…and \(notes.count - shownNotes.count) more").foregroundStyle(.secondary)
                 }
                 if !model.text.isEmpty {
                     Text(model.text).fixedSize(horizontal: false, vertical: true)
@@ -138,8 +147,8 @@ enum DrawingAIScreenshots {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400, height: 320)
-        _ = capture(view: view, size: NSSize(width: 400, height: 320), to: base + "-explain.png")
+        .frame(width: 400, height: 460)
+        _ = capture(view: view, size: NSSize(width: 400, height: 460), to: base + "-explain.png")
     }
 
     @MainActor
