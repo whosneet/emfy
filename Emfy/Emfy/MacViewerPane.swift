@@ -385,6 +385,7 @@ struct MacViewerPane: View {
     @MainActor
     private func runPenStrokesScript(base: String) async {
         NSApp.activate(ignoringOtherApps: true)
+        Self.scriptWindow()?.makeKeyAndOrderFront(nil)
         controller.fit()
         try? await Task.sleep(for: .milliseconds(400))
         await session.beginEditing()
