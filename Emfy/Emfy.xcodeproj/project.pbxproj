@@ -13,6 +13,8 @@
 		A1A000000000000000000103 /* DrawingAIAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000101 /* DrawingAIAvailability.swift */; };
 		A1A000000000000000000105 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
 		A1A000000000000000000106 /* DrawingAIContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000104 /* DrawingAIContext.swift */; };
+		A1A0000000000000B1B00006A /* LibrarySearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00006F /* LibrarySearch.swift */; };
+		A1A0000000000000B1B00006T /* LibrarySearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00006F /* LibrarySearch.swift */; };
 		A1A0000000000000B1B00005A /* DrawingTitleTagViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00005F /* DrawingTitleTagViews.swift */; };
 		A1A0000000000000B1B00005T /* DrawingTitleTagViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00005F /* DrawingTitleTagViews.swift */; };
 		A1A0000000000000B1B00003A /* DrawingTitleTagService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00003F /* DrawingTitleTagService.swift */; };
@@ -33,6 +35,7 @@
 		A1A00000000000000000011A /* AppleIntelligenceSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A000000000000000000119 /* AppleIntelligenceSettingsSection.swift */; };
 		A1A00000000000000000011C /* DrawingAIAvailabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000011B /* DrawingAIAvailabilityTests.swift */; };
 		A1A00000000000000000011E /* DrawingAIContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000011D /* DrawingAIContextTests.swift */; };
+		A1A0000000000000B1B00007A /* LibrarySearchRankerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00007F /* LibrarySearchRankerTests.swift */; };
 		A1A0000000000000B1B00004A /* DrawingTitleTagPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00004F /* DrawingTitleTagPolicyTests.swift */; };
 		A1A0000000000000B1B00002A /* DrawingAITitleTagsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00002F /* DrawingAITitleTagsTests.swift */; };
 		A1A000000000000000000120 /* DrawingAIToolsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000011F /* DrawingAIToolsTests.swift */; };
@@ -368,6 +371,7 @@
 		A1A0000000000000FACE0001 /* DrawingAIDebugProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIDebugProbe.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000101 /* DrawingAIAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIAvailability.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000104 /* DrawingAIContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIContext.swift"; sourceTree = "<group>"; };
+		A1A0000000000000B1B00006F /* LibrarySearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/LibrarySearch.swift"; sourceTree = "<group>"; };
 		A1A0000000000000B1B00005F /* DrawingTitleTagViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingTitleTagViews.swift"; sourceTree = "<group>"; };
 		A1A0000000000000B1B00003F /* DrawingTitleTagService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingTitleTagService.swift"; sourceTree = "<group>"; };
 		A1A0000000000000B1B00001F /* DrawingAITitleTags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAITitleTags.swift"; sourceTree = "<group>"; };
@@ -383,6 +387,7 @@
 		A1A00000000000000000011D /* DrawingAIContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIContextTests.swift; sourceTree = "<group>"; };
 		A1A00000000000000000011F /* DrawingAIToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIToolsTests.swift; sourceTree = "<group>"; };
 		A1A000000000000000000121 /* DrawingAIAltTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIAltTextTests.swift; sourceTree = "<group>"; };
+		A1A0000000000000B1B00007F /* LibrarySearchRankerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySearchRankerTests.swift; sourceTree = "<group>"; };
 		A1A0000000000000B1B00004F /* DrawingTitleTagPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTitleTagPolicyTests.swift; sourceTree = "<group>"; };
 		A1A0000000000000B1B00002F /* DrawingAITitleTagsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAITitleTagsTests.swift; sourceTree = "<group>"; };
 		F1A000000000000000000014 /* IOSBatchConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSBatchConvert.swift; sourceTree = "<group>"; };
@@ -779,6 +784,7 @@
 				A1A000000000000000000115 /* DrawingAskModel.swift */,
 				A1A000000000000000000117 /* DrawingAIInspectorViews.swift */,
 				A1A000000000000000000119 /* AppleIntelligenceSettingsSection.swift */,
+				A1A0000000000000B1B00006F /* LibrarySearch.swift */,
 				A1A0000000000000B1B00005F /* DrawingTitleTagViews.swift */,
 				A1A0000000000000B1B00003F /* DrawingTitleTagService.swift */,
 				A1A0000000000000B1B00001F /* DrawingAITitleTags.swift */,
@@ -832,6 +838,7 @@
 				A1A00000000000000000011D /* DrawingAIContextTests.swift */,
 				A1A00000000000000000011F /* DrawingAIToolsTests.swift */,
 				A1A000000000000000000121 /* DrawingAIAltTextTests.swift */,
+				A1A0000000000000B1B00007F /* LibrarySearchRankerTests.swift */,
 				A1A0000000000000B1B00004F /* DrawingTitleTagPolicyTests.swift */,
 				A1A0000000000000B1B00002F /* DrawingAITitleTagsTests.swift */,
 			);
@@ -1147,6 +1154,7 @@
 				A1A0000000000000FACE0002 /* DrawingAIDebugProbe.swift in Sources */,
 				A1A000000000000000000102 /* DrawingAIAvailability.swift in Sources */,
 				A1A000000000000000000105 /* DrawingAIContext.swift in Sources */,
+				A1A0000000000000B1B00006A /* LibrarySearch.swift in Sources */,
 				A1A0000000000000B1B00005A /* DrawingTitleTagViews.swift in Sources */,
 				A1A0000000000000B1B00003A /* DrawingTitleTagService.swift in Sources */,
 				A1A0000000000000B1B00001A /* DrawingAITitleTags.swift in Sources */,
@@ -1337,6 +1345,7 @@
 			files = (
 				A1A000000000000000000103 /* DrawingAIAvailability.swift in Sources */,
 				A1A000000000000000000106 /* DrawingAIContext.swift in Sources */,
+				A1A0000000000000B1B00006T /* LibrarySearch.swift in Sources */,
 				A1A0000000000000B1B00005T /* DrawingTitleTagViews.swift in Sources */,
 				A1A0000000000000B1B00003T /* DrawingTitleTagService.swift in Sources */,
 				A1A0000000000000B1B00001T /* DrawingAITitleTags.swift in Sources */,
@@ -1346,6 +1355,7 @@
 				A1A000000000000000000112 /* DrawingAIAltText.swift in Sources */,
 				A1A00000000000000000011C /* DrawingAIAvailabilityTests.swift in Sources */,
 				A1A00000000000000000011E /* DrawingAIContextTests.swift in Sources */,
+				A1A0000000000000B1B00007A /* LibrarySearchRankerTests.swift in Sources */,
 				A1A0000000000000B1B00004A /* DrawingTitleTagPolicyTests.swift in Sources */,
 				A1A0000000000000B1B00002A /* DrawingAITitleTagsTests.swift in Sources */,
 				A1A000000000000000000120 /* DrawingAIToolsTests.swift in Sources */,

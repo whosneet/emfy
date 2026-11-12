@@ -42,6 +42,9 @@ struct RegularSidebarList: View {
     @Binding var selection: UUID?
 
     @State private var searchText = ""
+    /// The search text after a short debounce, so the smart-search ranking (and any
+    /// embedding lookup) never runs on every keystroke (A1b Part 2).
+    @State private var debouncedQuery = ""
     @State private var isImporting = false
     #if os(iOS)
     // The shared library sheets, reachable from the iPad regular-width sidebar (H1).
@@ -54,6 +57,14 @@ struct RegularSidebarList: View {
         content
             .navigationTitle("Recents")
             .searchable(text: $searchText, placement: .sidebar, prompt: "Search recent files")
+            // Debounce the query (A1b Part 2): the ranking and any embedding lookup run
+            // after typing settles, not per keystroke.
+            .task(id: searchText) {
+                if searchText.isEmpty { debouncedQuery = ""; return }
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                debouncedQuery = searchText
+            }
             .toolbar { toolbarContent }
             .fileImporter(
                 isPresented: $isImporting,
@@ -107,9 +118,19 @@ struct RegularSidebarList: View {
     }
 
     /// The sorted, pinned/private-aware sections for the current search and sort
-    /// (S1a-5). Search filters first, so every sort still searches.
+    /// (S1a-5). Search filters first, so every sort still searches. An active smart
+    /// search shows one relevance-ranked section (no date/name re-sort), so the ranking
+    /// survives (A1b Part 2).
     private var sections: [RecentSections.Section] {
-        RecentSections.build(filteredEntries, sort: settings.sortRecentsBy, privateIDs: store.privateIDs)
+        if !debouncedQuery.isEmpty, aiSearchEnabled {
+            return [RecentSections.Section(kind: .all, entries: filteredEntries)]
+        }
+        return RecentSections.build(filteredEntries, sort: settings.sortRecentsBy, privateIDs: store.privateIDs)
+    }
+
+    /// Whether smart (AI) search is active — the AI toggle on and Private mode off.
+    private var aiSearchEnabled: Bool {
+        DrawingTitleTagPolicy.shouldDisplay(aiEnabled: settings.useOnDeviceAI, privateMode: settings.privateMode)
     }
 
     private var emptyState: some View {
@@ -212,8 +233,16 @@ struct RegularSidebarList: View {
     }
 
     private var filteredEntries: [RecentEntry] {
-        guard !searchText.isEmpty else { return store.entries }
-        return store.entries.filter { $0.displayName.localizedStandardContains(searchText) }
+        guard !debouncedQuery.isEmpty else { return store.entries }
+        // AI off (or Private): plain file-name matching, exactly as before.
+        guard aiSearchEnabled else {
+            return store.entries.filter { $0.displayName.localizedStandardContains(debouncedQuery) }
+        }
+        // AI on: rank by name, AI title, tags, extracted/OCR text and meaning.
+        return LibrarySearchRanker.rank(
+            entries: store.entries, query: debouncedQuery, aiEnabled: true,
+            textFor: { LibrarySearchIndex.shared.text(for: $0) },
+            scorer: LibrarySearchScorer.shared)
     }
 
     #if os(macOS)

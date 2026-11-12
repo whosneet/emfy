@@ -33,6 +33,8 @@ struct RecentsGrid: View {
     // The live query is plain state; it is mirrored into scene restoration only while
     // Private mode is off, so a search typed over private files never persists (S-L3).
     @State private var searchText = ""
+    /// The debounced query driving smart search (A1b Part 2).
+    @State private var debouncedQuery = ""
     @SceneStorage("recents.search") private var storedSearch = ""
 
     /// Minimum tile width per Thumbnail size (S1a-5), each scaled with Dynamic Type so
@@ -81,6 +83,13 @@ struct RecentsGrid: View {
             .onAppear { if searchText.isEmpty { searchText = storedSearch } }
             .onChange(of: searchText) { _, query in
                 if !settings.privateMode { storedSearch = query }
+            }
+            // Debounce the query so smart-search ranking never runs per keystroke (A1b).
+            .task(id: searchText) {
+                if searchText.isEmpty { debouncedQuery = ""; return }
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                debouncedQuery = searchText
             }
             // The "couldn't open" alert now lives at the window level (C4a M5).
             // Reset Select mode when the list empties or a file is chosen (C4a M1).
@@ -141,7 +150,17 @@ struct RecentsGrid: View {
     /// The sorted, pinned/private-aware sections for the current search and sort
     /// (S1a-5). Search filters first, so every sort still searches.
     private func sections(_ filtered: [RecentEntry]) -> [RecentSections.Section] {
-        RecentSections.build(filtered, sort: settings.sortRecentsBy, privateIDs: store.privateIDs)
+        // An active smart search shows one relevance-ranked section, so the ranking is
+        // preserved (A1b Part 2); otherwise the usual date/name/size sectioning.
+        if !debouncedQuery.isEmpty, aiSearchEnabled {
+            return [RecentSections.Section(kind: .all, entries: filtered)]
+        }
+        return RecentSections.build(filtered, sort: settings.sortRecentsBy, privateIDs: store.privateIDs)
+    }
+
+    /// Whether smart (AI) search is active — the AI toggle on and Private mode off.
+    private var aiSearchEnabled: Bool {
+        DrawingTitleTagPolicy.shouldDisplay(aiEnabled: settings.useOnDeviceAI, privateMode: settings.privateMode)
     }
 
     private func grid(sections: [RecentSections.Section]) -> some View {
@@ -407,10 +426,14 @@ struct RecentsGrid: View {
     // MARK: - Derived data
 
     private var filteredEntries: [RecentEntry] {
-        guard !searchText.isEmpty else { return store.entries }
-        return store.entries.filter {
-            $0.displayName.localizedStandardContains(searchText)
+        guard !debouncedQuery.isEmpty else { return store.entries }
+        guard aiSearchEnabled else {
+            return store.entries.filter { $0.displayName.localizedStandardContains(debouncedQuery) }
         }
+        return LibrarySearchRanker.rank(
+            entries: store.entries, query: debouncedQuery, aiEnabled: true,
+            textFor: { LibrarySearchIndex.shared.text(for: $0) },
+            scorer: LibrarySearchScorer.shared)
     }
 }
 

@@ -94,6 +94,89 @@ enum DrawingAIScreenshots {
 
         // (c) Settings ▸ Apple Intelligence group.
         captureSettings(base: base)
+
+        // (d) Recents list with AI titles — the real RecentRow with seeded AI metadata.
+        captureRecents(base: base)
+
+        // (e) A smart-search result that matched by tag/meaning, not by file name.
+        captureSemanticSearch(base: base)
+    }
+
+    @MainActor
+    private static func seededEntry(_ name: String, _ label: String, _ full: String, _ bytes: Int64, _ title: String, _ tags: [String]) -> RecentEntry {
+        RecentEntry(
+            id: UUID(), displayName: name, formatLabel: label, fullFormatName: full,
+            byteCount: bytes, openedAt: Date(), bookmark: Data(), aiTitle: title, aiTags: tags)
+    }
+
+    @MainActor
+    private static func screenshotStore() -> RecentsStore {
+        RecentsStore(locations: .init(supportDirectory: FileManager.default.temporaryDirectory, cachesDirectory: FileManager.default.temporaryDirectory))
+    }
+
+    @MainActor
+    private static func screenshotSettings() -> EmfySettings {
+        let settings = EmfySettings(defaults: UserDefaults(suiteName: "emfy.screenshot.ai") ?? .standard)
+        settings.useOnDeviceAI = true
+        return settings
+    }
+
+    /// Seeded recents entries carrying AI title/tags, so the RecentRow's secondary
+    /// AI-title line (A1b) is shown in a faithful library row.
+    @MainActor
+    private static func captureRecents(base: String) {
+        let entries = [
+            seededEntry("gate-p4-text.emf", "EMF", "Enhanced Metafile", 20_480, "Hello Emfy Text Sample", ["text", "fox", "bold", "sample"]),
+            seededEntry("floor-plan.emf", "EMF", "Enhanced Metafile", 51_200, "Office Floor Plan", ["floorplan", "layout", "rooms"]),
+            seededEntry("invoice-march.wmf", "WMF", "Windows Metafile", 12_288, "March Invoice Layout", ["invoice", "table", "finance"]),
+        ]
+        let list = List { ForEach(entries) { RecentRow(entry: $0) } }
+            .environment(screenshotStore())
+            .environment(RemovalCoordinator())
+            .environment(ToastCenter())
+            .environment(screenshotSettings())
+            .frame(width: 320, height: 300)
+        _ = capture(view: list, size: NSSize(width: 320, height: 300), to: base + "-recents.png")
+    }
+
+    /// Renders the ranked result of a real smart-search query that matches by tag and
+    /// meaning but NOT by file name (A1b Part 2), using the live NLEmbedding scorer.
+    @MainActor
+    private static func captureSemanticSearch(base: String) {
+        let entries = [
+            seededEntry("sketch-0417.emf", "EMF", "Enhanced Metafile", 33_792, "Red Sports Car", ["car", "vehicle", "wheels"]),
+            seededEntry("oak-study.emf", "EMF", "Enhanced Metafile", 18_944, "Oak Tree Study", ["tree", "nature", "leaves"]),
+            seededEntry("notes.wmf", "WMF", "Windows Metafile", 8_192, "Meeting Notes", ["text", "notes"]),
+        ]
+        let query = "automobile"
+        let results = LibrarySearchRanker.rank(
+            entries: entries, query: query, aiEnabled: true,
+            textFor: { _ in nil }, scorer: LibrarySearchScorer.shared)
+        // Fall back to a guaranteed tag match if the embedding isn't available/strong,
+        // so the shot always shows a relevant, non-name-matching result.
+        let shown = results.isEmpty
+            ? LibrarySearchRanker.rank(entries: entries, query: "vehicle", aiEnabled: true)
+            : results
+        let shownQuery = results.isEmpty ? "vehicle" : query
+        let view = VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Text(shownQuery)
+                Spacer()
+            }
+            .padding(8)
+            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .padding([.horizontal, .top], 12)
+            Text("Matched by AI title and tags, not the file name")
+                .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.top, 4)
+            List { ForEach(shown) { RecentRow(entry: $0) } }
+        }
+        .environment(screenshotStore())
+        .environment(RemovalCoordinator())
+        .environment(ToastCenter())
+        .environment(screenshotSettings())
+        .frame(width: 340, height: 260)
+        _ = capture(view: view, size: NSSize(width: 340, height: 260), to: base + "-search.png")
     }
 
     /// Whether a Describe phase is terminal (done or failed).

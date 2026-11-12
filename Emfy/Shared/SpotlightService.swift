@@ -75,7 +75,7 @@ final class SpotlightService {
             ? (entry.aiTitleTags.map { [$0.title] + $0.tags } ?? [])
             : []
 
-        return await Task.detached(priority: .background) { () -> DrawingSpotlightItem? in
+        let item = await Task.detached(priority: .background) { () -> DrawingSpotlightItem? in
             guard case .success(let data, _) = RecentsStore.resolveBookmark(bookmark),
                   let loaded = try? MetafileLoader.load(data, options: options) else { return nil }
             let observation = MetafileRenderer.observe(loaded.prepared, options: options)
@@ -97,6 +97,12 @@ final class SpotlightService {
             item.keywords = aiKeywords.filter { !$0.isEmpty }
             return item
         }.value
+        // Cache the extracted + OCR text for smart search (A1b Part 2) — a by-product of
+        // the parse we just did, so search matches drawing/OCR text without re-parsing.
+        if let item, !item.textContent.isEmpty {
+            LibrarySearchIndex.shared.set(id, text: item.textContent)
+        }
+        return item
     }
 
     /// The content UTI for a metafile name, so a Spotlight result carries the right type.
