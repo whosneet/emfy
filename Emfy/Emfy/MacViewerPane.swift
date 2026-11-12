@@ -90,6 +90,9 @@ struct MacViewerPane: View {
             // ⌘= also zooms in: a US keyboard sends "=" unshifted, and the View menu
             // item can show only ⌘+. This hidden accelerator covers the alternate.
             .background(zoomInEqualsShortcut)
+            // Edit ▸ Copy (⌘C), F1 — through the responder chain, so it uses the one
+            // system Copy item and a focused text field keeps its own ⌘C.
+            .onCopyCommand { copyItemProviders() }
             // Publish this window's actions to the shared menu bar (C3b scope 1).
             .focusedSceneValue(\.viewerActions, viewerActions)
             // Intercept the window close (red button / ⌘W) to flush and, if needed,
@@ -1262,13 +1265,15 @@ struct MacViewerPane: View {
             jobName: entry.displayName, window: NSApp.keyWindow)
     }
 
-    /// Edit ▸ Copy (⌘C), F1. Copies the drawing (or, in edit mode, the selection) to the
-    /// pasteboard as vector PDF + PNG, plus the original EMF when it cleanly applies.
-    private func copyDrawing() {
-        guard let loaded, let entry else { return }
-        MacDrawingCopy.copy(
-            session: session, prepared: loaded.prepared, entry: entry, store: store,
-            settings: settings, selection: editorModel.selection.ids, toast: toast)
+    /// Edit ▸ Copy (⌘C), F1. Driven through the responder chain by `.onCopyCommand`, so
+    /// it uses the one system Copy item and yields to a focused text field. Copies the
+    /// drawing (or, in edit mode, the selection) as vector PDF + PNG, plus the original
+    /// EMF when it cleanly applies. Returns `[]` with no document, so Copy stays inert.
+    private func copyItemProviders() -> [NSItemProvider] {
+        guard let loaded, let entry else { return [] }
+        return MacDrawingCopy.itemProviders(
+            session: session, prepared: loaded.prepared, entry: entry,
+            settings: settings, selection: editorModel.selection.ids)
     }
 
     /// Builds the privacy-safe diagnostic report for the current file, copies it to
@@ -1302,7 +1307,6 @@ struct MacViewerPane: View {
             shareSVG: { shareSVG() },
             copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil,
             printDocument: loaded != nil ? { printDocument() } : nil,
-            copyDrawing: loaded != nil ? { copyDrawing() } : nil,
             save: (session.editing == .editing && session.isDirty) ? { Task { await session.save() } } : nil,
             revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil,
             selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,

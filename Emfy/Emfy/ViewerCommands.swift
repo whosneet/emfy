@@ -151,14 +151,9 @@ struct EditMenuCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
-            // Copy the drawing (F1). ⌘C copies the whole drawing (viewer or edit mode)
-            // as PDF + PNG — plus the original EMF when it cleanly applies — or, with a
-            // canvas selection in edit mode, just the selected elements. Disabled until a
-            // document is shown.
-            Button("Copy") { actions?.copyDrawing?() }
-                .keyboardShortcut("c", modifiers: .command)
-                .disabled(actions?.copyDrawing == nil)
-            Divider()
+            // Copy the drawing (F1) is NOT a menu item: it is driven through the responder
+            // chain by the viewer's `.onCopyCommand`, so the one system Edit ▸ Copy (⌘C)
+            // reaches a focused text field first and copies the canvas otherwise.
             // Delete the selection (E2c). No key equivalent: the canvas handles the
             // bare Delete/Backspace key itself (so a focused text field keeps its own
             // backspace); this item is for discoverability and when the canvas isn't

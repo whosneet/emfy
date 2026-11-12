@@ -33,11 +33,11 @@ struct ViewerActions {
     /// menu item reads as disabled.
     var copyDiagnosticReport: (() -> Void)? = nil
 
-    // Output (F1): Mac File ▸ Print… (⌘P) and Edit ▸ Copy (⌘C). `nil` disables the
-    // menu item (no document shown). On iOS these stay no-ops — printing and copying
-    // are reached from the viewer's more menu.
+    // Output (F1): Mac File ▸ Print… (⌘P). `nil` disables the menu item (no document
+    // shown). On iOS this stays a no-op — printing is reached from the viewer's more
+    // menu. Copy is NOT here: it is driven through the responder chain by the viewer's
+    // `.onCopyCommand`, so it uses the single system Edit ▸ Copy item.
     var printDocument: (() -> Void)? = nil
-    var copyDrawing: (() -> Void)? = nil
 
     // Editing (E2a): Mac File ▸ Save and Revert to Opened Version. `nil` disables the
     // menu item — Save is `nil` unless there are unsaved edits; Revert is `nil` unless

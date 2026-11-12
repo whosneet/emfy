@@ -3,26 +3,29 @@ import CoreGraphics
 import EMFEdit
 import EMFRender
 import Foundation
+import UniformTypeIdentifiers
 
-/// Mac Edit ▸ Copy of the drawing (F1 design call 2). It puts the drawing on the
-/// pasteboard as vector **PDF** and **PNG** (at the Settings default scale, within the
-/// shared area cap) — plus the original file's raw EMF when it cleanly applies — using
-/// the pure `DrawingClipboard` plan. With a canvas selection in edit mode it copies
-/// only the selected elements, rendered from a subset scene (as the E2b ghost does);
-/// an edited document copies the edited scene.
+/// Mac Edit ▸ Copy of the drawing (F1 design call 2). The copy is driven through the
+/// RESPONDER CHAIN — the viewer host's `.onCopyCommand` returns these item providers
+/// to the single system Edit ▸ Copy (⌘C), so a focused text field (the inspector
+/// fields, the text popover, the sidebar search) keeps its own ⌘C and the canvas is
+/// copied only when no field is first responder. There is no second ⌘C menu item.
+///
+/// The provider carries the drawing as vector **PDF** and **PNG** (at the Settings
+/// default scale, within the shared area cap) — plus the original file's raw EMF when
+/// it cleanly applies. With a canvas selection in edit mode it copies only the
+/// selected elements (a subset scene, as the E2b ghost does); an edited document
+/// copies the edited scene. Each representation renders lazily, so ⌘C is cheap.
 @MainActor
 enum MacDrawingCopy {
-    /// Renders off-main, then writes the representations to `NSPasteboard` and confirms
-    /// with a toast.
-    static func copy(
+    /// The item providers for the current drawing / selection, for `.onCopyCommand`.
+    static func itemProviders(
         session: DocumentSession,
         prepared: MetafileRenderer.Prepared,
         entry: RecentEntry,
-        store: RecentsStore,
         settings: EmfySettings,
-        selection: Set<Int>,
-        toast: ToastCenter
-    ) {
+        selection: Set<Int>
+    ) -> [NSItemProvider] {
         let editing = session.editing == .editing
         let source = OutputSource.forCopy(
             isEditing: editing, hasDiverged: session.hasDivergedFromOpened, selection: selection)
@@ -35,50 +38,51 @@ enum MacDrawingCopy {
             pngScale: settings.defaultPNGScale.multiplier,
             areaCap: ExportScale.areaCap,
             isEdited: isEdited, isSubset: isSubset, originalType: originalType)
-
         let includesOriginal = representations.contains(.originalEMF)
         let background: RenderBackground = settings.pngBackground == .transparent ? .transparent : .white
         let options = settings.renderOptions
         let pngScale = settings.defaultPNGScale.multiplier
-        // Snapshot the scene inputs on the main actor before the detached render.
         let editedScene = session.editingScene
         let subsetScene = isSubset ? CopySubset.scene(editedScene, ids: selection) : nil
+        let bookmark = entry.bookmark
 
-        Task { @MainActor in
-            var emfBytes: Data?
-            if includesOriginal { emfBytes = try? await store.resolveData(for: entry) }
+        let provider = NSItemProvider()
+        provider.suggestedName = entry.baseName
 
-            let rendered = await Task.detached(priority: .userInitiated) {
-                Rendered(
-                    pdf: makePDF(source, prepared: prepared, editedScene: editedScene, subsetScene: subsetScene, options: options),
-                    png: makePNG(source, prepared: prepared, editedScene: editedScene, subsetScene: subsetScene,
-                                 pngScale: pngScale, background: background, options: options))
-            }.value
-
-            guard rendered.pdf != nil || rendered.png != nil else {
-                toast.show("Couldn’t copy this drawing", systemImage: "exclamationmark.triangle")
-                return
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.pdf.identifier, visibility: .all
+        ) { completion in
+            Task.detached(priority: .userInitiated) {
+                let data = makePDF(source, prepared: prepared, editedScene: editedScene, subsetScene: subsetScene, options: options)
+                completion(data, data == nil ? CopyError.renderFailed : nil)
             }
-            write(pdf: rendered.pdf, png: rendered.png, emf: includesOriginal ? emfBytes : nil)
-            toast.show(isSubset ? "Selection copied" : "Drawing copied", systemImage: "doc.on.doc")
+            return nil
         }
-    }
 
-    private struct Rendered: Sendable {
-        let pdf: Data?
-        let png: Data?
-    }
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.png.identifier, visibility: .all
+        ) { completion in
+            Task.detached(priority: .userInitiated) {
+                let data = makePNG(source, prepared: prepared, editedScene: editedScene, subsetScene: subsetScene,
+                                   pngScale: pngScale, background: background, options: options)
+                completion(data, data == nil ? CopyError.renderFailed : nil)
+            }
+            return nil
+        }
 
-    /// Writes the representations to the general pasteboard as one item carrying every
-    /// type, so a paste target picks its richest (PDF first).
-    static func write(pdf: Data?, png: Data?, emf: Data?) {
-        let item = NSPasteboardItem()
-        if let pdf { item.setData(pdf, forType: .pdf) }
-        if let png { item.setData(png, forType: .png) }
-        if let emf { item.setData(emf, forType: NSPasteboard.PasteboardType(DrawingClipboard.emfTypeIdentifier)) }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([item])
+        if includesOriginal {
+            provider.registerDataRepresentation(
+                forTypeIdentifier: DrawingClipboard.emfTypeIdentifier, visibility: .all
+            ) { completion in
+                Task.detached(priority: .userInitiated) {
+                    let data = resolveOriginalBytes(bookmark: bookmark)
+                    completion(data, data == nil ? CopyError.renderFailed : nil)
+                }
+                return nil
+            }
+        }
+
+        return [provider]
     }
 
     // MARK: - Rendering (off-main; `Sendable` inputs)
@@ -105,21 +109,21 @@ enum MacDrawingCopy {
         switch source {
         case .selectionSubset:
             guard let scene = subsetScene else { return nil }
-            let selection = ExportScale.select(
-                baseWidth: Int(scene.pageSizeDevice.width.rounded()),
-                baseHeight: Int(scene.pageSizeDevice.height.rounded()),
-                requested: pngScale, areaCap: ExportScale.areaCap)
-            return SceneRenderer.makeImage(scene, scale: CGFloat(selection.multiplier)).flatMap { EMFExport.pngData(from: $0) }
+            return sceneImagePNG(scene, pngScale: pngScale)
         case .editedScene:
             guard let scene = editedScene else { return originalPNG(prepared, pngScale: pngScale, background: background, options: options) }
-            let selection = ExportScale.select(
-                baseWidth: Int(scene.pageSizeDevice.width.rounded()),
-                baseHeight: Int(scene.pageSizeDevice.height.rounded()),
-                requested: pngScale, areaCap: ExportScale.areaCap)
-            return SceneRenderer.makeImage(scene, scale: CGFloat(selection.multiplier)).flatMap { EMFExport.pngData(from: $0) }
+            return sceneImagePNG(scene, pngScale: pngScale)
         case .original:
             return originalPNG(prepared, pngScale: pngScale, background: background, options: options)
         }
+    }
+
+    nonisolated private static func sceneImagePNG(_ scene: Scene, pngScale: Int) -> Data? {
+        let selection = ExportScale.select(
+            baseWidth: Int(scene.pageSizeDevice.width.rounded()),
+            baseHeight: Int(scene.pageSizeDevice.height.rounded()),
+            requested: pngScale, areaCap: ExportScale.areaCap)
+        return SceneRenderer.makeImage(scene, scale: CGFloat(selection.multiplier)).flatMap { EMFExport.pngData(from: $0) }
     }
 
     nonisolated private static func originalPNG(
@@ -133,6 +137,23 @@ enum MacDrawingCopy {
                 prepared, scale: CGFloat(selection.multiplier), background: background, options: options) else { return nil }
         return EMFExport.pngData(from: image)
     }
+
+    /// Resolves the original bytes from the recents bookmark off-main, taking and
+    /// releasing the macOS security scope around the read.
+    nonisolated private static func resolveOriginalBytes(bookmark: Data) -> Data? {
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: bookmark,
+            options: RecentsStore.bookmarkResolutionOptions,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        return try? Data(contentsOf: url, options: .mappedIfSafe)
+    }
+
+    private enum CopyError: Error { case renderFailed }
 }
 
 /// Builds a subset `Scene` holding only the given element ids, with its page set to the
