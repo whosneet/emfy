@@ -26,8 +26,9 @@ enum DrawingAIScreenshots {
         guard let i = args.firstIndex(of: "-EmfyDebugAIShots"), i + 1 < args.count else { return }
         let base = args[i + 1]
         let source = args.firstIndex(of: "-EmfyDebugAIShotsSource").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+        let explainSource = args.firstIndex(of: "-EmfyDebugAIExplainSource").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         Task { @MainActor in
-            await capture(all: base, describeSource: source)
+            await capture(all: base, describeSource: source, explainSource: explainSource)
             exit(0)
         }
     }
@@ -44,7 +45,7 @@ enum DrawingAIScreenshots {
     }
 
     @MainActor
-    private static func capture(all base: String, describeSource: String?) async {
+    private static func capture(all base: String, describeSource: String?, explainSource: String?) async {
         let status = DrawingAIAvailability.current()
         guard status.isAvailable, #available(macOS 26, iOS 26, *) else {
             try? "UNAVAILABLE: \(status)".write(toFile: base + "-unavailable.txt", atomically: true, encoding: .utf8)
@@ -100,6 +101,44 @@ enum DrawingAIScreenshots {
 
         // (e) A smart-search result that matched by tag/meaning, not by file name.
         captureSemanticSearch(base: base)
+
+        // (f) Explain what's missing — driven live against a file with skipped records.
+        if #available(macOS 26, iOS 26, *), let explainSource {
+            await captureExplain(base: base, explainSource: explainSource)
+        }
+    }
+
+    /// Loads a file with unsupported records, streams a live "Explain what's missing"
+    /// answer grounded in its diagnostics, and captures the Info-segment rows (A1b Part 3).
+    @available(macOS 26, iOS 26, *)
+    @MainActor
+    private static func captureExplain(base: String, explainSource: String) async {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: explainSource)),
+              let loaded = try? MetafileLoader.load(data), !loaded.couldNotShowNotes.isEmpty else { return }
+        let notes = loaded.couldNotShowNotes
+        let model = DrawingExplainModel()
+        model.explain(key: 1, items: DrawingMissingItems.list(from: notes))
+        await wait(timeout: .seconds(90)) {
+            switch model.phase { case .done, .failed: return true; default: return false }
+        }
+        let view = Form {
+            Section("What Emfy couldn't show") {
+                ForEach(notes) { note in
+                    Label {
+                        Text(note.summary).fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    }
+                }
+                if !model.text.isEmpty {
+                    Text(model.text).fixedSize(horizontal: false, vertical: true)
+                }
+                Label("Explain again", systemImage: "sparkles")
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 400, height: 320)
+        _ = capture(view: view, size: NSSize(width: 400, height: 320), to: base + "-explain.png")
     }
 
     @MainActor

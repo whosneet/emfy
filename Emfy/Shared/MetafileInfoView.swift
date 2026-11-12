@@ -49,6 +49,8 @@ struct MetafileInfoView: View {
     @State private var pngDocument = PNGExportDocument(data: Data())
     @State private var pdfDocument = PDFExportDocument(data: Data())
     @State private var filesError: String?
+    /// Streams the on-device "Explain what's missing" answer (A1b Part 3).
+    @State private var explainModel = DrawingExplainModel()
 
     var body: some View {
         Form {
@@ -73,6 +75,11 @@ struct MetafileInfoView: View {
                 Section("What Emfy couldn't show") {
                     ForEach(couldNotShowNotes) { note in
                         noteRow(note)
+                    }
+                    // Explain what's missing (A1b Part 3) — only when on-device AI is on;
+                    // grounded strictly in the diagnostics list above.
+                    if aiInputs != nil {
+                        explainMissingRows
                     }
                 }
             }
@@ -102,6 +109,10 @@ struct MetafileInfoView: View {
         #if os(macOS)
         .formStyle(.grouped)
         #endif
+        // A new drawing clears any stale "what's missing" explanation (A1b Part 3).
+        .onChange(of: aiInputs?.contentID) { _, id in
+            explainModel.resetIfChanged(key: id ?? 0)
+        }
         .fileExporter(
             isPresented: $isExportingPNG,
             document: pngDocument,
@@ -152,6 +163,46 @@ struct MetafileInfoView: View {
             if (error as? CocoaError)?.code == .userCancelled { return }
             filesError = error.localizedDescription
         }
+    }
+
+    /// The "Explain what's missing" button and its streamed answer (A1b Part 3).
+    @ViewBuilder
+    private var explainMissingRows: some View {
+        switch explainModel.phase {
+        case .idle:
+            explainButton(title: "Explain what's missing")
+        case .streaming, .done:
+            if !explainModel.text.isEmpty {
+                Text(explainModel.text)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if explainModel.phase == .streaming {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Explaining…").foregroundStyle(.secondary)
+                }
+            } else {
+                explainButton(title: "Explain again")
+            }
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            explainButton(title: "Try again")
+        }
+    }
+
+    private func explainButton(title: String) -> some View {
+        Button {
+            explainModel.resetIfChanged(key: aiInputs?.contentID ?? 0)
+            explainModel.explain(
+                key: aiInputs?.contentID ?? 0,
+                items: DrawingMissingItems.list(from: couldNotShowNotes))
+        } label: {
+            Label(title, systemImage: "sparkles")
+        }
+        .accessibilityIdentifier("explainWhatsMissing")
     }
 
     @ViewBuilder

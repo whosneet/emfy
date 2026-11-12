@@ -32,6 +32,17 @@ enum DrawingAIDebugProbe {
             }
             return
         }
+        if let k = args.firstIndex(of: "-EmfyDebugExplain"), k + 1 < args.count {
+            let files = args[k + 1].split(separator: ",").map(String.init)
+            let out = args.firstIndex(of: "-EmfyDebugExplainResult").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+                ?? (files.first.map { $0 + ".explain.txt" } ?? "/tmp/explain.txt")
+            Task { @MainActor in
+                let text = await runExplain(files: files)
+                try? text.write(toFile: out, atomically: true, encoding: .utf8)
+                exit(0)
+            }
+            return
+        }
         guard let i = args.firstIndex(of: "-EmfyDebugAIProbe"), i + 1 < args.count else { return }
         let sourcePath = args[i + 1]
         let resultPath = args.firstIndex(of: "-EmfyDebugAIResult").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
@@ -87,6 +98,40 @@ enum DrawingAIDebugProbe {
 
         // Injection probe: a drawing whose text tries to hijack the model.
         log.append(await injectionProbe())
+        return log.joined(separator: "\n\n")
+    }
+
+    /// Live explain-what's-missing (A1b Part 3 gate): finds the first file with
+    /// unsupported/skipped records and streams an explanation grounded only in its
+    /// diagnostics, logging both.
+    @MainActor
+    private static func runExplain(files: [String]) async -> String {
+        var log: [String] = []
+        let status = DrawingAIAvailability.current()
+        log.append("availability: \(status)")
+        for path in files {
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  let loaded = try? MetafileLoader.load(data) else {
+                log.append("\(name): could not load"); continue
+            }
+            let notes = loaded.couldNotShowNotes
+            log.append("\(name): \(notes.count) missing-content note(s)")
+            guard !notes.isEmpty else { continue }
+            let items = DrawingMissingItems.list(from: notes)
+            log.append("items:\n" + items.map { "  - \($0)" }.joined(separator: "\n"))
+            guard status.isAvailable, #available(macOS 26, iOS 26, *) else {
+                log.append("(model unavailable — items only)"); break
+            }
+            let session = LanguageModelSession(instructions: DrawingAIPrompt.structuredInstructions)
+            do {
+                let answer = try await session.respond(to: DrawingAIPrompt.explainMissingPrompt(items: items)).content
+                log.append("=== EXPLAIN (\(name)) ===\n\(answer)")
+            } catch {
+                log.append("EXPLAIN error: \(DrawingAIEngine.friendlyMessage(for: error))")
+            }
+            break
+        }
         return log.joined(separator: "\n\n")
     }
 
