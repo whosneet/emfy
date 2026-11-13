@@ -31,7 +31,7 @@ final class DrawingCheckModel {
         var version: Int
     }
 
-    static func cacheKey(editing: Bool, editVersion: Int, contentID: Int) -> CacheKey {
+    nonisolated static func cacheKey(editing: Bool, editVersion: Int, contentID: Int) -> CacheKey {
         CacheKey(editing: editing, version: editing ? editVersion : contentID)
     }
 
