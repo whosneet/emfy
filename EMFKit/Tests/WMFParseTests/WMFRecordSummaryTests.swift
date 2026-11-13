@@ -65,11 +65,37 @@ import Testing
         #expect(summary(0x02FA, le16(0) + le16(3) + le16(0) + colorRef(0xFF, 0, 0)) == "style 0x0000 w=3 #FF0000")
         // Brush: BrushStyle(2), ColorRef(4), BrushHatch(2).
         #expect(summary(0x02FC, le16(0) + colorRef(0, 0x80, 0) + le16(0)) == "style 0x0000 #008000")
-        // Font: Height(2) then 16 more fixed bytes, then NUL-terminated facename @18.
-        var font = le16(-12)
-        font += [UInt8](repeating: 0, count: 16)
-        font += Array("Arial".utf8) + [0]
-        #expect(summary(0x02FB, font) == "\"Arial\" h=-12")
+        // Font: Height(2), Width(2), Escapement(2), Orientation(2), Weight(2) @8,
+        // Italic(1) @10, then more bytes, then NUL-terminated facename @18.
+        var font = le16(-12) + le16(0) + le16(0) + le16(0) + le16(700)   // weight 700 (bold)
+        font += [1]                                     // italic @10
+        font += [UInt8](repeating: 0, count: 7)         // underline..pitchAndFamily (@11..17)
+        font += Array("Arial".utf8) + [0]               // facename @18
+        #expect(summary(0x02FB, font) == "\"Arial\" h=-12 w=700 italic")
+    }
+
+    /// Real META_CREATEFONTINDIRECT payloads from corpus/gate-wmf-gdi-p4-text.wmf,
+    /// decoded field-for-field like the WMFTranslator font decode ([MS-WMF] §2.2.1.2).
+    @Test func realCorpusFontRecords() {
+        func hex(_ s: String) -> [UInt8] {
+            stride(from: 0, to: s.count, by: 2).map { i in
+                let a = s.index(s.startIndex, offsetBy: i)
+                return UInt8(s[a ... s.index(after: a)], radix: 16)!
+            }
+        }
+        // Record 8 @122: a fully zeroed Font object (an inert/default font) — genuinely
+        // empty face and zero height, proven by its all-zero payload bytes.
+        let zeroFont = [UInt8](repeating: 0, count: 50)
+        #expect(summary(0x02FB, zeroFont) == "\"\" h=0 w=0")
+        // Record 18 @254: Arial, height -741, weight 400, upright.
+        #expect(summary(0x02FB, hex("1bfd00000000000090010000000000000002417269616c000000000000000000000000000000000000000000000000000000"))
+                == "\"Arial\" h=-741 w=400")
+        // Record 29 @458: Times New Roman, height -582, weight 400, italic.
+        #expect(summary(0x02FB, hex("bafd0000000000009001010000000000000254696d6573204e657720526f6d616e0000000000000000000000000000000000"))
+                == "\"Times New Roman\" h=-582 w=400 italic")
+        // Record 40 @664: Arial Bold, height -476, weight 700, upright.
+        #expect(summary(0x02FB, hex("24fe000000000000bc020000000000000002417269616c000000000000000000000000000000000000000000000000000000"))
+                == "\"Arial\" h=-476 w=700")
     }
 
     @Test func selectAndDelete() {

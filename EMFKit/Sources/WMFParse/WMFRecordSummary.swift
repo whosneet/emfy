@@ -186,11 +186,17 @@ public enum WMFRecordSummary {
         return "style \(hex16(style)) \(color(body, at: 2))"
     }
 
-    /// Font Object ([MS-WMF] §2.2.1.2): Height(Int16) @0, then a NUL-terminated
-    /// Latin-1 Facename of up to 32 bytes at offset 18.
+    /// Font Object ([MS-WMF] §2.2.1.2): Height(Int16) @0, Width(2), Escapement(2),
+    /// Orientation(2), Weight(Int16) @8, Italic(UInt8) @10, Underline, StrikeOut,
+    /// CharSet, …, then a NUL-terminated Latin-1 Facename of up to 32 bytes at
+    /// offset 18. The summary shows the face, height, weight and italic.
     private static func createFont(_ body: WMFByteReader) -> String {
         guard let height = body.readInt16(at: 0) else { return "" }
-        return "\(quoted(faceName(body))) h=\(height)"
+        let weight = body.readInt16(at: 8) ?? 0
+        let italic = (body.readUInt8(at: 10) ?? 0) != 0
+        var text = "\(quoted(faceName(body))) h=\(height) w=\(weight)"
+        if italic { text += " italic" }
+        return text
     }
 
     private static func faceName(_ body: WMFByteReader) -> String {
