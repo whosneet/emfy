@@ -185,31 +185,40 @@ extension AIEditScreenshots {
     /// Whether the iPad AI-edit/recolour screen was requested at launch.
     static var iosRequested: Bool { ProcessInfo.processInfo.arguments.contains("-EmfyDebugAIEditIOS") }
 
-    /// Shows the REAL Recolour sheet (deterministic) and, when `-EmfyDebugAIEditWhich ai`
-    /// is passed, the stub-driven AI edit preview, hosted on iPad for a `simctl` screenshot.
+    /// Presents the REAL Recolour sheet (deterministic) and, when `ai-edit` is passed, the
+    /// stub-driven AI edit preview, as a `.sheet` OVER a document backdrop on iPad, for a
+    /// `simctl` screenshot that shows the true sheet presentation.
     struct IOSScreen: View {
         @State private var recolour = DrawingRecolourModel()
         @State private var edit = DrawingAIEditModel()
-        @State private var ready = false
+        @State private var backdrop: CGImage?
+        @State private var showSheet = false
         private var wantsAI: Bool { ProcessInfo.processInfo.arguments.contains("ai-edit") }
 
         var body: some View {
             ZStack {
                 Color(.systemGroupedBackground).ignoresSafeArea()
-                if ready {
-                    if wantsAI, edit.preview != nil {
-                        DrawingAIEditView(model: edit, onClose: {}).environment(nil as AIProviderStore?)
-                    } else {
-                        DrawingRecolourView(model: recolour, onClose: {})
-                    }
+                // A faint document backdrop so the sheet reads as presented over the drawing.
+                if let backdrop {
+                    Image(decorative: backdrop, scale: 1)
+                        .resizable().aspectRatio(contentMode: .fit)
+                        .padding(60).opacity(0.5)
                 }
             }
-            .task { await setUp() }
+            .task { await setUp(); showSheet = true }
+            .sheet(isPresented: $showSheet) {
+                if wantsAI {
+                    DrawingAIEditView(model: edit, onClose: {}).environment(nil as AIProviderStore?)
+                } else {
+                    DrawingRecolourView(model: recolour, onClose: {})
+                }
+            }
         }
 
         @MainActor private func setUp() async {
             guard let scene = AIEditScreenshots.makeScene(),
                   let bytes = try? SceneExporter.export(scene, as: .emf).data else { return }
+            backdrop = SceneRenderer.makeImage(scene, scale: 2)
             if wantsAI {
                 let session = DocumentSession(entryID: UUID(), resolve: { _ in bytes }, documentFileName: { "ai.emf" })
                 await session.beginEditing()
@@ -226,7 +235,6 @@ extension AIEditScreenshots {
                 recolour.mode = .colourBlindSafe
                 for _ in 0 ..< 100 where recolour.afterImage == nil { try? await Task.sleep(for: .milliseconds(30)) }
             }
-            ready = true
         }
     }
 }
