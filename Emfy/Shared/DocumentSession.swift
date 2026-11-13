@@ -731,6 +731,23 @@ final class DocumentSession {
         afterMutation(markDirty: true)
     }
 
+    /// Applies several commands as ONE undo entry named `name` (X1a "Fix all of this
+    /// kind"). Each command lands inside one history group, so undo reverses the whole
+    /// batch in a single step. Refused commands are skipped; the group is only recorded
+    /// when at least one landed. A no-op when read-only or given nothing.
+    func applyGroupedCommands(_ commands: [SceneCommand], name: SceneActionName) {
+        guard editing == .editing, var updated = history, !commands.isEmpty else { return }
+        let before = updated.undoCount
+        updated.beginGroup(name: name)
+        for command in commands {
+            try? updated.apply(command)
+        }
+        updated.endGroup()
+        history = updated
+        if updated.undoCount > before { registerSystemUndo(name: name) }
+        afterMutation(markDirty: true)
+    }
+
     /// Recolours the selected elements from the light-editor Colour sheet (E4 design
     /// call 2). Routes each element to its paint channel (`LightColorRouter`): a solid
     /// fill for closed shapes and text (a text run's fill is its glyph colour), a
