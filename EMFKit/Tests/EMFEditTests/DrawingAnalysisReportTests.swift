@@ -43,6 +43,19 @@ import Testing
         #expect(!data.contains("Secret label"))
     }
 
+    @Test func summaryColourPairPhrasingIsUnambiguous() throws {
+        let data = DrawingAnalysis(scene: fixture()).summaryData()
+        // The colour-pair line must say the colours become INDISTINGUISHABLE, so a model
+        // can't invert it to "show up differently".
+        #expect(data.contains("look the same to people with"))
+        #expect(data.contains("colour blindness"))
+        // The phrasing stays inside the data fence.
+        let open = try #require(data.range(of: "<<<DRAWING_ANALYSIS_DATA"))
+        let close = try #require(data.range(of: "<<<END_DRAWING_ANALYSIS_DATA>>>"))
+        let phrase = try #require(data.range(of: "look the same to people with"))
+        #expect(phrase.lowerBound > open.upperBound && phrase.upperBound < close.lowerBound)
+    }
+
     @Test func hexStringFormatting() {
         #expect(SceneColor(ColorRef(red: 0xCC, green: 0, blue: 0)).hexString == "#CC0000")
         #expect(SceneColor(red: 0, green: 0, blue: 0, alpha: 0.5).hexString == "#00000080")

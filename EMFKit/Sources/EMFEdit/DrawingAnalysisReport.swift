@@ -66,10 +66,26 @@ public extension DrawingAnalysis {
         }
         lines.append("Findings: \(findings.count)")
         for finding in findings {
-            lines.append("- [\(Self.severityLabel(finding.severity))] \(Self.describe(finding))")
+            lines.append("- [\(Self.severityLabel(finding.severity))] \(summaryFindingLine(finding))")
         }
         lines.append("<<<END_DRAWING_ANALYSIS_DATA>>>")
         return lines.joined(separator: "\n")
+    }
+
+    /// An UNAMBIGUOUS one-line description of a finding for the AI summary data (no raw
+    /// drawing text). The colour-pair line in particular spells out that the colours
+    /// become INDISTINGUISHABLE (not "show up differently") under the dichromacy, so a
+    /// model can't invert the meaning; other kinds reuse `describe`.
+    private func summaryFindingLine(_ finding: Finding) -> String {
+        switch finding.kind {
+        case .colorPair(let a, let b, let under):
+            let type = under == .deuteranopia
+                ? "deuteranopia (red–green colour blindness)"
+                : "protanopia (red–green colour blindness)"
+            return "Two fill colours (\(a.hexString), \(b.hexString)) look the same to people with \(type); the drawing relies on colour alone to tell them apart."
+        default:
+            return Self.describe(finding)
+        }
     }
 
     /// The full Markdown report for export (design §4): the content inventory and
