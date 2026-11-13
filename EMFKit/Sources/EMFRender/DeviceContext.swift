@@ -32,6 +32,11 @@ struct DeviceContext {
         /// AD_COUNTERCLOCKWISE, which is what the arc path builder draws by
         /// default — so the default state leaves every arc figure byte-identical.
         var arcDirection: ArcDirection = .counterclockwise
+        /// Bitmap stretch mode (EMR_SETSTRETCHBLTMODE); GDI's default is
+        /// BLACKONWHITE. For this vector viewer it drives only the interpolation
+        /// quality of a shrunk bitmap — HALFTONE → smooth, everything else →
+        /// nearest, so the default keeps bitmap output byte-identical.
+        var stretchBltMode: StretchBltMode = .blackOnWhite
         /// Current position in LOGICAL units — mapped through whatever the
         /// transform is at consumption time, exactly as GDI stores it.
         var currentPosition = PointL(x: 0, y: 0)
@@ -206,6 +211,15 @@ struct DeviceContext {
                 return true
             }
             state.arcDirection = direction
+            return true
+
+        case .setStretchBltMode(let mode):
+            // Interpolation quality only; an unknown value keeps the current mode.
+            if case .unknown(let raw) = mode {
+                log.note(.unknownEnumValue(record: 21, rawValue: raw))
+                return true
+            }
+            state.stretchBltMode = mode
             return true
 
         case .setWorldTransform(let xform):

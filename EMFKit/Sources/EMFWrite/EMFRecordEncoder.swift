@@ -44,6 +44,8 @@ public enum EMFRecordEncoder {
             return try u32Record(19, polyFillModeRaw(mode))         // §2.3.11.22
         case .setROP2(let rawMode):
             return try u32Record(20, rawMode)                       // §2.3.11.23
+        case .setStretchBltMode(let mode):
+            return try u32Record(21, stretchBltModeRaw(mode))       // §2.3.11.24
         case .saveDC:
             return try emptyRecord(33)                              // §2.3.11.7
         case .restoreDC(let savedDC):
@@ -737,6 +739,16 @@ public enum EMFRecordEncoder {
         switch mode {
         case .alternate: return 0x01
         case .winding: return 0x02
+        case .unknown(let raw): return raw
+        }
+    }
+
+    private static func stretchBltModeRaw(_ mode: StretchBltMode) -> UInt32 {
+        switch mode {
+        case .blackOnWhite: return 0x01
+        case .whiteOnBlack: return 0x02
+        case .colorOnColor: return 0x03
+        case .halftone: return 0x04
         case .unknown(let raw): return raw
         }
     }

@@ -194,6 +194,34 @@ public enum ArcDirection: Sendable, Equatable {
     }
 }
 
+/// Bitmap stretch mode ([MS-WMF] §2.1.1.20, StretchMode enumeration), carried
+/// by EMR_SETSTRETCHBLTMODE (§2.3.11.24). It governs how the system combines
+/// eliminated rows/columns when a bitmap is shrunk by StretchBlt/StretchDIBits.
+/// For a vector viewer it affects only interpolation QUALITY — HALFTONE maps to
+/// a smooth (high-quality) interpolation, the others to nearest-neighbour. An
+/// out-of-range value decodes to `.unknown`.
+public enum StretchBltMode: Sendable, Equatable {
+    /// STRETCH_ANDSCANS / BLACKONWHITE (0x01).
+    case blackOnWhite
+    /// STRETCH_ORSCANS / WHITEONBLACK (0x02).
+    case whiteOnBlack
+    /// STRETCH_DELETESCANS / COLORONCOLOR (0x03).
+    case colorOnColor
+    /// STRETCH_HALFTONE (0x04): high-quality interpolation.
+    case halftone
+    case unknown(UInt32)
+
+    public init(_ raw: UInt32) {
+        switch raw {
+        case 0x01: self = .blackOnWhite
+        case 0x02: self = .whiteOnBlack
+        case 0x03: self = .colorOnColor
+        case 0x04: self = .halftone
+        default: self = .unknown(raw)
+        }
+    }
+}
+
 /// Predefined graphics objects ([MS-EMF] §2.1.31, StockObject enumeration).
 /// Stock indices have the most-significant bit set; 0x80000009 is not
 /// defined and, like any unlisted high-bit value, decodes to `.unknownStock`.

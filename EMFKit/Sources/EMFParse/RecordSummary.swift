@@ -44,6 +44,7 @@ public enum EMFRecordSummary {
         case .modifyWorldTransform(let p): return "\(modifyModeName(p.mode)) \(matrix(p.transform))"
         case .setMiterLimit(let limit): return String(limit)
         case .setArcDirection(let direction): return arcDirectionName(direction)
+        case .setStretchBltMode(let mode): return stretchBltModeName(mode)
         case .intersectClipRect(let clip): return rect(clip)
 
         // MARK: Objects
@@ -260,6 +261,16 @@ public enum EMFRecordSummary {
         switch direction {
         case .counterclockwise: return "AD_COUNTERCLOCKWISE"
         case .clockwise: return "AD_CLOCKWISE"
+        case .unknown(let raw): return hex32(raw)
+        }
+    }
+
+    static func stretchBltModeName(_ mode: StretchBltMode) -> String {
+        switch mode {
+        case .blackOnWhite: return "BLACKONWHITE"
+        case .whiteOnBlack: return "WHITEONBLACK"
+        case .colorOnColor: return "COLORONCOLOR"
+        case .halftone: return "HALFTONE"
         case .unknown(let raw): return hex32(raw)
         }
     }

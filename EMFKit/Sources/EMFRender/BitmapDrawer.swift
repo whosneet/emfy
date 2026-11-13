@@ -302,7 +302,10 @@ enum BitmapDrawer {
         context.saveGState()
         defer { context.restoreGState() }
         dc.state.clip.apply(to: context, deviceToTarget: base)
-        context.interpolationQuality = .none
+        // EMR_SETSTRETCHBLTMODE affects interpolation quality only (§2.3.11.24):
+        // HALFTONE asks for a smooth resample, every other mode (and the GDI
+        // default BLACKONWHITE) keeps the historical nearest-neighbour pixels.
+        context.interpolationQuality = dc.state.stretchBltMode == .halftone ? .high : .none
         // Enter device space (base carries the canvas fit + y-flip).
         context.concatenate(full)
         // Map the top-down unit image square [0,1]×[0,1] (origin = top-left) to

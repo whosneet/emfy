@@ -97,6 +97,12 @@ struct RenderFixture {
         append(type: 18, payload: body.bytes)
     }
 
+    /// EMR_SETSTRETCHBLTMODE §2.3.11.24 — BLACKONWHITE(1)…HALFTONE(4).
+    mutating func setStretchBltMode(_ raw: UInt32) {
+        var body = LE(); body.u32(raw)
+        append(type: 21, payload: body.bytes)
+    }
+
     /// EMR_SETWORLDTRANSFORM §2.3.12.2 — six FLOATs M11,M12,M21,M22,Dx,Dy.
     mutating func setWorldTransform(
         _ m11: Float, _ m12: Float, _ m21: Float, _ m22: Float, _ dx: Float, _ dy: Float

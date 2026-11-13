@@ -528,6 +528,9 @@ public enum EMFRecordPayload: Sendable, Equatable {
     /// EMR_INTERSECTCLIPRECT (30), §2.3.2.3. Decode-only in phase 2; the
     /// renderer defers clipping to phase 3.
     case intersectClipRect(clip: RectL)
+    /// EMR_SETSTRETCHBLTMODE (21), §2.3.11.24. Interpolation quality for
+    /// shrunk bitmaps.
+    case setStretchBltMode(StretchBltMode)
 
     // MARK: Object creation / manipulation ([MS-EMF] §2.3.7, §2.3.8)
 
