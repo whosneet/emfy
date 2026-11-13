@@ -23,6 +23,7 @@ import AppKit
 //
 // Inside `#if DEBUG`, so Release has none of it.
 
+@MainActor
 enum AIShareScreenshots {
 
     /// A faithful stand-in of the viewer's Share menu, with "Send to AI…" after the
