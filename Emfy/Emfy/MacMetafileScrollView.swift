@@ -148,6 +148,27 @@ struct MacMetafileScrollView: NSViewRepresentable {
         return shadow
     }
 
+    /// Renders the low-resolution full-page placeholder once, off the main actor,
+    /// and sets it on `placeholderView` (P2b). `prepared`, `naturalSize` and
+    /// `options` are `Sendable`; the render is area-capped so its one allocation
+    /// stays small, and the view is touched only back on the main actor.
+    @MainActor
+    static func renderPlaceholder(
+        prepared: MetafileRenderer.Prepared,
+        naturalSize: CGSize,
+        options: RenderOptions,
+        into placeholderView: NSImageView
+    ) {
+        Task { @MainActor [weak placeholderView] in
+            let image = await Task.detached(priority: .userInitiated) { () -> CGImage? in
+                let scale = ViewerFit.placeholderScale(forLongSide: max(naturalSize.width, naturalSize.height))
+                return MetafileRenderer.makeImage(prepared, scale: scale, background: .white, options: options)?.0
+            }.value
+            guard let image, let placeholderView else { return }
+            placeholderView.image = NSImage(cgImage: image, size: naturalSize)
+        }
+    }
+
     /// The viewer backdrop: ~0.90 grey in light mode so the white page and its edge
     /// read clearly (macOS 27's underPageBackgroundColor is near-white there), and
     /// dark in dark mode. Painted on both the scroll view and its clip view.
@@ -201,6 +222,23 @@ struct MacMetafileScrollView: NSViewRepresentable {
         tiled.controller = controller
         tiled.setPaint(tilePaint)
         paper.addSubview(tiled)
+
+        // P2b: for an expensive document, a low-resolution full-page placeholder
+        // sits BENEATH the tiles. The tiled layer is transparent where a tile has
+        // not drawn yet, so this blurry stand-in shows the whole page within one
+        // stream replay instead of the page popping in tile-by-tile; each sharp
+        // tile is opaque (white page + ink), so it fully covers the placeholder as
+        // it lands and the final pixels are unchanged. Cheap documents skip it
+        // entirely, so nothing changes for them.
+        if ViewerFit.isExpensiveToReplay(playbackOps: prepared.estimatedPlaybackOps) {
+            let placeholderView = NSImageView(frame: paper.bounds)
+            placeholderView.imageScaling = .scaleAxesIndependently
+            placeholderView.autoresizingMask = [.width, .height]
+            placeholderView.wantsLayer = true
+            paper.addSubview(placeholderView, positioned: .below, relativeTo: tiled)
+            context.coordinator.placeholderView = placeholderView
+            Self.renderPlaceholder(prepared: prepared, naturalSize: naturalSize, options: options, into: placeholderView)
+        }
 
         // The find-highlight overlay sits above the tiles, in the paper's y-up space, so it
         // rides the magnification/scroll with them (F3b). Transparent to the pointer.
@@ -260,6 +298,9 @@ struct MacMetafileScrollView: NSViewRepresentable {
         coordinator.findOverlay?.controller = nil
         coordinator.findOverlay?.removeFromSuperview()
         coordinator.findOverlay = nil
+        coordinator.placeholderView?.image = nil
+        coordinator.placeholderView?.removeFromSuperview()
+        coordinator.placeholderView = nil
         coordinator.tiledView = nil
         coordinator.scrollView = nil
     }
@@ -270,6 +311,8 @@ struct MacMetafileScrollView: NSViewRepresentable {
         fileprivate weak var scrollView: NSScrollView?
         fileprivate weak var tiledView: TiledMetafileView?
         fileprivate weak var findOverlay: FindHighlightOverlayView?
+        /// The P2b full-page placeholder beneath the tiles (expensive documents only).
+        fileprivate weak var placeholderView: NSImageView?
 
         private var hasSetInitialZoom = false
         private var lastViewportSize: CGSize = .zero
@@ -542,6 +585,10 @@ private final class CenteringClipView: NSClipView {
 private final class TiledMetafileView: NSView {
     private let prepared: MetafileRenderer.Prepared
     private let naturalSize: CGSize
+    /// The CATiledLayer tile side (pt), chosen once from the document's estimated
+    /// replay cost: 512 for a cheap document, 1024 for an expensive one so a fit
+    /// view needs a handful of full-stream replays instead of a dozen-plus (P2b).
+    private let tileSide: CGFloat
     /// One decoded-DIB cache for this document (P2 performance): the tiled layer
     /// replays the record stream once per tile on concurrent threads, so without
     /// it every tile re-decodes each DIB from scratch (~98% CPU on a 1 MB DIB).
@@ -591,6 +638,7 @@ private final class TiledMetafileView: NSView {
     init(prepared: MetafileRenderer.Prepared, naturalSize: CGSize, options: RenderOptions) {
         self.prepared = prepared
         self.naturalSize = naturalSize
+        self.tileSide = ViewerFit.tileSide(forPlaybackOps: prepared.estimatedPlaybackOps)
         self.optionsLock = OSAllocatedUnfairLock<RenderOptions>(initialState: options)
         super.init(frame: CGRect(origin: .zero, size: naturalSize))
         wantsLayer = true
@@ -609,7 +657,7 @@ private final class TiledMetafileView: NSView {
         // its own shadow properties.)
         tiled.levelsOfDetail = ZoomMath.tiledLevelsOfDetail(forLongSide: max(naturalSize.width, naturalSize.height))
         tiled.levelsOfDetailBias = 4
-        tiled.tileSize = CGSize(width: 512, height: 512)
+        tiled.tileSize = CGSize(width: tileSide, height: tileSide)
         tiled.contentsScale = window?.backingScaleFactor ?? 2
         return tiled
     }
