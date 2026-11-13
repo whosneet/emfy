@@ -32,11 +32,61 @@ enum AIEditScreenshots {
             }
             exit(0)
         }
+        if let l = args.firstIndex(of: "-EmfyDebugAIEditLive"), l + 1 < args.count {
+            let base = args[l + 1]
+            Task { @MainActor in
+                await captureLive(base: base)
+                exit(0)
+            }
+            return
+        }
         guard let i = args.firstIndex(of: "-EmfyDebugAIEditShots"), i + 1 < args.count else { return }
         let base = args[i + 1]
         Task { @MainActor in
             await captureAll(base: base)
             exit(0)
+        }
+    }
+
+    /// Runs "Edit with AI" LIVE on the on-device model (no stub) for the real instruction
+    /// "make the headings dark blue", up to 3 attempts, logging each raw reply and whether
+    /// it decoded + validated, and capturing the resulting preview (or the failure state).
+    @MainActor
+    private static func captureLive(base: String) async {
+        guard let scene = makeScene(), let bytes = try? SceneExporter.export(scene, as: .emf).data else {
+            try? "FAIL: fixture".write(toFile: base + "-live-log.txt", atomically: true, encoding: .utf8)
+            return
+        }
+        var log = "Live on-device AI edit — instruction: \"make the headings dark blue\"\n"
+        var successes = 0
+        let attempts = 3
+        var lastModel: DrawingAIEditModel?
+        for attempt in 1 ... attempts {
+            let session = DocumentSession(entryID: UUID(), resolve: { _ in bytes }, documentFileName: { "live.emf" })
+            await session.beginEditing()
+            let model = DrawingAIEditModel()
+            model.configure(session: session)
+            model.engineOverride = .onDevice   // force on-device; producer stays nil → real model
+            model.instruction = "make the headings dark blue"
+            model.submit()
+            await wait(timeout: .seconds(120)) {
+                switch model.phase { case .preview, .failed, .applied: return true; default: return false }
+            }
+            let decoded: String
+            switch model.phase {
+            case .preview: decoded = "DECODED + VALIDATED → preview shown"; successes += 1
+            case .failed(let m): decoded = "FAILED: \(m)"
+            default: decoded = "phase=\(model.phase)"
+            }
+            let raw = model.lastRawReply.prefix(800)
+            log += "\n--- attempt \(attempt) ---\n\(decoded)\nRAW (<=800 chars):\n\(raw)\n"
+            lastModel = model
+            if case .preview = model.phase { break }
+        }
+        log += "\nResult: \(successes)/\(attempts) attempts decoded+validated.\n"
+        try? log.write(toFile: base + "-live-log.txt", atomically: true, encoding: .utf8)
+        if let model = lastModel {
+            _ = capture(view: aiEditShot(model: model), size: NSSize(width: 560, height: 560), to: base + "-live.png")
         }
     }
     #endif

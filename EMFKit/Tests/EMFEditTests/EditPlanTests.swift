@@ -137,6 +137,27 @@ private func standardScene() -> Scene {
     }
 }
 
+@Test func decodeRepairsMissingKeyOpeningQuote() throws {
+    // A small on-device model sometimes drops the opening quote on a key. The conservative
+    // repair re-quotes known keys so a near-miss reply still decodes (seen live on-device).
+    let malformed = ##"{"operations": [{"op":"recolorFill","ids":[2],color":"#0000FF"}]}"##
+    let plan = try EditPlan.decode(fromJSON: malformed)
+    #expect(plan == EditPlan(operations: [.recolorFill(ids: [2], color: PlanColor(hex: "#0000FF"))]))
+}
+
+@Test func repairLeavesWellFormedJSONUnchanged() {
+    let good = ##"{"color":"#1F3A93","op":"recolorFill"}"##
+    #expect(EditPlan.repairKeyQuoting(good) == good)
+}
+
+@Test func decodeStillRejectsUnknownOpAfterRepair() {
+    // The repair must not rescue a genuinely unknown op.
+    let json = #"{ "operations": [ { "op": "formatHardDrive", "ids": [1] } ] }"#
+    #expect(throws: EditPlanDecodingError.unknownOperation("formatHardDrive")) {
+        try EditPlan.decode(fromJSON: json)
+    }
+}
+
 @Test func decodeIgnoresExtraFreeFormFields() throws {
     // Extra, unknown fields must be ignored, never acted on.
     let json = #"{ "operations": [ { "op": "delete", "ids": [3], "runShellCommand": "rm -rf /", "priority": 9 } ] }"#

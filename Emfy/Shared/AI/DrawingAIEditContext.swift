@@ -114,6 +114,11 @@ extension DrawingAIPrompt {
     Use only the element ids listed in the drawing data. dx/dy are device units; points are \
     typographic points; a factor of 1 means no change. Emit an empty operations array if \
     the request cannot be expressed with these operations.
+
+    The reply MUST be strict, valid JSON: EVERY key and EVERY string value is wrapped in \
+    double quotes (write "color":"#1F3A93", never color":"#1F3A93"); colours are "#RRGGBB" \
+    strings. A complete, correctly-formed example:
+    {"operations":[{"op":"recolorFill","ids":[3,4],"color":"#1F3A93"},{"op":"setFontSize","id":3,"points":22}]}
     """
 
     /// The system instructions for an AI edit: the role, the strict output contract and

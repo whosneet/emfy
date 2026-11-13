@@ -290,14 +290,37 @@ extension EditOperation: Codable {
 
 extension EditPlan {
     /// Decodes a plan from UTF-8 JSON, tolerant of surrounding prose or a ```json code
-    /// fence (model replies often wrap the object). Throws `EditPlanDecodingError` (or a
-    /// `DecodingError`) on any malformation — nothing is applied on a throw.
+    /// fence (model replies often wrap the object). A small on-device model sometimes drops
+    /// the opening quote on a key (`,color":` instead of `,"color":`); when the strict
+    /// decode fails, ONE conservative repair that re-quotes only the known keys is tried —
+    /// this never loosens the validator (the decoded plan is validated unchanged) and never
+    /// invents structure. Throws `EditPlanDecodingError` (or a `DecodingError`) when the
+    /// repaired text still won't decode — nothing is applied on a throw.
     public static func decode(fromJSON json: String) throws -> EditPlan {
         let slice = extractJSONObject(json) ?? json
-        guard let data = slice.data(using: .utf8) else {
+        if let plan = try? decodeStrict(slice) { return plan }
+        return try decodeStrict(repairKeyQuoting(slice))
+    }
+
+    private static func decodeStrict(_ json: String) throws -> EditPlan {
+        guard let data = json.data(using: .utf8) else {
             throw EditPlanDecodingError.invalidValue(op: "plan", field: "json", value: "not utf-8")
         }
         return try JSONDecoder().decode(EditPlan.self, from: data)
+    }
+
+    /// Known EditPlan JSON keys (for the conservative re-quoting repair).
+    private static let knownKeys = "op|ids|id|color|text|points|family|dx|dy|factor|edge|axis"
+
+    /// Re-inserts a missing OPENING quote on a known key that immediately follows `{` or `,`
+    /// (e.g. `,color":` → `,"color":`). A correctly-quoted key has a `"` between the
+    /// delimiter and the key letters, so it never matches. Bounded to the known key set; no
+    /// other structure is touched. §8: builds no force-unwrap and repairs untrusted text safely.
+    static func repairKeyQuoting(_ json: String) -> String {
+        let pattern = "([,{][\\s]*)(\(knownKeys))\"([\\s]*):"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return json }
+        let range = NSRange(json.startIndex ..< json.endIndex, in: json)
+        return regex.stringByReplacingMatches(in: json, range: range, withTemplate: "$1\"$2\"$3:")
     }
 
     /// The outermost `{ … }` object in `text`, so a fenced or prose-wrapped reply still

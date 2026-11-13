@@ -180,8 +180,11 @@ final class DrawingAIEditModel {
             if Task.isCancelled { phase = .idle; return }
             lastRaw = raw
             do {
-                plan = try EditPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw))
-                break
+                let decoded = try EditPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw))
+                // An empty plan is also retried once (the model declined to act) — the
+                // retry just asks again, it does not loosen the validator.
+                if !decoded.operations.isEmpty { plan = decoded; break }
+                lastDecodeError = "the reply contained no operations; name the element ids listed in the data that should change"
             } catch {
                 lastDecodeError = "\(error)"
             }
