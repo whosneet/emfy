@@ -131,4 +131,29 @@ public enum DrawingColorMath {
         let dr = a.red - b.red, dg = a.green - b.green, db = a.blue - b.blue
         return (((dr * dr) + (dg * dg) + (db * db)) / 3).squareRoot()
     }
+
+    // MARK: - CIELAB ΔE
+
+    /// sRGB → CIELAB (D65), via linear sRGB → XYZ → Lab. Used for perceptual colour
+    /// naming and the eval suite's "within tolerance" colour checks.
+    public static func toLab(_ color: SceneColor) -> (L: Double, a: Double, b: Double) {
+        let r = linearize(color.red), g = linearize(color.green), b = linearize(color.blue)
+        // linear sRGB → XYZ (D65), then normalise by the D65 white point.
+        let x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047
+        let y = (0.2126729 * r + 0.7151522 * g + 0.0721750 * b) / 1.0
+        let z = (0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883
+        func f(_ t: Double) -> Double {
+            t > 0.008856 ? pow(t, 1.0 / 3) : (7.787 * t + 16.0 / 116)
+        }
+        let fx = f(x), fy = f(y), fz = f(z)
+        return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+    }
+
+    /// CIE76 ΔE between two colours (Euclidean distance in CIELAB). ~2.3 is the "just
+    /// noticeable difference"; the eval suite treats a modest ΔE as "the right colour".
+    public static func deltaE(_ a: SceneColor, _ b: SceneColor) -> Double {
+        let la = toLab(a), lb = toLab(b)
+        let dL = la.L - lb.L, da = la.a - lb.a, dB = la.b - lb.b
+        return (dL * dL + da * da + dB * dB).squareRoot()
+    }
 }
