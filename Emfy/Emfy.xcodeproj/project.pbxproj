@@ -824,6 +824,7 @@
 		A3F100000000000000000002 /* MCPTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MCP/MCPTools.swift"; sourceTree = "<group>"; };
 		A3F100000000000000000003 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MCP/main.swift"; sourceTree = "<group>"; };
 		A3F100000000000000000004 /* MCPClientConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MCP/MCPClientConfiguration.swift"; sourceTree = "<group>"; };
+		A3F1000000000000000000FA /* emfy-mcp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "MCP/emfy-mcp.entitlements"; sourceTree = "<group>"; };
 		A3F100000000000000000005 /* MCPProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPProtocolTests.swift; sourceTree = "<group>"; };
 		A3F100000000000000000006 /* MCPToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPToolsTests.swift; sourceTree = "<group>"; };
 		A3F1000000000000000000FE /* emfy-mcp */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "emfy-mcp"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -970,6 +971,7 @@
 				A3F100000000000000000002 /* MCPTools.swift */,
 				A3F100000000000000000003 /* main.swift */,
 				A3F100000000000000000004 /* MCPClientConfiguration.swift */,
+				A3F1000000000000000000FA /* emfy-mcp.entitlements */,
 				B00100000000000000000F40 /* SVGExport.swift */,
 				E2A0000000000000000000A0 /* RevertSnapshot.swift */,
 				E2A0000000000000000000B0 /* DocumentEditingSupport.swift */,
@@ -2882,6 +2884,7 @@
 		A3F700000000000000000007 /* Debug-DMG */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Shared/MCP/emfy-mcp.entitlements";
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 7;
@@ -2905,6 +2908,7 @@
 		A3F700000000000000000008 /* Release-DMG */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Shared/MCP/emfy-mcp.entitlements";
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 7;
