@@ -148,4 +148,57 @@ enum ViewerFit {
             trailing: insets.trailing + extraX
         )
     }
+
+    // MARK: - Adaptive tile size + placeholder (P2b)
+    //
+    // Pure policy shared by the Mac (`MacMetafileScrollView`) and iOS
+    // (`ZoomableMetafileView`) tiled viewers. It lives here (not in ZoomMath,
+    // which is macOS-only in the multiplatform target) so both platforms and the
+    // unit tests see one copy.
+
+    /// The estimated playback-op count (`Prepared.estimatedPlaybackOps`) at or
+    /// above which the tiled viewer switches from 512 pt tiles to large tiles.
+    /// Each tile re-executes the whole record stream, so the fit-view repaint ≈
+    /// tile count × per-tile cost; above this the file is heavy enough that fewer,
+    /// larger tiles pay off. Measured targets: a ~278k-record GDI file
+    /// (~73 ms/tile) and a ~276k-record dual EMF+ file (~584 ms/tile) both
+    /// qualify, while an ordinary file of a few thousand records stays on 512 and
+    /// is untouched.
+    static let largeTileOpThreshold = 50_000
+
+    /// The historical tile side — kept exactly for a cheap document, so nothing
+    /// changes for it.
+    static let defaultTileSide: CGFloat = 512
+    /// The large tile side for an expensive document. 1024 pt → 2048² px at a 2×
+    /// backing scale = 16 MB per tile: a budget-safe quarter of a 2048-pt tile's
+    /// 64 MB, and ~4× fewer tiles at fit, so a fit-to-window view of a heavy file
+    /// replays the stream a handful of times instead of a dozen-plus. Levels of
+    /// detail and the magnification bias are unchanged, so zoom-in stays crisp.
+    static let largeTileSide: CGFloat = 1024
+
+    /// Whether a document is expensive enough to replay that it earns large tiles
+    /// and a render-once placeholder (P2b).
+    static func isExpensiveToReplay(playbackOps: Int) -> Bool {
+        playbackOps >= largeTileOpThreshold
+    }
+
+    /// The `CATiledLayer.tileSize` side (pt) for a document of `ops` estimated
+    /// playback ops: `defaultTileSide` for a cheap one, `largeTileSide` for an
+    /// expensive one.
+    static func tileSide(forPlaybackOps ops: Int) -> CGFloat {
+        isExpensiveToReplay(playbackOps: ops) ? largeTileSide : defaultTileSide
+    }
+
+    /// The long edge (px) the render-once placeholder beneath the tiles is capped
+    /// to (P2b). The placeholder is a transient, blurry stand-in shown only while
+    /// tiles fill in, so a modest resolution keeps its one render and its retained
+    /// bitmap cheap (1536² × 4 ≈ 9 MB worst case).
+    static let maxPlaceholderLongEdge: CGFloat = 1536
+
+    /// The render scale for the placeholder image: the page's long side scaled to
+    /// at most `maxPlaceholderLongEdge`, never upscaled past 1×.
+    static func placeholderScale(forLongSide longSide: CGFloat) -> CGFloat {
+        guard longSide.isFinite, longSide > maxPlaceholderLongEdge else { return 1 }
+        return maxPlaceholderLongEdge / longSide
+    }
 }

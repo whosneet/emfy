@@ -150,4 +150,42 @@ import Testing
             #expect(coarsest <= 256 + 1e-6)
         }
     }
+
+    // MARK: adaptive tile size (P2b) — policy lives in ViewerFit (cross-platform)
+
+    @Test func cheapDocumentsKeepTheHistoricalTile() {
+        // An ordinary file of a few thousand records is untouched: 512, not expensive.
+        #expect(ViewerFit.isExpensiveToReplay(playbackOps: 0) == false)
+        #expect(ViewerFit.isExpensiveToReplay(playbackOps: 2_000) == false)
+        #expect(ViewerFit.isExpensiveToReplay(playbackOps: 49_999) == false)
+        #expect(ViewerFit.tileSide(forPlaybackOps: 0) == ViewerFit.defaultTileSide)
+        #expect(ViewerFit.tileSide(forPlaybackOps: 2_000) == 512)
+    }
+
+    @Test func expensiveDocumentsGetLargeTiles() {
+        // The measured heavy targets (~276k–278k records) cross the threshold.
+        #expect(ViewerFit.isExpensiveToReplay(playbackOps: 50_000) == true)
+        #expect(ViewerFit.isExpensiveToReplay(playbackOps: 276_264) == true)
+        #expect(ViewerFit.isExpensiveToReplay(playbackOps: 277_901) == true)
+        #expect(ViewerFit.tileSide(forPlaybackOps: 50_000) == ViewerFit.largeTileSide)
+        #expect(ViewerFit.tileSide(forPlaybackOps: 277_901) == 1024)
+    }
+
+    // MARK: placeholder scale (P2b)
+
+    @Test func placeholderNeverUpscalesASmallPage() {
+        #expect(ViewerFit.placeholderScale(forLongSide: 100) == 1)
+        #expect(ViewerFit.placeholderScale(forLongSide: ViewerFit.maxPlaceholderLongEdge) == 1)
+    }
+
+    @Test func placeholderCapsALargePageToTheLongEdge() {
+        let scale = ViewerFit.placeholderScale(forLongSide: 3072)
+        #expect(abs(scale - 0.5) < 1e-9)                        // 1536 / 3072
+        #expect(3072 * scale == ViewerFit.maxPlaceholderLongEdge)
+    }
+
+    @Test func placeholderScaleIsSafeForDegenerateInput() {
+        #expect(ViewerFit.placeholderScale(forLongSide: .nan) == 1)
+        #expect(ViewerFit.placeholderScale(forLongSide: 0) == 1)
+    }
 }
