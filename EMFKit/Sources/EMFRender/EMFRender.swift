@@ -399,6 +399,13 @@ public enum EMFRenderer {
         case .gradientFill(let payload):
             // A direct draw (not recorded into a path bracket), like text/bitmaps.
             GradientDrawer.draw(payload, into: context, dc: dc, base: base, log: &log)
+            // v1 does not lift a gradient to an editable element, but it DID paint
+            // its bounds, so capture a passthrough op carrying the payload — without
+            // it the scene importer makes an empty passthrough element and the
+            // editor render drops the gradient the viewer draws. Mirrors PATBLT.
+            if dc.observer != nil {
+                capturePassthroughOp(deviceRect: PathBuilder.cgRect(payload.bounds), payload: .gradientFill(payload), dc: dc)
+            }
             return
 
         // WMF-sourced direct draws ([MS-WMF] §2.3.3.12/.19). Like text and
