@@ -21,6 +21,9 @@ struct DrawingCheckView: View {
 
     @Environment(AIProviderStore.self) private var providerStore: AIProviderStore?
     @State private var reportExpanded = false
+    @State private var compareModel = DrawingCompareModel()
+    @State private var showingCompare = false
+    @State private var pickingBaselineFile = false
 
     var body: some View {
         @Bindable var model = model
@@ -47,6 +50,12 @@ struct DrawingCheckView: View {
                 onCancel: { model.cancelPendingFix() })
         }
         .onAppear { summariseModel.providerStore = providerStore }
+        .sheet(isPresented: $showingCompare) {
+            DrawingCompareView(model: compareModel, onClose: { showingCompare = false })
+        }
+        .fileImporter(isPresented: $pickingBaselineFile, allowedContentTypes: MetafileTypes.readableContentTypes) { result in
+            if case .success(let url) = result { loadBaseline(from: url) }
+        }
         .aiConsentSheet(
             provider: summariseModel.pendingConsent,
             purpose: .drawingData,
@@ -93,6 +102,49 @@ struct DrawingCheckView: View {
                 actionLabel("Export Report…", "square.and.arrow.up", compact: compact)
             }
             .accessibilityIdentifier("exportCheckReport")
+            compareButton(compact: compact)
+        }
+    }
+
+    @ViewBuilder
+    private func compareButton(compact: Bool) -> some View {
+        if model.canCompareWithOpenedVersion {
+            Menu {
+                Button("Compare with Opened Version") { compareWithOpenedVersion() }
+                Button("Compare with File…") { pickingBaselineFile = true }
+            } label: {
+                actionLabel("Compare…", "rectangle.on.rectangle", compact: compact)
+            }
+            .menuIndicator(.hidden)
+            .accessibilityIdentifier("compareDrawing")
+        } else {
+            Button { pickingBaselineFile = true } label: {
+                actionLabel("Compare…", "rectangle.on.rectangle", compact: compact)
+            }
+            .accessibilityIdentifier("compareDrawing")
+        }
+    }
+
+    // MARK: Compare actions (X1b item 1)
+
+    private func compareWithOpenedVersion() {
+        guard let data = model.openedVersionBaselineData() else { return }
+        startCompare(baselineData: data, label: "Opened version")
+    }
+
+    private func loadBaseline(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { return }
+        startCompare(baselineData: data, label: url.lastPathComponent)
+    }
+
+    private func startCompare(baselineData: Data, label: String) {
+        showingCompare = true
+        Task {
+            guard let current = await model.currentSceneForCompare(),
+                  let baseline = try? SceneImporter.import(data: baselineData) else { return }
+            compareModel.compare(current: current, baseline: baseline, baselineLabel: label)
         }
     }
 

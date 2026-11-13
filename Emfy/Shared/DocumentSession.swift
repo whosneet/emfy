@@ -1208,6 +1208,13 @@ final class DocumentSession {
         snapshotStore?.hasSnapshot(for: entryID) ?? false
     }
 
+    /// The opened-version snapshot bytes for Compare, when one exists (the same
+    /// snapshot Revert reads). Lets the viewer compare the edited drawing against the
+    /// version it was opened at, with no file to pick (X1b item 1).
+    func openedVersionSnapshotData() -> Data? {
+        snapshotStore?.read(for: entryID)?.data
+    }
+
     /// Restores the opened bytes through the same coordinated write, clears the edit
     /// state and undo, and reloads the document (design call E2a-7). Behind a
     /// confirmation in the UI.

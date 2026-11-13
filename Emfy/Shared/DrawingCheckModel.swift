@@ -166,6 +166,32 @@ final class DrawingCheckModel {
         }
     }
 
+    // MARK: Compare (X1b item 1)
+
+    /// The current drawing as a scene, for Compare: the edited scene while editing, else
+    /// the scene imported from the open bytes (the one the check analysed). Imports off
+    /// the main actor when no analysed scene is available yet.
+    func currentSceneForCompare() async -> Scene? {
+        if let session, session.editing == .editing, let editingScene = session.editingScene {
+            return editingScene
+        }
+        if let scene { return scene }
+        guard let dataProvider, let data = await dataProvider() else { return nil }
+        return try? await Task.detached(priority: .userInitiated) { try SceneImporter.import(data: data) }.value
+    }
+
+    /// Whether the drawing can be compared against the version it was opened at (a Mac
+    /// revert snapshot exists for this document).
+    var canCompareWithOpenedVersion: Bool {
+        session?.canRevertToOpenedVersion ?? false
+    }
+
+    /// The opened-version snapshot bytes, when one exists, for the "Compare with opened
+    /// version" action.
+    func openedVersionBaselineData() -> Data? {
+        session?.openedVersionSnapshotData()
+    }
+
     // MARK: Canvas highlight
 
     /// The outline for the selected finding's elements, in device space, reusing the
