@@ -11,6 +11,15 @@ struct SharePayload: Identifiable {
     var items: [Any] { [url] }
 }
 
+/// What drives the "Send to AI…" activity sheet (A3b): the ready items — the rendered
+/// image, the summary text, and (only when opted in) the original file URL. Held as
+/// `[Any]` because `UIActivityViewController` mixes item types. `Identifiable` for
+/// `.sheet(item:)`.
+struct AIActivityPayload: Identifiable {
+    let id = UUID()
+    let items: [Any]
+}
+
 /// A thin `UIActivityViewController` bridge for the Share menu.
 ///
 /// We use this rather than `ShareLink` because the approved design is a Menu of

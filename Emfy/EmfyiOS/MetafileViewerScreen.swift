@@ -66,6 +66,9 @@ struct MetafileViewerScreen: View {
     // Editing (E2a review #6).
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
+    // Send to AI… (A3b): the confirm sheet and its "Include the original file" toggle (off).
+    @State private var showAIShareConfirm = false
+    @State private var aiShareIncludeOriginal = false
 
     // Image insert (E3c): Photos picker + Files importer presentation.
     @State private var photoItem: PhotosPickerItem?
@@ -234,6 +237,20 @@ struct MetafileViewerScreen: View {
         .sheet(item: shareSheetBinding, onDismiss: { exporter.cleanupTemp() }) { payload in
             ShareSheet(items: payload.items)
                 .presentationDetents([.medium, .large])   // G5
+        }
+        // Send to AI… (A3b): the confirm sheet (the opt-in toggle) then the activity sheet.
+        .sheet(isPresented: $showAIShareConfirm) {
+            AIShareConfirmSheet(includeOriginal: $aiShareIncludeOriginal) {
+                showAIShareConfirm = false
+                sendToAI(includeOriginal: aiShareIncludeOriginal)
+            } onCancel: {
+                showAIShareConfirm = false
+            }
+            .presentationDetents([.height(240)])
+        }
+        .sheet(item: aiActivityBinding, onDismiss: { exporter.cleanupAITemp() }) { payload in
+            ShareSheet(items: payload.items)
+                .presentationDetents([.medium, .large])
         }
         #if DEBUG
         // F1 screenshot (d): the share actions in a system dialog (same actions as the
@@ -770,9 +787,30 @@ struct MetafileViewerScreen: View {
         exporter.shareSceneCopy(data: data, baseName: entry?.baseName ?? "Drawing")
     }
 
+    /// Send to AI… (A3b): packages the whole drawing (the edited scene when diverged,
+    /// else the original) as a PNG + text summary and hands it to the system share sheet.
+    /// `includeOriginal` attaches the original file too (the confirm-sheet toggle, off).
+    private func sendToAI(includeOriginal: Bool) {
+        guard let model = loaded, let entry else { return }
+        let opts = ExportScale.pngOptions(for: model.prepared.naturalSize, settings: settings)
+        let source = AISharePackage.outputSource(
+            isEditing: session.editing == .editing, hasDiverged: session.hasDivergedFromOpened)
+        let recordCount = model.prepared.recordKinds.reduce(0) { $0 + $1.count }
+        exporter.sendToAI(
+            entry: entry, store: store, source: source,
+            prepared: model.prepared, editedScene: session.editedScene,
+            allText: findModel.copyAllText(), recordCount: recordCount,
+            background: opts.background, options: settings.renderOptions,
+            includeOriginal: includeOriginal)
+    }
+
     // Computed bindings keep share/export state on the `@Observable` controller.
     private var shareSheetBinding: Binding<SharePayload?> {
         Binding(get: { exporter.sharePayload }, set: { exporter.sharePayload = $0 })
+    }
+
+    private var aiActivityBinding: Binding<AIActivityPayload?> {
+        Binding(get: { exporter.aiActivityPayload }, set: { exporter.aiActivityPayload = $0 })
     }
 
     private var shareErrorBinding: Binding<Bool> {
@@ -1367,6 +1405,15 @@ struct MetafileViewerScreen: View {
             } label: {
                 Label("Share as SVG", systemImage: "doc.text")
             }
+            // Send to AI… (A3b): a PNG + text summary for an AI app the user already has,
+            // through the system share sheet. Emfy sends nothing itself.
+            Button {
+                aiShareIncludeOriginal = false
+                showAIShareConfirm = true
+            } label: {
+                Label(AISharePackage.menuTitle, systemImage: "sparkles")
+            }
+            .accessibilityIdentifier("sendToAI")
             Divider()
             // Print (F1): the vector PDF through UIPrintInteractionController.
             Button {

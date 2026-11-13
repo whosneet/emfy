@@ -1,3 +1,4 @@
+import EMFEdit
 import EMFRender
 import SwiftUI
 import UIKit
@@ -19,6 +20,8 @@ final class MetafileExportController {
     var isRendering = false
     /// Non-nil presents the system share sheet.
     var sharePayload: SharePayload?
+    /// Non-nil presents the "Send to AI…" activity sheet (image + text + optional file).
+    var aiActivityPayload: AIActivityPayload?
     /// Non-nil presents the "Export Failed" alert (render/share failures).
     var shareError: String?
     /// Presents the "add photos permission denied" alert with a Settings path — only
@@ -30,9 +33,13 @@ final class MetafileExportController {
     @ObservationIgnored private let runner = ExportTaskRunner()
     /// The temp directory of the file currently being shared, removed on dismiss.
     @ObservationIgnored private var tempCleanupURL: URL?
+    /// The temp directory of the original file staged for a Send-to-AI opt-in.
+    @ObservationIgnored private var aiTempCleanupURL: URL?
     /// The in-flight "Share File" resolve/stage task, tracked so a repeat tap
     /// cancels it rather than letting two runs double-fire the share sheet (§j).
     @ObservationIgnored private var shareOriginalTask: Task<Void, Never>?
+    /// The in-flight "Send to AI…" resolve/render task, so a repeat tap cancels it.
+    @ObservationIgnored private var aiShareTask: Task<Void, Never>?
 
     // MARK: - Actions
 
@@ -226,6 +233,76 @@ final class MetafileExportController {
         )
     }
 
+    // MARK: - Send to AI… (A3b)
+
+    /// Packages the drawing for an AI app the user already has — a 2× PNG and a plain-text
+    /// summary (file name, format, page size, record count, Copy All Text) — and presents
+    /// it through a `UIActivityViewController`. Emfy sends nothing over the network.
+    /// `includeOriginal` (the confirm-sheet toggle, default off) also attaches the file.
+    /// Renders off-main through `AISharePackageProducer`; a spinner shows past ~0.3 s.
+    func sendToAI(
+        entry: RecentEntry,
+        store: RecentsStore,
+        source: OutputSource,
+        prepared: MetafileRenderer.Prepared,
+        editedScene: EMFEdit.Scene?,
+        allText: String,
+        recordCount: Int,
+        background: RenderBackground,
+        options: RenderOptions,
+        includeOriginal: Bool
+    ) {
+        runner.cancel()
+        aiShareTask?.cancel()
+        isRendering = false
+        let fileName = entry.displayName
+        aiShareTask = Task { @MainActor in
+            let spinner = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.3))
+                if !Task.isCancelled { self.isRendering = true }
+            }
+            defer {
+                spinner.cancel()
+                self.isRendering = false
+            }
+            guard let data = try? await store.resolveData(for: entry) else {
+                if !Task.isCancelled { self.shareError = AISharePackage.shareFailure }
+                return
+            }
+            if Task.isCancelled { return }
+            let package = await Task.detached(priority: .userInitiated) {
+                AISharePackageProducer.make(
+                    resolvedData: data, fileName: fileName, allText: allText, recordCount: recordCount,
+                    source: source, prepared: prepared, editedScene: editedScene,
+                    background: background, options: options, includeOriginal: includeOriginal)
+            }.value
+            if Task.isCancelled { return }
+            guard let pngData = package.pngData, let image = UIImage(data: pngData) else {
+                self.shareError = AISharePackage.shareFailure
+                return
+            }
+            self.presentAIShare(image: image, text: package.summary, originalData: package.originalData, fileName: fileName)
+        }
+    }
+
+    private func presentAIShare(image: UIImage, text: String, originalData: Data?, fileName: String) {
+        cleanupAITemp()
+        var items: [Any] = [image, text]
+        if let originalData, let url = try? MetafileExport.writeTemporary(originalData, fileName: fileName) {
+            aiTempCleanupURL = url.deletingLastPathComponent()
+            items.append(url)
+        }
+        aiActivityPayload = AIActivityPayload(items: items)
+    }
+
+    /// Removes the Send-to-AI opt-in's temp directory once the activity sheet dismisses.
+    func cleanupAITemp() {
+        if let directory = aiTempCleanupURL {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        aiTempCleanupURL = nil
+    }
+
     // MARK: - Lifecycle
 
     /// Removes the shared file's temp directory once the sheet is dismissed.
@@ -240,6 +317,7 @@ final class MetafileExportController {
     func cancelOngoing() {
         runner.cancel()
         shareOriginalTask?.cancel()
+        aiShareTask?.cancel()
         isRendering = false
     }
 
