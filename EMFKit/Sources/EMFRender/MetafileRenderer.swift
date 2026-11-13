@@ -119,6 +119,22 @@ public enum MetafileRenderer {
             return []
         }
 
+        /// A cheap, synchronous estimate of per-tile playback cost: the number of
+        /// records the renderer replays once per rendered tile. The tiled viewer
+        /// uses it to pick a larger tile size for an expensive document (P2b) —
+        /// every tile re-executes the whole record stream, so the total repaint of
+        /// a fit view ≈ tile count × this cost. It is an `Array.count` (O(1)) over
+        /// already-parsed structure — never drawing content. For a dual EMF+ file
+        /// it is the GDI record count: the renderer draws such a file through EMF+,
+        /// but the file also carries the full GDI fallback, so the GDI count still
+        /// tracks overall document complexity.
+        public var estimatedPlaybackOps: Int {
+            switch content {
+            case .emf(let file): return file.records.count
+            case .wmfProgram(let program): return program.payloads.count
+            }
+        }
+
         init(
             content: Content,
             kind: Kind,
