@@ -211,16 +211,22 @@ struct DrawingCompareView: View {
                 ContentUnavailableView("No differences", systemImage: "equal.circle", description: Text("The two versions match."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(selection: Binding(get: { model.selectedChangeID }, set: { model.select(changeID: $0) })) {
-                    ForEach(model.changes) { change in
-                        changeRow(change).tag(change.id)
+                // A ScrollView of rows rather than a List: a List pads the remaining height
+                // with empty alternating rows on macOS; here only the real changes render.
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.changes) { change in
+                            changeRow(change)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(change.id == model.selectedChangeID ? Color.accentColor.opacity(0.16) : Color.clear)
+                                .contentShape(Rectangle())
+                                .onTapGesture { model.select(changeID: change.id) }
+                            Divider()
+                        }
                     }
                 }
-                #if os(macOS)
-                .listStyle(.inset(alternatesRowBackgrounds: true))
-                #else
-                .listStyle(.plain)
-                #endif
             }
         }
     }
