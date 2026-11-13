@@ -109,21 +109,24 @@ enum MacDrawingCopy {
         switch source {
         case .selectionSubset:
             guard let scene = subsetScene else { return nil }
-            return sceneImagePNG(scene, pngScale: pngScale)
+            return sceneImagePNG(scene, pngScale: pngScale, background: background)
         case .editedScene:
             guard let scene = editedScene else { return originalPNG(prepared, pngScale: pngScale, background: background, options: options) }
-            return sceneImagePNG(scene, pngScale: pngScale)
+            return sceneImagePNG(scene, pngScale: pngScale, background: background)
         case .original:
             return originalPNG(prepared, pngScale: pngScale, background: background, options: options)
         }
     }
 
-    nonisolated private static func sceneImagePNG(_ scene: Scene, pngScale: Int) -> Data? {
+    nonisolated private static func sceneImagePNG(_ scene: Scene, pngScale: Int, background: RenderBackground) -> Data? {
         let selection = ExportScale.select(
             baseWidth: Int(scene.pageSizeDevice.width.rounded()),
             baseHeight: Int(scene.pageSizeDevice.height.rounded()),
             requested: pngScale, areaCap: ExportScale.areaCap)
-        return SceneRenderer.makeImage(scene, scale: CGFloat(selection.multiplier)).flatMap { EMFExport.pngData(from: $0) }
+        // Honour the Export › PNG background setting for the edited scene exactly as the
+        // viewer export does for the original (the scene renderer defaulted to white).
+        return SceneRenderer.makeImage(scene, scale: CGFloat(selection.multiplier), background: background)
+            .flatMap { EMFExport.pngData(from: $0) }
     }
 
     nonisolated private static func originalPNG(

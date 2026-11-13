@@ -86,9 +86,12 @@ public enum SceneRenderer {
     }
 
     /// Renders `scene` into a fresh sRGB bitmap sized from the page (× `scale`),
-    /// on white, matching `MetafileRenderer.makeImage`'s sizing. Returns `nil`
-    /// only on a bitmap allocation failure.
-    public static func makeImage(_ scene: Scene, scale: CGFloat = 1) -> CGImage? {
+    /// matching `MetafileRenderer.makeImage`'s sizing. `background` fills the page
+    /// opaque white (the default, preserving every existing caller's output) or
+    /// leaves it transparent, exactly as the viewer's PNG export honours the
+    /// Export › PNG background setting (`RenderBackground`). Returns `nil` only on
+    /// a bitmap allocation failure.
+    public static func makeImage(_ scene: Scene, scale: CGFloat = 1, background: RenderBackground = .white) -> CGImage? {
         // The SAME canvas-sizing rule the viewer uses (per-side cap then the
         // 32 Mpx area cap), so the editor canvas is pixel-for-pixel the viewer's
         // for every file — a `SceneRenderer`-only per-side clamp sized a >32 Mpx
@@ -102,8 +105,13 @@ public enum SceneRenderer {
                   bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
               )
         else { return nil }
-        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        // `.transparent` skips the white fill, leaving the premultiplied-alpha
+        // canvas clear so empty areas export with alpha 0 (matching the viewer's
+        // transparent PNG). `.white` fills opaque white first, as before.
+        if case .white = background {
+            context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
         render(scene, into: context, target: CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()
     }

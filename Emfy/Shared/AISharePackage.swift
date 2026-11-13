@@ -147,7 +147,7 @@ enum AISharePackageRender {
     ) -> Data? {
         switch source {
         case .editedScene:
-            if let scene = editedScene, let data = scenePNG(scene) { return data }
+            if let scene = editedScene, let data = scenePNG(scene, background: background) { return data }
             return originalPNG(prepared, background: background, options: options)
         case .selectionSubset:
             // Send to AI never narrows to a subset; treat it as the whole original.
@@ -157,9 +157,11 @@ enum AISharePackageRender {
         }
     }
 
-    private static func scenePNG(_ scene: Scene) -> Data? {
+    private static func scenePNG(_ scene: Scene, background: RenderBackground) -> Data? {
         let scale = AISharePackage.renderScale(naturalSize: scene.pageSizeDevice)
-        return SceneRenderer.makeImage(scene, scale: scale).flatMap { EMFExport.pngData(from: $0) }
+        // Honour the Export › PNG background setting for the edited scene, as the original
+        // path does — the scene renderer defaulted to white regardless of the setting.
+        return SceneRenderer.makeImage(scene, scale: scale, background: background).flatMap { EMFExport.pngData(from: $0) }
     }
 
     private static func originalPNG(
