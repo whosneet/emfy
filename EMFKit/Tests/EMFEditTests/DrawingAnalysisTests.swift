@@ -231,6 +231,22 @@ private let black = SceneColor(red: 0, green: 0, blue: 0)
         #expect(DrawingColorMath.contrastRatio(after, white) >= 4.5 - 1e-6)
     }
 
+    @Test func contrastFixSurvivesSerialisationRoundTrip() throws {
+        // Grey #999999 text on white → one contrast finding. The fix must still clear AA
+        // after the colour is quantised to an 8-bit COLORREF on save and re-imported.
+        let scene = makeScene([textRun(id: 1, CGRect(x: 10, y: 10, width: 120, height: 20), points: 12, color: gdi(0x99, 0x99, 0x99))])
+        let finding = try #require(scene.lowContrastFindings.first)
+        let fix = try #require(DrawingFixPlanner.plan(for: finding, in: scene))
+        var history = SceneHistory(scene: scene)
+        try history.apply(fix.command)
+        // No finding in memory (full-precision colour).
+        #expect(!DrawingAnalysis(scene: history.scene).findings.contains { if case .lowContrast = $0.kind { return true } else { return false } })
+        // Serialise to EMF and re-import — this is where the 8-bit quantisation happens.
+        let data = try SceneExporter.export(history.scene, as: .emf).data
+        let reimported = try SceneImporter.import(data: data)
+        #expect(!DrawingAnalysis(scene: reimported).findings.contains { if case .lowContrast = $0.kind { return true } else { return false } })
+    }
+
     @Test func tinyTextFixReachesEightPoint() throws {
         let scene = makeScene([textRun(id: 1, CGRect(x: 10, y: 10, width: 80, height: 10), points: 6, color: black)])
         let finding = try #require(scene.findings.first { if case .tinyText = $0.kind { return true } else { return false } })

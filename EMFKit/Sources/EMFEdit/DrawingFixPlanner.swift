@@ -42,6 +42,12 @@ public enum DrawingFixPlanner {
     /// The grouped-undo name for a "Fix all of this kind" batch.
     public static let fixAllActionName = SceneActionName.group("edit.action.fixAll")
 
+    /// Headroom added to the required contrast ratio when darkening/lightening text, so
+    /// the fix still clears WCAG AA after the colour is quantised to an 8-bit COLORREF on
+    /// save and re-imported (a fix landing exactly on 4.5:1 / 3.0:1 can otherwise regress
+    /// to ~4.48:1 after a round-trip). Targets 4.6:1 for normal text and 3.1:1 for large.
+    static let contrastFixMargin = 0.1
+
     /// Plans the single fix for `finding`, or nil when it is informational
     /// (unlabelled image) or the target element cannot be edited.
     public static func plan(for finding: Finding, in scene: Scene, config: DrawingAnalysis.Config = .init()) -> PlannedFix? {
@@ -99,6 +105,8 @@ public enum DrawingFixPlanner {
     /// against a light background, lightens against a dark one; falls back to the
     /// stronger extreme when neither side can reach the ratio.
     static func contrastAdjustedColor(text: SceneColor, background: SceneColor, required: Double) -> SceneColor {
+        // Aim past the bare threshold so the fix survives the 8-bit COLORREF round-trip.
+        let target = required + contrastFixMargin
         let hsl = DrawingColorMath.toHSL(text)
         func colorAt(_ l: Double) -> SceneColor {
             DrawingColorMath.fromHSL(hue: hsl.hue, saturation: hsl.saturation, lightness: l, alpha: text.alpha)
@@ -106,19 +114,19 @@ public enum DrawingFixPlanner {
         func ratioAt(_ l: Double) -> Double {
             DrawingColorMath.contrastRatio(DrawingColorMath.composite(colorAt(l), over: background), background)
         }
-        if ratioAt(hsl.lightness) >= required { return text }   // already fine (no-op)
+        if ratioAt(hsl.lightness) >= target { return text }   // already fine (no-op)
 
-        let darkReaches = ratioAt(0) >= required
-        let lightReaches = ratioAt(1) >= required
+        let darkReaches = ratioAt(0) >= target
+        let lightReaches = ratioAt(1) >= target
 
         func searchDarken() -> Double {   // largest l in [0, l0] that meets
             var lo = 0.0, hi = hsl.lightness
-            for _ in 0 ..< 48 { let mid = (lo + hi) / 2; if ratioAt(mid) >= required { lo = mid } else { hi = mid } }
+            for _ in 0 ..< 48 { let mid = (lo + hi) / 2; if ratioAt(mid) >= target { lo = mid } else { hi = mid } }
             return lo
         }
         func searchLighten() -> Double {  // smallest l in [l0, 1] that meets
             var lo = hsl.lightness, hi = 1.0
-            for _ in 0 ..< 48 { let mid = (lo + hi) / 2; if ratioAt(mid) >= required { hi = mid } else { lo = mid } }
+            for _ in 0 ..< 48 { let mid = (lo + hi) / 2; if ratioAt(mid) >= target { hi = mid } else { lo = mid } }
             return hi
         }
 
