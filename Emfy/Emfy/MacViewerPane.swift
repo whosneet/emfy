@@ -42,6 +42,11 @@ struct MacViewerPane: View {
     // Accessibility Check (X1a): deterministic analysis + fixes + AI summary.
     @State private var checkModel = DrawingCheckModel()
     @State private var summariseModel = DrawingSummariseModel()
+    // Editor AI edit + recolour (X2a), reachable from the Edit menu, selection-scoped.
+    @State private var aiEditModel = DrawingAIEditModel()
+    @State private var recolourModel = DrawingRecolourModel()
+    @State private var showingAIEditSheet = false
+    @State private var showingRecolourSheet = false
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
     // Translate (F3d): the system Translate overlay presentation.
@@ -93,6 +98,14 @@ struct MacViewerPane: View {
             .onChange(of: findModel.current) { _, _ in scrollToCurrentMatch() }
             .inspector(isPresented: $showInspector) {
                 inspector
+            }
+            // Editor AI edit + recolour sheets (X2a), driven by the Edit-menu entries.
+            .sheet(isPresented: $showingAIEditSheet) {
+                DrawingAIEditView(model: aiEditModel, onClose: { showingAIEditSheet = false })
+                    .environment(aiProviders)
+            }
+            .sheet(isPresented: $showingRecolourSheet) {
+                DrawingRecolourView(model: recolourModel, onClose: { showingRecolourSheet = false })
             }
             // Records inspector (F5c): (re)configure when the segment is shown or the
             // content changes, render each selection off-main, and rebuild on an
@@ -1737,6 +1750,8 @@ struct MacViewerPane: View {
             alignSelection: arrangeEnabled ? { session.alignSelection(editorModel.selection.ids, $0) } : nil,
             distributeSelection: arrangeEnabled ? { session.distributeSelection(editorModel.selection.ids, $0) } : nil,
             canDistribute: editorModel.selection.ids.count >= 3,
+            editWithAI: (session.editing == .editing && aiEnabled) ? { startEditorAIEdit() } : nil,
+            recolour: session.editing == .editing ? { startEditorRecolour() } : nil,
             toggleGrid: session.editing == .editing ? { editorModel.showGrid.toggle() } : nil,
             toggleSnapToGrid: session.editing == .editing ? { editorModel.snapToGrid.toggle() } : nil,
             toggleSnapToGuides: session.editing == .editing ? { editorModel.snapToGuides.toggle() } : nil,
@@ -1744,6 +1759,20 @@ struct MacViewerPane: View {
             isSnapToGrid: editorModel.snapToGrid,
             isSnapToGuides: editorModel.snapToGuides
         )
+    }
+
+    /// Opens "Edit with AI…", scoped to the current selection (X2a).
+    private func startEditorAIEdit() {
+        aiEditModel.reset()
+        aiEditModel.configure(session: session, scope: editorModel.selection.ids)
+        aiEditModel.providerStore = aiProviders
+        showingAIEditSheet = true
+    }
+
+    /// Opens "Recolour…", scoped to the current selection (X2a).
+    private func startEditorRecolour() {
+        showingRecolourSheet = true
+        Task { await recolourModel.start(session: session, selection: editorModel.selection.ids) }
     }
 
     /// Arrange is enabled only in edit mode with a non-empty selection (E3d).

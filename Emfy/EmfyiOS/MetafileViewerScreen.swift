@@ -80,6 +80,11 @@ struct MetafileViewerScreen: View {
 
     // Light editor (E4): the Colour sheet presentation.
     @State private var showColorSheet = false
+    // Editor AI edit + recolour (X2a), selection-scoped.
+    @State private var aiEditModel = DrawingAIEditModel()
+    @State private var recolourModel = DrawingRecolourModel()
+    @State private var showingAIEditSheet = false
+    @State private var showingRecolourSheet = false
     #if DEBUG
     @State private var showDebugSettings = false
     #endif
@@ -276,6 +281,14 @@ struct MetafileViewerScreen: View {
             LightColorSheet(session: session, selection: editorModel.selection.ids)
                 .presentationDetents([.height(260), .medium])
                 .presentationDragIndicator(.visible)
+        }
+        // Editor AI edit + recolour sheets (X2a).
+        .sheet(isPresented: $showingAIEditSheet) {
+            DrawingAIEditView(model: aiEditModel, onClose: { showingAIEditSheet = false })
+                .environment(aiProviders)
+        }
+        .sheet(isPresented: $showingRecolourSheet) {
+            DrawingRecolourView(model: recolourModel, onClose: { showingRecolourSheet = false })
         }
         #if DEBUG
         // The `iphone-settings` script presents the real Settings screen so a capture
@@ -1071,6 +1084,9 @@ struct MetafileViewerScreen: View {
             ToolbarItem(placement: .topBarLeading) {
                 gridMenu
             }
+            ToolbarItem(placement: .topBarLeading) {
+                aiEditMenu
+            }
         }
     }
 
@@ -1218,6 +1234,7 @@ struct MetafileViewerScreen: View {
             ToolbarItemGroup(placement: .bottomBar) {
                 markupMenu
                 colourButton
+                aiEditMenu
                 lightTextButton
                 deleteButton
                 Spacer()
@@ -1267,6 +1284,32 @@ struct MetafileViewerScreen: View {
         }
         .tint(editorModel.armedPen ? Color.accentColor : nil)
         .accessibilityIdentifier("viewerMarkup")
+    }
+
+    /// The AI edit + recolour menu (X2a), shown in both the iPad full editor and the iPhone
+    /// light editor. Both scope to the current selection.
+    private var aiEditMenu: some View {
+        Menu {
+            if aiEnabled {
+                Button { startEditorAIEdit() } label: { Label("Edit with AI…", systemImage: "wand.and.stars.inverse") }
+            }
+            Button { startEditorRecolour() } label: { Label("Recolour…", systemImage: "paintpalette") }
+        } label: {
+            Label("AI & Colour", systemImage: "wand.and.stars")
+        }
+        .accessibilityIdentifier("viewerAIEdit")
+    }
+
+    private func startEditorAIEdit() {
+        aiEditModel.reset()
+        aiEditModel.configure(session: session, scope: editorModel.selection.ids)
+        aiEditModel.providerStore = aiProviders
+        showingAIEditSheet = true
+    }
+
+    private func startEditorRecolour() {
+        showingRecolourSheet = true
+        Task { await recolourModel.start(session: session, selection: editorModel.selection.ids) }
     }
 
     /// Colour: opens the compact Colour sheet, applied to the selection (design call 2).

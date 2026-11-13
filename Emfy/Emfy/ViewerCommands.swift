@@ -176,6 +176,13 @@ struct EditMenuCommands: Commands {
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(actions?.insertImage == nil)
             Divider()
+            // Edit with AI… / Recolour… (X2a). Both scope to the selection; disabled when
+            // not editing (Edit with AI also needs an AI engine).
+            Button("Edit with AI…") { actions?.editWithAI?() }
+                .disabled(actions?.editWithAI == nil)
+            Button("Recolour…") { actions?.recolour?() }
+                .disabled(actions?.recolour == nil)
+            Divider()
             // Copy All Text (F3b): the drawing's text, in reading order, as plain text.
             // No key equivalent (⌘C stays the drawing-copy responder path); disabled when
             // the drawing has no text.

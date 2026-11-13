@@ -50,8 +50,11 @@ struct DrawingAIEditView: View {
                 .font(.title2)
                 .foregroundStyle(.tint)
                 .accessibilityHidden(true)
-            Text("Edit with AI")
-                .font(.headline)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Edit with AI").font(.headline)
+                Text("Applies to \(model.scopeDescription).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Spacer()
         }
     }

@@ -91,6 +91,11 @@ struct ViewerActions {
     var distributeSelection: ((EditorArrange.Distribution) -> Void)? = nil
     var canDistribute: Bool = false
 
+    // Editing (X2a): AI edit by instruction, and deterministic recolour. Both are `nil`
+    // unless the document is in edit mode; they scope to the current selection.
+    var editWithAI: (() -> Void)? = nil
+    var recolour: (() -> Void)? = nil
+
     // Editing (E3e): View ▸ grid + snapping. The toggles are `nil` unless editing; the
     // flags drive the menu checkmarks and the "Show/Hide Grid" label.
     var toggleGrid: (() -> Void)? = nil
