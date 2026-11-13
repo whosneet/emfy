@@ -45,8 +45,10 @@ struct MacViewerPane: View {
     // Editor AI edit + recolour (X2a), reachable from the Edit menu, selection-scoped.
     @State private var aiEditModel = DrawingAIEditModel()
     @State private var recolourModel = DrawingRecolourModel()
+    @State private var translateModel = DrawingAITranslateModel()
     @State private var showingAIEditSheet = false
     @State private var showingRecolourSheet = false
+    @State private var showingTranslateSheet = false
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
     // Translate (F3d): the system Translate overlay presentation.
@@ -106,6 +108,11 @@ struct MacViewerPane: View {
             }
             .sheet(isPresented: $showingRecolourSheet) {
                 DrawingRecolourView(model: recolourModel, onClose: { showingRecolourSheet = false })
+            }
+            // Editor translate-in-place sheet (X2c), driven by the Edit-menu entry.
+            .sheet(isPresented: $showingTranslateSheet) {
+                DrawingAITranslateView(model: translateModel, onClose: { showingTranslateSheet = false })
+                    .environment(aiProviders)
             }
             // Records inspector (F5c): (re)configure when the segment is shown or the
             // content changes, render each selection off-main, and rebuild on an
@@ -1752,6 +1759,7 @@ struct MacViewerPane: View {
             canDistribute: editorModel.selection.ids.count >= 3,
             editWithAI: (session.editing == .editing && aiEnabled) ? { startEditorAIEdit() } : nil,
             recolour: session.editing == .editing ? { startEditorRecolour() } : nil,
+            translateDrawing: (session.editing == .editing && aiEnabled) ? { startEditorTranslate() } : nil,
             toggleGrid: session.editing == .editing ? { editorModel.showGrid.toggle() } : nil,
             toggleSnapToGrid: session.editing == .editing ? { editorModel.snapToGrid.toggle() } : nil,
             toggleSnapToGuides: session.editing == .editing ? { editorModel.snapToGuides.toggle() } : nil,
@@ -1773,6 +1781,13 @@ struct MacViewerPane: View {
     private func startEditorRecolour() {
         showingRecolourSheet = true
         Task { await recolourModel.start(session: session, selection: editorModel.selection.ids) }
+    }
+
+    /// Opens "Translate…", scoped to the selected text runs, else all text (X2c).
+    private func startEditorTranslate() {
+        translateModel.providerStore = aiProviders
+        showingTranslateSheet = true
+        Task { await translateModel.prepare(session: session, selection: editorModel.selection.ids) }
     }
 
     /// Arrange is enabled only in edit mode with a non-empty selection (E3d).

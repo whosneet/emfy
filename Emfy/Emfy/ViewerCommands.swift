@@ -182,16 +182,23 @@ struct EditMenuCommands: Commands {
                 .disabled(actions?.editWithAI == nil)
             Button("Recolour…") { actions?.recolour?() }
                 .disabled(actions?.recolour == nil)
+            // Translate… (X2c): AI translate-in-place of the drawing's text, scoped to the
+            // selection. Distinct from the read-only system Translate overlay below (which
+            // shows a translation without editing the file).
+            Button("Translate…") { actions?.translateDrawing?() }
+                .disabled(actions?.translateDrawing == nil)
             Divider()
             // Copy All Text (F3b): the drawing's text, in reading order, as plain text.
             // No key equivalent (⌘C stays the drawing-copy responder path); disabled when
             // the drawing has no text.
             Button("Copy All Text") { actions?.copyAllText?() }
                 .disabled(actions?.copyAllText == nil)
-            // Translate… (F3d): the system Translate overlay for the current Find match or the
-            // drawing's text. Hidden below macOS 14.4; disabled when no document/text is shown.
+            // Show Translation… (F3d): the read-only system Translate overlay for the current
+            // Find match or the drawing's text. Renamed from "Translate…" to disambiguate from
+            // the X2c in-place "Translate…" edit above. Hidden below macOS 14.4; disabled when
+            // no document/text is shown.
             if #available(macOS 14.4, *) {
-                Button("Translate…") { actions?.translate?() }
+                Button("Show Translation…") { actions?.translate?() }
                     .disabled(actions?.translate == nil)
             }
             // Find ▸ Find… / Find Next / Find Previous (F3b), the standard Find submenu.

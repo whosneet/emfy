@@ -83,8 +83,10 @@ struct MetafileViewerScreen: View {
     // Editor AI edit + recolour (X2a), selection-scoped.
     @State private var aiEditModel = DrawingAIEditModel()
     @State private var recolourModel = DrawingRecolourModel()
+    @State private var translateModel = DrawingAITranslateModel()
     @State private var showingAIEditSheet = false
     @State private var showingRecolourSheet = false
+    @State private var showingTranslateSheet = false
     #if DEBUG
     @State private var showDebugSettings = false
     #endif
@@ -289,6 +291,10 @@ struct MetafileViewerScreen: View {
         }
         .sheet(isPresented: $showingRecolourSheet) {
             DrawingRecolourView(model: recolourModel, onClose: { showingRecolourSheet = false })
+        }
+        .sheet(isPresented: $showingTranslateSheet) {
+            DrawingAITranslateView(model: translateModel, onClose: { showingTranslateSheet = false })
+                .environment(aiProviders)
         }
         #if DEBUG
         // The `iphone-settings` script presents the real Settings screen so a capture
@@ -1292,6 +1298,7 @@ struct MetafileViewerScreen: View {
         Menu {
             if aiEnabled {
                 Button { startEditorAIEdit() } label: { Label("Edit with AI…", systemImage: "wand.and.stars.inverse") }
+                Button { startEditorTranslate() } label: { Label("Translate…", systemImage: "character.bubble") }
             }
             Button { startEditorRecolour() } label: { Label("Recolour…", systemImage: "paintpalette") }
         } label: {
@@ -1310,6 +1317,12 @@ struct MetafileViewerScreen: View {
     private func startEditorRecolour() {
         showingRecolourSheet = true
         Task { await recolourModel.start(session: session, selection: editorModel.selection.ids) }
+    }
+
+    private func startEditorTranslate() {
+        translateModel.providerStore = aiProviders
+        showingTranslateSheet = true
+        Task { await translateModel.prepare(session: session, selection: editorModel.selection.ids) }
     }
 
     /// Colour: opens the compact Colour sheet, applied to the selection (design call 2).

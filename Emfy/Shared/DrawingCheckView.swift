@@ -30,6 +30,8 @@ struct DrawingCheckView: View {
     @State private var showingAIEdit = false
     @State private var recolourModel = DrawingRecolourModel()
     @State private var showingRecolour = false
+    @State private var translateModel = DrawingAITranslateModel()
+    @State private var showingTranslate = false
 
     var body: some View {
         @Bindable var model = model
@@ -71,6 +73,10 @@ struct DrawingCheckView: View {
         }
         .sheet(isPresented: $showingRecolour) {
             DrawingRecolourView(model: recolourModel, onClose: { showingRecolour = false })
+        }
+        .sheet(isPresented: $showingTranslate) {
+            DrawingAITranslateView(model: translateModel, onClose: { showingTranslate = false })
+                .environment(providerStore)
         }
         .aiConsentSheet(
             provider: summariseModel.pendingConsent,
@@ -119,6 +125,10 @@ struct DrawingCheckView: View {
                     actionLabel("Edit with AI…", "wand.and.stars.inverse", compact: compact)
                 }
                 .accessibilityIdentifier("editWithAI")
+                Button { startTranslate() } label: {
+                    actionLabel("Translate…", "character.bubble", compact: compact)
+                }
+                .accessibilityIdentifier("translateDrawing")
             }
             Button { startRecolour() } label: {
                 actionLabel("Recolour…", "paintpalette", compact: compact)
@@ -148,6 +158,13 @@ struct DrawingCheckView: View {
         guard let session = model.editSession else { return }
         showingRecolour = true
         Task { await recolourModel.start(session: session, selection: []) }
+    }
+
+    private func startTranslate() {
+        guard let session = model.editSession else { return }
+        translateModel.providerStore = providerStore
+        showingTranslate = true
+        Task { await translateModel.prepare(session: session, selection: []) }
     }
 
     private func startCleanup() {

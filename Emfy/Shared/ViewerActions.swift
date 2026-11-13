@@ -95,6 +95,9 @@ struct ViewerActions {
     // unless the document is in edit mode; they scope to the current selection.
     var editWithAI: (() -> Void)? = nil
     var recolour: (() -> Void)? = nil
+    // Editing (X2c): AI translate-in-place. `nil` unless editing and an AI engine is
+    // available; scopes to the selected text runs, else all text.
+    var translateDrawing: (() -> Void)? = nil
 
     // Editing (E3e): View ▸ grid + snapping. The toggles are `nil` unless editing; the
     // flags drive the menu checkmarks and the "Show/Hide Grid" label.
