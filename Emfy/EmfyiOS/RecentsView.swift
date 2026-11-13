@@ -324,11 +324,14 @@ struct RecentsGrid: View {
                     showConvert = true
                 } label: {
                     // Show the word, not just a glyph: the bare circular-arrows icon read
-                    // as "refresh". A swap glyph + the visible "Convert…" title (HIG:
-                    // prefer a text label for a destructive-sounding or ambiguous action).
-                    Label("Convert…", systemImage: "arrow.left.arrow.right")
+                    // as "refresh". An explicit icon+title HStack (a bottom-bar `Label`
+                    // collapses to icon-only even with `.titleAndIcon`) with a swap glyph
+                    // and the visible "Convert…" title (HIG: label an ambiguous action).
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.left.arrow.right")
+                        Text("Convert…")
+                    }
                 }
-                .labelStyle(.titleAndIcon)
                 .accessibilityLabel("Convert…")
                 .disabled(selectedIDs.isEmpty)
                 Spacer()
