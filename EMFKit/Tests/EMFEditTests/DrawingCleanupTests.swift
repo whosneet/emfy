@@ -146,6 +146,32 @@ private enum EMFFixture {
         #expect(guardResult.equivalent)
     }
 
+    // MARK: - Pruner bounds safety (§8)
+
+    @Test
+    func prunerThrowsOnRecordPastEndOfData() throws {
+        let data = EMFFixture.build()
+        let file = try EMFFile.parse(data)
+        // Truncate the data so the (kept) EOF record's range now runs past the end.
+        let truncated = Data(data.prefix(data.count - 4))
+        // Drop an early redundant record so the rewrite proceeds into the copy loop.
+        #expect(throws: EMFRecordPruner.PruneError.recordOutOfBounds) {
+            _ = try EMFRecordPruner.rewrite(data: truncated, file: file, dropping: [6])
+        }
+    }
+
+    @Test
+    func patchedHeaderMatchesTheWalkersAccounting() throws {
+        let data = EMFFixture.build()
+        let report = DrawingCleanup(data: data)
+        let optimised = try #require(report.optimisedCopy(of: data))
+        let reparsed = try EMFFile.parse(optimised)
+        // The patched EMR_HEADER nBytes/nRecords equal the walker's own accounting.
+        #expect(Int(reparsed.header.bytes) == optimised.count)
+        #expect(reparsed.header.bytes == UInt32(reparsed.bytesWalked))
+        #expect(Int(reparsed.header.records) == reparsed.records.count)
+    }
+
     // MARK: - Pruner keeps structural records
 
     @Test

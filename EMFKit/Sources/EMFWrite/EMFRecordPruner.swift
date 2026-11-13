@@ -45,9 +45,12 @@ public enum EMFRecordPruner {
         var keptCount = 0
         let base = data.startIndex
         for (index, record) in records.enumerated() where !effectiveDrop.contains(index) {
-            let start = base + record.offset
-            let end = start + Int(record.size)
-            guard record.offset >= 0, end <= data.endIndex, start <= end else {
+            // §8: no unchecked arithmetic on the parse path — a hostile offset/size must
+            // fail as a typed error, never trap. Every add is overflow-checked.
+            let (start, startOverflow) = base.addingReportingOverflow(record.offset)
+            let (end, endOverflow) = start.addingReportingOverflow(Int(record.size))
+            guard !startOverflow, !endOverflow,
+                  record.offset >= 0, start >= base, end <= data.endIndex, start <= end else {
                 throw PruneError.recordOutOfBounds
             }
             output.append(data[start ..< end])
