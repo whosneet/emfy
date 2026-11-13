@@ -32,9 +32,21 @@ enum DrawingAIEditContext {
         if !selectedIDs.isEmpty {
             lines.append("Edit ONLY these selected elements:")
         }
+
+        // Role hints for the text runs (heading / body / small) and the likely title, so
+        // "the headings", "the body text" and "the title" each map to concrete ids.
+        let textRuns = editable.prefix(maxElements).compactMap { element -> TextRoleClassifier.Run? in
+            guard element.kind == .text, let text = element.text else { return nil }
+            return TextRoleClassifier.Run(id: element.id, pointSize: Double(pointSize(of: text, in: scene)),
+                                          top: element.boundsDevice.isNull ? 0 : Double(element.boundsDevice.minY))
+        }
+        let roles = TextRoleClassifier.classify(textRuns)
+        let titleID = TextRoleClassifier.titleID(textRuns)
+
+        lines.append("Each element is TEXT or SHAPE. TEXT colour lives in its fill, so recolour text with recolorFill.")
         lines.append("Editable elements (\(editable.count)):")
         for element in editable.prefix(maxElements) {
-            lines.append(describe(element, in: scene))
+            lines.append(describe(element, in: scene, role: roles[element.id], isTitle: element.id == titleID))
         }
         if editable.count > maxElements {
             lines.append("… and \(editable.count - maxElements) more elements (ask to narrow the edit).")
@@ -42,14 +54,20 @@ enum DrawingAIEditContext {
         return lines.joined(separator: "\n")
     }
 
-    private static func describe(_ element: Element, in scene: Scene) -> String {
-        var parts: [String] = ["#\(element.id) \(kindName(element.kind))"]
+    private static func describe(_ element: Element, in scene: Scene, role: TextRole?, isTitle: Bool) -> String {
+        let kind = element.kind == .text ? "TEXT" : "SHAPE"
+        var parts: [String] = ["#\(element.id) \(kind)(\(kindName(element.kind)))"]
         let b = element.boundsDevice
         if !b.isNull {
             parts.append("bounds=(\(Int(b.minX.rounded())),\(Int(b.minY.rounded())),\(Int(b.width.rounded())),\(Int(b.height.rounded())))")
         }
         if element.kind == .text, let text = element.text {
-            parts.append("textColor=\(PlanColor(text.color).hex)")
+            if let role {
+                var tag = role.rawValue
+                if isTitle { tag = "title" }
+                parts.append("role=\(tag)")
+            }
+            parts.append("textColor=\(colorToken(text.color))")
             parts.append("font=\"\(DrawingAIContext.sanitizeLine(text.fontFamily))\"")
             parts.append("size=\(pointSize(of: text, in: scene))pt")
             if text.bold { parts.append("bold") }
@@ -57,10 +75,16 @@ enum DrawingAIEditContext {
             let excerpt = String(DrawingAIContext.sanitizeLine(text.string).prefix(maxTextPerElement))
             parts.append("text=\"\(excerpt)\"")
         } else {
-            if let fill = element.style.fill { parts.append("fill=\(PlanColor(fill.color).hex)\(fill.gradient != nil ? "(gradient)" : "")") }
-            if let stroke = element.style.stroke { parts.append("stroke=\(PlanColor(stroke.color).hex)") }
+            if let fill = element.style.fill { parts.append("fill=\(colorToken(fill.color))\(fill.gradient != nil ? "(gradient)" : "")") }
+            if let stroke = element.style.stroke { parts.append("stroke=\(colorToken(stroke.color))") }
         }
         return "- " + parts.joined(separator: " ")
+    }
+
+    /// A colour as `#RRGGBB(name)`, e.g. `#7F8C8D(grey)`, so the model can match a colour
+    /// word in the request to an element without reasoning about hex.
+    private static func colorToken(_ color: SceneColor) -> String {
+        "\(PlanColor(color).hex)(\(DrawingColorNames.name(for: color)))"
     }
 
     /// The approximate print point size of a GDI run for grounding (the inverse of
@@ -114,6 +138,14 @@ extension DrawingAIPrompt {
     Use only the element ids listed in the drawing data. dx/dy are device units; points are \
     typographic points; a factor of 1 means no change. Emit an empty operations array if \
     the request cannot be expressed with these operations.
+
+    Targeting: each element is tagged TEXT or SHAPE, and each text run has a role \
+    (title / heading / body / small). Map the request to the matching ids — "the headings" \
+    means every role=heading text run, "the title" the role=title run, "the body text" the \
+    role=body runs. To recolour TEXT, use recolorFill (a text run's colour is its fill). \
+    Only touch the ids the request names; leave the others unchanged.
+
+    \(DrawingColorNames.promptGuidance())
 
     The reply MUST be strict, valid JSON: EVERY key and EVERY string value is wrapped in \
     double quotes (write "color":"#1F3A93", never color":"#1F3A93"); colours are "#RRGGBB" \
