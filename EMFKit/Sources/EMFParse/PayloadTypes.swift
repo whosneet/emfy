@@ -387,6 +387,11 @@ public struct ExtTextOutOptions: Sendable, Equatable {
     public var glyphIndex: Bool { rawValue & 0x0010 != 0 }
     /// ETO_RTLREADING (0x0080): lay characters out right-to-left.
     public var rtlReading: Bool { rawValue & 0x0080 != 0 }
+    /// ETO_NO_RECT (0x0100): EMR_SMALLTEXTOUT omits its Bounds rectangle.
+    public var noRect: Bool { rawValue & 0x0100 != 0 }
+    /// ETO_SMALL_CHARS (0x0200): EMR_SMALLTEXTOUT characters are 8-bit ANSI
+    /// (otherwise 16-bit UTF-16).
+    public var smallChars: Bool { rawValue & 0x0200 != 0 }
     /// ETO_PDY (0x2000): the Dx array carries two values (dx, dy) per
     /// character rather than one.
     public var pdy: Bool { rawValue & 0x2000 != 0 }

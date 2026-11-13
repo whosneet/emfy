@@ -495,7 +495,7 @@ public enum MetafileRenderer {
              .polyBezier16, .polygon16, .polyline16, .polyBezierTo16, .polylineTo16,
              .polyPolyline16, .polyPolygon16, .pie, .chord, .setPixel, .patBlt,
              .fillPath, .strokeAndFillPath, .strokePath,
-             .extTextOutA, .extTextOutW, .stretchDIBits, .bitBlt, .stretchBlt, .setDIBitsToDevice:
+             .extTextOutA, .extTextOutW, .smallTextOut, .stretchDIBits, .bitBlt, .stretchBlt, .setDIBitsToDevice:
             return .drawing
         case .unimplemented, .malformed:
             return .unknown

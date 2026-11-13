@@ -270,6 +270,7 @@ extension EMFFile {
         case 90: return decodePolyPoly16(type: type, slice: slice, make: EMFRecordPayload.polyPolyline16)
         case 91: return decodePolyPoly16(type: type, slice: slice, make: EMFRecordPayload.polyPolygon16)
         case 95: return decodeExtCreatePen(slice: slice)
+        case 108: return decodeSmallTextOut(slice: slice)
         default: return .unimplemented(type: type)
         }
     }
@@ -848,6 +849,79 @@ extension EMFFile {
             dx: dx
         )
         return ansi ? .extTextOutA(payload) : .extTextOutW(payload)
+    }
+
+    /// EMR_SMALLTEXTOUT §2.3.5.38: a compact text record (no Dx). Fixed fields
+    /// at RECORD offsets: x i32 at 8, y i32 at 12, cChars u32 at 16, fuOptions
+    /// u32 at 20, iGraphicsMode u32 at 24, exScale f32 at 28, eyScale f32 at 32.
+    /// A 16-byte Bounds RectL follows at 36 UNLESS ETO_NO_RECT is set; the
+    /// TextString then starts at 52 (with rect) or 36 (no rect). ETO_SMALL_CHARS
+    /// selects 8-bit ANSI characters (cChars bytes) over 16-bit (cChars×2 bytes).
+    /// Every offset/length is validated against nSize before allocation (§8).
+    private static func decodeSmallTextOut(slice: RecordSlice) -> EMFRecordPayload {
+        let type: UInt32 = 108
+        guard let x = slice.i32(8), let y = slice.i32(12),
+              let rawChars = slice.u32(16), let rawOptions = slice.u32(20),
+              let graphicsMode = slice.u32(24),
+              let exScale = slice.f32(28), let eyScale = slice.f32(32)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 36, actualSize: slice.size))
+        }
+        guard exScale.isFinite, eyScale.isFinite else {
+            return .malformed(type: type, reason: .nonFiniteTransform)
+        }
+
+        let options = ExtTextOutOptions(rawValue: rawOptions)
+        let chars = Int(rawChars)
+        guard chars >= 0 else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 36, actualSize: slice.size))
+        }
+
+        // Bounds present only when ETO_NO_RECT is clear; the string follows it.
+        var rectangle = RectL(left: 0, top: 0, right: 0, bottom: 0)
+        var stringOffset = 36
+        if !options.noRect {
+            guard let bounds = slice.rectL(36) else {
+                return .malformed(type: type, reason: .tooSmall(minimumSize: 52, actualSize: slice.size))
+            }
+            rectangle = bounds
+            stringOffset = 52
+        }
+
+        // String: cChars 8-bit bytes (ETO_SMALL_CHARS) or cChars UTF-16 units.
+        let stringByteLength = options.smallChars ? chars : chars * 2
+        guard stringByteLength <= slice.size - stringOffset else {
+            return .malformed(type: type, reason: .rangeOutOfBounds(
+                offset: stringOffset, length: stringByteLength, recordSize: slice.size
+            ))
+        }
+        let string: String
+        if options.smallChars {
+            guard let bytes = slice.bytes(at: stringOffset, length: chars) else {
+                return .malformed(type: type, reason: .rangeOutOfBounds(
+                    offset: stringOffset, length: stringByteLength, recordSize: slice.size
+                ))
+            }
+            string = decodeANSI(bytes)
+        } else {
+            guard let decoded = slice.utf16String(at: stringOffset, codeUnits: chars, stopAtNUL: false) else {
+                return .malformed(type: type, reason: .rangeOutOfBounds(
+                    offset: stringOffset, length: stringByteLength, recordSize: slice.size
+                ))
+            }
+            string = decoded
+        }
+
+        return .smallTextOut(ExtTextPayload(
+            graphicsMode: graphicsMode,
+            exScale: exScale,
+            eyScale: eyScale,
+            reference: PointL(x: x, y: y),
+            rectangle: rectangle,
+            string: string,
+            options: options,
+            dx: nil
+        ))
     }
 
     /// Decodes an EMR_EXTTEXTOUTA string's 8-bit bytes to Unicode. EMF ANSI text

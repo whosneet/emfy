@@ -154,6 +154,11 @@ public enum EMFRecordEncoder {
             // re-emits the original record bytes instead (isFaithfullyEncodable
             // is false below). A lifted A record is re-synthesised as EXTTEXTOUTW.
             throw .unsupportedPayload(label: "extTextOutA (ANSI — re-emit original bytes)")
+        case .smallTextOut:
+            // Likewise: the compact layout (optional Bounds, ANSI/UTF-16 string,
+            // no Dx) is re-emitted from original bytes; a lifted record becomes
+            // EXTTEXTOUTW.
+            throw .unsupportedPayload(label: "smallTextOut (compact — re-emit original bytes)")
         case .extTextOutW(let p):
             return try extTextOutWRecord(p)                         // §2.3.5.8
 
@@ -201,7 +206,7 @@ public enum EMFRecordEncoder {
     /// form). The document writer re-emits those from their original bytes.
     public static func isFaithfullyEncodable(_ payload: EMFRecordPayload) -> Bool {
         switch payload {
-        case .unimplemented, .malformed, .patBlt, .extTextOutA:
+        case .unimplemented, .malformed, .patBlt, .extTextOutA, .smallTextOut:
             return false
         case .extCreateFontIndirectW(let p):
             return !p.hasExtendedData

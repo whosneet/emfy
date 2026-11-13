@@ -577,6 +577,43 @@ struct RenderFixture {
         append(type: 83, payload: body.bytes)
     }
 
+    /// EMR_SMALLTEXTOUT §2.3.5.38 — compact text, no Dx. `options` carries
+    /// ETO_NO_RECT (0x0100) and ETO_SMALL_CHARS (0x0200); when NO_RECT is clear a
+    /// Bounds RectL is written at offset 36. `smallChars` picks the 8-bit ANSI
+    /// string (`ansiBytes`) over the 16-bit `string`.
+    mutating func smallTextOut(
+        x: Int32, y: Int32,
+        options: UInt32,
+        rectangle: (l: Int32, t: Int32, r: Int32, b: Int32) = (0, 0, 0, 0),
+        string: String = "",
+        ansiBytes: [UInt8] = []
+    ) {
+        let smallChars = options & 0x0200 != 0
+        let noRect = options & 0x0100 != 0
+        let units = Array(string.utf16)
+        let charCount = smallChars ? ansiBytes.count : units.count
+
+        var body = LE()                                  // record offset 8
+        body.i32(x); body.i32(y)                         // x@8, y@12
+        body.u32(UInt32(charCount))                      // cChars@16
+        body.u32(options)                                // fuOptions@20
+        body.u32(1)                                      // iGraphicsMode@24
+        body.f32(1); body.f32(1)                         // exScale@28, eyScale@32
+        if !noRect {
+            body.i32(rectangle.l); body.i32(rectangle.t) // Bounds@36
+            body.i32(rectangle.r); body.i32(rectangle.b)
+        }
+        if smallChars {
+            body.raw(ansiBytes)
+        } else {
+            for unit in units { body.u16(unit) }
+        }
+        let recordSize = 8 + body.bytes.count
+        let alignPad = (4 - recordSize % 4) % 4
+        if alignPad > 0 { body.raw([UInt8](repeating: 0, count: alignPad)) }
+        append(type: 108, payload: body.bytes)
+    }
+
     // MARK: - Phase-4 bitmap records
 
     /// A 40-byte BitmapInfoHeader ([MS-WMF] §2.2.2.3). `height` signed.

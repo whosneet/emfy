@@ -641,6 +641,11 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case extTextOutA(ExtTextPayload)
     /// EMR_EXTTEXTOUTW (84), §2.3.5.8.
     case extTextOutW(ExtTextPayload)
+    /// EMR_SMALLTEXTOUT (108), §2.3.5.38. A compact text record with no Dx
+    /// array; ETO_SMALL_CHARS selects 8-bit vs 16-bit characters and
+    /// ETO_NO_RECT omits the Bounds rectangle. Shares `ExtTextPayload` (dx nil)
+    /// and the renderer text path.
+    case smallTextOut(ExtTextPayload)
 
     // MARK: WMF-sourced primitives ([MS-WMF] §2.3.3, §2.3.5)
     //
