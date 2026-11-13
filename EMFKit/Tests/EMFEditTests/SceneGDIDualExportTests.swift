@@ -131,14 +131,17 @@ struct SceneGDIDualExportTests {
         case .fillGradient:
             featureBack = reimport.editableElements.contains { $0.style.fill?.gradient != nil }
         case .strokeAlpha:
-            featureBack = reimport.editableElements.contains { ($0.style.stroke?.color.alpha ?? 1) < 0.9 }
+            featureBack = reimport.editableElements.contains { $0.style.opacity * ($0.style.stroke?.color.alpha ?? 1) < 0.9 }
         case .opacity, .fillAlpha:
-            // Opacity folds into whichever paint the element carries (fill, stroke
-            // or text colour); an alpha fill lands on the fill colour.
+            // The alpha survives as the EFFECTIVE paint alpha — element opacity × the
+            // paint colour alpha, over fill, stroke or text. Import lifts EMF+ paint
+            // alpha into `style.opacity` and leaves the paint colour opaque (P1 polish),
+            // so a reopened opacity edit reads back as opacity, not a buried paint alpha.
             featureBack = reimport.editableElements.contains {
-                ($0.style.fill?.color.alpha ?? 1) < 0.9
-                    || ($0.style.stroke?.color.alpha ?? 1) < 0.9
-                    || ($0.text?.color.alpha ?? 1) < 0.9
+                let o = $0.style.opacity
+                return o * ($0.style.fill?.color.alpha ?? 1) < 0.9
+                    || o * ($0.style.stroke?.color.alpha ?? 1) < 0.9
+                    || o * ($0.text?.color.alpha ?? 1) < 0.9
             }
         }
         #expect(featureBack, "\(name) id=\(id) \(edit): re-import does not show the alpha/gradient")
@@ -210,7 +213,7 @@ struct SceneGDIDualExportTests {
         // Re-import keeps the new element and shows its alpha.
         let reimport = try SceneImporter.import(data: result.data)
         #expect(reimport.editableElements.count == base.editableElements.count + 1, "insert: element not added")
-        #expect(reimport.editableElements.contains { ($0.style.fill?.color.alpha ?? 1) < 0.9 }, "insert: alpha not present")
+        #expect(reimport.editableElements.contains { $0.style.opacity * ($0.style.fill?.color.alpha ?? 1) < 0.9 }, "insert: alpha not present")
 
         // EMF+ mode matches the edited scene; OUTSIDE the new rect, the page is the original.
         guard let emfPlusImg = render(result.data),

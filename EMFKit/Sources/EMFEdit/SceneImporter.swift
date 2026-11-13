@@ -273,11 +273,11 @@ public enum SceneImporter {
                 resolved.referenceLogical = resolved.referenceLogical.applying(inverse)
                 text = resolved
             }
-            return Element(
+            return liftingOpacity(Element(
                 id: 0, kind: .text, geometryDevice: geometry, transform: op.worldToDevice,
                 style: plusStyle(op), text: text,
                 clipDevice: clip, provenance: provenance
-            )
+            ))
         case .image:
             return Element(
                 id: 0, kind: .image, geometryDevice: geometry, transform: op.worldToDevice,
@@ -291,11 +291,45 @@ public enum SceneImporter {
                 passthroughReason: plusPassthroughReason(op)
             )
         default:
-            return Element(
+            return liftingOpacity(Element(
                 id: 0, kind: plusElementKind(op.kind), geometryDevice: geometry, transform: op.worldToDevice,
                 style: plusStyle(op), clipDevice: clip, provenance: provenance
-            )
+            ))
         }
+    }
+
+    /// Normalises EMF+ paint alpha into a single element opacity (slice P1 polish).
+    /// EMF+ carries alpha per brush/pen/text ARGB, but the editor models ONE element
+    /// opacity (the inspector's Opacity row, `style.opacity`) over opaque paint — the
+    /// same form a ColorPicker alpha edit stores (design call 2). Leaving the alpha in
+    /// the paint made the inspector read 100% after a save → reopen. The opacity taken
+    /// is the most-opaque paint alpha present (so every residual alpha stays ≤ 1), and
+    /// each paint alpha is divided back out, so re-emitting paint × opacity on export
+    /// reproduces the source ARGB exactly — never doubling it at render or export.
+    private static func liftingOpacity(_ element: Element) -> Element {
+        var alphas: [Double] = []
+        if let fill = element.style.fill {
+            alphas.append(fill.color.alpha)
+            alphas.append(contentsOf: fill.gradient?.stops.map(\.color.alpha) ?? [])
+        }
+        if let stroke = element.style.stroke { alphas.append(stroke.color.alpha) }
+        if let text = element.text { alphas.append(text.color.alpha) }
+        let opacity = alphas.max() ?? 1
+        guard opacity > 0, opacity < 1 else { return element }
+        func reduced(_ a: Double) -> Double { min(1, a / opacity) }
+        var copy = element
+        copy.style.opacity = opacity
+        if var fill = copy.style.fill {
+            fill.color.alpha = reduced(fill.color.alpha)
+            if var gradient = fill.gradient {
+                gradient.stops = gradient.stops.map { var s = $0; s.color.alpha = reduced(s.color.alpha); return s }
+                fill.gradient = gradient
+            }
+            copy.style.fill = fill
+        }
+        if var stroke = copy.style.stroke { stroke.color.alpha = reduced(stroke.color.alpha); copy.style.stroke = stroke }
+        if var text = copy.text { text.color.alpha = reduced(text.color.alpha); copy.text = text }
+        return copy
     }
 
     /// The inverse of `t` when it is invertible (non-degenerate determinant),

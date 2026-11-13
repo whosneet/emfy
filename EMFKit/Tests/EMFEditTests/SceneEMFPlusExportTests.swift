@@ -232,7 +232,10 @@ struct SceneEMFPlusExportTests {
                 #expect(reimport.editableElements.contains { colorClose($0.style.fill?.color, opaque) }, "\(name): fill colour not applied")
             }
         case .fillAlpha:
-            #expect(reimport.editableElements.contains { ($0.style.fill?.color.alpha ?? 1) < 0.9 }, "\(name): alpha fill not applied")
+            // The alpha survives as the EFFECTIVE paint alpha (element opacity × fill
+            // colour alpha): import lifts EMF+ paint alpha into `style.opacity` and
+            // leaves the fill colour opaque (P1 polish), so check the product.
+            #expect(reimport.editableElements.contains { $0.style.opacity * ($0.style.fill?.color.alpha ?? 1) < 0.9 }, "\(name): alpha fill not applied")
         case .fillGradient:
             #expect(reimport.editableElements.contains { $0.style.fill?.gradient != nil }, "\(name): gradient fill not applied")
         case .stroke:
