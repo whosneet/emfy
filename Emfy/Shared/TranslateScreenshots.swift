@@ -110,7 +110,10 @@ enum TranslateScreenshots {
             try? "FAIL: fixture".write(toFile: base + "-live-log.txt", atomically: true, encoding: .utf8)
             return
         }
-        var log = "Live on-device translate — EN→French, 3-run fixture\n"
+        // The target language is overridable for an RTL (Arabic) render check.
+        let langCode = ProcessInfo.processInfo.environment["EMFY_TRANSLATE_LANG"] ?? "fr"
+        let langName = TranslationLanguages.all.first { $0.code == langCode }?.englishName ?? "French"
+        var log = "Live on-device translate — EN→\(langName), 3-run fixture\n"
         var successes = 0
         var lastModel: DrawingAITranslateModel?
         for attempt in 1 ... 3 {
@@ -118,7 +121,7 @@ enum TranslateScreenshots {
             let model = DrawingAITranslateModel()
             model.engineOverride = .onDevice   // real model (producer stays nil)
             await model.prepare(session: session, selection: [])
-            model.targetLanguage = TranslationLanguages.all.first { $0.code == "fr" } ?? model.targetLanguage
+            model.targetLanguage = TranslationLanguages.all.first { $0.code == langCode } ?? model.targetLanguage
             model.submit()
             await wait(timeout: .seconds(120)) {
                 switch model.phase { case .preview, .failed, .applied: return true; default: return false }
