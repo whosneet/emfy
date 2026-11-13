@@ -444,6 +444,7 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "iphone-full" { await runIPhoneFullScript(); return }
         if EditorDebugLaunch.findQuery != nil { await runFindScript(); return }
         if EditorDebugLaunch.recordsInspector { await runRecordsScript(); return }
+        if EditorDebugLaunch.script == "check" { await runCheckScript(); return }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -585,6 +586,19 @@ struct MetafileViewerScreen: View {
             try? await Task.sleep(for: .milliseconds(100))
         }
         Self.logScript("ios records: count=\(recordModel.recordCount) index=\(recordModel.selectedIndex) supportsPartial=\(recordModel.supportsPartial) image=\(replayDriver.image != nil)")
+    }
+
+    /// Opens the inspector on the Check segment, waits for the analysis, selects the first
+    /// finding (so it is outlined on the canvas), and stays on screen so `simctl io
+    /// screenshot` captures the iPad Check segment (X1a screenshot d).
+    @MainActor
+    private func runCheckScript() async {
+        showInspector = true
+        viewerInspectorTab = .check
+        configureCheckIfNeeded()
+        for _ in 0..<80 where checkModel.analysis == nil { try? await Task.sleep(for: .milliseconds(100)) }
+        if let first = checkModel.findings.first { checkModel.select(findingID: first.id) }
+        Self.logScript("ios check: findings=\(checkModel.findings.count) selected=\(checkModel.selectedFindingID ?? -1)")
     }
 
     @MainActor

@@ -153,6 +153,9 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
         DrawingAIEvalSuite.runIfNeeded()
         DrawingAIDebugProbe.runIfNeeded()
         DrawingAIScreenshots.runIfNeeded()
+        #if os(macOS)
+        CheckScreenshots.runIfNeeded()
+        #endif
         AIProviderScreenshots.runIfNeeded()
         AIShareScreenshots.runIfNeeded()
         #endif
