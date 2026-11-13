@@ -148,29 +148,39 @@ public enum TextRoleClassifier {
         }
     }
 
-    /// Classifies each run as heading / body / small from the SIZE distribution. With no
-    /// size variation every run is `body`. A run in the largest size tier is a `heading`;
-    /// one clearly smaller than the body (≤ 70% of the median body size) is `small`.
+    /// Classifies each run from its size TIER. Near-equal sizes (within 10%) form one tier;
+    /// with no size variation every run is `body`. The largest tier is `heading`; when there
+    /// are three or more tiers the smallest is `small`; everything else is `body`. Tiers
+    /// (not an absolute threshold) keep two equal headings BOTH `heading` rather than
+    /// splitting one off as a title.
     public static func classify(_ runs: [Run]) -> [Int: TextRole] {
         guard runs.count > 1 else {
             // A single run is "body" — there is nothing to contrast it against.
             return runs.reduce(into: [:]) { $0[$1.id] = .body }
         }
-        let sizes = runs.map(\.pointSize).sorted()
-        let maxSize = sizes.last ?? 0
-        let minSize = sizes.first ?? 0
+        let sizes = runs.map(\.pointSize)
+        let maxSize = sizes.max() ?? 0
+        let minSize = sizes.min() ?? 0
         guard maxSize - minSize > 0.5 else {
             return runs.reduce(into: [:]) { $0[$1.id] = .body }
         }
-        // The "body" reference is the median size of the runs that are NOT in the top tier.
-        let headingThreshold = maxSize * 0.9
-        let nonHeading = sizes.filter { $0 < headingThreshold }
-        let bodyReference = median(nonHeading.isEmpty ? sizes : nonHeading)
+        // Representative (largest) size of each tier, descending, merging sizes within 10%.
+        var tiers: [Double] = []
+        for size in Set(sizes).sorted(by: >) {
+            if let last = tiers.last, last - size <= last * 0.10 { continue }
+            tiers.append(size)
+        }
+        func tier(of size: Double) -> Int {
+            for (index, rep) in tiers.enumerated() where size >= rep - rep * 0.10 - 1e-9 { return index }
+            return tiers.count - 1
+        }
+        let tierCount = tiers.count
         var out: [Int: TextRole] = [:]
         for run in runs {
-            if run.pointSize >= headingThreshold {
+            let t = tier(of: run.pointSize)
+            if t == 0 {
                 out[run.id] = .heading
-            } else if run.pointSize <= bodyReference * 0.7 {
+            } else if tierCount >= 3 && t == tierCount - 1 {
                 out[run.id] = .small
             } else {
                 out[run.id] = .body
@@ -180,7 +190,8 @@ public enum TextRoleClassifier {
     }
 
     /// The id of the single most title-like run: the largest, ties broken by the topmost
-    /// position. `nil` for an empty list. Used to label a likely title in the context.
+    /// position. `nil` for an empty list. A likely-title label in the context uses this only
+    /// when the largest size is held by exactly one run (see `uniqueTitleID`).
     public static func titleID(_ runs: [Run]) -> Int? {
         runs.max { lhs, rhs in
             if lhs.pointSize != rhs.pointSize { return lhs.pointSize < rhs.pointSize }
@@ -188,10 +199,12 @@ public enum TextRoleClassifier {
         }?.id
     }
 
-    private static func median(_ values: [Double]) -> Double {
-        guard !values.isEmpty else { return 0 }
-        let sorted = values.sorted()
-        let mid = sorted.count / 2
-        return sorted.count % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+    /// The title id ONLY when the largest run is uniquely largest (no other run shares its
+    /// size). When several runs tie for largest they are peer headings, not a title, so this
+    /// returns `nil` and they all keep the `heading` role.
+    public static func uniqueTitleID(_ runs: [Run]) -> Int? {
+        guard let maxSize = runs.map(\.pointSize).max() else { return nil }
+        let atMax = runs.filter { abs($0.pointSize - maxSize) < 0.5 }
+        return atMax.count == 1 ? atMax.first?.id : nil
     }
 }

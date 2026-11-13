@@ -111,4 +111,31 @@ import Testing
         ]
         #expect(TextRoleClassifier.titleID(runs) == 2)
     }
+
+    @Test func twoEqualHeadingsAreBothHeadingsNoTitle() {
+        // Two equal large runs plus smaller body: both are headings, and there is NO unique
+        // title (so neither is split off as the title). This is the "make the headings dark
+        // blue" grounding that previously mislabelled one heading as a title.
+        let runs = [
+            TextRoleClassifier.Run(id: 0, pointSize: 20, top: 70),
+            TextRoleClassifier.Run(id: 1, pointSize: 20, top: 110),
+            TextRoleClassifier.Run(id: 2, pointSize: 11, top: 150),
+            TextRoleClassifier.Run(id: 3, pointSize: 11, top: 180),
+        ]
+        let roles = TextRoleClassifier.classify(runs)
+        #expect(roles[0] == .heading)
+        #expect(roles[1] == .heading)
+        #expect(roles[2] == .body)
+        #expect(roles[3] == .body)
+        #expect(TextRoleClassifier.uniqueTitleID(runs) == nil)
+    }
+
+    @Test func uniqueTitleIsDetectedWhenStrictlyLargest() {
+        let runs = [
+            TextRoleClassifier.Run(id: 7, pointSize: 28, top: 50),
+            TextRoleClassifier.Run(id: 8, pointSize: 12, top: 110),
+            TextRoleClassifier.Run(id: 9, pointSize: 12, top: 140),
+        ]
+        #expect(TextRoleClassifier.uniqueTitleID(runs) == 7)
+    }
 }

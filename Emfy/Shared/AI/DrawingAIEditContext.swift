@@ -41,7 +41,7 @@ enum DrawingAIEditContext {
                                           top: element.boundsDevice.isNull ? 0 : Double(element.boundsDevice.minY))
         }
         let roles = TextRoleClassifier.classify(textRuns)
-        let titleID = TextRoleClassifier.titleID(textRuns)
+        let titleID = TextRoleClassifier.uniqueTitleID(textRuns)
 
         lines.append("Each element is TEXT or SHAPE. TEXT colour lives in its fill, so recolour text with recolorFill.")
         lines.append("Editable elements (\(editable.count)):")
@@ -142,15 +142,37 @@ extension DrawingAIPrompt {
     Targeting: each element is tagged TEXT or SHAPE, and each text run has a role \
     (title / heading / body / small). Map the request to the matching ids — "the headings" \
     means every role=heading text run, "the title" the role=title run, "the body text" the \
-    role=body runs. To recolour TEXT, use recolorFill (a text run's colour is its fill). \
-    Only touch the ids the request names; leave the others unchanged.
+    role=body runs, "all text" or "the text" means every TEXT element. To recolour TEXT, use \
+    recolorFill (a text run's colour is its fill). Only touch the ids the request names; \
+    leave the others unchanged.
+
+    Coverage: apply the change to EVERY matching element, never just the first. The ops with \
+    an "ids" array (recolorFill, recolorStroke, move, scale, setLineWidth, align, distribute, \
+    delete) must list ALL matching ids together in that one op — e.g. two headings go in one \
+    recolorFill with "ids":[a,b]. The per-element ops (setText, setFontSize, setFontFamily) \
+    take a single "id", so emit ONE such op for EACH matching element — e.g. "make all text \
+    bigger" with four text runs needs four setFontSize ops, one per id.
+
+    Change ONLY the attribute the request names, and nothing else: a colour request uses only \
+    recolorFill/recolorStroke; a size request uses only setFontSize or scale; never rewrite a \
+    run's words (setText) unless the request asks to change the text itself.
+
+    Making text bigger/smaller: to enlarge SEVERAL runs at once ("make all the text bigger"), \
+    prefer a single scale op over all their ids with factor > 1 (e.g. 1.3) — it grows each run \
+    proportionally and never shrinks a larger one. If you instead use setFontSize, each run's \
+    new points MUST be larger than that run's current size shown in the data (never one flat \
+    size for all, which would shrink the bigger runs).
 
     \(DrawingColorNames.promptGuidance())
 
     The reply MUST be strict, valid JSON: EVERY key and EVERY string value is wrapped in \
-    double quotes (write "color":"#1F3A93", never color":"#1F3A93"); colours are "#RRGGBB" \
-    strings. A complete, correctly-formed example:
-    {"operations":[{"op":"recolorFill","ids":[3,4],"color":"#1F3A93"},{"op":"setFontSize","id":3,"points":22}]}
+    double quotes (write "color":"#1F3A93", never color":"#1F3A93" or color:"#1F3A93"); \
+    colours are "#RRGGBB" strings. A colour-only request is only recolorFill ops — do not add \
+    a size or text change the user did not ask for. Two complete, correctly-formed examples:
+    - "make the headings dark blue" over heading runs #3 and #4 (one recolorFill lists BOTH \
+    ids): {"operations":[{"op":"recolorFill","ids":[3,4],"color":"#1F3A93"}]}
+    - "make all the text bigger" over text runs #3, #4, #5 at 12pt (setFontSize uses "id", one \
+    op per run): {"operations":[{"op":"setFontSize","id":3,"points":18},{"op":"setFontSize","id":4,"points":18},{"op":"setFontSize","id":5,"points":18}]}
     """
 
     /// The system instructions for an AI edit: the role, the strict output contract and
