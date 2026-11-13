@@ -197,6 +197,10 @@ final class DrawingCheckModel {
     /// The open drawing's bytes, for the clean-up & compatibility report.
     func cleanupData() async -> Data? { await dataProvider?() }
 
+    /// The document session backing this check, so the inspector can offer "Edit with AI…"
+    /// and "Recolour…" against the same open drawing (X2a). `nil` before `configure`.
+    var editSession: DocumentSession? { session }
+
     /// A suggested base file name for a saved copy.
     var documentFileName: String { session?.currentDocumentFileName() ?? "Drawing.emf" }
 

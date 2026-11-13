@@ -7,6 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C2E00000000000000000D07 /* DrawingAIEditModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F07 /* DrawingAIEditModelTests.swift */; };
+		C2E00000000000000000D08 /* DrawingRecolourModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F08 /* DrawingRecolourModelTests.swift */; };
+		C2E00000000000000000A01 /* DrawingAIEditContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F01 /* DrawingAIEditContext.swift */; };
+		C2E00000000000000000B01 /* DrawingAIEditContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F01 /* DrawingAIEditContext.swift */; };
+		C2E00000000000000000A02 /* DrawingAIEditModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F02 /* DrawingAIEditModel.swift */; };
+		C2E00000000000000000B02 /* DrawingAIEditModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F02 /* DrawingAIEditModel.swift */; };
+		C2E00000000000000000A03 /* DrawingAIEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F03 /* DrawingAIEditView.swift */; };
+		C2E00000000000000000A04 /* DrawingRecolourModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F04 /* DrawingRecolourModel.swift */; };
+		C2E00000000000000000B04 /* DrawingRecolourModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F04 /* DrawingRecolourModel.swift */; };
+		C2E00000000000000000A05 /* DrawingRecolourView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F05 /* DrawingRecolourView.swift */; };
+		C2E00000000000000000A06 /* AIEditScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F06 /* AIEditScreenshots.swift */; };
 		A1A0000000000000FACE0004 /* DrawingAIScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000FACE0003 /* DrawingAIScreenshots.swift */; };
 		A1A0000000000000RECP000A /* DrawingRecordPurpose.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */; };
 		A1A0000000000000RECP000T /* DrawingRecordPurpose.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */; };
@@ -483,6 +494,14 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C2E00000000000000000F07 /* DrawingAIEditModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIEditModelTests.swift; sourceTree = "<group>"; };
+		C2E00000000000000000F08 /* DrawingRecolourModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingRecolourModelTests.swift; sourceTree = "<group>"; };
+		C2E00000000000000000F01 /* DrawingAIEditContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAIEditContext.swift; path = "Shared/AI/DrawingAIEditContext.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F02 /* DrawingAIEditModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAIEditModel.swift; path = "Shared/AI/DrawingAIEditModel.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F03 /* DrawingAIEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAIEditView.swift; path = "Shared/AI/DrawingAIEditView.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F04 /* DrawingRecolourModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingRecolourModel.swift; path = "Shared/DrawingRecolourModel.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F05 /* DrawingRecolourView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingRecolourView.swift; path = "Shared/DrawingRecolourView.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F06 /* AIEditScreenshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AIEditScreenshots.swift; path = "Shared/AIEditScreenshots.swift"; sourceTree = SOURCE_ROOT; };
 		A1A0000000000000FACE0003 /* DrawingAIScreenshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIScreenshots.swift"; sourceTree = "<group>"; };
 		A1A0000000000000FACE0001 /* DrawingAIDebugProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIDebugProbe.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000101 /* DrawingAIAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIAvailability.swift"; sourceTree = "<group>"; };
@@ -861,6 +880,12 @@
 				B001000000000000000000E0 /* ExportTaskRunner.swift */,
 				B001000000000000000000E1 /* ExportTemp.swift */,
 				B00100000000000000000110 /* DocumentSession.swift */,
+				C2E00000000000000000F01 /* DrawingAIEditContext.swift */,
+				C2E00000000000000000F02 /* DrawingAIEditModel.swift */,
+				C2E00000000000000000F03 /* DrawingAIEditView.swift */,
+				C2E00000000000000000F04 /* DrawingRecolourModel.swift */,
+				C2E00000000000000000F05 /* DrawingRecolourView.swift */,
+				C2E00000000000000000F06 /* AIEditScreenshots.swift */,
 				C1D0000000000000000000A1 /* DrawingCheckModel.swift */,
 				C1D0000000000000000000A2 /* DrawingCheckView.swift */,
 				C1D0000000000000000000A4 /* CheckScreenshots.swift */,
@@ -1067,6 +1092,8 @@
 				F4A000000000000000000022 /* ConvertServiceTests.swift */,
 				A1A00000000000000000011B /* DrawingAIAvailabilityTests.swift */,
 				C1D0000000000000000000D0 /* DrawingCheckTests.swift */,
+				C2E00000000000000000F07 /* DrawingAIEditModelTests.swift */,
+				C2E00000000000000000F08 /* DrawingRecolourModelTests.swift */,
 				C1B0000000000000000000D0 /* DrawingAIOutputSanitiserTests.swift */,
 				C1B0000000000000000000D4 /* DrawingCleanupModelTests.swift */,
 				A1A00000000000000000011D /* DrawingAIContextTests.swift */,
@@ -1462,6 +1489,12 @@
 				A1A000000000000000000114 /* DrawingDescribeModel.swift in Sources */,
 				A1A000000000000000000116 /* DrawingAskModel.swift in Sources */,
 				C1D0000000000000000000B1 /* DrawingCheckModel.swift in Sources */,
+				C2E00000000000000000A01 /* DrawingAIEditContext.swift in Sources */,
+				C2E00000000000000000A02 /* DrawingAIEditModel.swift in Sources */,
+				C2E00000000000000000A03 /* DrawingAIEditView.swift in Sources */,
+				C2E00000000000000000A04 /* DrawingRecolourModel.swift in Sources */,
+				C2E00000000000000000A05 /* DrawingRecolourView.swift in Sources */,
+				C2E00000000000000000A06 /* AIEditScreenshots.swift in Sources */,
 				C1D0000000000000000000B2 /* DrawingCheckView.swift in Sources */,
 				C1D0000000000000000000B4 /* CheckScreenshots.swift in Sources */,
 				C1D0000000000000000000B3 /* DrawingSummariseModel.swift in Sources */,
@@ -1685,6 +1718,9 @@
 				A2A000000000000000000049 /* OpenAIProviderTests.swift in Sources */,
 				A1A0000000000000B1B00008T /* DrawingExplainModel.swift in Sources */,
 				C1D0000000000000000000C1 /* DrawingCheckModel.swift in Sources */,
+				C2E00000000000000000B01 /* DrawingAIEditContext.swift in Sources */,
+				C2E00000000000000000B02 /* DrawingAIEditModel.swift in Sources */,
+				C2E00000000000000000B04 /* DrawingRecolourModel.swift in Sources */,
 				C1D0000000000000000000C3 /* DrawingSummariseModel.swift in Sources */,
 				C1B0000000000000000000C0 /* DrawingAIOutputSanitiser.swift in Sources */,
 				A1A0000000000000RECP000T /* DrawingRecordPurpose.swift in Sources */,
@@ -1698,6 +1734,8 @@
 				A1A000000000000000000112 /* DrawingAIAltText.swift in Sources */,
 				A1A00000000000000000011C /* DrawingAIAvailabilityTests.swift in Sources */,
 				C1D0000000000000000000D1 /* DrawingCheckTests.swift in Sources */,
+				C2E00000000000000000D07 /* DrawingAIEditModelTests.swift in Sources */,
+				C2E00000000000000000D08 /* DrawingRecolourModelTests.swift in Sources */,
 				C1B0000000000000000000D1 /* DrawingAIOutputSanitiserTests.swift in Sources */,
 				C1B0000000000000000000C4 /* DrawingCleanupModel.swift in Sources */,
 				C1B0000000000000000000D5 /* DrawingCleanupModelTests.swift in Sources */,

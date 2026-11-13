@@ -26,6 +26,10 @@ struct DrawingCheckView: View {
     @State private var pickingBaselineFile = false
     @State private var cleanupModel = DrawingCleanupModel()
     @State private var showingCleanup = false
+    @State private var aiEditModel = DrawingAIEditModel()
+    @State private var showingAIEdit = false
+    @State private var recolourModel = DrawingRecolourModel()
+    @State private var showingRecolour = false
 
     var body: some View {
         @Bindable var model = model
@@ -60,6 +64,13 @@ struct DrawingCheckView: View {
         }
         .sheet(isPresented: $showingCleanup) {
             DrawingCleanupView(model: cleanupModel, fileName: model.documentFileName, onClose: { showingCleanup = false })
+        }
+        .sheet(isPresented: $showingAIEdit) {
+            DrawingAIEditView(model: aiEditModel, onClose: { showingAIEdit = false })
+                .environment(providerStore)
+        }
+        .sheet(isPresented: $showingRecolour) {
+            DrawingRecolourView(model: recolourModel, onClose: { showingRecolour = false })
         }
         .aiConsentSheet(
             provider: summariseModel.pendingConsent,
@@ -103,6 +114,16 @@ struct DrawingCheckView: View {
             if summariseModel.hasEngine, model.summaryData != nil {
                 summariseButton(compact: compact)
             }
+            if summariseModel.hasEngine {
+                Button { startAIEdit() } label: {
+                    actionLabel("Edit with AI…", "wand.and.stars.inverse", compact: compact)
+                }
+                .accessibilityIdentifier("editWithAI")
+            }
+            Button { startRecolour() } label: {
+                actionLabel("Recolour…", "paintpalette", compact: compact)
+            }
+            .accessibilityIdentifier("recolourDrawing")
             Button(action: onExport) {
                 actionLabel("Export Report…", "square.and.arrow.up", compact: compact)
             }
@@ -113,6 +134,20 @@ struct DrawingCheckView: View {
             }
             .accessibilityIdentifier("cleanUpDrawing")
         }
+    }
+
+    private func startAIEdit() {
+        guard let session = model.editSession else { return }
+        aiEditModel.configure(session: session)
+        aiEditModel.providerStore = providerStore
+        aiEditModel.reset()
+        showingAIEdit = true
+    }
+
+    private func startRecolour() {
+        guard let session = model.editSession else { return }
+        showingRecolour = true
+        Task { await recolourModel.start(session: session, selection: []) }
     }
 
     private func startCleanup() {

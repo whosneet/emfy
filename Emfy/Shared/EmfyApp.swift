@@ -157,6 +157,7 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
         CheckScreenshots.runIfNeeded()
         CompareScreenshots.runIfNeeded()
         CleanupScreenshots.runIfNeeded()
+        AIEditScreenshots.runIfNeeded()
         #endif
         AIProviderScreenshots.runIfNeeded()
         AIShareScreenshots.runIfNeeded()
