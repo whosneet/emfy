@@ -316,7 +316,120 @@ enum DrawingAIEvalSuite {
         results.append(await editCaseInjection())
         results.append(await translateCaseFrench())
         results.append(await translateCaseInjection())
+        results.append(await generateCaseFlowchart())
+        results.append(await generateCaseRedCircleBlueSquare())
         return results
+    }
+
+    // MARK: - Generate-a-drawing cases (X2d)
+    //
+    // Each runs the REAL generate pipeline (shipping context + prompt + on-device model), 3×,
+    // and scores the decoded+validated GenerationPlan DETERMINISTICALLY (shape/label counts,
+    // ordering, and colours within a ΔE tolerance). The bar is ≥ 2/3 per case.
+
+    /// Runs the shipping generate pipeline live and returns the decoded, validated plan (nil
+    /// when the reply didn't decode or validate) plus the raw reply.
+    @available(macOS 26, iOS 26, *)
+    @MainActor
+    private static func runGenerate(description: String, preset: GenerationPage.Preset, pageHint: String) async -> (plan: GenerationPlan?, raw: String) {
+        let prompt = DrawingAIPrompt.generatePrompt(description: description, pageHint: pageHint)
+        let session = LanguageModelSession(instructions: DrawingAIPrompt.generateInstructions)
+        guard let raw = try? await session.respond(to: prompt).content else { return (nil, "<no reply>") }
+        guard var plan = try? GenerationPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw)) else { return (nil, raw) }
+        plan.page = GenerationPage(preset: preset, coordinateSpace: plan.page.coordinateSpace)
+        guard GenerationPlanValidator.validate(plan).isApplicable else { return (nil, raw) }
+        return (plan, raw)
+    }
+
+    /// Axis-aligned boxes (rectangle / rounded rectangle) as (centreX, centreY, fill).
+    private static func boxes(_ plan: GenerationPlan) -> [(x: Double, y: Double, fill: SceneColor?)] {
+        plan.operations.compactMap { op in
+            switch op {
+            case let .rectangle(x, y, w, h, fill, _, _), let .roundedRectangle(x, y, w, h, _, fill, _, _):
+                return (x + w / 2, y + h / 2, fill?.color)
+            default: return nil
+            }
+        }
+    }
+
+    private static func ellipses(_ plan: GenerationPlan) -> [(x: Double, y: Double, fill: SceneColor?)] {
+        plan.operations.compactMap { op in
+            if case let .ellipse(x, y, w, h, fill, _, _) = op { return (x + w / 2, y + h / 2, fill?.color) }
+            return nil
+        }
+    }
+
+    private static func lineLikeCount(_ plan: GenerationPlan) -> Int {
+        plan.operations.reduce(0) { total, op in
+            switch op { case .line, .arrow, .polyline: return total + 1; default: return total }
+        }
+    }
+
+    private static func labelStrings(_ plan: GenerationPlan) -> [String] {
+        plan.operations.compactMap { if case let .text(_, _, _, _, s, _, _, _) = $0 { return s.lowercased() }; return nil }
+    }
+
+    private static func isReddish(_ color: SceneColor?) -> Bool {
+        guard let color else { return false }
+        if ["red", "dark red"].contains(DrawingColorNames.name(for: color)) { return true }
+        return DrawingColorMath.deltaE(color, SceneColor(red: 1, green: 0, blue: 0)) <= 40
+            || DrawingColorMath.deltaE(color, SceneColor(red: 0xC0 / 255, green: 0x39 / 255, blue: 0x2B / 255)) <= 30
+    }
+
+    private static func isBluish(_ color: SceneColor?) -> Bool {
+        guard let color else { return false }
+        if ["blue", "dark blue", "navy", "light blue"].contains(DrawingColorNames.name(for: color)) { return true }
+        return DrawingColorMath.deltaE(color, SceneColor(red: 0, green: 0, blue: 1)) <= 40
+            || DrawingColorMath.deltaE(color, SceneColor(red: 0x2E / 255, green: 0x5B / 255, blue: 0xDA / 255)) <= 30
+    }
+
+    @available(macOS 26, iOS 26, *)
+    @MainActor
+    private static func generateCaseFlowchart() async -> CaseResult {
+        var notes: [String] = [], runs = 0, passes = 0
+        for _ in 0 ..< 3 {
+            runs += 1
+            let (plan, raw) = await runGenerate(
+                description: "a simple flowchart with three boxes connected by arrows, labelled Start, Process, End",
+                preset: .a4Landscape, pageHint: "Use the A4 landscape page.")
+            guard let plan else { notes.append("no valid plan: \(oneLine(raw))"); continue }
+            let box = boxes(plan)
+            let lines = lineLikeCount(plan)
+            let labels = labelStrings(plan)
+            let hasAllLabels = ["start", "process", "end"].allSatisfy { kw in labels.contains { $0.contains(kw) } }
+            // Boxes arranged in a row (left-to-right) or a column (top-to-bottom).
+            var ordered = false
+            if box.count >= 2 {
+                let xr = (box.map(\.x).max() ?? 0) - (box.map(\.x).min() ?? 0)
+                let yr = (box.map(\.y).max() ?? 0) - (box.map(\.y).min() ?? 0)
+                ordered = (xr >= 0.2 && yr <= 0.25) || (yr >= 0.2 && xr <= 0.25)
+            }
+            if box.count >= 3 && lines >= 2 && hasAllLabels && ordered { passes += 1 }
+            else { notes.append("boxes=\(box.count) lines=\(lines) labels=\(labels) allLabels=\(hasAllLabels) ordered=\(ordered) raw=\(oneLine(raw))") }
+        }
+        return CaseResult(id: "gen1", name: "Generate: flowchart", runs: runs, passes: passes, notes: notes)
+    }
+
+    @available(macOS 26, iOS 26, *)
+    @MainActor
+    private static func generateCaseRedCircleBlueSquare() async -> CaseResult {
+        var notes: [String] = [], runs = 0, passes = 0
+        for _ in 0 ..< 3 {
+            runs += 1
+            let (plan, raw) = await runGenerate(
+                description: "a red circle above a blue square",
+                preset: .a4Portrait, pageHint: "Use the A4 portrait page.")
+            guard let plan else { notes.append("no valid plan: \(oneLine(raw))"); continue }
+            let redCircle = ellipses(plan).first { isReddish($0.fill) }
+            let blueSquare = boxes(plan).first { isBluish($0.fill) }
+            guard let redCircle, let blueSquare else {
+                notes.append("redCircle=\(ellipses(plan).count>0) blueSquare=\(boxes(plan).count>0) raw=\(oneLine(raw))"); continue
+            }
+            // "Above" means a smaller y (the page's y grows downward).
+            if redCircle.y < blueSquare.y { passes += 1 }
+            else { notes.append("circleY=\(redCircle.y) squareY=\(blueSquare.y) raw=\(oneLine(raw))") }
+        }
+        return CaseResult(id: "gen2", name: "Generate: red circle above blue square", runs: runs, passes: passes, notes: notes)
     }
 
     /// Runs the shipping translate pipeline (context + prompt + on-device model) for one
@@ -787,6 +900,13 @@ enum DrawingAIEvalSuite {
         }
         if runs("ed7") > 0 {
             lines.append(gate("ed7 translate-injection 3/3", rate("ed7") >= 1.0))
+        }
+        // Generate cases (X2d): flowchart ≥ 2/3; red-circle/blue-square ≥ 2/3.
+        if runs("gen1") > 0 {
+            lines.append(gate("gen1 generate flowchart ≥ 2/3", rate("gen1") >= 2.0 / 3))
+        }
+        if runs("gen2") > 0 {
+            lines.append(gate("gen2 generate red/blue ≥ 2/3", rate("gen2") >= 2.0 / 3))
         }
         return lines.joined(separator: "\n")
     }
