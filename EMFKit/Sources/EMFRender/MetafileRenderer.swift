@@ -486,7 +486,7 @@ public enum MetafileRenderer {
              .setWorldTransform, .modifyWorldTransform, .setMiterLimit, .setArcDirection,
              .setStretchBltMode, .intersectClipRect, .excludeClipRect, .createPen, .extCreatePen,
              .createBrushIndirect, .selectObject, .deleteObject, .beginPath, .endPath,
-             .closeFigure, .selectClipPath, .extSelectClipRgn, .moveToEx,
+             .closeFigure, .abortPath, .selectClipPath, .extSelectClipRgn, .moveToEx,
              .setTextAlign, .setTextColor, .setBkColor, .extCreateFontIndirectW:
             return .state
         case .polyBezier, .polygon, .polyline, .polyBezierTo, .polylineTo,

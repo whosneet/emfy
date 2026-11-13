@@ -55,7 +55,7 @@ public enum EMFRecordSummary {
         case .deleteObject(let handle): return handleName(handle)
 
         // MARK: Paths and clipping
-        case .beginPath, .endPath, .closeFigure: return ""
+        case .beginPath, .endPath, .closeFigure, .abortPath: return ""
         case .fillPath(let b), .strokeAndFillPath(let b), .strokePath(let b): return rect(b)
         case .selectClipPath(let mode): return regionModeName(mode)
         case .extSelectClipRgn(let p):

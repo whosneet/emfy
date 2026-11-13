@@ -253,6 +253,7 @@ extension EMFFile {
         case 63: return decodePathBounds(type: type, slice: slice) { .strokeAndFillPath(bounds: $0) }
         case 64: return decodePathBounds(type: type, slice: slice) { .strokePath(bounds: $0) }
         case 67: return decodeU32(type: type, slice: slice) { .selectClipPath(RegionMode($0)) }
+        case 68: return .abortPath
         case 75: return decodeExtSelectClipRgn(slice: slice)
         case 76: return decodeBitBlt(slice: slice, stretch: false)
         case 77: return decodeBitBlt(slice: slice, stretch: true)

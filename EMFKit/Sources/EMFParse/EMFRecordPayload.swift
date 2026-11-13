@@ -562,6 +562,10 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case strokeAndFillPath(bounds: RectL)
     /// EMR_STROKEPATH (64), §2.3.5.39.
     case strokePath(bounds: RectL)
+    /// EMR_ABORTPATH (68), §2.3.10.1 — discards any open path bracket and the
+    /// closed-but-unconsumed path, returning the DC to no-path state. No
+    /// parameters (8-byte record).
+    case abortPath
     /// EMR_SELECTCLIPPATH (67), §2.3.2.5. Combines the current path bracket
     /// with the current clipping region using this mode.
     case selectClipPath(RegionMode)

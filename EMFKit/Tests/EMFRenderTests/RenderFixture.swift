@@ -132,6 +132,8 @@ struct RenderFixture {
     mutating func beginPath() { append(type: 59, payload: []) }
     mutating func endPath() { append(type: 60, payload: []) }
     mutating func closeFigure() { append(type: 61, payload: []) }
+    /// EMR_ABORTPATH §2.3.10.1 — discards any open/selected path.
+    mutating func abortPath() { append(type: 68, payload: []) }
 
     /// A RectL bounds body shared by the FILL/STROKE closers.
     private static func rectBody(_ l: Int32, _ t: Int32, _ r: Int32, _ b: Int32) -> [UInt8] {

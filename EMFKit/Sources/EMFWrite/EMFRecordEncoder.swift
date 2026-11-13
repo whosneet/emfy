@@ -78,6 +78,8 @@ public enum EMFRecordEncoder {
             return try emptyRecord(60)                              // §2.3.5.6
         case .closeFigure:
             return try emptyRecord(61)                              // §2.3.5.5
+        case .abortPath:
+            return try emptyRecord(68)                              // §2.3.10.1
         case .fillPath(let bounds):
             return try rectLRecord(62, bounds)                      // §2.3.5.9
         case .strokeAndFillPath(let bounds):

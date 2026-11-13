@@ -536,6 +536,16 @@ public final class RenderObserver {
         return indices.sorted()
     }
 
+    /// EMR_ABORTPATH discarded the bracket: its construction records drew
+    /// nothing, so — like a clip-consumed path — they are folded into state.
+    func abortBracket() {
+        pathConstructionIndices.formUnion(pendingPathIndices)
+        if let open = openBracketIndices { pathConstructionIndices.formUnion(open) }
+        pathConstructionIndices.insert(currentRecordIndex)
+        pendingPathIndices = []
+        openBracketIndices = nil
+    }
+
     /// A SELECTCLIPPATH consumed the path: its construction records are state.
     func consumePathForClip() {
         pathConstructionIndices.formUnion(pendingPathIndices)

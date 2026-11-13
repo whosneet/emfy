@@ -287,6 +287,14 @@ struct DeviceContext {
             observer?.noteBracketRecord()
             return true
 
+        case .abortPath:
+            // EMR_ABORTPATH (§2.3.10.1): discard any open bracket AND the
+            // closed-but-unconsumed path. The construction records drew nothing,
+            // so the importer folds them into state (not passthrough geometry).
+            abortPath()
+            observer?.abortBracket()
+            return true
+
         case .selectClipPath(let mode):
             // EMR_SELECTCLIPPATH ([MS-EMF] §2.3.2.5): combine the current path
             // (already DEVICE space) with the clip per RegionMode. Pure state —
@@ -419,6 +427,15 @@ struct DeviceContext {
         currentPath = accumulator.copy()
         pathAccumulator = nil
         pathSubpathStart = nil
+    }
+
+    /// EMR_ABORTPATH ([MS-EMF] §2.3.10.1): discards any open path bracket and
+    /// the closed-but-unconsumed `currentPath`, returning the DC to the
+    /// no-path-selected state. A no-op when nothing is open or selected.
+    private mutating func abortPath() {
+        pathAccumulator = nil
+        pathSubpathStart = nil
+        currentPath = nil
     }
 
     /// EMR_CLOSEFIGURE ([MS-EMF] §2.3.10): closes the open figure by drawing a
