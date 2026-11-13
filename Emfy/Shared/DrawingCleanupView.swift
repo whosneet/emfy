@@ -62,6 +62,7 @@ struct DrawingCleanupView: View {
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                if model.hasUnsavedChanges { unsavedNote }
                 reportSection
                 Divider()
                 optimisedSection
@@ -71,6 +72,16 @@ struct DrawingCleanupView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var unsavedNote: some View {
+        Label("Save your changes first — clean-up works on the saved file.", systemImage: "exclamationmark.triangle.fill")
+            .font(.callout)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: Report
@@ -110,6 +121,10 @@ struct DrawingCleanupView: View {
                 }
                 .accessibilityIdentifier("saveOptimisedCopy")
                 equivalenceNote
+            } else if model.hasUnsavedChanges && model.hasOptimisations {
+                Button {} label: { Label("Save Optimised Copy…", systemImage: "wand.and.stars") }
+                    .accessibilityIdentifier("saveOptimisedCopy")
+                    .disabled(true)
             } else if let reason = model.optimisedBlockedReason {
                 blocked(reason)
             } else {
@@ -135,6 +150,10 @@ struct DrawingCleanupView: View {
                     }
                     .accessibilityIdentifier("saveCompatibleCopy")
                     equivalenceNote
+                } else if model.hasUnsavedChanges {
+                    Button {} label: { Label("Save Compatible Copy…", systemImage: "doc.badge.gearshape") }
+                        .accessibilityIdentifier("saveCompatibleCopy")
+                        .disabled(true)
                 } else if let reason = model.compatibleBlockedReason {
                     blocked(reason)
                     if !model.isDual {

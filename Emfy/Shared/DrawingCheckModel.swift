@@ -200,6 +200,10 @@ final class DrawingCheckModel {
     /// A suggested base file name for a saved copy.
     var documentFileName: String { session?.currentDocumentFileName() ?? "Drawing.emf" }
 
+    /// Whether the document has unsaved edits — clean-up works on the saved file, so the
+    /// save actions are gated while this is true.
+    var hasUnsavedChanges: Bool { session?.isDirty ?? false }
+
     // MARK: Canvas highlight
 
     /// The outline for the selected finding's elements, in device space, reusing the

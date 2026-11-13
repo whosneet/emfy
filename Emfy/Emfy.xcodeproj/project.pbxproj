@@ -102,6 +102,8 @@
 		A1A00000000000000000011C /* DrawingAIAvailabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000011B /* DrawingAIAvailabilityTests.swift */; };
 		C1D0000000000000000000D1 /* DrawingCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D0000000000000000000D0 /* DrawingCheckTests.swift */; };
 		C1B0000000000000000000D1 /* DrawingAIOutputSanitiserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000D0 /* DrawingAIOutputSanitiserTests.swift */; };
+		C1B0000000000000000000C4 /* DrawingCleanupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000A4 /* DrawingCleanupModel.swift */; };
+		C1B0000000000000000000D5 /* DrawingCleanupModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000D4 /* DrawingCleanupModelTests.swift */; };
 		A1A00000000000000000011E /* DrawingAIContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A00000000000000000011D /* DrawingAIContextTests.swift */; };
 		A1A0000000000000B1B00009A /* DrawingExplainGroundingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00009F /* DrawingExplainGroundingTests.swift */; };
 		A1A0000000000000B1B00007A /* LibrarySearchRankerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00007F /* LibrarySearchRankerTests.swift */; };
@@ -545,6 +547,7 @@
 		A1A00000000000000000011B /* DrawingAIAvailabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIAvailabilityTests.swift; sourceTree = "<group>"; };
 		C1D0000000000000000000D0 /* DrawingCheckTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingCheckTests.swift; sourceTree = "<group>"; };
 		C1B0000000000000000000D0 /* DrawingAIOutputSanitiserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIOutputSanitiserTests.swift; sourceTree = "<group>"; };
+		C1B0000000000000000000D4 /* DrawingCleanupModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingCleanupModelTests.swift; sourceTree = "<group>"; };
 		A1A00000000000000000011D /* DrawingAIContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIContextTests.swift; sourceTree = "<group>"; };
 		A1A00000000000000000011F /* DrawingAIToolsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIToolsTests.swift; sourceTree = "<group>"; };
 		A1A000000000000000000121 /* DrawingAIAltTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIAltTextTests.swift; sourceTree = "<group>"; };
@@ -1065,6 +1068,7 @@
 				A1A00000000000000000011B /* DrawingAIAvailabilityTests.swift */,
 				C1D0000000000000000000D0 /* DrawingCheckTests.swift */,
 				C1B0000000000000000000D0 /* DrawingAIOutputSanitiserTests.swift */,
+				C1B0000000000000000000D4 /* DrawingCleanupModelTests.swift */,
 				A1A00000000000000000011D /* DrawingAIContextTests.swift */,
 				A1A00000000000000000011F /* DrawingAIToolsTests.swift */,
 				A1A000000000000000000121 /* DrawingAIAltTextTests.swift */,
@@ -1695,6 +1699,8 @@
 				A1A00000000000000000011C /* DrawingAIAvailabilityTests.swift in Sources */,
 				C1D0000000000000000000D1 /* DrawingCheckTests.swift in Sources */,
 				C1B0000000000000000000D1 /* DrawingAIOutputSanitiserTests.swift in Sources */,
+				C1B0000000000000000000C4 /* DrawingCleanupModel.swift in Sources */,
+				C1B0000000000000000000D5 /* DrawingCleanupModelTests.swift in Sources */,
 				A1A00000000000000000011E /* DrawingAIContextTests.swift in Sources */,
 				A1A0000000000000B1B00009A /* DrawingExplainGroundingTests.swift in Sources */,
 				A1A0000000000000B1B00007A /* LibrarySearchRankerTests.swift in Sources */,

@@ -34,6 +34,12 @@ enum CleanupScreenshots {
         model.analyse(data: fixtureEMF())
         await wait(timeout: .seconds(10)) { model.phase == .ready }
         _ = capture(view: view(model), size: CGSize(width: 520, height: 640), to: base + "-report.png")
+
+        // The unsaved-changes state: both save actions blocked, with the "save first" note.
+        let dirty = DrawingCleanupModel()
+        dirty.analyse(data: fixtureEMF(), hasUnsavedChanges: true)
+        await wait(timeout: .seconds(10)) { dirty.phase == .ready }
+        _ = capture(view: view(dirty), size: CGSize(width: 520, height: 640), to: base + "-dirty.png")
     }
 
     @MainActor

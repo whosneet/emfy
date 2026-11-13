@@ -117,9 +117,10 @@ struct DrawingCheckView: View {
 
     private func startCleanup() {
         showingCleanup = true
+        let dirty = model.hasUnsavedChanges
         Task {
             guard let data = await model.cleanupData() else { return }
-            cleanupModel.analyse(data: data)
+            cleanupModel.analyse(data: data, hasUnsavedChanges: dirty)
         }
     }
 

@@ -24,6 +24,10 @@ final class DrawingCleanupModel {
     private(set) var hasOptimisations = false
     private(set) var hasEMFPlus = false
     private(set) var isDual = false
+    /// True when the document has unsaved edits. Clean-up works on the SAVED file, so a
+    /// copy made now would silently drop those edits — both save actions are blocked and
+    /// the view shows an inline "save first" note (X1b review correction).
+    private(set) var hasUnsavedChanges = false
     /// The render-equivalence verdict for each copy (nil = couldn't render to verify).
     private(set) var optimisedGuard: DrawingCleanupGuard.Result?
     private(set) var compatibleGuard: DrawingCleanupGuard.Result?
@@ -34,19 +38,30 @@ final class DrawingCleanupModel {
 
     var isBusy: Bool { phase == .analysing }
 
-    /// Whether the optimised copy is safe to offer (produced and render-equivalent).
-    var optimisedReady: Bool { optimisedData != nil && (optimisedGuard?.equivalent ?? false) }
+    /// Whether a copy is safe to offer: it was produced, render-equivalent, and the
+    /// document has no unsaved edits (clean-up works on the saved file). Pure, so the
+    /// gating is unit-testable without running the async analysis.
+    nonisolated static func copyIsOfferable(copyExists: Bool, guardEquivalent: Bool?, hasUnsavedChanges: Bool) -> Bool {
+        copyExists && (guardEquivalent ?? false) && !hasUnsavedChanges
+    }
+
+    /// Whether the optimised copy is safe to offer.
+    var optimisedReady: Bool {
+        Self.copyIsOfferable(copyExists: optimisedData != nil, guardEquivalent: optimisedGuard?.equivalent, hasUnsavedChanges: hasUnsavedChanges)
+    }
     /// Whether the compatible copy is safe to offer.
-    var compatibleReady: Bool { compatibleData != nil && (compatibleGuard?.equivalent ?? false) }
+    var compatibleReady: Bool {
+        Self.copyIsOfferable(copyExists: compatibleData != nil, guardEquivalent: compatibleGuard?.equivalent, hasUnsavedChanges: hasUnsavedChanges)
+    }
 
     /// Set when a copy was produced but the render check failed or couldn't run — the UI
     /// explains why it can't be offered instead of writing a lossy file.
     var optimisedBlockedReason: String? {
-        guard optimisedData != nil, !optimisedReady else { return nil }
+        guard optimisedData != nil, !optimisedReady, !hasUnsavedChanges else { return nil }
         return guardReason(optimisedGuard)
     }
     var compatibleBlockedReason: String? {
-        guard compatibleData != nil, !compatibleReady else { return nil }
+        guard compatibleData != nil, !compatibleReady, !hasUnsavedChanges else { return nil }
         return guardReason(compatibleGuard)
     }
 
@@ -61,7 +76,9 @@ final class DrawingCleanupModel {
     func compatibleCopyBytes() -> Data? { compatibleReady ? compatibleData : nil }
 
     /// Analyses `data` and produces the two verified copies off the main actor.
-    func analyse(data: Data) {
+    /// `hasUnsavedChanges` gates the save actions (clean-up works on the saved file).
+    func analyse(data: Data, hasUnsavedChanges: Bool = false) {
+        self.hasUnsavedChanges = hasUnsavedChanges
         phase = .analysing
         task?.cancel()
         task = Task { [weak self] in
