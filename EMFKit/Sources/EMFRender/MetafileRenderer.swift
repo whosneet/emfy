@@ -483,14 +483,14 @@ public enum MetafileRenderer {
         switch payload {
         case .setWindowExtEx, .setWindowOrgEx, .setViewportExtEx, .setViewportOrgEx,
              .setMapMode, .setBkMode, .setPolyFillMode, .setROP2, .saveDC, .restoreDC,
-             .setWorldTransform, .modifyWorldTransform, .setMiterLimit,
+             .setWorldTransform, .modifyWorldTransform, .setMiterLimit, .setArcDirection,
              .intersectClipRect, .excludeClipRect, .createPen, .extCreatePen,
              .createBrushIndirect, .selectObject, .deleteObject, .beginPath, .endPath,
              .closeFigure, .selectClipPath, .extSelectClipRgn, .moveToEx,
              .setTextAlign, .setTextColor, .setBkColor, .extCreateFontIndirectW:
             return .state
         case .polyBezier, .polygon, .polyline, .polyBezierTo, .polylineTo,
-             .ellipse, .rectangle, .roundRect, .arc, .lineTo,
+             .ellipse, .rectangle, .roundRect, .arc, .arcTo, .lineTo,
              .polyBezier16, .polygon16, .polyline16, .polyBezierTo16, .polylineTo16,
              .polyPolyline16, .polyPolygon16, .pie, .chord, .setPixel, .patBlt,
              .fillPath, .strokeAndFillPath, .strokePath,

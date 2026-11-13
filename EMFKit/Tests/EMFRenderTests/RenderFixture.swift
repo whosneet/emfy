@@ -220,6 +220,36 @@ struct RenderFixture {
         append(type: 45, payload: body.bytes)
     }
 
+    /// The shared Box/Start/End body of the arc figures (ARC/ARCTO/CHORD/PIE).
+    private static func arcBody(box: (l: Int32, t: Int32, r: Int32, b: Int32), start: (x: Int32, y: Int32), end: (x: Int32, y: Int32)) -> [UInt8] {
+        var body = LE()
+        body.i32(box.l); body.i32(box.t); body.i32(box.r); body.i32(box.b)
+        body.i32(start.x); body.i32(start.y)
+        body.i32(end.x); body.i32(end.y)
+        return body.bytes
+    }
+
+    /// EMR_ARCTO §2.3.5.3 — Box/Start/End; connects from the current position.
+    mutating func arcTo(box: (l: Int32, t: Int32, r: Int32, b: Int32), start: (x: Int32, y: Int32), end: (x: Int32, y: Int32)) {
+        append(type: 55, payload: Self.arcBody(box: box, start: start, end: end))
+    }
+
+    /// EMR_CHORD §2.3.5.4 — Box/Start/End; filled + outlined.
+    mutating func chord(box: (l: Int32, t: Int32, r: Int32, b: Int32), start: (x: Int32, y: Int32), end: (x: Int32, y: Int32)) {
+        append(type: 46, payload: Self.arcBody(box: box, start: start, end: end))
+    }
+
+    /// EMR_PIE §2.3.5.6 — Box/Start/End; filled wedge + outline.
+    mutating func pie(box: (l: Int32, t: Int32, r: Int32, b: Int32), start: (x: Int32, y: Int32), end: (x: Int32, y: Int32)) {
+        append(type: 47, payload: Self.arcBody(box: box, start: start, end: end))
+    }
+
+    /// EMR_SETARCDIRECTION §2.3.11.1 — AD_COUNTERCLOCKWISE(1) / AD_CLOCKWISE(2).
+    mutating func setArcDirection(_ raw: UInt32) {
+        var body = LE(); body.u32(raw)
+        append(type: 57, payload: body.bytes)
+    }
+
     /// EMR_POLYPOLYGON16 §2.3.5.29 — Bounds at 8, NumberOfPolys at 24, total
     /// Count at 28, the per-polygon u32 counts at 32, then all PointS values.
     mutating func polyPolygon16(_ polygons: [[(Int16, Int16)]]) {

@@ -236,8 +236,12 @@ extension EMFFile {
         case 42: return decodeRectL(type: type, slice: slice) { .ellipse(box: $0) }
         case 43: return decodeRectL(type: type, slice: slice) { .rectangle(box: $0) }
         case 44: return decodeRoundRect(slice: slice)
-        case 45: return decodeArc(slice: slice)
+        case 45: return decodeArcLike(type: type, slice: slice, make: EMFRecordPayload.arc)
+        case 46: return decodeArcLike(type: type, slice: slice, make: EMFRecordPayload.chord)
+        case 47: return decodeArcLike(type: type, slice: slice, make: EMFRecordPayload.pie)
         case 54: return decodePointL(type: type, slice: slice) { .lineTo(point: $0) }
+        case 55: return decodeArcLike(type: type, slice: slice, make: EMFRecordPayload.arcTo)
+        case 57: return decodeU32(type: type, slice: slice) { .setArcDirection(ArcDirection($0)) }
         case 58: return decodeU32(type: type, slice: slice) { .setMiterLimit(miterLimit: $0) }
         case 59: return .beginPath
         case 60: return .endPath
@@ -381,15 +385,22 @@ extension EMFFile {
         return .roundRect(RoundRectPayload(box: box, corner: corner))
     }
 
-    /// EMR_ARC §2.3.5.2: Box RectL at 8, Start PointL at 24, End PointL at 32.
-    private static func decodeArc(slice: RecordSlice) -> EMFRecordPayload {
+    /// The shared Box/Start/End layout of the arc figures: EMR_ARC §2.3.5.2,
+    /// EMR_ARCTO §2.3.5.3, EMR_CHORD §2.3.5.4, EMR_PIE §2.3.5.6 — all 40 bytes,
+    /// Box RectL at 8, Start PointL at 24, End PointL at 32. `make` selects which
+    /// payload case the record carries.
+    private static func decodeArcLike(
+        type: UInt32,
+        slice: RecordSlice,
+        make: (ArcPayload) -> EMFRecordPayload
+    ) -> EMFRecordPayload {
         guard let box = slice.rectL(8),
               let start = slice.pointL(24),
               let end = slice.pointL(32)
         else {
-            return .malformed(type: 45, reason: .tooSmall(minimumSize: 40, actualSize: slice.size))
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 40, actualSize: slice.size))
         }
-        return .arc(ArcPayload(box: box, start: start, end: end))
+        return make(ArcPayload(box: box, start: start, end: end))
     }
 
     /// EMR_CREATEPEN §2.3.7.7: ihPen at 8, LogPen §2.2.19 at 12

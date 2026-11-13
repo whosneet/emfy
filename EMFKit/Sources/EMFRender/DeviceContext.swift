@@ -28,6 +28,10 @@ struct DeviceContext {
         /// Spec-literal unsigned miter limit ([MS-EMF] §2.3.11.21); GDI's
         /// default is 10.
         var miterLimit: UInt32 = 10
+        /// Arc sweep direction (EMR_SETARCDIRECTION); GDI's default is
+        /// AD_COUNTERCLOCKWISE, which is what the arc path builder draws by
+        /// default — so the default state leaves every arc figure byte-identical.
+        var arcDirection: ArcDirection = .counterclockwise
         /// Current position in LOGICAL units — mapped through whatever the
         /// transform is at consumption time, exactly as GDI stores it.
         var currentPosition = PointL(x: 0, y: 0)
@@ -195,6 +199,15 @@ struct DeviceContext {
             state.miterLimit = miterLimit
             return true
 
+        case .setArcDirection(let direction):
+            // An unknown value keeps the current direction and logs (log-and-skip).
+            if case .unknown(let raw) = direction {
+                log.note(.unknownEnumValue(record: 57, rawValue: raw))
+                return true
+            }
+            state.arcDirection = direction
+            return true
+
         case .setWorldTransform(let xform):
             state.world = CoordinatePipeline.affine(from: xform)
             return true
@@ -339,7 +352,7 @@ struct DeviceContext {
 
         // MARK: Drawing records — the renderer's job
         case .polyBezier, .polygon, .polyline, .polyBezierTo, .polylineTo,
-             .ellipse, .rectangle, .roundRect, .arc, .lineTo,
+             .ellipse, .rectangle, .roundRect, .arc, .arcTo, .lineTo,
              .polyBezier16, .polygon16, .polyline16, .polyBezierTo16,
              .polylineTo16, .polyPolyline16, .polyPolygon16,
              .pie, .chord, .setPixel, .patBlt:

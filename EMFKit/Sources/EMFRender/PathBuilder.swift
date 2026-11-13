@@ -162,11 +162,56 @@ enum PathBuilder {
         start: PointL,
         end: PointL,
         to path: CGMutablePath,
-        transform: CGAffineTransform
+        transform: CGAffineTransform,
+        clockwise: Bool = false
     ) {
-        guard let geometry = ArcGeometry(box: box, start: start, end: end) else { return }
+        guard let geometry = ArcGeometry(box: box, start: start, end: end, clockwise: clockwise) else { return }
         path.move(to: geometry.pointAt(geometry.thetaStart), transform: transform)
         geometry.appendSegments(to: path, transform: transform)
+    }
+
+    /// Appends EMR_ARCTO ([MS-EMF] §2.3.5.3): a straight line from the current
+    /// position to the arc's start point, then the elliptical arc itself. Unlike
+    /// EMR_ARC this connects to the figure in progress and advances the current
+    /// position. Returns the arc's end point (the new current position) in
+    /// LOGICAL units, or `nil` for a degenerate ellipse (nothing appended — GDI
+    /// leaves the current position unchanged). `moveToStart` seeds a fresh
+    /// subpath at the current position when the caller is drawing a standalone
+    /// stroke (outside a path bracket); inside a bracket the figure continues
+    /// from whatever is already open.
+    static func appendArcTo(
+        box: RectL,
+        start: PointL,
+        end: PointL,
+        currentPosition: CGPoint,
+        to path: CGMutablePath,
+        transform: CGAffineTransform,
+        clockwise: Bool,
+        moveToStart: Bool
+    ) -> PointL? {
+        guard let geometry = ArcGeometry(box: box, start: start, end: end, clockwise: clockwise) else { return nil }
+        if moveToStart {
+            path.move(to: currentPosition, transform: transform)
+        }
+        // Connect the current position to the arc's start, then sweep the arc.
+        path.addLine(to: geometry.pointAt(geometry.thetaStart), transform: transform)
+        geometry.appendSegments(to: path, transform: transform)
+        // The new current position is the arc's end point, expressed back in
+        // logical units (the untransformed ellipse parameter end). Saturating
+        // conversion — a hostile box could put the endpoint beyond Int32 (§8: no
+        // trapping arithmetic).
+        let endPoint = geometry.pointAt(geometry.thetaEnd)
+        return PointL(x: clampToInt32(endPoint.x), y: clampToInt32(endPoint.y))
+    }
+
+    /// Rounds a Double to the nearest Int32, saturating instead of trapping on
+    /// a non-finite or out-of-range value.
+    private static func clampToInt32(_ value: Double) -> Int32 {
+        guard value.isFinite else { return value > 0 ? Int32.max : Int32.min }
+        let rounded = value.rounded()
+        if rounded >= Double(Int32.max) { return Int32.max }
+        if rounded <= Double(Int32.min) { return Int32.min }
+        return Int32(rounded)
     }
 
     // MARK: - Pie and chord (EMR_PIE §2.3.5.16-analogue / [MS-WMF] §2.3.3.13,
@@ -180,9 +225,10 @@ enum PathBuilder {
         start: PointL,
         end: PointL,
         to path: CGMutablePath,
-        transform: CGAffineTransform
+        transform: CGAffineTransform,
+        clockwise: Bool = false
     ) {
-        guard let geometry = ArcGeometry(box: box, start: start, end: end) else { return }
+        guard let geometry = ArcGeometry(box: box, start: start, end: end, clockwise: clockwise) else { return }
         path.move(to: geometry.center, transform: transform)
         path.addLine(to: geometry.pointAt(geometry.thetaStart), transform: transform)
         geometry.appendSegments(to: path, transform: transform)
@@ -198,9 +244,10 @@ enum PathBuilder {
         start: PointL,
         end: PointL,
         to path: CGMutablePath,
-        transform: CGAffineTransform
+        transform: CGAffineTransform,
+        clockwise: Bool = false
     ) {
-        guard let geometry = ArcGeometry(box: box, start: start, end: end) else { return }
+        guard let geometry = ArcGeometry(box: box, start: start, end: end, clockwise: clockwise) else { return }
         path.move(to: geometry.pointAt(geometry.thetaStart), transform: transform)
         geometry.appendSegments(to: path, transform: transform)
         path.closeSubpath()
@@ -215,9 +262,16 @@ enum PathBuilder {
         let rx: Double
         let ry: Double
         let thetaStart: Double
+        /// Signed sweep in parameter space: NEGATIVE for the default
+        /// counterclockwise-on-screen direction (θ decreases), POSITIVE for the
+        /// clockwise direction (θ increases). `thetaEnd == thetaStart + sweep`.
         let sweep: Double
 
-        init?(box: RectL, start: PointL, end: PointL) {
+        /// The parameter angle where the arc ends (used to advance EMR_ARCTO's
+        /// current position).
+        var thetaEnd: Double { thetaStart + sweep }
+
+        init?(box: RectL, start: PointL, end: PointL, clockwise: Bool) {
             let rect = cgRect(box)
             let rx = rect.width / 2
             let ry = rect.height / 2
@@ -236,11 +290,18 @@ enum PathBuilder {
             let thetaStart = parameterAngle(start)
             let thetaEnd = parameterAngle(end)
             self.thetaStart = thetaStart
-            // Sweep magnitude in the decreasing-θ direction; coincident radials
-            // mean a full ellipse.
-            var sweep = thetaStart - thetaEnd
-            if sweep <= 0 { sweep += 2 * Double.pi }
-            self.sweep = sweep
+            // Magnitude of the sweep in the chosen direction; coincident radials
+            // mean a full ellipse (2π). AD_COUNTERCLOCKWISE (the default) sweeps
+            // in DECREASING θ (negative step); AD_CLOCKWISE in increasing θ.
+            if clockwise {
+                var magnitude = thetaEnd - thetaStart
+                if magnitude <= 0 { magnitude += 2 * Double.pi }
+                self.sweep = magnitude            // positive: θ increases
+            } else {
+                var magnitude = thetaStart - thetaEnd
+                if magnitude <= 0 { magnitude += 2 * Double.pi }
+                self.sweep = -magnitude           // negative: θ decreases
+            }
         }
 
         func pointAt(_ theta: Double) -> CGPoint {
@@ -254,8 +315,10 @@ enum PathBuilder {
         /// Appends the cubic arc segments continuing from the current point
         /// (the caller has already moved/lined to `pointAt(thetaStart)`).
         func appendSegments(to path: CGMutablePath, transform: CGAffineTransform) {
-            let segmentCount = max(1, Int((sweep / (Double.pi / 2)).rounded(.up)))
-            let step = -sweep / Double(segmentCount)   // negative: θ decreases
+            // |sweep| capped into ≤90° cubic segments; `step` carries the sign so
+            // θ moves in the arc's direction (negative for CCW, positive for CW).
+            let segmentCount = max(1, Int((abs(sweep) / (Double.pi / 2)).rounded(.up)))
+            let step = sweep / Double(segmentCount)
             var theta = thetaStart
             for _ in 0 ..< segmentCount {
                 let next = theta + step

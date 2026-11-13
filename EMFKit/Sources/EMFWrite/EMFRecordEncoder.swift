@@ -108,6 +108,10 @@ public enum EMFRecordEncoder {
             return try roundRectRecord(p)                           // §2.3.5.35
         case .arc(let p):
             return try arcRecord(45, p)                             // §2.3.5.2
+        case .arcTo(let p):
+            return try arcRecord(55, p)                             // §2.3.5.3 (ARC layout)
+        case .setArcDirection(let direction):
+            return try u32Record(57, arcDirectionRaw(direction))   // §2.3.11.1
         case .lineTo(let point):
             return try pointLRecord(54, point)                      // §2.3.5.13
 
@@ -709,6 +713,14 @@ public enum EMFRecordEncoder {
         switch mode {
         case .alternate: return 0x01
         case .winding: return 0x02
+        case .unknown(let raw): return raw
+        }
+    }
+
+    private static func arcDirectionRaw(_ direction: ArcDirection) -> UInt32 {
+        switch direction {
+        case .counterclockwise: return 0x0000_0001
+        case .clockwise: return 0x0000_0002
         case .unknown(let raw): return raw
         }
     }

@@ -568,6 +568,13 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case roundRect(RoundRectPayload)
     /// EMR_ARC (45), §2.3.5.2.
     case arc(ArcPayload)
+    /// EMR_ARCTO (55), §2.3.5.3. Same Box/Start/End layout as EMR_ARC, but the
+    /// figure is connected from the current position by a straight line to the
+    /// arc's start, and the current position is updated to the arc's end.
+    case arcTo(ArcPayload)
+    /// EMR_SETARCDIRECTION (57), §2.3.11.1. Selects the sweep direction of the
+    /// arc figures (EMR_ARC/ARCTO/CHORD/PIE).
+    case setArcDirection(ArcDirection)
     /// EMR_LINETO (54), §2.3.5.13. Line endpoint, logical units.
     case lineTo(point: PointL)
 

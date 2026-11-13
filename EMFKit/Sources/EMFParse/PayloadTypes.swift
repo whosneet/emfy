@@ -172,6 +172,28 @@ public enum ModifyWorldTransformMode: Sendable, Equatable {
     }
 }
 
+/// Arc drawing direction ([MS-EMF] §2.1.2, ArcDirection enumeration), carried
+/// by EMR_SETARCDIRECTION (§2.3.11.1). Selects the sweep direction of the arc
+/// figures (EMR_ARC, EMR_ARCTO, EMR_CHORD, EMR_PIE). The GDI default is
+/// AD_COUNTERCLOCKWISE. An out-of-range value decodes to `.unknown` and the
+/// renderer keeps the current direction (log-and-skip).
+public enum ArcDirection: Sendable, Equatable {
+    /// AD_COUNTERCLOCKWISE (0x00000001): the default; arcs sweep
+    /// counterclockwise as seen on the device surface.
+    case counterclockwise
+    /// AD_CLOCKWISE (0x00000002): arcs sweep clockwise.
+    case clockwise
+    case unknown(UInt32)
+
+    public init(_ raw: UInt32) {
+        switch raw {
+        case 0x0000_0001: self = .counterclockwise
+        case 0x0000_0002: self = .clockwise
+        default: self = .unknown(raw)
+        }
+    }
+}
+
 /// Predefined graphics objects ([MS-EMF] §2.1.31, StockObject enumeration).
 /// Stock indices have the most-significant bit set; 0x80000009 is not
 /// defined and, like any unlisted high-bit value, decodes to `.unknownStock`.

@@ -43,6 +43,7 @@ public enum EMFRecordSummary {
         case .setWorldTransform(let xform): return matrix(xform)
         case .modifyWorldTransform(let p): return "\(modifyModeName(p.mode)) \(matrix(p.transform))"
         case .setMiterLimit(let limit): return String(limit)
+        case .setArcDirection(let direction): return arcDirectionName(direction)
         case .intersectClipRect(let clip): return rect(clip)
 
         // MARK: Objects
@@ -68,6 +69,7 @@ public enum EMFRecordSummary {
         case .rectangle(let box): return rect(box)
         case .roundRect(let p): return "\(rect(p.box)) corner \(size(p.corner))"
         case .arc(let a): return "\(rect(a.box)) \(point(a.start))→\(point(a.end))"
+        case .arcTo(let a): return "\(rect(a.box)) \(point(a.start))→\(point(a.end))"
         case .lineTo(let point): return "→ \(self.point(point))"
 
         // MARK: 16-bit geometry
@@ -248,6 +250,14 @@ public enum EMFRecordSummary {
         switch mode {
         case .alternate: return "ALTERNATE"
         case .winding: return "WINDING"
+        case .unknown(let raw): return hex32(raw)
+        }
+    }
+
+    static func arcDirectionName(_ direction: ArcDirection) -> String {
+        switch direction {
+        case .counterclockwise: return "AD_COUNTERCLOCKWISE"
+        case .clockwise: return "AD_CLOCKWISE"
         case .unknown(let raw): return hex32(raw)
         }
     }

@@ -486,18 +486,34 @@ public enum EMFRenderer {
             stroke(path, context: context, dc: dc, base: base, full: full)
 
         case .arc(let arc):
-            // Stroke only; does NOT move the current position (that is
-            // EMR_ARCTO, outside the phase-2 set).
-            PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full)
+            // Stroke only; does NOT move the current position (that is EMR_ARCTO).
+            PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full,
+                                  clockwise: dc.state.arcDirection == .clockwise)
             stroke(path, context: context, dc: dc, base: base, full: full)
+
+        case .arcTo(let arc):
+            // EMR_ARCTO (§2.3.5.3): connect the current position to the arc start
+            // with a line, sweep the arc, then advance the current position to
+            // the arc's end. Stroke only (pen, no fill).
+            if let newPosition = PathBuilder.appendArcTo(
+                box: arc.box, start: arc.start, end: arc.end,
+                currentPosition: PathBuilder.cgPoint(dc.state.currentPosition),
+                to: path, transform: full,
+                clockwise: dc.state.arcDirection == .clockwise, moveToStart: true
+            ) {
+                stroke(path, context: context, dc: dc, base: base, full: full)
+                dc.state.currentPosition = newPosition
+            }
 
         // MARK: Filled arc figures ([MS-WMF] §2.3.3.13/.2) — brush then pen.
         case .pie(let arc):
-            PathBuilder.appendPie(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full)
+            PathBuilder.appendPie(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full,
+                                  clockwise: dc.state.arcDirection == .clockwise)
             fillAndStroke(path, context: context, dc: dc, base: base, full: full)
 
         case .chord(let arc):
-            PathBuilder.appendChord(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full)
+            PathBuilder.appendChord(box: arc.box, start: arc.start, end: arc.end, to: path, transform: full,
+                                    clockwise: dc.state.arcDirection == .clockwise)
             fillAndStroke(path, context: context, dc: dc, base: base, full: full)
 
         // MARK: Current-position consumers.
@@ -599,7 +615,20 @@ public enum EMFRenderer {
         case .roundRect(let payload):
             dc.appendFigureToPath { path, t in PathBuilder.appendRoundRect(box: payload.box, corner: payload.corner, to: path, transform: t) }
         case .arc(let arc):
-            dc.appendFigureToPath { path, t in PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: path, transform: t) }
+            let cw = dc.state.arcDirection == .clockwise
+            dc.appendFigureToPath { path, t in PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: path, transform: t, clockwise: cw) }
+
+        case .arcTo(let arc):
+            // EMR_ARCTO inside a bracket: continue the current figure with the
+            // connecting line + arc, advancing the current position to the end.
+            // `appendToPath` already seeds the subpath at the current position,
+            // so `appendArcTo` draws from the path's current point (no own move).
+            let cw = dc.state.arcDirection == .clockwise
+            dc.appendToPath(seedFromCurrentPosition: true) { path, t in
+                PathBuilder.appendArcTo(box: arc.box, start: arc.start, end: arc.end,
+                                        currentPosition: .zero, to: path, transform: t,
+                                        clockwise: cw, moveToStart: false)
+            }
 
         default:
             // Not a geometry record — nothing to record.
@@ -1027,10 +1056,12 @@ public enum EMFRenderer {
             PathBuilder.appendRoundRect(box: rr.box, corner: rr.corner, to: device, transform: t)
             kind = .roundRect; fill = true; stroke = true
         case .pie(let arc):
-            PathBuilder.appendPie(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t)
+            PathBuilder.appendPie(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t,
+                                  clockwise: dc.state.arcDirection == .clockwise)
             kind = .pie; fill = true; stroke = true
         case .chord(let arc):
-            PathBuilder.appendChord(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t)
+            PathBuilder.appendChord(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t,
+                                    clockwise: dc.state.arcDirection == .clockwise)
             kind = .chord; fill = true; stroke = true
         case .polyline(let poly):
             PathBuilder.appendPolyline(poly.points.map(PathBuilder.cgPoint), to: device, transform: t)
@@ -1050,7 +1081,8 @@ public enum EMFRenderer {
             PathBuilder.appendBezier(prefixOfBezier(poly.points.map(PathBuilder.cgPoint), continues: false), to: device, transform: t)
             kind = .bezier; stroke = true
         case .arc(let arc):
-            PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t)
+            PathBuilder.appendArc(box: arc.box, start: arc.start, end: arc.end, to: device, transform: t,
+                                  clockwise: dc.state.arcDirection == .clockwise)
             kind = .arc; stroke = true
         case .lineTo(let point):
             device.move(to: PathBuilder.cgPoint(startPosition), transform: t)
