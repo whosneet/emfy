@@ -222,4 +222,42 @@ struct MetafilePreparedTests {
         #expect(opened.format == .unknown)
         #expect(MetafileRenderer.prepare(opened) == nil)
     }
+
+    // MARK: - estimatedPlaybackOps (P2b tile-cost estimate)
+
+    @Test("a plain-GDI EMF estimates its GDI record count")
+    func playbackOpsIsGDICountForPlainEMF() throws {
+        let data = try Data(contentsOf: TestPaths.corpusFile("gate-p2-star.emf"))
+        let opened = try OpenedMetafile.open(data)
+        let prepared = try #require(MetafileRenderer.prepare(opened))
+        let file = try EMFFile.parse(data)
+        // No EMF+ drawing content, so the estimate is exactly the GDI record count.
+        #expect(file.emfPlusPresence() != .drawingContent)
+        #expect(prepared.estimatedPlaybackOps == file.records.count)
+    }
+
+    @Test("an EMF+-only EMF folds in its EMF+ record count")
+    func playbackOpsCountsEMFPlusRecords() throws {
+        // handmade-emfplus-shapes is EMF+-only (3 GDI records, 17 EMF+ records):
+        // the renderer replays the 17 EMF+ records per tile, so the estimate must
+        // reflect that, not the 3 GDI records.
+        let data = try Data(contentsOf: TestPaths.corpusFile("handmade-emfplus-shapes.emf"))
+        let opened = try OpenedMetafile.open(data)
+        let prepared = try #require(MetafileRenderer.prepare(opened))
+        let file = try EMFFile.parse(data)
+        let plus = file.emfPlusStream().records.count
+        #expect(file.emfPlusPresence() == .drawingContent)
+        #expect(plus > file.records.count)                 // EMF+ dominates the GDI count
+        #expect(prepared.estimatedPlaybackOps == plus)     // and the estimate counts it
+    }
+
+    @Test("a dual EMF+ EMF takes the larger of the GDI and EMF+ counts")
+    func playbackOpsTakesMaxForDualEMF() throws {
+        let data = try Data(contentsOf: TestPaths.corpusFile("handmade-emfplus-dual.emf"))
+        let opened = try OpenedMetafile.open(data)
+        let prepared = try #require(MetafileRenderer.prepare(opened))
+        let file = try EMFFile.parse(data)
+        let expected = max(file.records.count, file.emfPlusStream().records.count)
+        #expect(prepared.estimatedPlaybackOps == expected)
+    }
 }

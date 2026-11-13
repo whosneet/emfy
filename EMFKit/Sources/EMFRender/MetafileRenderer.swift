@@ -123,15 +123,25 @@ public enum MetafileRenderer {
         /// records the renderer replays once per rendered tile. The tiled viewer
         /// uses it to pick a larger tile size for an expensive document (P2b) —
         /// every tile re-executes the whole record stream, so the total repaint of
-        /// a fit view ≈ tile count × this cost. It is an `Array.count` (O(1)) over
-        /// already-parsed structure — never drawing content. For a dual EMF+ file
-        /// it is the GDI record count: the renderer draws such a file through EMF+,
-        /// but the file also carries the full GDI fallback, so the GDI count still
-        /// tracks overall document complexity.
+        /// a fit view ≈ tile count × this cost.
+        ///
+        /// For a plain EMF it is the GDI record count (an `Array.count`, O(1)). For
+        /// a file that draws through EMF+ the renderer replays the EMF+ record
+        /// stream, not the GDI records ([MS-EMFPLUS] §1.3.1 arbitration), so the
+        /// EMF+ record count is folded in too: an EMF+-**only** file (few GDI
+        /// records, many EMF+ drawing records) then still registers as expensive.
+        /// The cheap presence scan gates the work — only a drawing-content file
+        /// reassembles the stream, and that reassembly is light (≈3 ms even for a
+        /// 25k-record stream). A dual EMF+ file takes the larger of the two counts.
+        /// Structure only — never drawing content.
         public var estimatedPlaybackOps: Int {
             switch content {
-            case .emf(let file): return file.records.count
-            case .wmfProgram(let program): return program.payloads.count
+            case .emf(let file):
+                let gdi = file.records.count
+                guard file.emfPlusPresence() == .drawingContent else { return gdi }
+                return Swift.max(gdi, file.emfPlusStream().records.count)
+            case .wmfProgram(let program):
+                return program.payloads.count
             }
         }
 
