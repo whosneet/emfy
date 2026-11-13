@@ -242,6 +242,16 @@ struct LibraryWindow: View {
         // U1 updater screenshots (first-launch sheet / Settings ▸ Updates), extracted
         // to a modifier to keep this body type-checkable.
         .modifier(UpdatesScreenshotModifier())
+        // A3a screenshot: the MCP-server settings group, hosted offscreen and captured
+        // in-process (DMG build only, where the group exists).
+        .task {
+            if EditorDebugLaunch.settingsScene == "mcp", let base = EditorDebugLaunch.screenshotBase {
+                try? await Task.sleep(for: .milliseconds(900))
+                _ = SettingsSceneScreenshot.captureMCPTab(settings: settings, to: base + "-mcp-settings.png")
+                try? await Task.sleep(for: .milliseconds(200))
+                exit(0)
+            }
+        }
         #endif
         #if DEBUG && os(iOS)
         // E3a screenshot (e): present the New Drawing sheet at launch for a simulator

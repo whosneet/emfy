@@ -127,6 +127,17 @@ final class EmfySettings {
         didSet { defaults.set(useOnDeviceAI, forKey: Keys.useOnDeviceAI) }
     }
 
+    // MARK: MCP server (A3a — GitHub/DMG build only; persisted through `sharedDefaults`)
+
+    /// Whether the local, read-only MCP server (the embedded `emfy-mcp` helper)
+    /// may serve tool calls that read drawings. Default OFF. Persisted through the
+    /// App Group suite so the helper — a separate process — reads the same value.
+    /// Only surfaced in the GitHub/DMG build's Settings; harmless (and unread) in
+    /// the App Store build, which embeds no helper.
+    var mcpServerEnabled: Bool {
+        didSet { sharedDefaults.set(mcpServerEnabled, forKey: AppGroup.mcpServerEnabledKey) }
+    }
+
     // MARK: Library extras
 
     /// Recents ordering. Today recents sort by most-recently-opened, so `.date`.
@@ -257,6 +268,9 @@ final class EmfySettings {
         pngBackground = Self.string(defaults, Keys.pngBackground, default: .white)
         defaultExportFormat = Self.string(defaults, Keys.defaultExportFormat, default: .png)
         useOnDeviceAI = Self.bool(defaults, Keys.useOnDeviceAI, default: true)
+        // The MCP-server enable toggle lives in the shared suite (read by the
+        // helper process). Default OFF, like every new opt-in surface.
+        mcpServerEnabled = Self.bool(sharedDefaults, AppGroup.mcpServerEnabledKey, default: false)
         // Rendering (S1b) reads from `sharedDefaults`. As with every other setting,
         // assignment in `init` doesn't trigger `didSet`, so construction reads without
         // writing back; the decoded table is already bounded.

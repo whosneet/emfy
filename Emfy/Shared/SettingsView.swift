@@ -450,6 +450,9 @@ private struct MacSettingsTabs: View {
             // The Updates group exists only in the GitHub/DMG build (U1).
             UpdatesSettingsTab()
                 .tabItem { Label("Updates", systemImage: "arrow.down.circle") }
+            // The MCP-server group also exists only in the GitHub/DMG build (A3a).
+            MacMCPTab()
+                .tabItem { Label("MCP server", systemImage: "terminal") }
             #endif
             MacViewerTab()
                 .tabItem { Label("Viewer", systemImage: "eye") }
@@ -750,6 +753,54 @@ private struct MacHelpTab: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 }
+
+#if EMFY_DMG
+/// The MCP-server group (GitHub/DMG build only, A3a). A single opt-in toggle,
+/// default OFF, that lets an AI app read drawings through Emfy's local, read-only
+/// MCP server, plus a button that copies the client configuration snippet. The
+/// helper refuses to serve tool calls until this is on.
+private struct MacMCPTab: View {
+    @Environment(EmfySettings.self) private var settings
+    @State private var copied = false
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section {
+                Toggle("Allow AI apps to read drawings through Emfy’s MCP server", isOn: $settings.mcpServerEnabled)
+                LabeledContent("Client configuration") {
+                    Button(copied ? "Copied" : "Copy") { copyConfiguration() }
+                }
+            } header: {
+                Text("MCP server")
+            } footer: {
+                Text(MCPSettingsFooter.explanation)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: macSettingsWidth)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func copyConfiguration() {
+        let path = MCPClientConfiguration.helperPath(appBundleURL: Bundle.main.bundleURL)
+        let json = MCPClientConfiguration.configJSON(helperPath: path)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(json, forType: .string)
+        copied = true
+        AccessibilityAnnouncement.post("Copied")
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
+        }
+    }
+}
+
+/// The MCP group's single read-only explanation sentence.
+private enum MCPSettingsFooter {
+    static let explanation = "Emfy’s MCP server is a local, read-only helper that lets an AI app you configure read a drawing’s text, records and rendered image through Emfy. It never changes files and never uses the network. It stays off until you turn it on."
+}
+#endif
 
 #else
 
@@ -1073,6 +1124,16 @@ enum SettingsSceneScreenshot {
     static func captureGeneralTab(store: RecentsStore, settings: EmfySettings, to path: String) -> Bool {
         capture(view: MacGeneralTab().environment(store).environment(settings).padding(.vertical, 8), to: path)
     }
+
+    #if EMFY_DMG
+    /// A3a screenshot: hosts the GitHub/DMG-only MCP-server settings group offscreen
+    /// and captures it in-process (no Screen Recording permission needed).
+    @MainActor
+    @discardableResult
+    static func captureMCPTab(settings: EmfySettings, to path: String) -> Bool {
+        capture(view: MacMCPTab().environment(settings).padding(.vertical, 8), to: path)
+    }
+    #endif
 
     @MainActor
     private static func capture<V: View>(view: V, to path: String) -> Bool {
