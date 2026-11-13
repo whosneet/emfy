@@ -286,7 +286,7 @@ struct RecordsInspectorPanel: View {
             .accessibilityLabel("Record scrubber")
 
             if !model.supportsPartial {
-                Text(RecordInspectorLogic.emfPlusStepNote)
+                Text(model.stepUnavailableNote)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

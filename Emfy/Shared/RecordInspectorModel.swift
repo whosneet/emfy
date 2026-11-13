@@ -47,9 +47,12 @@ enum RecordInspectorLogic {
     /// itself changes.
     static func summaryCacheKey(contentID: Int) -> Int { contentID }
 
-    /// The note shown when a file cannot be stepped (an EMF+ drawing file, or a
-    /// WMF program with no EMF step-through), so the scrubber is disabled.
+    /// The note shown when an EMF+ drawing file cannot be stepped, so the scrubber
+    /// is disabled.
     static let emfPlusStepNote = "Step-through isn't available for EMF+ drawings; showing the full drawing."
+
+    /// The note shown for a translated WMF program, which has no EMF step-through.
+    static let wmfStepNote = "Step-through isn't available for WMF drawings yet; showing the full drawing."
 }
 
 // MARK: - DC-panel formatting
@@ -350,6 +353,12 @@ final class RecordInspectorModel {
     /// Whether the step-through controls are active (an EMF that supports partial
     /// playback with more than one record).
     var canStep: Bool { supportsPartial && refs.count > 1 }
+
+    /// The note shown when the file cannot be stepped: the EMF+ message for an EMF+
+    /// drawing file, the WMF message for a translated WMF program.
+    var stepUnavailableNote: String {
+        isEMF ? RecordInspectorLogic.emfPlusStepNote : RecordInspectorLogic.wmfStepNote
+    }
 
     /// The DC-panel groups for the current state, or empty before the first step.
     var stateGroups: [RecordStateGroup] {

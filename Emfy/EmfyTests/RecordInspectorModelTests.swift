@@ -88,11 +88,18 @@ import Testing
         let emfPlus = RecordInspectorModel()
         emfPlus.setContent(refs: sampleRefs, drawingIndices: [], supportsPartial: false, isEMF: true, contentID: 2)
         #expect(!emfPlus.canStep)                        // EMF+ drawing: scrubber disabled
+        // The note names EMF+, not WMF, for an EMF+ drawing.
+        #expect(emfPlus.stepUnavailableNote.contains("EMF+"))
+        #expect(!emfPlus.stepUnavailableNote.contains("WMF"))
 
         let wmf = RecordInspectorModel()
         wmf.setContent(refs: sampleRefs, drawingIndices: [], supportsPartial: false, isEMF: false, contentID: 3)
         #expect(!wmf.canStep)
+        // A WMF program gets the WMF message, not the EMF+ one.
+        #expect(wmf.stepUnavailableNote.contains("WMF"))
+        #expect(!wmf.stepUnavailableNote.contains("EMF+"))
         #expect(RecordInspectorLogic.emfPlusStepNote.contains("EMF+"))
+        #expect(RecordInspectorLogic.wmfStepNote.contains("WMF"))
     }
 
     @Test("Navigation clamps to the record range")
