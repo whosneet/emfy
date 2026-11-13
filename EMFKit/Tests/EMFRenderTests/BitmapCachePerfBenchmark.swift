@@ -129,6 +129,128 @@ struct BitmapCachePerfBenchmark {
         }
     }
 
+    // MARK: - P2b adaptive-tile + placeholder report
+
+    /// The P2b before/after: the cost of a fit-to-window repaint and a 400% repaint
+    /// with the historical 512 tile versus the adaptive tile, plus the placeholder
+    /// (time-to-first-visible-content) render and the per-tile memory. Manual, not
+    /// part of the gate.
+    ///
+    ///   EMFY_BENCH_P2B=1 EMFY_BENCH_FILES=/abs/a.emf:/abs/b.emf \
+    ///   EMFY_BENCH_LABELS=WS-B:WS-A \
+    ///     swift test -c release --no-parallel --scratch-path <dir> \
+    ///     --filter adaptiveTileReport
+    @Test("adaptive tile size + placeholder (P2b)")
+    func adaptiveTileReport() throws {
+        guard ProcessInfo.processInfo.environment["EMFY_BENCH_P2B"] == "1" else { return }
+
+        var targets: [(label: String, url: URL)] = [
+            (label: Self.syntheticName, url: TestPaths.corpusFile(Self.syntheticName))
+        ]
+        let env = ProcessInfo.processInfo.environment
+        if let list = env["EMFY_BENCH_FILES"], !list.isEmpty {
+            let paths = list.split(separator: ":").map(String.init)
+            let labels = (env["EMFY_BENCH_LABELS"]?.split(separator: ":").map(String.init)) ?? []
+            for (i, path) in paths.enumerated() {
+                let label = i < labels.count ? labels[i] : URL(fileURLWithPath: path).lastPathComponent
+                targets.append((label: label, url: URL(fileURLWithPath: path)))
+            }
+        }
+
+        print("")
+        print("[p2b] viewport \(Int(Self.viewportPt.width))x\(Int(Self.viewportPt.height)) pt @\(Int(Self.backingScale))x backing")
+        print("[p2b] file | ops | tileSide | per-tile ms | fit: tiles 512->adaptive (ms) | 400%: tiles 512->adaptive (ms) | first-content(placeholder) ms | tileMem MB 512->adaptive | placeholder MB")
+        for target in targets {
+            try runP2B(label: target.label, url: target.url)
+        }
+    }
+
+    private static let viewportPt = CGSize(width: 1512, height: 982)
+    private static let backingScale: CGFloat = 2
+    // Mirror of ZoomMath (the app layer EMFKit cannot import); kept in sync by hand.
+    private static let largeTileOpThreshold = 50_000
+    private static let defaultTileSide = 512
+    private static let largeTileSide = 1024
+    private static let maxPlaceholderLongEdge: CGFloat = 1536
+
+    private func runP2B(label: String, url: URL) throws {
+        guard let data = try? Data(contentsOf: url) else {
+            print("[p2b] \(label): NOT READABLE — skipped"); return
+        }
+        guard let file = try? EMFFile.parse(data) else {
+            print("[p2b] \(label): parse failed — skipped"); return
+        }
+
+        let ops = file.records.count
+        let expensive = ops >= Self.largeTileOpThreshold
+        let tileSide = expensive ? Self.largeTileSide : Self.defaultTileSide
+
+        // Natural device size (header bounds), as the viewer sizes the page.
+        let b = file.header.bounds
+        let devW = Double(max(1, Int(b.right) - Int(b.left) + 1))
+        let devH = Double(max(1, Int(b.bottom) - Int(b.top) + 1))
+        let (pageW, pageH) = EMFRenderer.canvasPixelSize(deviceWidth: devW, deviceHeight: devH, scale: 1)
+        let fullTarget = CGRect(x: 0, y: 0, width: pageW, height: pageH)
+
+        // Per-tile cost (area-independent): render the whole stream clipped to one
+        // tile. Confirm it barely moves between 512 and the adaptive side.
+        let cols512 = max(1, Int(ceil(Double(pageW) / 512)))
+        let perTile512 = tileAverage(file: file, target: fullTarget, tile: 512, cols: cols512, tiles: min(cols512 * max(1, Int(ceil(Double(pageH) / 512))), 4), cache: nil)
+        let colsAd = max(1, Int(ceil(Double(pageW) / Double(tileSide))))
+        let perTileAd = tileAverage(file: file, target: fullTarget, tile: tileSide, cols: colsAd, tiles: min(colsAd * max(1, Int(ceil(Double(pageH) / Double(tileSide)))), 4), cache: nil)
+
+        // Fit: the page scaled to fit the viewport (keeping aspect), rasterised at
+        // the backing scale. Tiles needed = grid over that fit-resolution page.
+        let fitScale = min(
+            (Self.viewportPt.width) / devW,
+            (Self.viewportPt.height) / devH, 1)
+        let fitPxW = devW * fitScale * Double(Self.backingScale)
+        let fitPxH = devH * fitScale * Double(Self.backingScale)
+        let fitTiles512 = tileGridCount(fitPxW, fitPxH, tile: 512)
+        let fitTilesAd = tileGridCount(fitPxW, fitPxH, tile: tileSide)
+
+        // 400%: the viewport shows a 4× crop, so visible tiles depend on the
+        // viewport in device pixels, not the page size.
+        let vpxW = Double(Self.viewportPt.width) * Double(Self.backingScale)
+        let vpxH = Double(Self.viewportPt.height) * Double(Self.backingScale)
+        let tiles400_512 = tileGridCount(vpxW, vpxH, tile: 512)
+        let tiles400Ad = tileGridCount(vpxW, vpxH, tile: tileSide)
+
+        // Time to first visible content: one placeholder render (area-capped).
+        let longSide = max(devW, devH)
+        let phScale: CGFloat = longSide > Double(Self.maxPlaceholderLongEdge)
+            ? Self.maxPlaceholderLongEdge / CGFloat(longSide) : 1
+        let before = Self.physFootprintMB()
+        var placeholderMB = 0.0
+        let placeholderMs = median(iterations: expensive ? 3 : 7) {
+            let r = EMFRenderer.makeImage(file, scale: phScale, background: .white)
+            if let img = r?.0 {
+                placeholderMB = Double(img.bytesPerRow * img.height) / (1024 * 1024)
+            }
+        }
+        _ = before
+
+        // Per-tile backing memory (constant across zoom): tile px² at backing × 4 B.
+        func tileMemMB(_ side: Int) -> Double {
+            let px = Double(side) * Double(Self.backingScale)
+            return px * px * 4 / (1024 * 1024)
+        }
+
+        print(String(
+            format: "[p2b] %@ | %d | %d | %.1f/%.1f | %d->%d (%.0f->%.0f) | %d->%d (%.0f->%.0f) | %.1f | %.1f->%.1f | %.1f",
+            label, ops, tileSide,
+            perTile512, perTileAd,
+            fitTiles512, fitTilesAd, Double(fitTiles512) * perTile512, Double(fitTilesAd) * perTileAd,
+            tiles400_512, tiles400Ad, Double(tiles400_512) * perTile512, Double(tiles400Ad) * perTileAd,
+            placeholderMs, tileMemMB(512), tileMemMB(tileSide), placeholderMB))
+    }
+
+    private func tileGridCount(_ w: Double, _ h: Double, tile: Int) -> Int {
+        let cols = max(1, Int(ceil(w / Double(tile))))
+        let rows = max(1, Int(ceil(h / Double(tile))))
+        return cols * rows
+    }
+
     private func runOne(label: String, url: URL) throws {
         guard let data = try? Data(contentsOf: url) else {
             print("[bench] \(label): NOT READABLE at \(url.path) — skipped")
