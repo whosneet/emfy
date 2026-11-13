@@ -2143,10 +2143,9 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = EmfyiOS/EmfyiOS.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = EmfyiOS/EmfyiOS.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Emfy/Emfy.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				"CODE_SIGN_INJECT_BASE_ENTITLEMENTS[sdk=macosx*]" = NO;
 				CODE_SIGN_STYLE = Automatic;
-				"CODE_SIGN_STYLE[sdk=macosx*]" = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 6Y294JNMJ2;
@@ -2230,10 +2229,9 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = EmfyiOSQuickLook/EmfyiOSQuickLook.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = EmfyiOSQuickLook/EmfyiOSQuickLook.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = EmfyQuickLook/EmfyQuickLook.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				"CODE_SIGN_INJECT_BASE_ENTITLEMENTS[sdk=macosx*]" = NO;
 				CODE_SIGN_STYLE = Automatic;
-				"CODE_SIGN_STYLE[sdk=macosx*]" = Manual;
 				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 6Y294JNMJ2;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -2317,10 +2315,9 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = EmfyiOSThumbnail/EmfyiOSThumbnail.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = EmfyiOSThumbnail/EmfyiOSThumbnail.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = EmfyThumbnail/EmfyThumbnail.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				"CODE_SIGN_INJECT_BASE_ENTITLEMENTS[sdk=macosx*]" = NO;
 				CODE_SIGN_STYLE = Automatic;
-				"CODE_SIGN_STYLE[sdk=macosx*]" = Manual;
 				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 6Y294JNMJ2;
 				ENABLE_HARDENED_RUNTIME = YES;
