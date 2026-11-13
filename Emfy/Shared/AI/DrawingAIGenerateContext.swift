@@ -37,11 +37,30 @@ extension DrawingAIPrompt {
     over it. Give every shape a fill or a stroke so it is visible. Use at most 300 elements, \
     and lay elements out so they do not all overlap.
 
+    Keep EVERY shape fully inside the page: x and y are between 0 and 1, and x + w must be \
+    1 or less and y + h must be 1 or less. A typical box is about 0.2 wide and 0.15 tall — \
+    do NOT make a box wider than the space it has (three boxes in a row each need w of about \
+    0.2, placed at x ≈ 0.06, 0.4 and 0.72, not 0.6).
+
     \(DrawingColorNames.promptGuidance())
 
-    The reply MUST be strict, valid JSON: EVERY key and EVERY string value is wrapped in \
-    double quotes. Emit an empty elements array only if the description cannot be drawn with \
-    these shapes.
+    The reply MUST be strict, valid JSON: the top level is EXACTLY \
+    {"page":"…","coords":"fraction","elements":[ … ]}. EVERY key and EVERY string value is \
+    wrapped in double quotes, and a number is never followed by a quote. "coords" is always \
+    the plain string "fraction". Emit an empty elements array only if the description cannot \
+    be drawn with these shapes.
+
+    Here is one complete, correctly-formed example for "a flowchart with three boxes \
+    connected by arrows, labelled Start, Process, End":
+    {"page":"a4-landscape","coords":"fraction","elements":[\
+    {"op":"roundedRectangle","x":0.06,"y":0.4,"w":0.22,"h":0.18,"cornerRadius":0.02,"fill":"light blue","stroke":"dark blue","strokeWidth":2},\
+    {"op":"roundedRectangle","x":0.39,"y":0.4,"w":0.22,"h":0.18,"cornerRadius":0.02,"fill":"light blue","stroke":"dark blue","strokeWidth":2},\
+    {"op":"roundedRectangle","x":0.72,"y":0.4,"w":0.22,"h":0.18,"cornerRadius":0.02,"fill":"light blue","stroke":"dark blue","strokeWidth":2},\
+    {"op":"arrow","x1":0.28,"y1":0.49,"x2":0.39,"y2":0.49,"stroke":"black","strokeWidth":2},\
+    {"op":"arrow","x1":0.61,"y1":0.49,"x2":0.72,"y2":0.49,"stroke":"black","strokeWidth":2},\
+    {"op":"text","x":0.1,"y":0.46,"text":"Start","color":"dark blue","fontSize":16},\
+    {"op":"text","x":0.43,"y":0.46,"text":"Process","color":"dark blue","fontSize":16},\
+    {"op":"text","x":0.78,"y":0.46,"text":"End","color":"dark blue","fontSize":16}]}
     """
 
     /// The system instructions for a generation: the role and the strict output contract.
