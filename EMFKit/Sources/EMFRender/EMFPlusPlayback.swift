@@ -195,6 +195,7 @@ struct EMFPlusPlayback {
             // are suppressed — GetDC content replays as its own GDI element.
             if gdiWindowOpen {
                 observer?.currentRecordIndex = index
+                dc.currentRecordIndex = index
                 if drawFilter == nil {
                     EMFRenderer.playGDIRecord(file.payload(of: record), into: context, dc: &dc, base: base, log: &log)
                 }

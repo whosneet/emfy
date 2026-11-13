@@ -51,11 +51,13 @@ public enum EMFRenderer {
         target: CGRect,
         options: RenderOptions = .default,
         observer: RenderObserver? = nil,
-        emfPlusDrawFilter: Set<Int>? = nil
+        emfPlusDrawFilter: Set<Int>? = nil,
+        imageCache: DIBImageCache? = nil
     ) -> EMFRenderLog {
         var log = EMFRenderLog()
         let base = deviceToTarget(header: file.header, target: target, log: &log)
         var dc = DeviceContext(header: file.header, fontSubstitutions: options.fontSubstitutions)
+        dc.imageCache = imageCache
 
         context.saveGState()
         defer { context.restoreGState() }
@@ -111,6 +113,7 @@ public enum EMFRenderer {
         // map an op back to its source record (0 = header).
         for index in file.records.indices.dropFirst() {
             observer?.currentRecordIndex = index
+            dc.currentRecordIndex = index
             playGDIRecord(file.payload(of: file.records[index]), into: context, dc: &dc, base: base, log: &log)
         }
         observer?.finalize()
@@ -1357,11 +1360,16 @@ public enum EMFRenderer {
         _ op: ResolvedDrawOp,
         into context: CGContext,
         deviceToTarget base: CGAffineTransform,
-        options: RenderOptions = .default
+        options: RenderOptions = .default,
+        imageCache: DIBImageCache? = nil
     ) {
         var log = EMFRenderLog()
         var dc = DeviceContext(header: op.replayHeader, fontSubstitutions: options.fontSubstitutions)
         dc.state = op.replayState
+        dc.imageCache = imageCache
+        // Key the cache by this op's source record so repeated drags of the same
+        // imported image (the editor replays the op every frame) decode once.
+        dc.currentRecordIndex = op.recordIndices.first ?? 0
 
         if let payload = op.replayPayload {
             playGDIRecord(payload, into: context, dc: &dc, base: base, log: &log)

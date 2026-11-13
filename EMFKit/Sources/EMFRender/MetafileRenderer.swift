@@ -266,13 +266,14 @@ public enum MetafileRenderer {
         _ prepared: Prepared,
         into context: CGContext,
         target: CGRect,
-        options: RenderOptions = .default
+        options: RenderOptions = .default,
+        imageCache: DIBImageCache? = nil
     ) -> EMFRenderLog {
         switch prepared.content {
         case .emf(let file):
-            return EMFRenderer.render(file, into: context, target: target, options: options)
+            return EMFRenderer.render(file, into: context, target: target, options: options, imageCache: imageCache)
         case .wmfProgram(let program):
-            return renderProgram(program, into: context, target: target, options: options)
+            return renderProgram(program, into: context, target: target, options: options, imageCache: imageCache)
         }
     }
 
@@ -555,13 +556,15 @@ public enum MetafileRenderer {
         into context: CGContext,
         target: CGRect,
         options: RenderOptions = .default,
-        observer: RenderObserver? = nil
+        observer: RenderObserver? = nil,
+        imageCache: DIBImageCache? = nil
     ) -> EMFRenderLog {
         var log = EMFRenderLog()
         let header = syntheticHeader(width: program.canvasWidth, height: program.canvasHeight)
         let base = EMFRenderer.deviceToTarget(header: header, target: target, log: &log)
         var dc = DeviceContext(header: header, fontSubstitutions: options.fontSubstitutions)
         dc.observer = observer
+        dc.imageCache = imageCache
 
         context.saveGState()
         defer { context.restoreGState() }
@@ -577,6 +580,7 @@ public enum MetafileRenderer {
         // playback unit (E1 provenance).
         for index in program.payloads.indices {
             observer?.currentRecordIndex = index
+            dc.currentRecordIndex = index
             EMFRenderer.playGDIRecord(program.payloads[index], into: context, dc: &dc, base: base, log: &log)
         }
         observer?.finalize()

@@ -96,6 +96,21 @@ struct DeviceContext {
     /// resolved operation and path brackets report their construction records.
     var observer: RenderObserver?
 
+    /// The index of the record currently being played, into the source record
+    /// array (`file.records` for EMF, `program.payloads` for WMF). Set by every
+    /// playback loop before dispatching a record. Used as the stable per-document
+    /// key base for the DIB image cache (P2); 0 (EMR_HEADER, never a draw) when a
+    /// draw runs outside a loop (e.g. a single-op replay). Independent of the
+    /// optional `observer`, which is attached only on an import.
+    var currentRecordIndex: Int = 0
+
+    /// Optional decoded-DIB cache (P2 performance). Nil on every render but a
+    /// tiled viewer's, so the snapshot/Quick Look/export paths decode exactly as
+    /// before. When set, `BitmapDrawer` serves a repeated `EMR_STRETCHDIBITS` /
+    /// `EMR_BITBLT` / `EMR_STRETCHBLT` / `EMR_SETDIBITSTODEVICE` decode from here
+    /// instead of re-decoding it per tile. The pixels are identical either way.
+    var imageCache: DIBImageCache?
+
     /// Path-bracket construction state ([MS-EMF] §2.3.10). This is DC-level,
     /// NOT part of the saveable `State`: a bracket is a transient
     /// record-recording mode bounded by EMR_BEGINPATH … EMR_ENDPATH, orthogonal

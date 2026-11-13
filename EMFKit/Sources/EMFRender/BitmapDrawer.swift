@@ -61,6 +61,7 @@ enum BitmapDrawer {
             ),
             nativeW: Int(dib.width), nativeH: abs(Int(dib.height)),
             destTargetRect: footprint(origin: payload.dest, size: payload.destSize, full: full),
+            dc: dc,
             log: &log
         ) else { return }
 
@@ -115,6 +116,7 @@ enum BitmapDrawer {
             ),
             nativeW: Int(dib.width), nativeH: abs(Int(dib.height)),
             destTargetRect: footprint(origin: payload.dest, size: payload.destSize, full: full),
+            dc: dc,
             log: &log
         ) else { return }
 
@@ -226,6 +228,7 @@ enum BitmapDrawer {
             srcRect: BitmapDecoder.SourceRect(x: 0, y: cropY, width: imageWidth, height: scanCount),
             nativeW: imageWidth, nativeH: scanCount,
             destTargetRect: footprint(origin: payload.dest, size: windowSize, full: full),
+            dc: dc,
             log: &log
         ) else { return }
 
@@ -253,18 +256,60 @@ enum BitmapDrawer {
         nativeW: Int,
         nativeH: Int,
         destTargetRect: CGRect,
+        dc: DeviceContext,
         log: inout EMFRenderLog
     ) -> CGImage? {
         let budget = BitmapDecoder.decodeBudget(destTargetRect: destTargetRect, nativeW: nativeW, nativeH: nativeH)
-        let (image, reason, downsampled) = BitmapDecoder.decode(dib, srcRect: srcRect, budget: budget)
-        guard let image else {
-            log.noteUnsupportedDIB(reason: reason)
-            return nil
+
+        // No cache (every snapshot / Quick Look / export render): the unchanged
+        // decode path, byte-identical to before P2.
+        guard let cache = dc.imageCache else {
+            let (image, reason, downsampled) = BitmapDecoder.decode(dib, srcRect: srcRect, budget: budget)
+            guard let image else {
+                log.noteUnsupportedDIB(reason: reason)
+                return nil
+            }
+            if downsampled {
+                log.noteDIBDownsampled(nativePixels: nativeW * nativeH, decodedPixels: image.width * image.height)
+            }
+            return image
         }
-        if downsampled {
-            log.noteDIBDownsampled(nativePixels: nativeW * nativeH, decodedPixels: image.width * image.height)
+
+        // Cached path (a tiled viewer): decode once per (record, crop, budget)
+        // and reuse across tiles. The closure runs only on a miss (under the
+        // cache lock), so an unsupported DIB logs once there; the downsample
+        // note is re-emitted per draw from the stored flag so the log matches an
+        // uncached render.
+        let key = DIBImageCache.Key(
+            recordIndex: dc.currentRecordIndex,
+            srcX: srcRect.x, srcY: srcRect.y, srcW: srcRect.width, srcH: srcRect.height,
+            budgetW: budget.w, budgetH: budget.h,
+            dibWidth: dib.width, dibHeight: dib.height, bitCount: dib.bitCount, byteCount: dibByteCount(dib)
+        )
+        let decoded = cache.decodedImage(forKey: key) { () -> DIBImageCache.Decoded? in
+            let (image, reason, downsampled) = BitmapDecoder.decode(dib, srcRect: srcRect, budget: budget)
+            guard let image else {
+                log.noteUnsupportedDIB(reason: reason)
+                return nil
+            }
+            return DIBImageCache.Decoded(
+                image: image, downsampled: downsampled,
+                nativePixels: nativeW * nativeH, decodedPixels: image.width * image.height
+            )
         }
-        return image
+        guard let decoded else { return nil }
+        if decoded.downsampled {
+            log.noteDIBDownsampled(nativePixels: decoded.nativePixels, decodedPixels: decoded.decodedPixels)
+        }
+        return decoded.image
+    }
+
+    /// The decoded-pixel byte count of a DIB payload, for the cache key's
+    /// defence-in-depth guard (0 for an unsupported DIB — its record index and
+    /// dimensions already distinguish it).
+    private static func dibByteCount(_ dib: DIB) -> Int {
+        if case .pixels(let bytes, _, _) = dib.content { return bytes.count }
+        return 0
     }
 
     /// The destination footprint in TARGET space: the logical dest box
