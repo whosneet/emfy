@@ -50,7 +50,9 @@ public struct PlanColor: Sendable, Equatable, Codable {
         }
     }
 
-    static func parse(_ raw: String) -> SceneColor? {
+    /// Parses a hex colour string (`#RGB`, `#RRGGBB`, `#RRGGBBAA`, with or without `#`),
+    /// or `nil`. Public so the app's brand-colour entry can validate as the user types.
+    public static func parse(_ raw: String) -> SceneColor? {
         var s = raw.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("#") { s.removeFirst() }
         guard s.allSatisfy({ $0.isHexDigit }) else { return nil }
