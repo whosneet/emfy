@@ -103,6 +103,8 @@
 		F1C000000000000000000001 /* PrintLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000001 /* PrintLayout.swift */; };
 		F1B000000000000000000002 /* DrawingClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000002 /* DrawingClipboard.swift */; };
 		A3B000000000000000010002 /* AISharePackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000010001 /* AISharePackage.swift */; };
+		A3B000000000000000030002 /* AISharePackageProducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000030001 /* AISharePackageProducer.swift */; };
+		A3B000000000000000040002 /* AIShareConfirmSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000040001 /* AIShareConfirmSheet.swift */; };
 		A3B000000000000000010003 /* AISharePackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000010001 /* AISharePackage.swift */; };
 		A3B000000000000000020002 /* AISharePackageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000020001 /* AISharePackageTests.swift */; };
 		F3B000000000000000000001 /* DrawingTextExtraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000001 /* DrawingTextExtraction.swift */; };
@@ -529,6 +531,8 @@
 		F1A000000000000000000001 /* PrintLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintLayout.swift; sourceTree = "<group>"; };
 		F1A000000000000000000002 /* DrawingClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingClipboard.swift; sourceTree = "<group>"; };
 		A3B000000000000000010001 /* AISharePackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISharePackage.swift; sourceTree = "<group>"; };
+		A3B000000000000000030001 /* AISharePackageProducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISharePackageProducer.swift; sourceTree = "<group>"; };
+		A3B000000000000000040001 /* AIShareConfirmSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIShareConfirmSheet.swift; sourceTree = "<group>"; };
 		F3A000000000000000000001 /* DrawingTextExtraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextExtraction.swift; sourceTree = "<group>"; };
 		F3A000000000000000000003 /* DrawingTextFind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextFind.swift; sourceTree = "<group>"; };
 		F3A000000000000000000005 /* DrawingSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSpotlight.swift; sourceTree = "<group>"; };
@@ -902,6 +906,8 @@
 				F1A000000000000000000001 /* PrintLayout.swift */,
 				F1A000000000000000000002 /* DrawingClipboard.swift */,
 				A3B000000000000000010001 /* AISharePackage.swift */,
+				A3B000000000000000030001 /* AISharePackageProducer.swift */,
+				A3B000000000000000040001 /* AIShareConfirmSheet.swift */,
 				F3A000000000000000000001 /* DrawingTextExtraction.swift */,
 				F3A000000000000000000003 /* DrawingTextFind.swift */,
 				F3A000000000000000000005 /* DrawingSpotlight.swift */,
@@ -1508,6 +1514,8 @@
 				F1B000000000000000000001 /* PrintLayout.swift in Sources */,
 				F1B000000000000000000002 /* DrawingClipboard.swift in Sources */,
 				A3B000000000000000010002 /* AISharePackage.swift in Sources */,
+				A3B000000000000000030002 /* AISharePackageProducer.swift in Sources */,
+				A3B000000000000000040002 /* AIShareConfirmSheet.swift in Sources */,
 				F3B000000000000000000001 /* DrawingTextExtraction.swift in Sources */,
 				F3B000000000000000000002 /* DrawingTextFind.swift in Sources */,
 				F3B000000000000000000003 /* DrawingSpotlight.swift in Sources */,

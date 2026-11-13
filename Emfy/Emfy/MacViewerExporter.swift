@@ -1,4 +1,5 @@
 import AppKit
+import EMFEdit
 import EMFRender
 import SwiftUI
 
@@ -38,14 +39,20 @@ final class MacViewerExporter {
 
     /// Non-nil presents the share picker (consumed by `MacSharePresenter`).
     var sharePayload: MacSharePayload?
+    /// Non-nil presents the "Send to AI…" share picker (consumed by `MacAISharePresenter`).
+    var aiSharePayload: MacAISharePayload?
 
     @ObservationIgnored private let runner = ExportTaskRunner()
     /// The in-flight "Share File" resolve/stage task, so a repeat tap cancels it.
     @ObservationIgnored private var shareOriginalTask: Task<Void, Never>?
     /// The in-flight SVG resolve+import+serialise task, so a repeat tap cancels it.
     @ObservationIgnored private var svgTask: Task<Void, Never>?
+    /// The in-flight "Send to AI…" resolve/render task, so a repeat tap cancels it.
+    @ObservationIgnored private var aiShareTask: Task<Void, Never>?
     /// The temp directory of the file currently staged for sharing.
     @ObservationIgnored private var tempCleanupURL: URL?
+    /// The temp directory of the original file staged for a Send-to-AI opt-in.
+    @ObservationIgnored private var aiTempCleanupURL: URL?
 
     // MARK: - Export to file
 
@@ -182,11 +189,82 @@ final class MacViewerExporter {
         )
     }
 
+    // MARK: - Send to AI… (A3b)
+
+    /// Packages the drawing for an AI app the user already has — a 2× PNG and a plain-text
+    /// summary (file name, format, page size, record count, Copy All Text) — and hands them
+    /// to `NSSharingServicePicker`. Emfy sends nothing over the network. `includeOriginal`
+    /// (default off, set in the pre-sheet) also attaches the original file. Renders off-main
+    /// through `AISharePackageProducer`; a spinner shows past ~0.3 s.
+    func sendToAI(
+        entry: RecentEntry,
+        store: RecentsStore,
+        source: OutputSource,
+        prepared: MetafileRenderer.Prepared,
+        editedScene: EMFEdit.Scene?,
+        allText: String,
+        recordCount: Int,
+        background: RenderBackground,
+        options: RenderOptions,
+        includeOriginal: Bool
+    ) {
+        runner.cancel()
+        aiShareTask?.cancel()
+        isRendering = false
+        let fileName = entry.displayName
+        aiShareTask = Task { @MainActor in
+            let spinner = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.3))
+                if !Task.isCancelled { self.isRendering = true }
+            }
+            defer {
+                spinner.cancel()
+                self.isRendering = false
+            }
+            guard let data = try? await store.resolveData(for: entry) else {
+                if !Task.isCancelled { self.errorMessage = AISharePackage.shareFailure }
+                return
+            }
+            if Task.isCancelled { return }
+            let package = await Task.detached(priority: .userInitiated) {
+                AISharePackageProducer.make(
+                    resolvedData: data, fileName: fileName, allText: allText, recordCount: recordCount,
+                    source: source, prepared: prepared, editedScene: editedScene,
+                    background: background, options: options, includeOriginal: includeOriginal)
+            }.value
+            if Task.isCancelled { return }
+            guard let pngData = package.pngData, let image = NSImage(data: pngData) else {
+                self.errorMessage = AISharePackage.shareFailure
+                return
+            }
+            self.presentAIShare(image: image, text: package.summary, originalData: package.originalData, fileName: fileName)
+        }
+    }
+
+    private func presentAIShare(image: NSImage, text: String, originalData: Data?, fileName: String) {
+        // Reclaim a prior opt-in's temp directory before staging a new one.
+        cleanupAITemp()
+        var fileURL: URL?
+        if let originalData, let url = try? MetafileExport.writeTemporary(originalData, fileName: fileName) {
+            aiTempCleanupURL = url.deletingLastPathComponent()
+            fileURL = url
+        }
+        aiSharePayload = MacAISharePayload(image: image, text: text, fileURL: fileURL)
+    }
+
+    private func cleanupAITemp() {
+        if let directory = aiTempCleanupURL {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        aiTempCleanupURL = nil
+    }
+
     /// Cancels any in-flight render (the viewer disappeared).
     func cancelOngoing() {
         runner.cancel()
         shareOriginalTask?.cancel()
         svgTask?.cancel()
+        aiShareTask?.cancel()
         isRendering = false
     }
 
@@ -236,6 +314,45 @@ struct MacSharePresenter: NSViewRepresentable {
         let picker = NSSharingServicePicker(items: [payload.url])
         // Anchor to this small view's bounds; it sits at the toolbar's trailing
         // edge, so the picker drops from under the Share button.
+        picker.show(relativeTo: nsView.bounds, of: nsView, preferredEdge: .minY)
+    }
+
+    final class Coordinator {
+        var presentedID: UUID?
+    }
+}
+
+/// What drives the Send-to-AI share picker: the rendered PNG as an `NSImage`, the
+/// summary as an `NSString`, and — only when the user opted in — the staged original
+/// file as a URL. A fresh `id` each time so a repeat share re-presents.
+struct MacAISharePayload: Identifiable {
+    let id = UUID()
+    let image: NSImage
+    let text: String
+    let fileURL: URL?
+
+    /// The items handed to `NSSharingServicePicker`, in the order a target reads them.
+    var items: [Any] {
+        var items: [Any] = [image, text as NSString]
+        if let fileURL { items.append(fileURL) }
+        return items
+    }
+}
+
+/// Presents `NSSharingServicePicker` for the Send-to-AI payload when it appears,
+/// anchored near the toolbar's Share button — the same pattern as `MacSharePresenter`,
+/// but carrying the image + text (+ optional file) items rather than a single file URL.
+struct MacAISharePresenter: NSViewRepresentable {
+    let payload: MacAISharePayload?
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let payload, context.coordinator.presentedID != payload.id else { return }
+        context.coordinator.presentedID = payload.id
+        let picker = NSSharingServicePicker(items: payload.items)
         picker.show(relativeTo: nsView.bounds, of: nsView, preferredEdge: .minY)
     }
 

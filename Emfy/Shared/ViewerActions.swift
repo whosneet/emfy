@@ -28,6 +28,11 @@ struct ViewerActions {
     var sharePDF: () -> Void = {}
     var shareSVG: () -> Void = {}
 
+    // Send to AI… (A3b): packages a PNG + text summary for the system share sheet.
+    // `nil` disables the menu item (no document shown). iOS reaches it from the
+    // viewer's Share menu instead, so this stays `nil` there.
+    var sendToAI: (() -> Void)? = nil
+
     /// Copies the current file's privacy-safe diagnostic report to the clipboard
     /// (S1a-6), surfaced in the Mac Help menu. `nil` when no file is shown, so the
     /// menu item reads as disabled.

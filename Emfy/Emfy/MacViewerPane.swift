@@ -43,6 +43,9 @@ struct MacViewerPane: View {
     @State private var showReloadDiscardConfirm = false
     // Translate (F3d): the system Translate overlay presentation.
     @State private var showTranslation = false
+    // Send to AI… (A3b): the pre-sheet and its "Include the original file" toggle (off).
+    @State private var showAIShareConfirm = false
+    @State private var aiShareIncludeOriginal = false
     #if DEBUG
     @State private var debugLaunchRan = false
     #endif
@@ -1415,6 +1418,16 @@ struct MacViewerPane: View {
             } label: {
                 Label("Share as SVG", systemImage: "doc.text")
             }
+            Divider()
+            // Send to AI… (A3b): packages a PNG + a text summary for an AI app the user
+            // already has, through the system share sheet. Emfy sends nothing itself.
+            Button {
+                aiShareIncludeOriginal = false
+                showAIShareConfirm = true
+            } label: {
+                Label(AISharePackage.menuTitle, systemImage: "sparkles")
+            }
+            .accessibilityIdentifier("sendToAI")
         } label: {
             Label("Share", systemImage: "square.and.arrow.up")
         }
@@ -1425,6 +1438,18 @@ struct MacViewerPane: View {
         .background {
             MacSharePresenter(payload: exporter.sharePayload)
                 .allowsHitTesting(false)
+        }
+        .background {
+            MacAISharePresenter(payload: exporter.aiSharePayload)
+                .allowsHitTesting(false)
+        }
+        .sheet(isPresented: $showAIShareConfirm) {
+            AIShareConfirmSheet(includeOriginal: $aiShareIncludeOriginal) {
+                showAIShareConfirm = false
+                sendToAI(includeOriginal: aiShareIncludeOriginal)
+            } onCancel: {
+                showAIShareConfirm = false
+            }
         }
         .disabled(loaded == nil)
         .help("Share")
@@ -1481,6 +1506,23 @@ struct MacViewerPane: View {
     private func shareOriginal() {
         guard let entry else { return }
         exporter.shareOriginal(entry: entry, store: store)
+    }
+
+    /// Send to AI… (A3b): packages the whole drawing (the edited scene when diverged,
+    /// else the original) as a PNG + text summary and hands it to the system share sheet.
+    /// `includeOriginal` attaches the original file too (the pre-sheet toggle, default off).
+    private func sendToAI(includeOriginal: Bool) {
+        guard let loaded, let entry else { return }
+        let opts = ExportScale.pngOptions(for: loaded.prepared.naturalSize, settings: settings)
+        let source = AISharePackage.outputSource(
+            isEditing: session.editing == .editing, hasDiverged: session.hasDivergedFromOpened)
+        let recordCount = loaded.prepared.recordKinds.reduce(0) { $0 + $1.count }
+        exporter.sendToAI(
+            entry: entry, store: store, source: source,
+            prepared: loaded.prepared, editedScene: session.editedScene,
+            allText: findModel.copyAllText(), recordCount: recordCount,
+            background: opts.background, options: settings.renderOptions,
+            includeOriginal: includeOriginal)
     }
 
     /// File ▸ Print… (⌘P), F1. Prints the whole drawing as vector — the edited scene
@@ -1659,6 +1701,7 @@ struct MacViewerPane: View {
             sharePNG: { share(.png) },
             sharePDF: { share(.pdf) },
             shareSVG: { shareSVG() },
+            sendToAI: loaded != nil ? { aiShareIncludeOriginal = false; showAIShareConfirm = true } : nil,
             copyDiagnosticReport: loaded != nil ? { copyDiagnosticReport() } : nil,
             printDocument: loaded != nil ? { printDocument() } : nil,
             presentFind: loaded != nil ? { presentFind() } : nil,

@@ -28,6 +28,20 @@ enum AISharePackage {
     /// share target expects. Past it the text is truncated with a note.
     static let maxTextCharacters = 20_000
 
+    // MARK: Shared UI strings
+
+    /// The share-menu item title on both platforms.
+    static let menuTitle = "Send to AI…"
+    /// The pre-sheet / confirm-sheet toggle label.
+    static let includeOriginalLabel = "Include the original file"
+    /// The confirm-sheet heading.
+    static let sheetTitle = "Send to AI"
+    /// The explanatory line shown on the confirm sheet (Emfy sends nothing itself).
+    static let sheetFootnote =
+        "Emfy prepares a picture and a text summary, then hands them to the app you choose. Emfy itself sends nothing."
+    /// The failure alert/toast when the package can't be prepared.
+    static let shareFailure = "Emfy couldn’t prepare this drawing to send."
+
     // MARK: Render scale
 
     /// The effective render scale for `naturalSize`: 2×, reduced so the long side never

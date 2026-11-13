@@ -93,6 +93,9 @@ struct FileMenuCommands: Commands {
                 Button("Share as PNG") { actions?.sharePNG() }
                 Button("Share as PDF") { actions?.sharePDF() }
                 Button("Share as SVG") { actions?.shareSVG() }
+                Divider()
+                Button(AISharePackage.menuTitle) { actions?.sendToAI?() }
+                    .disabled(actions?.sendToAI == nil)
             }
             .disabled(noDocument)
         }
