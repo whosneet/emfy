@@ -148,6 +148,28 @@ private func standardScene() -> Scene {
 @Test func repairLeavesWellFormedJSONUnchanged() {
     let good = ##"{"color":"#1F3A93","op":"recolorFill"}"##
     #expect(EditPlan.repairKeyQuoting(good) == good)
+    #expect(EditPlan.repairUnquotedKeys(good) == good)
+}
+
+@Test func decodeRepairsFullyUnquotedNumericKeys() throws {
+    // The model sometimes drops BOTH quotes on a numeric key after the first field
+    // (seen live on-device: `dx:320`, `points:22`). The conservative repair re-quotes
+    // known keys that precede a JSON value start.
+    let move = ##"{"operations":[{"op":"move","ids":[0],dx:320,dy:0}]}"##
+    #expect(try EditPlan.decode(fromJSON: move)
+            == EditPlan(operations: [.move(ids: [0], dx: 320, dy: 0)]))
+    let size = ##"{"operations":[{"op":"setFontSize","id":0,points:22}]}"##
+    #expect(try EditPlan.decode(fromJSON: size)
+            == EditPlan(operations: [.setFontSize(id: 0, points: 22)]))
+}
+
+@Test func unquotedRepairLeavesTextValuesIntact() throws {
+    // A key word appearing inside a text VALUE (after a comma) must NOT be re-quoted:
+    // the lookahead requires a JSON value start, and "the id: five" begins with a space
+    // then a letter, so it is left alone.
+    let json = ##"{"operations":[{"op":"setText","id":1,"text":"the id: five, dx: east"}]}"##
+    let plan = try EditPlan.decode(fromJSON: json)
+    #expect(plan == EditPlan(operations: [.setText(id: 1, text: "the id: five, dx: east")]))
 }
 
 @Test func decodeStillRejectsUnknownOpAfterRepair() {

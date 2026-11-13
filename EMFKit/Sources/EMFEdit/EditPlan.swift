@@ -299,7 +299,9 @@ extension EditPlan {
     public static func decode(fromJSON json: String) throws -> EditPlan {
         let slice = extractJSONObject(json) ?? json
         if let plan = try? decodeStrict(slice) { return plan }
-        return try decodeStrict(repairKeyQuoting(slice))
+        let reQuoted = repairKeyQuoting(slice)
+        if let plan = try? decodeStrict(reQuoted) { return plan }
+        return try decodeStrict(repairUnquotedKeys(reQuoted))
     }
 
     private static func decodeStrict(_ json: String) throws -> EditPlan {
@@ -321,6 +323,21 @@ extension EditPlan {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return json }
         let range = NSRange(json.startIndex ..< json.endIndex, in: json)
         return regex.stringByReplacingMatches(in: json, range: range, withTemplate: "$1\"$2\"$3:")
+    }
+
+    /// Re-quotes a known key that follows `{`/`,` with NO quotes at all and is immediately
+    /// followed by a JSON value start (`,dx:320` → `,"dx":320`). A small on-device model
+    /// sometimes drops both quotes on a numeric key after the first field. The lookahead
+    /// `["\[{\-0-9]` requires the value be a string/array/object/number start, so a key
+    /// word appearing inside prose text (e.g. `,id: five`) is NOT matched and a text value
+    /// is never corrupted. Bounded to the known key set; never loosens the validator (the
+    /// repaired text still decodes strictly, and the plan is validated unchanged). §8: no
+    /// force-unwrap; safe on untrusted input.
+    static func repairUnquotedKeys(_ json: String) -> String {
+        let pattern = "([,{][\\s]*)(\(knownKeys))([\\s]*:[\\s]*)(?=[\"\\[{\\-0-9])"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return json }
+        let range = NSRange(json.startIndex ..< json.endIndex, in: json)
+        return regex.stringByReplacingMatches(in: json, range: range, withTemplate: "$1\"$2\"$3")
     }
 
     /// The outermost `{ … }` object in `text`, so a fenced or prose-wrapped reply still
