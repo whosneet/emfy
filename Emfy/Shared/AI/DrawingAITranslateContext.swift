@@ -42,11 +42,13 @@ enum DrawingAITranslateContext {
         return out
     }
 
-    /// The fenced, data-only block for ONE batch: each run as `#<id>: "<text>"`.
+    /// The fenced, data-only block for ONE batch: each run as `#<id>: <text>`. The source
+    /// text is NOT wrapped in quotes, so the model doesn't echo stray quotation marks into
+    /// its JSON string value.
     static func batchBlock(_ runs: [Run]) -> String {
-        var lines = ["There are \(runs.count) items to translate."]
+        var lines = ["There are \(runs.count) items to translate. Return all \(runs.count)."]
         for run in runs {
-            lines.append("#\(run.id): \"\(run.text)\"")
+            lines.append("#\(run.id): \(run.text)")
         }
         return lines.joined(separator: "\n")
     }
@@ -60,12 +62,19 @@ extension DrawingAIPrompt {
         """
         Reply with ONLY one JSON object, no prose and no code fence, in exactly this shape:
         {"translations":[{"id":<int>,"text":"<translated text>"}]}
-        Return EXACTLY one entry for EVERY item, reusing the same id shown for that item. \
-        Translate ONLY the quoted text of each item into \(targetLanguage). Keep numbers, \
-        proper names, URLs and punctuation; do not add notes, comments or explanations, and \
-        do not merge or drop items. If an item is already in \(targetLanguage), repeat it \
-        unchanged. The reply MUST be strict, valid JSON: every key and every string value is \
-        wrapped in double quotes.
+        Return EXACTLY one entry for EVERY item — if there are 3 items, your array has 3 \
+        entries — reusing the same id shown after each "#". Never merge or drop items. \
+        Translate ONLY the text that follows each "#<id>:" marker into \(targetLanguage). Keep \
+        numbers, proper names, URLs and punctuation. Do NOT wrap the translated text in extra \
+        quotation marks, and do not add notes, comments or explanations. If an item is already \
+        in \(targetLanguage), repeat it unchanged. The reply MUST be strict, valid JSON: every \
+        key and every string value is wrapped in double quotes.
+        Example (three items, translating to French):
+        items:
+        #5: Hello
+        #6: Thank you
+        #7: Goodbye
+        reply: {"translations":[{"id":5,"text":"Bonjour"},{"id":6,"text":"Merci"},{"id":7,"text":"Au revoir"}]}
         """
     }
 
