@@ -705,11 +705,12 @@ public enum EMFRecordPayload: Sendable, Equatable {
 
     // MARK: WMF-sourced primitives ([MS-WMF] §2.3.3, §2.3.5)
     //
-    // These payloads have EMF record analogues (EMR_PIE 47, EMR_CHORD 46,
-    // EMR_SETPIXELV 15, EMR_EXCLUDECLIPRECT 29) that the EMF decoder does not
-    // yet produce, so in v3 they are only ever emitted by the WMFParse
-    // translator ([MS-WMF] §2.3.3.13/.2/.19, §2.3.5.2). They play through the
-    // same `DeviceContext`/`draw` path as every other geometry/clip record.
+    // These payloads are shared between the WMFParse translator ([MS-WMF]
+    // §2.3.3.13/.2/.19/.12, §2.3.5.2) and the EMF decoder: EMR_SETPIXELV (15,
+    // §2.3.5.36) decodes to `.setPixel` and EMR_EXCLUDECLIPRECT (29, §2.3.2.1)
+    // to `.excludeClipRect`, so an EMF and a WMF file reach the identical
+    // `DeviceContext`/`draw` path. `.patBlt` remains WMF-only (no single EMF
+    // record). EMR_PIE (47) and EMR_CHORD (46) have their own EMF cases above.
 
     /// A filled pie wedge ([MS-WMF] §2.3.3.13 META_PIE): the arc of `box`'s
     /// ellipse from the `start` radial to the `end` radial, closed through the

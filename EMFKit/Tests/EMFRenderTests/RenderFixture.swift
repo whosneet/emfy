@@ -129,6 +129,18 @@ struct RenderFixture {
         append(type: 30, payload: body.bytes)
     }
 
+    /// EMR_EXCLUDECLIPRECT §2.3.2.1 — subtract a Clip RectL (logical units).
+    mutating func excludeClipRect(_ l: Int32, _ t: Int32, _ r: Int32, _ b: Int32) {
+        var body = LE(); body.i32(l); body.i32(t); body.i32(r); body.i32(b)
+        append(type: 29, payload: body.bytes)
+    }
+
+    /// EMR_SETPIXELV §2.3.5.36 — a Pixel PointL then a Color ColorRef.
+    mutating func setPixelV(_ x: Int32, _ y: Int32, r: UInt8, g: UInt8, b: UInt8) {
+        var body = LE(); body.i32(x); body.i32(y); body.color(r, g, b)
+        append(type: 15, payload: body.bytes)
+    }
+
     mutating func beginPath() { append(type: 59, payload: []) }
     mutating func endPath() { append(type: 60, payload: []) }
     mutating func closeFigure() { append(type: 61, payload: []) }

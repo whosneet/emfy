@@ -216,6 +216,7 @@ extension EMFFile {
         case 8: return decodePolyPoly32(type: type, slice: slice, make: EMFRecordPayload.polyPolygon)
         case 9: return decodeSizeL(type: type, slice: slice) { .setWindowExtEx(extent: $0) }
         case 13: return decodePointL(type: type, slice: slice) { .setBrushOrgEx(origin: $0) }
+        case 15: return decodeSetPixelV(slice: slice)
         case 10: return decodePointL(type: type, slice: slice) { .setWindowOrgEx(origin: $0) }
         case 11: return decodeSizeL(type: type, slice: slice) { .setViewportExtEx(extent: $0) }
         case 12: return decodePointL(type: type, slice: slice) { .setViewportOrgEx(origin: $0) }
@@ -228,6 +229,7 @@ extension EMFFile {
         case 20: return decodeU32(type: type, slice: slice) { .setROP2(rawMode: $0) }
         case 21: return decodeU32(type: type, slice: slice) { .setStretchBltMode(StretchBltMode($0)) }
         case 27: return decodePointL(type: type, slice: slice) { .moveToEx(point: $0) }
+        case 29: return decodeRectL(type: type, slice: slice) { .excludeClipRect(clip: $0) }
         case 30: return decodeRectL(type: type, slice: slice) { .intersectClipRect(clip: $0) }
         case 33: return .saveDC
         case 34: return decodeU32(type: type, slice: slice) { .restoreDC(savedDC: Int32(bitPattern: $0)) }
@@ -319,6 +321,16 @@ extension EMFFile {
             return .malformed(type: type, reason: .tooSmall(minimumSize: 16, actualSize: slice.size))
         }
         return make(point)
+    }
+
+    /// EMR_SETPIXELV §2.3.5.36: Pixel PointL at 8, Color ColorRef at 16 (20
+    /// bytes). Shares the `.setPixel` payload and direct-draw path with the
+    /// WMF-translated META_SETPIXEL.
+    private static func decodeSetPixelV(slice: RecordSlice) -> EMFRecordPayload {
+        guard let point = slice.pointL(8), let color = slice.colorRef(16) else {
+            return .malformed(type: 15, reason: .tooSmall(minimumSize: 20, actualSize: slice.size))
+        }
+        return .setPixel(point: point, color: color)
     }
 
     /// Single SizeL field at offset 8 (EMR_SET*EXTEX §2.3.11.28/.30).
