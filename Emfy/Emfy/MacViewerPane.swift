@@ -39,6 +39,9 @@ struct MacViewerPane: View {
     @State private var describeModel = DrawingDescribeModel()
     @State private var askModel = DrawingAskModel()
     @State private var altTextStore = DrawingAltTextStore()
+    // Accessibility Check (X1a): deterministic analysis + fixes + AI summary.
+    @State private var checkModel = DrawingCheckModel()
+    @State private var summariseModel = DrawingSummariseModel()
     @State private var showRevertConfirm = false
     @State private var showReloadDiscardConfirm = false
     // Translate (F3d): the system Translate overlay presentation.
@@ -98,6 +101,9 @@ struct MacViewerPane: View {
             // On-device AI (A1a): reset the models and seed alt text when the drawing
             // changes (or edit mode flips, which hides/affects the AI inputs).
             .task(id: "\(session.loadedContentID)·\(session.editing == .editing)") { configureAIForCurrentDrawing() }
+            // Accessibility Check (X1a): re-run the analysis when the drawing, the edit, or
+            // the Check segment's visibility changes.
+            .task(id: checkConfigKey) { configureCheckIfNeeded() }
             .onChange(of: recordModel.selectedIndex) { _, index in
                 replayDriver.request(index: index, model: recordModel)
             }
@@ -1077,6 +1083,9 @@ struct MacViewerPane: View {
                 summaries: replayDriver.summaries,
                 diagnostics: loaded.diagnostics,
                 onClose: { showInspector = false },
+                checkModel: checkModel,
+                summariseModel: summariseModel,
+                onExportReport: exportCheckReport,
                 askModel: aiInputs != nil ? askModel : nil,
                 aiInputs: aiInputs
             ) {
@@ -1579,7 +1588,13 @@ struct MacViewerPane: View {
     }
 
     /// The find highlights for the current matches, in device space, handed to the overlays.
+    /// The Check segment's selected-finding outline takes precedence while it is showing, so
+    /// selecting a finding outlines its elements on the canvas (X1a).
     private var findHighlightSet: FindHighlightSet {
+        if showInspector, viewerInspectorTab == .check {
+            let checkHighlight = checkModel.highlight
+            if !checkHighlight.isEmpty { return checkHighlight }
+        }
         guard findModel.isPresented, !findModel.matches.isEmpty, let geometry = findPageGeometry else {
             return .empty
         }
@@ -1806,6 +1821,54 @@ struct MacViewerPane: View {
             )
         }
     }
+
+    // MARK: - Accessibility Check (X1a)
+
+    /// Re-runs the Check analysis when the drawing, the edit, the inspector visibility or
+    /// the active segment changes.
+    private var checkConfigKey: String {
+        "\(session.loadedContentID)·\(session.editVersion)·\(session.editing == .editing)·\(showInspector)·\(viewerInspectorTab == .check)"
+    }
+
+    /// The drawing's bytes on demand (independent of AI, so Check works with AI off).
+    private var checkDataProvider: (@Sendable () async -> Data?)? {
+        guard let entry else { return nil }
+        let store = self.store
+        return { [weak store] in
+            guard let store else { return nil }
+            return try? await store.resolveData(for: entry)
+        }
+    }
+
+    private func configureCheckIfNeeded() {
+        guard showInspector, viewerInspectorTab == .check, entry != nil else { return }
+        guard let dataProvider = checkDataProvider else { return }
+        summariseModel.providerStore = aiProviders
+        checkModel.configure(session: session, dataProvider: dataProvider, contentID: session.loadedContentID)
+        checkModel.refreshIfNeeded()
+        summariseModel.resetIfChanged(key: checkModel.analysisVersion)
+    }
+
+    /// Saves the Markdown accessibility report, "<name> accessibility report.md" (X1a §4).
+    private func exportCheckReport() {
+        guard let markdown = checkModel.markdownReport(title: reportTitle) else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(entry?.baseName ?? "Drawing") accessibility report.md"
+        panel.canCreateDirectories = true
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try Data(markdown.utf8).write(to: url)
+                toast.show("Saved report", systemImage: "square.and.arrow.down", actionTitle: "Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            } catch {
+                exporter.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private var reportTitle: String { "\(entry?.baseName ?? "Drawing") — accessibility report" }
 
     /// Format · size for the navigation subtitle, via the shared helper (G6), with an
     /// "Edited" marker while there are unsaved edits (E2a-9, review #7). Reads the

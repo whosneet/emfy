@@ -60,6 +60,9 @@ struct MetafileViewerScreen: View {
     @State private var describeModel = DrawingDescribeModel()
     @State private var askModel = DrawingAskModel()
     @State private var altTextStore = DrawingAltTextStore()
+    // Accessibility Check (X1a): deterministic analysis + fixes + AI summary.
+    @State private var checkModel = DrawingCheckModel()
+    @State private var summariseModel = DrawingSummariseModel()
     @State private var bannerDismissed = false
     @State private var pillVisible = false
     @State private var pillHideTask: Task<Void, Never>?
@@ -222,6 +225,9 @@ struct MetafileViewerScreen: View {
         // On-device AI (A1a): reset the models and seed alt text when the drawing
         // changes (or edit mode flips).
         .task(id: "\(session.loadedContentID)·\(session.editing == .editing)") { configureAIForCurrentDrawing() }
+        // Accessibility Check (X1a): re-run the analysis when the drawing, the edit, or the
+        // Check segment's visibility changes.
+        .task(id: checkConfigKey) { configureCheckIfNeeded() }
         .onChange(of: recordModel.selectedIndex) { _, index in
             replayDriver.request(index: index, model: recordModel)
         }
@@ -1561,6 +1567,11 @@ struct MetafileViewerScreen: View {
 
     /// The find highlights for the current matches, in device space, for the overlays.
     private var findHighlightSet: FindHighlightSet {
+        // The Check segment's selected-finding outline takes precedence while it is showing (X1a).
+        if showInspector, viewerInspectorTab == .check {
+            let checkHighlight = checkModel.highlight
+            if !checkHighlight.isEmpty { return checkHighlight }
+        }
         guard findModel.isPresented, !findModel.matches.isEmpty, let geometry = findPageGeometry else {
             return .empty
         }
@@ -1795,6 +1806,9 @@ struct MetafileViewerScreen: View {
                 summaries: replayDriver.summaries,
                 diagnostics: loaded.diagnostics,
                 onClose: { closeInspector() },
+                checkModel: checkModel,
+                summariseModel: summariseModel,
+                onExportReport: exportCheckReport,
                 askModel: aiInputs != nil ? askModel : nil,
                 aiInputs: aiInputs
             ) {
@@ -1957,6 +1971,36 @@ struct MetafileViewerScreen: View {
         let fallback = "Drawing: \(entry?.baseName ?? "Metafile")"
         guard onDeviceReady else { return fallback }
         return altTextStore.label(for: session.loadedContentID, fileName: entry?.displayName ?? "")
+    }
+
+    // MARK: - Accessibility Check (X1a)
+
+    private var checkConfigKey: String {
+        "\(session.loadedContentID)·\(session.editVersion)·\(session.editing == .editing)·\(showInspector)·\(viewerInspectorTab == .check)"
+    }
+
+    private var checkDataProvider: (@Sendable () async -> Data?)? {
+        guard let entry else { return nil }
+        let store = self.store
+        return { [weak store] in
+            guard let store else { return nil }
+            return try? await store.resolveData(for: entry)
+        }
+    }
+
+    private func configureCheckIfNeeded() {
+        guard showInspector, viewerInspectorTab == .check, entry != nil else { return }
+        guard let dataProvider = checkDataProvider else { return }
+        summariseModel.providerStore = aiProviders
+        checkModel.configure(session: session, dataProvider: dataProvider, contentID: session.loadedContentID)
+        checkModel.refreshIfNeeded()
+        summariseModel.resetIfChanged(key: checkModel.analysisVersion)
+    }
+
+    /// Shares the Markdown accessibility report through the system share sheet (X1a §4).
+    private func exportCheckReport() {
+        guard let markdown = checkModel.markdownReport(title: "\(entry?.baseName ?? "Drawing") — accessibility report") else { return }
+        exporter.shareReport(markdown: markdown, baseName: entry?.baseName ?? "Drawing")
     }
 
     /// Resets the AI models when the drawing changes, and seeds alt text when

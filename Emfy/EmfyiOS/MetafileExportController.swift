@@ -327,6 +327,11 @@ final class MetafileExportController {
         presentShare(data: data, fileName: "\(baseName).emf", failure: "Emfy couldn’t prepare an EMF copy of this drawing.")
     }
 
+    /// Shares the Markdown accessibility report, "<name> accessibility report.md" (X1a §4).
+    func shareReport(markdown: String, baseName: String) {
+        presentShare(data: Data(markdown.utf8), fileName: "\(baseName) accessibility report.md", failure: "Emfy couldn’t prepare the report.")
+    }
+
     // MARK: - Helpers
 
     private func presentShare(data: Data, fileName: String, failure: String) {

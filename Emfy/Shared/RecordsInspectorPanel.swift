@@ -11,8 +11,8 @@ import SwiftUI
 // replay view (handled by the host), so this panel only drives the model.
 
 /// Which panel the read-only viewer inspector shows. `ask` appears only when
-/// on-device AI is available (A1a).
-enum ViewerInspectorTab: Hashable { case info, records, ask }
+/// on-device AI is available (A1a); `check` is always offered (X1a).
+enum ViewerInspectorTab: Hashable { case info, records, check, ask }
 
 /// The read-only viewer inspector: an Info | Records (| Ask) segmented control over
 /// the caller's Info view, the Records inspector, or the Ask chat. Mirrors
@@ -24,6 +24,11 @@ struct ViewerInspectorPanel<Info: View>: View {
     let summaries: [Int: String]
     let diagnostics: ViewerDiagnostics
     let onClose: () -> Void
+    /// The accessibility Check segment (X1a), always offered.
+    let checkModel: DrawingCheckModel
+    let summariseModel: DrawingSummariseModel
+    /// Exports the Markdown accessibility report (the host owns the save/share).
+    let onExportReport: () -> Void
     /// The Ask chat model + inputs (A1a). Non-nil only when on-device AI is
     /// available, which is also when the Ask segment is offered.
     var askModel: DrawingAskModel? = nil
@@ -38,6 +43,7 @@ struct ViewerInspectorPanel<Info: View>: View {
                 Picker("", selection: $tab) {
                     Text("Info").tag(ViewerInspectorTab.info)
                     Text("Records").tag(ViewerInspectorTab.records)
+                    Text("Check").tag(ViewerInspectorTab.check)
                     if aiAvailable {
                         Text("Ask").tag(ViewerInspectorTab.ask)
                     }
@@ -55,6 +61,8 @@ struct ViewerInspectorPanel<Info: View>: View {
             switch tab {
             case .info: info()
             case .records: RecordsInspectorPanel(model: model, summaries: summaries, diagnostics: diagnostics)
+            case .check:
+                DrawingCheckView(model: checkModel, summariseModel: summariseModel, onExport: onExportReport)
             case .ask:
                 if let askModel, let aiInputs {
                     DrawingAskView(model: askModel, inputs: aiInputs)
