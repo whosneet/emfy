@@ -46,6 +46,8 @@ public enum EMFRecordEncoder {
             return try u32Record(20, rawMode)                       // §2.3.11.23
         case .setStretchBltMode(let mode):
             return try u32Record(21, stretchBltModeRaw(mode))       // §2.3.11.24
+        case .setBrushOrgEx(let origin):
+            return try pointLRecord(13, origin)                     // §2.3.11.12
         case .saveDC:
             return try emptyRecord(33)                              // §2.3.11.7
         case .restoreDC(let savedDC):
@@ -66,6 +68,13 @@ public enum EMFRecordEncoder {
             return try extCreatePenRecord(p)                        // §2.3.7.9
         case .createBrushIndirect(let p):
             return try createBrushRecord(p)                         // §2.3.7.1
+        case .createDIBPatternBrushPT, .createMonoBrush:
+            // The brush's packed DIB (pixel bytes, possibly `.unsupported`) is not
+            // retained in a re-encodable form, and the brush is never lifted into
+            // an editable element, so it stays passthrough-locked: the document
+            // writer re-emits the original record bytes (isFaithfullyEncodable is
+            // false below). Mirrors the pattern-DIB EXTCREATEPEN handling.
+            throw .unsupportedPayload(label: "DIB pattern brush (re-emit original bytes)")
         case .selectObject(let handle):
             return try u32Record(37, objectHandleRaw(handle))       // §2.3.8.5
         case .deleteObject(let handle):
@@ -212,7 +221,8 @@ public enum EMFRecordEncoder {
     /// form). The document writer re-emits those from their original bytes.
     public static func isFaithfullyEncodable(_ payload: EMFRecordPayload) -> Bool {
         switch payload {
-        case .unimplemented, .malformed, .patBlt, .extTextOutA, .smallTextOut, .gradientFill:
+        case .unimplemented, .malformed, .patBlt, .extTextOutA, .smallTextOut, .gradientFill,
+             .createDIBPatternBrushPT, .createMonoBrush:
             return false
         case .extCreateFontIndirectW(let p):
             return !p.hasExtendedData

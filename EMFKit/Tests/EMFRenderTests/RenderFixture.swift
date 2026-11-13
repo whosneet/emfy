@@ -376,6 +376,34 @@ struct RenderFixture {
         append(type: 95, payload: body.bytes)
     }
 
+    /// EMR_SETBRUSHORGEX §2.3.11.12 — a PointL brush origin (device units).
+    mutating func setBrushOrgEx(_ x: Int32, _ y: Int32) {
+        var body = LE(); body.i32(x); body.i32(y)
+        append(type: 13, payload: body.bytes)
+    }
+
+    /// EMR_CREATEDIBPATTERNBRUSHPT §2.3.7.4 (or §2.3.7.5 EMR_CREATEMONOBRUSH when
+    /// `mono`): ihBrush@8, iUsage@12, the offBmi/cbBmi/offBits/cbBits range pair,
+    /// then a packed DIB at offBmi = 32.
+    mutating func createDIBPatternBrush(
+        index: UInt32, bmi: [UInt8], bits: [UInt8], mono: Bool = false, usage: UInt32 = 0
+    ) {
+        let offBmi = 32
+        let cbBmi = bmi.count
+        let offBits = offBmi + cbBmi
+        let cbBits = bits.count
+        var body = LE()
+        body.u32(index)                      // ihBrush@8
+        body.u32(usage)                      // iUsage@12
+        body.u32(UInt32(offBmi))             // offBmi@16
+        body.u32(UInt32(cbBmi))              // cbBmi@20
+        body.u32(UInt32(offBits))            // offBits@24
+        body.u32(UInt32(cbBits))             // cbBits@28
+        body.raw(bmi)
+        body.raw(bits)
+        append(type: mono ? 93 : 94, payload: body.bytes)
+    }
+
     /// EMR_SELECTOBJECT §2.3.8.5 — pass a table index or a 0x8000_00xx
     /// stock value.
     mutating func selectObject(_ raw: UInt32) {

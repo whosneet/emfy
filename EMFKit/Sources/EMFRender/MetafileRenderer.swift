@@ -484,8 +484,9 @@ public enum MetafileRenderer {
         case .setWindowExtEx, .setWindowOrgEx, .setViewportExtEx, .setViewportOrgEx,
              .setMapMode, .setBkMode, .setPolyFillMode, .setROP2, .saveDC, .restoreDC,
              .setWorldTransform, .modifyWorldTransform, .setMiterLimit, .setArcDirection,
-             .setStretchBltMode, .intersectClipRect, .excludeClipRect, .createPen, .extCreatePen,
-             .createBrushIndirect, .selectObject, .deleteObject, .beginPath, .endPath,
+             .setStretchBltMode, .setBrushOrgEx, .intersectClipRect, .excludeClipRect, .createPen, .extCreatePen,
+             .createBrushIndirect, .createDIBPatternBrushPT, .createMonoBrush,
+             .selectObject, .deleteObject, .beginPath, .endPath,
              .closeFigure, .abortPath, .selectClipPath, .extSelectClipRgn, .moveToEx,
              .setTextAlign, .setTextColor, .setBkColor, .extCreateFontIndirectW:
             return .state

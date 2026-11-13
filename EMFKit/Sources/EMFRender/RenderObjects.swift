@@ -16,6 +16,18 @@ enum ResolvedBrush: Equatable, Sendable {
     case none
     /// BS_SOLID (or the logged fallback for unsupported styles).
     case solid(ColorRef)
+    /// A DIB pattern brush (EMR_CREATEDIBPATTERNBRUSHPT / EMR_CREATEMONOBRUSH):
+    /// a colour DIB tiled in device space, phased by the DC brush origin.
+    case pattern(PatternBrush)
+}
+
+/// A resolved DIB pattern brush: the colour source bitmap to tile. Only a DIB
+/// whose content decoded to `.pixels` reaches here (the resolver falls an
+/// `.unsupported`/monochrome DIB back to a solid fill), so the renderer always
+/// has pixels to tile.
+struct PatternBrush: Equatable, Sendable {
+    /// The pattern's source bitmap (content is `.pixels`).
+    var dib: DIB
 }
 
 /// The dash treatment of a resolved pen's line.
@@ -240,6 +252,26 @@ enum ObjectResolver {
             log.note(.unsupportedBrushStyle(rawStyle: payload.style))
             return .solid(payload.color)
         }
+    }
+
+    /// Resolves an EMR_CREATEDIBPATTERNBRUSHPT ([MS-EMF] §2.3.7.4) or
+    /// EMR_CREATEMONOBRUSH ([MS-EMF] §2.3.7.5) DIB brush. A colour DIB the shared
+    /// decoder expanded to `.pixels` becomes a tileable `.pattern`. A monochrome
+    /// (1-bpp) or otherwise-unsupported DIB is NOT expanded in v1 — the shape
+    /// still has to paint, so it falls back to a solid fill with a logged
+    /// `unsupportedDIB` note (primer §8, best partial output). The fallback is
+    /// LTGRAY: a visible neutral that neither hides the shape nor masquerades as a
+    /// real brush colour (the DIB carries no single colour to use).
+    static func resolve(_ payload: CreateDIBPatternBrushPayload, log: inout EMFRenderLog) -> ResolvedBrush {
+        if case .pixels = payload.dib.content {
+            return .pattern(PatternBrush(dib: payload.dib))
+        }
+        let reason: DIBUnsupportedReason? = {
+            if case .unsupported(let r) = payload.dib.content { return r }
+            return nil
+        }()
+        log.noteUnsupportedDIB(reason: reason)
+        return .solid(StockObjects.ltGray)
     }
 
     /// Maps a line-style nibble to the resolved dash treatment, logging and

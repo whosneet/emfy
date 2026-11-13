@@ -723,10 +723,15 @@ public enum EMFRenderer {
             return
         }
         // Scene-import capture (E1): the path bracket is already DEVICE space.
-        // Provenance spans BEGINPATH … this closer.
+        // Provenance spans BEGINPATH … this closer. A pattern-filled closer is
+        // NOT lifted to an editable element (v1 lifts solid fills only), so it is
+        // captured as a passthrough op — kind `.passthrough` with the device
+        // geometry, which `replay` fills with the pattern brush from the captured
+        // state. A solid/stroke-only closer stays an editable `.path`.
         if let observer = dc.observer {
+            let isPattern = fill && { if case .pattern = dc.state.brush { return true } else { return false } }()
             observer.append(makeOp(
-                kind: .path,
+                kind: isPattern ? .passthrough : .path,
                 recordIndices: observer.consumePathForDraw(),
                 deviceGeometry: devicePath,
                 fill: fill, stroke: stroke, text: nil, image: nil,
@@ -738,13 +743,8 @@ public enum EMFRenderer {
         let targetPath = CGMutablePath()
         targetPath.addPath(devicePath, transform: base)
 
-        if fill, case .solid(let color) = dc.state.brush {
-            context.saveGState()
-            dc.state.clip.apply(to: context, deviceToTarget: base)
-            context.setFillColor(cgColor(color))
-            context.addPath(targetPath)
-            context.fillPath(using: dc.state.polyFillMode == .winding ? .winding : .evenOdd)
-            context.restoreGState()
+        if fill {
+            fillBrush(targetPath, context: context, dc: dc, base: base)
         }
         if stroke, case .stroke(let pen) = dc.state.pen {
             let full = dc.resolvedTransform.concatenating(base)
@@ -885,36 +885,37 @@ public enum EMFRenderer {
         base: CGAffineTransform,
         log: inout EMFRenderLog
     ) {
-        let fillColor: ColorRef?
-        switch rasterOperation {
-        case 0x00F0_0021:                       // PATCOPY
-            fillColor = patBltBrushColor(dc)
-        case 0x0000_0042:                       // BLACKNESS
-            fillColor = ColorRef(red: 0, green: 0, blue: 0)
-        case 0x00FF_0062:                       // WHITENESS
-            fillColor = ColorRef(red: 255, green: 255, blue: 255)
-        default:
-            log.noteUnsupportedRasterOp(rasterOperation: rasterOperation)
-            fillColor = patBltBrushColor(dc)
-        }
-        guard let fillColor else { return }
         let full = dc.resolvedTransform.concatenating(base)
         let path = CGMutablePath()
         path.addRect(PathBuilder.cgRect(bounds), transform: full)
         guard !path.isEmpty else { return }
-        context.saveGState()
-        dc.state.clip.apply(to: context, deviceToTarget: base)
-        context.setFillColor(cgColor(fillColor))
-        context.addPath(path)
-        context.fillPath()
-        context.restoreGState()
-    }
 
-    /// The current brush's solid colour for a PATBLT copy, or `nil` for a NULL
-    /// brush (nothing to paint).
-    private static func patBltBrushColor(_ dc: DeviceContext) -> ColorRef? {
-        if case .solid(let color) = dc.state.brush { return color }
-        return nil
+        // BLACKNESS/WHITENESS force a solid colour; PATCOPY (and an unsupported
+        // rop, best-effort) copy the current brush — which may be a DIB pattern.
+        let forcedColor: ColorRef?
+        switch rasterOperation {
+        case 0x00F0_0021:                       // PATCOPY
+            forcedColor = nil
+        case 0x0000_0042:                       // BLACKNESS
+            forcedColor = ColorRef(red: 0, green: 0, blue: 0)
+        case 0x00FF_0062:                       // WHITENESS
+            forcedColor = ColorRef(red: 255, green: 255, blue: 255)
+        default:
+            log.noteUnsupportedRasterOp(rasterOperation: rasterOperation)
+            forcedColor = nil
+        }
+
+        if let forcedColor {
+            context.saveGState()
+            dc.state.clip.apply(to: context, deviceToTarget: base)
+            context.setFillColor(cgColor(forcedColor))
+            context.addPath(path)
+            context.fillPath()
+            context.restoreGState()
+        } else {
+            // Brush copy: a NULL brush paints nothing; a solid/pattern brush fills.
+            fillBrush(path, context: context, dc: dc, base: base)
+        }
     }
 
     // MARK: - Paint
@@ -941,15 +942,62 @@ public enum EMFRenderer {
         base: CGAffineTransform,
         full: CGAffineTransform
     ) {
-        if case .solid(let color) = dc.state.brush, !path.isEmpty {
+        fillBrush(path, context: context, dc: dc, base: base)
+        stroke(path, context: context, dc: dc, base: base, full: full)
+    }
+
+    /// Fills `targetPath` (already target space) with the DC's current brush
+    /// under the clip, honouring the polyfill rule. Handles a solid colour and a
+    /// DIB pattern brush; a NULL brush fills nothing. Each fill paints inside its
+    /// own gstate save/restore with the clip applied, so CoreGraphics' monotonic
+    /// gstate clip never leaks between records.
+    private static func fillBrush(
+        _ targetPath: CGPath,
+        context: CGContext,
+        dc: DeviceContext,
+        base: CGAffineTransform
+    ) {
+        guard !targetPath.isEmpty else { return }
+        let evenOdd = dc.state.polyFillMode != .winding
+        switch dc.state.brush {
+        case .none:
+            return
+        case .solid(let color):
             context.saveGState()
             dc.state.clip.apply(to: context, deviceToTarget: base)
             context.setFillColor(cgColor(color))
-            context.addPath(path)
-            context.fillPath(using: dc.state.polyFillMode == .winding ? .winding : .evenOdd)
+            context.addPath(targetPath)
+            context.fillPath(using: evenOdd ? .evenOdd : .winding)
             context.restoreGState()
+        case .pattern(let pattern):
+            fillPattern(targetPath, pattern: pattern, context: context, dc: dc, base: base, evenOdd: evenOdd)
         }
-        stroke(path, context: context, dc: dc, base: base, full: full)
+    }
+
+    /// Fills `targetPath` with a tiled DIB pattern brush under the clip. The
+    /// CGPattern tiles the DIB in device space, phased by the DC brush origin,
+    /// through the device→target fit (`PatternFill`). A DIB that cannot be
+    /// rasterised paints nothing (the resolver only yields a `.pattern` for a
+    /// `.pixels` DIB, so this is defence in depth).
+    private static func fillPattern(
+        _ targetPath: CGPath,
+        pattern: PatternBrush,
+        context: CGContext,
+        dc: DeviceContext,
+        base: CGAffineTransform,
+        evenOdd: Bool
+    ) {
+        guard let cgPattern = PatternFill.makePattern(
+            brush: pattern, brushOrigin: dc.state.brushOrigin, deviceToTarget: base
+        ), let patternSpace = CGColorSpace(patternBaseSpace: nil) else { return }
+        context.saveGState()
+        dc.state.clip.apply(to: context, deviceToTarget: base)
+        context.setFillColorSpace(patternSpace)
+        var alpha: CGFloat = 1
+        context.setFillPattern(cgPattern, colorComponents: &alpha)
+        context.addPath(targetPath)
+        context.fillPath(using: evenOdd ? .evenOdd : .winding)
+        context.restoreGState()
     }
 
     /// Strokes `path` with the current pen inside a gstate save/restore that
@@ -1156,8 +1204,13 @@ public enum EMFRenderer {
             return
         }
 
+        // A pattern-filled primitive is not lifted to an editable element (v1
+        // lifts solid fills only): capture it as a passthrough op carrying its
+        // payload, so `replay` re-runs the ORIGINAL draw (fill with the pattern,
+        // then stroke) pixel-identically. Mirrors the pattern path-closer above.
+        let isPattern = fill && { if case .pattern = dc.state.brush { return true } else { return false } }()
         observer.append(makeOp(
-            kind: kind,
+            kind: isPattern ? .passthrough : kind,
             recordIndices: [observer.currentRecordIndex],
             deviceGeometry: device,
             fill: fill, stroke: stroke, text: nil, image: nil,
@@ -1318,7 +1371,14 @@ public enum EMFRenderer {
         // exactly as `drawPathCloser` does.
         let targetPath = CGMutablePath()
         targetPath.addPath(op.deviceGeometry, transform: base)
-        if op.fillColor != nil, case .solid(let color) = dc.state.brush {
+        if op.kind == .passthrough, case .pattern(let pattern) = dc.state.brush {
+            // A pattern-filled path closer captured as passthrough (no payload):
+            // fill the geometry with the pattern brush, phased by the saved origin.
+            fillPattern(
+                targetPath, pattern: pattern, context: context, dc: dc, base: base,
+                evenOdd: dc.state.polyFillMode != .winding
+            )
+        } else if op.fillColor != nil, case .solid(let color) = dc.state.brush {
             context.saveGState()
             dc.state.clip.apply(to: context, deviceToTarget: base)
             context.setFillColor(cgColor(color))

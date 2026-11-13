@@ -235,6 +235,32 @@ public struct CreateBrushPayload: Sendable, Equatable {
     }
 }
 
+/// Payload of EMR_CREATEDIBPATTERNBRUSHPT ([MS-EMF] §2.3.7.4) and
+/// EMR_CREATEMONOBRUSH ([MS-EMF] §2.3.7.5): the object-table index, the
+/// DIBColors usage of the brush's colour table, and the brush's source DIB.
+///
+/// Both records share this exact fixed layout — ihBrush, iUsage, then the
+/// offBmi/cbBmi/offBits/cbBits range pair that locates a packed DIB — so one
+/// payload carries both; the enum case distinguishes them. The DIB is decoded
+/// by the shared DIB core: a colour DIB becomes `.pixels` (a tileable pattern),
+/// a 1-bpp monochrome or otherwise-unsupported DIB stays `.unsupported` (the
+/// renderer logs and falls back to a solid fill). Every offset and length is
+/// validated against the record's own `nSize` before the DIB exists (§8).
+public struct CreateDIBPatternBrushPayload: Sendable, Equatable {
+    /// Object-table index this brush is assigned to.
+    public var ihBrush: UInt32
+    /// DIBColors enumeration ([MS-EMF] §2.1.9); DIB_RGB_COLORS vs DIB_PAL_COLORS.
+    public var usage: UInt32
+    /// The brush's source bitmap.
+    public var dib: DIB
+
+    public init(ihBrush: UInt32, usage: UInt32, dib: DIB) {
+        self.ihBrush = ihBrush
+        self.usage = usage
+        self.dib = dib
+    }
+}
+
 /// Payload of EMR_EXTSELECTCLIPRGN ([MS-EMF] §2.3.2.2): the combination
 /// mode and the region's rectangles, decoded from the RegionData object
 /// ([MS-EMF] §2.2.24) that follows the RgnDataSize/RegionMode fields.
@@ -554,6 +580,9 @@ public enum EMFRecordPayload: Sendable, Equatable {
     /// EMR_SETSTRETCHBLTMODE (21), §2.3.11.24. Interpolation quality for
     /// shrunk bitmaps.
     case setStretchBltMode(StretchBltMode)
+    /// EMR_SETBRUSHORGEX (13), §2.3.11.12. Sets the brush origin — the device
+    /// anchor point (pattern phase) a pattern/hatch brush tiles from.
+    case setBrushOrgEx(origin: PointL)
 
     // MARK: Object creation / manipulation ([MS-EMF] §2.3.7, §2.3.8)
 
@@ -563,6 +592,10 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case extCreatePen(ExtCreatePenPayload)
     /// EMR_CREATEBRUSHINDIRECT (39), §2.3.7.1.
     case createBrushIndirect(CreateBrushPayload)
+    /// EMR_CREATEDIBPATTERNBRUSHPT (94), §2.3.7.4 — a DIB pattern brush.
+    case createDIBPatternBrushPT(CreateDIBPatternBrushPayload)
+    /// EMR_CREATEMONOBRUSH (93), §2.3.7.5 — a monochrome (1-bpp DIB) brush.
+    case createMonoBrush(CreateDIBPatternBrushPayload)
     /// EMR_SELECTOBJECT (37), §2.3.8.5.
     case selectObject(ObjectHandle)
     /// EMR_DELETEOBJECT (40), §2.3.8.3.

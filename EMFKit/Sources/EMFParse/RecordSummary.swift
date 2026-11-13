@@ -45,12 +45,15 @@ public enum EMFRecordSummary {
         case .setMiterLimit(let limit): return String(limit)
         case .setArcDirection(let direction): return arcDirectionName(direction)
         case .setStretchBltMode(let mode): return stretchBltModeName(mode)
+        case .setBrushOrgEx(let origin): return point(origin)
         case .intersectClipRect(let clip): return rect(clip)
 
         // MARK: Objects
         case .createPen(let p): return "#\(p.ihPen) \(color(p.color))"
         case .extCreatePen(let p): return "#\(p.ihPen) \(color(p.color)) w=\(p.width)"
         case .createBrushIndirect(let p): return "#\(p.ihBrush) \(color(p.color))"
+        case .createDIBPatternBrushPT(let p), .createMonoBrush(let p):
+            return "#\(p.ihBrush) \(dibSize(p.dib))"
         case .selectObject(let handle): return handleName(handle)
         case .deleteObject(let handle): return handleName(handle)
 

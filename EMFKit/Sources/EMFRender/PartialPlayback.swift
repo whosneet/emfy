@@ -42,6 +42,9 @@ public struct PlaybackState: Sendable, Equatable {
         /// BS_NULL / NULL_BRUSH — the fill half of a shape is skipped.
         case none
         case solid(ColorRef)
+        /// A DIB pattern brush (EMR_CREATEDIBPATTERNBRUSHPT / EMR_CREATEMONOBRUSH),
+        /// with its tile's pixel dimensions for the inspector's DC panel.
+        case pattern(width: Int, height: Int)
     }
 
     /// The selected font, when one has been selected.
@@ -145,6 +148,8 @@ extension DeviceContext {
         switch brush {
         case .none: return .none
         case .solid(let color): return .solid(color)
+        case .pattern(let pattern):
+            return .pattern(width: Int(pattern.dib.width), height: abs(Int(pattern.dib.height)))
         }
     }
 

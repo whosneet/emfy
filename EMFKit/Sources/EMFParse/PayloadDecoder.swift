@@ -215,6 +215,7 @@ extension EMFFile {
         case 7: return decodePolyPoly32(type: type, slice: slice, make: EMFRecordPayload.polyPolyline)
         case 8: return decodePolyPoly32(type: type, slice: slice, make: EMFRecordPayload.polyPolygon)
         case 9: return decodeSizeL(type: type, slice: slice) { .setWindowExtEx(extent: $0) }
+        case 13: return decodePointL(type: type, slice: slice) { .setBrushOrgEx(origin: $0) }
         case 10: return decodePointL(type: type, slice: slice) { .setWindowOrgEx(origin: $0) }
         case 11: return decodeSizeL(type: type, slice: slice) { .setViewportExtEx(extent: $0) }
         case 12: return decodePointL(type: type, slice: slice) { .setViewportOrgEx(origin: $0) }
@@ -269,6 +270,8 @@ extension EMFFile {
         case 89: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polylineTo16)
         case 90: return decodePolyPoly16(type: type, slice: slice, make: EMFRecordPayload.polyPolyline16)
         case 91: return decodePolyPoly16(type: type, slice: slice, make: EMFRecordPayload.polyPolygon16)
+        case 93: return decodeCreateDIBPatternBrush(slice: slice, type: 93, make: EMFRecordPayload.createMonoBrush)
+        case 94: return decodeCreateDIBPatternBrush(slice: slice, type: 94, make: EMFRecordPayload.createDIBPatternBrushPT)
         case 95: return decodeExtCreatePen(slice: slice)
         case 108: return decodeSmallTextOut(slice: slice)
         case 118: return decodeGradientFill(slice: slice)
@@ -1202,6 +1205,36 @@ extension EMFFile {
             dib: dib
         )
         return stretch ? .stretchBlt(payload) : .bitBlt(payload)
+    }
+
+    /// EMR_CREATEDIBPATTERNBRUSHPT §2.3.7.4 and EMR_CREATEMONOBRUSH §2.3.7.5 —
+    /// identical fixed layout: ihBrush at 8, iUsage at 12, offBmi/cbBmi at 16/20,
+    /// offBits/cbBits at 24/28, then the packed source DIB. The DIB is decoded by
+    /// the shared DIB core, so every offset/length is validated against nSize
+    /// before any pixel bytes are exposed (§8). A monochrome/unsupported DIB
+    /// decodes to `.unsupported` (a valid verdict the renderer logs), NOT to
+    /// `.malformed` — only an internally inconsistent DIB fails the record.
+    private static func decodeCreateDIBPatternBrush(
+        slice: RecordSlice,
+        type: UInt32,
+        make: (CreateDIBPatternBrushPayload) -> EMFRecordPayload
+    ) -> EMFRecordPayload {
+        guard let ihBrush = slice.u32(8),
+              let usage = slice.u32(12),
+              let offBmi = slice.u32(16), let cbBmi = slice.u32(20),
+              let offBits = slice.u32(24), let cbBits = slice.u32(28)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 32, actualSize: slice.size))
+        }
+        switch decodeDIB(
+            slice: slice, type: type,
+            offBmi: offBmi, cbBmi: cbBmi, offBits: offBits, cbBits: cbBits
+        ) {
+        case .failure(let reason):
+            return .malformed(type: type, reason: reason)
+        case .success(let dib):
+            return make(CreateDIBPatternBrushPayload(ihBrush: ihBrush, usage: usage, dib: dib))
+        }
     }
 
     // MARK: - Shared DIB core

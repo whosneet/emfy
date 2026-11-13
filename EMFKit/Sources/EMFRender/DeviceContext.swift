@@ -45,6 +45,10 @@ struct DeviceContext {
         var pen: ResolvedPen = .cosmetic(StockObjects.black)
         /// Selected brush — a resolved value, default WHITE_BRUSH.
         var brush: ResolvedBrush = .solid(StockObjects.white)
+        /// Brush origin (EMR_SETBRUSHORGEX, [MS-EMF] §2.3.11.12): the DEVICE-space
+        /// anchor a pattern/hatch brush tiles from (the pattern phase). GDI's
+        /// default is (0, 0). Part of the saveable state.
+        var brushOrigin = PointL(x: 0, y: 0)
         /// Selected font — a resolved value, `nil` until one is selected (the
         /// text drawer then falls back to the system font). Not part of the
         /// phase-2/3 set; added for phase-4 text playback.
@@ -222,6 +226,13 @@ struct DeviceContext {
             state.stretchBltMode = mode
             return true
 
+        case .setBrushOrgEx(let origin):
+            // EMR_SETBRUSHORGEX ([MS-EMF] §2.3.11.12): the brush origin is in
+            // DEVICE coordinates and sets the pattern phase for a pattern/hatch
+            // brush. Stored only; consumed by the pattern fill.
+            state.brushOrigin = origin
+            return true
+
         case .setWorldTransform(let xform):
             state.world = CoordinatePipeline.affine(from: xform)
             return true
@@ -326,6 +337,14 @@ struct DeviceContext {
             return true
 
         case .createBrushIndirect(let payload):
+            let brush = ObjectResolver.resolve(payload, log: &log)
+            store(.brush(brush), at: payload.ihBrush, log: &log)
+            return true
+
+        case .createDIBPatternBrushPT(let payload), .createMonoBrush(let payload):
+            // Both resolve a DIB brush the same way (§2.3.7.4/.5): a colour DIB
+            // tiles as a pattern, a monochrome/unsupported DIB falls back to a
+            // solid fill with a log (ObjectResolver).
             let brush = ObjectResolver.resolve(payload, log: &log)
             store(.brush(brush), at: payload.ihBrush, log: &log)
             return true
