@@ -59,6 +59,23 @@ import Testing
     }
     #endif
 
+    // MARK: - Changelog latest entry (the What's New content)
+
+    @Test func latestChangelogEntryIsThreePointZero() {
+        let latest = Changelog.latest
+        #expect(latest.version == "3.0")
+        #expect(latest.build == "7")
+    }
+
+    @Test func latestChangelogHasFiveToEightHeadlineBullets() {
+        // What's New groups 3.0 into a handful of headline bullets. In the test
+        // (Debug, no EMFY_DMG) only the common bullets are present.
+        let changes = Changelog.latest.changes
+        #expect((5...8).contains(changes.count))
+        // No empty or whitespace-only bullets.
+        #expect(changes.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    }
+
     // MARK: - OpenRecentList derivation
 
     private func entry(name: String, daysAgo: Double) -> RecentEntry {
