@@ -52,4 +52,19 @@ enum AppGroup {
         guard containerAvailable else { return nil }
         return UserDefaults(suiteName: identifier)
     }
+
+    // MARK: - MCP server enable gate (A3a)
+
+    /// The shared-suite key for the "Allow AI apps to read drawings" toggle. The
+    /// app (Settings) writes it; the `emfy-mcp` helper reads it before serving any
+    /// tool call. Default OFF.
+    static let mcpServerEnabledKey = "settings.mcp.serverEnabled"
+
+    /// Whether the MCP server is enabled, read by NAME from the shared suite so a
+    /// helper process WITHOUT the app-group entitlement still reads the same
+    /// preferences domain (its `containerURL` is nil, so `defaults()` would be —
+    /// unlike this — unavailable). Defaults to `false` (off) when absent.
+    static func mcpServerEnabled() -> Bool {
+        UserDefaults(suiteName: identifier)?.bool(forKey: mcpServerEnabledKey) ?? false
+    }
 }
