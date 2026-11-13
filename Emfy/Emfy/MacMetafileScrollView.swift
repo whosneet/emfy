@@ -542,6 +542,11 @@ private final class CenteringClipView: NSClipView {
 private final class TiledMetafileView: NSView {
     private let prepared: MetafileRenderer.Prepared
     private let naturalSize: CGSize
+    /// One decoded-DIB cache for this document (P2 performance): the tiled layer
+    /// replays the record stream once per tile on concurrent threads, so without
+    /// it every tile re-decodes each DIB from scratch (~98% CPU on a 1 MB DIB).
+    /// Shared across tiles and threads; `DIBImageCache` is thread-safe.
+    private let imageCache = DIBImageCache()
     /// The tile paint (page + dark-mode treatment), read on the tiled-layer's
     /// background thread, set on the main thread — behind a lock (S1a-4b).
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
@@ -639,8 +644,9 @@ private final class TiledMetafileView: NSView {
         let prepared = self.prepared
         // Page, then the drawing (y-up here, so no flip), then the dark-mode
         // treatment — all inside the tile's clip, set by CATiledLayer (S1a-4b).
+        let imageCache = self.imageCache
         TilePainter.paint(paint, into: context, rect: dirtyRect) { ctx in
-            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural), options: options)
+            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural), options: options, imageCache: imageCache)
         }
     }
 

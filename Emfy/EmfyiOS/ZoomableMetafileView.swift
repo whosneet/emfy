@@ -468,6 +468,10 @@ struct ZoomableMetafileView: UIViewRepresentable {
 private final class TiledMetafileView: UIView {
     private let prepared: MetafileRenderer.Prepared
     private let naturalSize: CGSize
+    /// One decoded-DIB cache for this document (P2 performance): the tiled layer
+    /// replays the record stream once per tile on concurrent threads, so without
+    /// it every tile re-decodes each DIB from scratch. Thread-safe and shared.
+    private let imageCache = DIBImageCache()
     /// The tile paint (page + dark-mode treatment), read on the tiled-layer's
     /// background thread, set on the main thread — behind a lock (S1a-4b).
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
@@ -614,10 +618,11 @@ private final class TiledMetafileView: UIView {
         // draw context is y-down; the renderer targets a y-up space, so the ink
         // replay flips around the full height first (scoped by TilePainter's
         // save/restore, so the page fill and treatment stay in tile space).
+        let imageCache = self.imageCache
         TilePainter.paint(paint, into: context, rect: rect) { ctx in
             ctx.translateBy(x: 0, y: natural.height)
             ctx.scaleBy(x: 1, y: -1)
-            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural), options: options)
+            _ = MetafileRenderer.render(prepared, into: ctx, target: CGRect(origin: .zero, size: natural), options: options, imageCache: imageCache)
         }
     }
 }
