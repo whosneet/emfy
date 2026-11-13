@@ -323,8 +323,13 @@ struct RecentsGrid: View {
                 Button {
                     showConvert = true
                 } label: {
-                    Label("Convert…", systemImage: "arrow.triangle.2.circlepath")
+                    // Show the word, not just a glyph: the bare circular-arrows icon read
+                    // as "refresh". A swap glyph + the visible "Convert…" title (HIG:
+                    // prefer a text label for a destructive-sounding or ambiguous action).
+                    Label("Convert…", systemImage: "arrow.left.arrow.right")
                 }
+                .labelStyle(.titleAndIcon)
+                .accessibilityLabel("Convert…")
                 .disabled(selectedIDs.isEmpty)
                 Spacer()
                 Text(selectedIDs.isEmpty ? "Select files to convert" : "\(selectedIDs.count) selected")
