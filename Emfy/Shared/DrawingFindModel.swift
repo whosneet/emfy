@@ -145,7 +145,11 @@ final class DrawingFindModel {
     func goPrevious() { current = DrawingTextFind.previous(current: current, total: matches.count) }
 
     private func recompute(resetToFirst: Bool) {
-        matches = DrawingTextFind.matches(of: query, in: allRuns)
+        // Match, then refine each match's bounds to the matched substring so two
+        // matches in one run get two distinct highlight boxes (P3). The refiner reads
+        // the SAME reading-ordered list `matches` indexed into.
+        let raw = DrawingTextFind.matches(of: query, in: allRuns)
+        matches = FindMatchBoxes.refined(raw, orderedRuns: DrawingTextExtractor.readingOrder(allRuns))
         if matches.isEmpty {
             current = nil
         } else if resetToFirst {

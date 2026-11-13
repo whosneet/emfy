@@ -15,6 +15,25 @@ import AppKit
         DrawingTextRun(text: text, boundsDevice: rect, fontFamily: nil, fontSize: nil, source: source)
     }
 
+    /// A run carrying glyph-layout metrics (GDI-style), so Find derives per-match
+    /// substring boxes from its Dx advances and transform (P3).
+    private func layoutRun(
+        _ text: String,
+        advances: [UInt32],
+        em: Double = 10,
+        reference: CGPoint = .zero,
+        align: UInt32 = 0,
+        transform: CGAffineTransform = .identity,
+        family: String? = nil,
+        rect: CGRect = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+    ) -> DrawingTextRun {
+        DrawingTextRun(
+            text: text, boundsDevice: rect, fontFamily: family, fontSize: em, source: .drawing,
+            layout: TextRunLayout(
+                referenceLogical: reference, emLogical: em, advancesLogical: advances,
+                alignRawValue: align, transform: transform, bold: false, italic: false))
+    }
+
     // A straight device→view mapping: a 100×100 device page onto a 200×200 view, no y-flip,
     // so a device point (x,y) maps to (2x, 2y) — easy to reason about in tests.
     private var mapping: EditorCanvasMapping {
@@ -125,6 +144,116 @@ import AppKit
             utf16Count: 2, alignRawValue: 0, transform: CGAffineTransform(scaleX: 2, y: 2))
         #expect(box.minX == 10)
         #expect(box.width == 40)          // 20 logical * 2
+    }
+
+    // MARK: DrawingTextBounds.substringBox (P3)
+
+    @Test func substringBoxOffsetsByLeadAndWidth() {
+        // Whole run width 60, substring "cd" at lead 20, width 20, TA_LEFT/TOP.
+        let box = DrawingTextBounds.substringBox(
+            referenceLogical: .zero, emLogical: 10, totalWidthLogical: 60,
+            leadLogical: 20, matchWidthLogical: 20, alignRawValue: 0, transform: .identity)
+        #expect(box.minX == 20)
+        #expect(box.width == 20)
+        #expect(box.minY == 0)
+        #expect(box.height == 12.5)   // em * 1.25
+    }
+
+    @Test func substringBoxRightAlignUsesTotalWidth() {
+        // TA_RIGHT (0x2): the run's right edge is the reference; the run starts at
+        // refX - total, and the substring offsets from there.
+        let box = DrawingTextBounds.substringBox(
+            referenceLogical: CGPoint(x: 100, y: 0), emLogical: 10, totalWidthLogical: 60,
+            leadLogical: 0, matchWidthLogical: 20, alignRawValue: 0x2, transform: .identity)
+        #expect(box.minX == 40)       // 100 - 60
+        #expect(box.width == 20)
+    }
+
+    @Test func substringBoxMapsThroughTransform() {
+        // A ×2 scale doubles the device extent and offset.
+        let box = DrawingTextBounds.substringBox(
+            referenceLogical: .zero, emLogical: 10, totalWidthLogical: 40,
+            leadLogical: 10, matchWidthLogical: 10, alignRawValue: 0,
+            transform: CGAffineTransform(scaleX: 2, y: 2))
+        #expect(box.minX == 20)       // 10 * 2
+        #expect(box.width == 20)      // 10 * 2
+    }
+
+    @Test func substringBoxNullForUnknownEm() {
+        #expect(DrawingTextBounds.substringBox(
+            referenceLogical: .zero, emLogical: 0, totalWidthLogical: 10,
+            leadLogical: 0, matchWidthLogical: 5, alignRawValue: 0, transform: .identity).isNull)
+    }
+
+    // MARK: FindMatchBoxes (P3)
+
+    @Test func twoMatchesInOneRunGetTwoDistinctBoxes() {
+        // "abcabc" with uniform 10-unit advances: "abc" matches twice, at lead 0
+        // and lead 30 — two distinct, non-overlapping highlight boxes.
+        let run = layoutRun("abcabc", advances: [10, 10, 10, 10, 10, 10])
+        let raw = DrawingTextFind.matches(of: "abc", in: [run])
+        #expect(raw.count == 2)
+        let refined = FindMatchBoxes.refined(raw, orderedRuns: DrawingTextExtractor.readingOrder([run]))
+        #expect(refined.count == 2)
+        #expect(refined[0].boundsDevice == CGRect(x: 0, y: 0, width: 30, height: 12.5))
+        #expect(refined[1].boundsDevice == CGRect(x: 30, y: 0, width: 30, height: 12.5))
+        #expect(refined[0].boundsDevice != refined[1].boundsDevice)
+    }
+
+    @Test func dxAdvancesArePerMatchHonoured() {
+        // Condensed then expanded spacing: "AB" first (5+5), "AB" second (20+20).
+        // The two "AB" matches get boxes of DIFFERENT widths from the Dx array.
+        let run = layoutRun("ABAB", advances: [5, 5, 20, 20])
+        let raw = DrawingTextFind.matches(of: "AB", in: [run])
+        let refined = FindMatchBoxes.refined(raw, orderedRuns: DrawingTextExtractor.readingOrder([run]))
+        #expect(refined.count == 2)
+        #expect(refined[0].boundsDevice.width == 10)   // 5 + 5
+        #expect(refined[1].boundsDevice.width == 40)   // 20 + 20
+        #expect(refined[1].boundsDevice.minX == 10)    // after the first pair
+    }
+
+    @Test func rotatedRunProducesDistinctFiniteBoxes() {
+        // A 90° rotation: the per-match boxes are still distinct and finite.
+        let rot = CGAffineTransform(rotationAngle: .pi / 2)
+        let run = layoutRun("abcabc", advances: [10, 10, 10, 10, 10, 10], transform: rot)
+        let raw = DrawingTextFind.matches(of: "abc", in: [run])
+        let refined = FindMatchBoxes.refined(raw, orderedRuns: DrawingTextExtractor.readingOrder([run]))
+        #expect(refined.count == 2)
+        let a = refined[0].boundsDevice, b = refined[1].boundsDevice
+        #expect(!a.isNull && !b.isNull)
+        #expect(a.width.isFinite && a.height.isFinite && b.width.isFinite && b.height.isFinite)
+        // Rotation swaps the long axis onto y, so the boxes separate vertically.
+        #expect(abs(a.minY - b.minY) > 1)
+        #expect(a != b)
+    }
+
+    @Test func noDxFallsBackToFontMeasurement() {
+        // No Dx array: FindMatchBoxes measures the resolved font (FontMapper) so the
+        // two "a" matches still get distinct, left-to-right boxes.
+        let run = layoutRun("aba", advances: [], em: 20, family: "Helvetica")
+        let raw = DrawingTextFind.matches(of: "a", in: [run])
+        #expect(raw.count == 2)
+        let refined = FindMatchBoxes.refined(raw, orderedRuns: DrawingTextExtractor.readingOrder([run]))
+        #expect(refined.count == 2)
+        #expect(refined[0].boundsDevice.minX < refined[1].boundsDevice.minX)
+        #expect(!refined[0].boundsDevice.isNull && !refined[1].boundsDevice.isNull)
+    }
+
+    @Test func runWithoutLayoutKeepsWholeRunBounds() {
+        // An OCR/EMF+ run carries no layout; both matches keep the whole-run box.
+        let bounds = CGRect(x: 5, y: 5, width: 40, height: 10)
+        let plain = run("x y x", bounds)
+        let raw = DrawingTextFind.matches(of: "x", in: [plain])
+        let refined = FindMatchBoxes.refined(raw, orderedRuns: DrawingTextExtractor.readingOrder([plain]))
+        #expect(refined.count == 2)
+        #expect(refined.allSatisfy { $0.boundsDevice == bounds })
+    }
+
+    @Test func matchesCarryCharacterRanges() {
+        let run = layoutRun("abcabc", advances: [10, 10, 10, 10, 10, 10])
+        let raw = DrawingTextFind.matches(of: "abc", in: [run])
+        #expect(raw[0].characterRangeUTF16 == 0..<3)
+        #expect(raw[1].characterRangeUTF16 == 3..<6)
     }
 
     // MARK: DrawingFindModel

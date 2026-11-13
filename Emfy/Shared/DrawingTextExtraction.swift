@@ -38,6 +38,11 @@ struct DrawingTextRun: Equatable, Sendable {
     /// magnitude of a GDI logical height). nil when unknown or for OCR runs.
     var fontSize: Double?
     var source: Source
+    /// The run's glyph-layout metrics, when known, so Find can derive a tight
+    /// per-match box from the matched substring (F3b / P3). Populated for GDI and
+    /// scene text runs; `nil` for EMF+ playback and OCR runs, which keep the
+    /// whole-run `boundsDevice`.
+    var layout: TextRunLayout? = nil
 }
 
 enum DrawingTextExtractor {
@@ -79,12 +84,12 @@ enum DrawingTextExtractor {
         var runs: [DrawingTextRun] = []
         var total = 0
 
-        func append(_ string: String, bounds: CGRect, family: String?, size: Double?) {
+        func append(_ string: String, bounds: CGRect, family: String?, size: Double?, layout: TextRunLayout? = nil) {
             let clean = sanitize(string)
             guard !clean.isEmpty else { return }
             guard total < maxCharactersPerFile else { return }
             total += clean.utf16.count
-            runs.append(DrawingTextRun(text: clean, boundsDevice: bounds, fontFamily: family, fontSize: size, source: .drawing))
+            runs.append(DrawingTextRun(text: clean, boundsDevice: bounds, fontFamily: family, fontSize: size, source: .drawing, layout: layout))
         }
 
         for op in observation.ops where op.kind == .text {
@@ -102,7 +107,18 @@ enum DrawingTextExtractor {
                     alignRawValue: text.alignRawValue,
                     transform: op.deviceTransform)
             }
-            append(text.string, bounds: bounds, family: emptyToNil(text.fontFamily), size: size)
+            // GDI runs carry the metrics for a tight per-match highlight box (F3b / P3):
+            // reference point, logical em, the Dx advances the file positioned the run with,
+            // the alignment and the logical→device transform (rotation included).
+            let layout = TextRunLayout(
+                referenceLogical: CGPoint(x: Double(text.referenceLogical.x), y: Double(text.referenceLogical.y)),
+                emLogical: Double(text.logicalHeight),
+                advancesLogical: text.advancesLogical,
+                alignRawValue: text.alignRawValue,
+                transform: op.deviceTransform,
+                bold: text.bold,
+                italic: text.italic)
+            append(text.string, bounds: bounds, family: emptyToNil(text.fontFamily), size: size, layout: layout)
         }
         for entry in observation.plusEntries {
             guard case .plus(let op) = entry, op.kind == .text, let text = op.text else { continue }
@@ -136,12 +152,21 @@ enum DrawingTextExtractor {
                 utf16Count: text.string.utf16.count,
                 alignRawValue: text.alignRawValue,
                 transform: element.transform)
+            let layout = TextRunLayout(
+                referenceLogical: text.referenceLogical,
+                emLogical: text.emSize > 0 ? text.emSize : Double(text.logicalHeight),
+                advancesLogical: text.advancesLogical,
+                alignRawValue: text.alignRawValue,
+                transform: element.transform,
+                bold: text.bold,
+                italic: text.italic)
             runs.append(DrawingTextRun(
                 text: clean,
                 boundsDevice: derived.isNull ? element.boundsDevice : derived,
                 fontFamily: emptyToNil(text.fontFamily),
                 fontSize: size,
-                source: .drawing
+                source: .drawing,
+                layout: layout
             ))
         }
         return runs

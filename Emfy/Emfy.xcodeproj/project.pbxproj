@@ -193,9 +193,11 @@
 		F3C000000000000000000032 /* DrawingOCRServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000032 /* DrawingOCRServiceTests.swift */; };
 		F3B000000000000000000011 /* DrawingFindModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000011 /* DrawingFindModel.swift */; };
 		F3B000000000000000000013 /* FindHighlightGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000013 /* FindHighlightGeometry.swift */; };
+		F3B000000000000000000016 /* FindMatchBoxes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000016 /* FindMatchBoxes.swift */; };
 		F3B000000000000000000015 /* MenuShortcutAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000015 /* MenuShortcutAudit.swift */; platformFilters = (macos, ); };
 		F3C000000000000000000011 /* DrawingFindModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000011 /* DrawingFindModel.swift */; };
 		F3C000000000000000000013 /* FindHighlightGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000013 /* FindHighlightGeometry.swift */; };
+		F3C000000000000000000016 /* FindMatchBoxes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000016 /* FindMatchBoxes.swift */; };
 		F3C000000000000000000015 /* MenuShortcutAudit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000015 /* MenuShortcutAudit.swift */; };
 		F3C000000000000000000017 /* DrawingFindUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000017 /* DrawingFindUITests.swift */; };
 		F3B000000000000000000019 /* MacFindBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000019 /* MacFindBar.swift */; platformFilters = (macos, ); };
@@ -641,6 +643,7 @@
 		F3A000000000000000000032 /* DrawingOCRServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingOCRServiceTests.swift; sourceTree = "<group>"; };
 		F3A000000000000000000011 /* DrawingFindModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingFindModel.swift; sourceTree = "<group>"; };
 		F3A000000000000000000013 /* FindHighlightGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindHighlightGeometry.swift; sourceTree = "<group>"; };
+		F3A000000000000000000016 /* FindMatchBoxes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindMatchBoxes.swift; sourceTree = "<group>"; };
 		F3A000000000000000000015 /* MenuShortcutAudit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuShortcutAudit.swift; sourceTree = "<group>"; };
 		F3A000000000000000000017 /* DrawingFindUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingFindUITests.swift; sourceTree = "<group>"; };
 		F3A000000000000000000019 /* MacFindBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFindBar.swift; sourceTree = "<group>"; };
@@ -1022,6 +1025,7 @@
 				F3A000000000000000000031 /* DrawingOCRCache.swift */,
 				F3A000000000000000000011 /* DrawingFindModel.swift */,
 				F3A000000000000000000013 /* FindHighlightGeometry.swift */,
+				F3A000000000000000000016 /* FindMatchBoxes.swift */,
 				F3A000000000000000000023 /* DrawingTextBounds.swift */,
 				F3A000000000000000000040 /* DrawingTranslation.swift */,
 				F3A000000000000000000050 /* CoreSpotlightIndex.swift */,
@@ -1674,6 +1678,7 @@
 				F3B000000000000000000031 /* DrawingOCRCache.swift in Sources */,
 				F3B000000000000000000011 /* DrawingFindModel.swift in Sources */,
 				F3B000000000000000000013 /* FindHighlightGeometry.swift in Sources */,
+				F3B000000000000000000016 /* FindMatchBoxes.swift in Sources */,
 				F3B000000000000000000023 /* DrawingTextBounds.swift in Sources */,
 				F3B000000000000000000040 /* DrawingTranslation.swift in Sources */,
 				F3B000000000000000000050 /* CoreSpotlightIndex.swift in Sources */,
@@ -1888,6 +1893,7 @@
 				F3C000000000000000000032 /* DrawingOCRServiceTests.swift in Sources */,
 				F3C000000000000000000011 /* DrawingFindModel.swift in Sources */,
 				F3C000000000000000000013 /* FindHighlightGeometry.swift in Sources */,
+				F3C000000000000000000016 /* FindMatchBoxes.swift in Sources */,
 				F3C000000000000000000023 /* DrawingTextBounds.swift in Sources */,
 				F3C000000000000000000040 /* DrawingTranslation.swift in Sources */,
 				F3C000000000000000000050 /* CoreSpotlightIndex.swift in Sources */,

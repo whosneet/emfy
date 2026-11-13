@@ -23,6 +23,10 @@ enum DrawingTextFind {
         var source: DrawingTextRun.Source
         /// 0-based occurrence within the run.
         var occurrence: Int
+        /// The matched substring's UTF-16 offset range within the run text, so the
+        /// find overlay can derive a tight per-match box (F3b / P3). `nil` when the
+        /// range is unknown (a match built directly in a test).
+        var characterRangeUTF16: Range<Int>? = nil
     }
 
     /// The search options: case- and diacritic-insensitive, matching the design.
@@ -37,12 +41,36 @@ enum DrawingTextFind {
         let ordered = DrawingTextExtractor.readingOrder(runs)
         var result: [Match] = []
         for (runIndex, run) in ordered.enumerated() {
-            let occurrences = occurrenceCount(of: needle, in: run.text)
-            for occurrence in 0..<occurrences {
-                result.append(Match(runIndex: runIndex, boundsDevice: run.boundsDevice, source: run.source, occurrence: occurrence))
+            let utf16 = run.text.utf16
+            for (occurrence, range) in occurrenceRanges(of: needle, in: run.text).enumerated() {
+                // String.Index positions are UTF-16 boundaries; the offsets index the
+                // run's Dx advance array / measured offsets for the per-match box (P3).
+                let lower = utf16.distance(from: utf16.startIndex, to: range.lowerBound)
+                let upper = utf16.distance(from: utf16.startIndex, to: range.upperBound)
+                result.append(Match(
+                    runIndex: runIndex,
+                    boundsDevice: run.boundsDevice,
+                    source: run.source,
+                    occurrence: occurrence,
+                    characterRangeUTF16: lower..<upper))
             }
         }
         return result
+    }
+
+    /// The non-overlapping ranges of every occurrence of `needle` in `haystack`
+    /// under the find options, left-to-right.
+    static func occurrenceRanges(of needle: String, in haystack: String) -> [Range<String.Index>] {
+        guard !needle.isEmpty else { return [] }
+        var ranges: [Range<String.Index>] = []
+        var searchStart = haystack.startIndex
+        while searchStart < haystack.endIndex,
+              let found = haystack.range(of: needle, options: options, range: searchStart..<haystack.endIndex) {
+            ranges.append(found)
+            // Advance past the match; guard the degenerate empty-range case.
+            searchStart = found.upperBound > found.lowerBound ? found.upperBound : haystack.index(after: found.lowerBound)
+        }
+        return ranges
     }
 
     /// How many times `needle` appears in `haystack` under the find options.
