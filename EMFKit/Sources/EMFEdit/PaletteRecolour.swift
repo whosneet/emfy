@@ -216,30 +216,54 @@ public enum PaletteRecolour {
 
     // MARK: Colour-blind-safe
 
-    /// Maps `distinct` colours to the Okabe–Ito palette by lightness RANK, so the lightness
-    /// order of the drawing is preserved and every mapped pair is a distinct, CVD-safe
-    /// colour (while there are ≤ 8 distinct colours). With more than 8, ranks beyond the
-    /// palette reuse its lightest/darkest ends.
+    /// How far apart two mapped colours must stay under BOTH dichromacies to count as
+    /// distinguishable (same split `DrawingFixPlanner` uses, with margin).
+    static let cvdDistinctThreshold = 0.2
+
+    /// A colour is achromatic (grey/black/white) when its RGB chroma is tiny. Achromatic
+    /// colours carry no hue to confuse, so the CVD recolour LEAVES THEM UNCHANGED.
+    static func isAchromatic(_ colour: SceneColor) -> Bool {
+        let maxC = Swift.max(colour.red, colour.green, colour.blue)
+        let minC = Swift.min(colour.red, colour.green, colour.blue)
+        return (maxC - minC) < 0.12
+    }
+
+    /// Maps the CHROMATIC `distinct` colours to the CHROMATIC Okabe–Ito entries (never to
+    /// black): each source takes the nearest-hue palette entry that keeps every mapped pair
+    /// distinguishable under deuteranopia AND protanopia. Achromatic colours (greys, black,
+    /// white) are omitted, so they pass through unchanged.
     static func colourBlindMap(_ distinct: [SceneColor]) -> [SceneColor: SceneColor] {
-        guard !distinct.isEmpty else { return [:] }
-        let paletteByLightness = okabeIto.sorted { DrawingColorMath.toHSL($0).lightness < DrawingColorMath.toHSL($1).lightness }
-        let sources = distinct.enumerated().sorted {
-            DrawingColorMath.toHSL($0.element).lightness < DrawingColorMath.toHSL($1.element).lightness
-        }
+        let chromaticPalette = Array(okabeIto.dropFirst())   // drop black — only chromatic targets
         var map: [SceneColor: SceneColor] = [:]
-        let count = sources.count
-        for (rank, entry) in sources.enumerated() {
-            let paletteIndex: Int
-            if count == 1 {
-                paletteIndex = paletteByLightness.count / 2
-            } else {
-                // Spread ranks across the palette so order is preserved and spacing is even.
-                let position = Double(rank) / Double(count - 1) * Double(paletteByLightness.count - 1)
-                paletteIndex = Swift.min(Swift.max(Int(position.rounded()), 0), paletteByLightness.count - 1)
+        var assigned: [SceneColor] = []
+        for source in distinct where !isAchromatic(source) {
+            let hue = DrawingColorMath.toHSL(source).hue
+            let ordered = chromaticPalette.sorted { hueDistance(hue, $0) < hueDistance(hue, $1) }
+            var chosen = ordered[0]
+            var bestMin = -1.0
+            for candidate in ordered {
+                let minDist = assigned.map { minSimulatedDistance(candidate, $0) }.min() ?? .infinity
+                if assigned.isEmpty || minDist >= cvdDistinctThreshold { chosen = candidate; break }
+                if minDist > bestMin { bestMin = minDist; chosen = candidate }
             }
-            map[entry.element] = paletteByLightness[paletteIndex]
+            map[source] = chosen
+            assigned.append(chosen)
         }
         return map
+    }
+
+    /// Circular hue distance (degrees) between a hue and a colour's hue.
+    private static func hueDistance(_ hue: Double, _ colour: SceneColor) -> Double {
+        let other = DrawingColorMath.toHSL(colour).hue
+        let d = abs(hue - other).truncatingRemainder(dividingBy: 360)
+        return Swift.min(d, 360 - d)
+    }
+
+    /// The smallest separation between two colours across the simulated dichromacies.
+    private static func minSimulatedDistance(_ a: SceneColor, _ b: SceneColor) -> Double {
+        DrawingColorMath.Dichromacy.allCases
+            .map { DrawingColorMath.distance(DrawingColorMath.simulate(a, $0), DrawingColorMath.simulate(b, $0)) }
+            .min() ?? 0
     }
 
     /// Darkens (or lightens) `colour` just enough to keep text legible against the page:

@@ -100,18 +100,39 @@ private func contrast(_ a: SceneColor, over b: SceneColor) -> Double {
     }
 }
 
-@Test func colourBlindPreservesLightnessOrder() {
-    let darker = SceneColor(red: 0.3, green: 0.1, blue: 0.1)
-    let lighter = SceneColor(red: 0.9, green: 0.85, blue: 0.3)
+@Test func colourBlindLeavesNeutralsUnchanged() {
+    let grey = SceneColor(red: 0.6, green: 0.6, blue: 0.6)
+    let black = SceneColor(red: 0, green: 0, blue: 0)
+    let white = SceneColor(red: 1, green: 1, blue: 1)
+    let red = SceneColor(red: 0.85, green: 0, blue: 0)
+    // Greys/black/white are achromatic and must be preserved.
+    for neutral in [grey, black, white] { #expect(PaletteRecolour.isAchromatic(neutral)) }
+    let map = PaletteRecolour.colourBlindMap([grey, black, white, red])
+    #expect(map[grey] == nil)     // omitted → identity
+    #expect(map[black] == nil)
+    #expect(map[white] == nil)
+    #expect(map[red] != nil)      // chromatic → remapped
+}
+
+@Test func colourBlindNeverMapsChromaticToBlack() {
+    let red = SceneColor(red: 0.85, green: 0, blue: 0)
+    let green = SceneColor(red: 0, green: 0.6, blue: 0)
+    let blue = SceneColor(red: 0, green: 0, blue: 0.8)
+    let map = PaletteRecolour.colourBlindMap([red, green, blue])
+    let black = SceneColor(red: 0, green: 0, blue: 0)
+    for (_, target) in map { #expect(target != black) }
+}
+
+@Test func colourBlindPreservesGreyTextInACombinedScene() {
+    let grey = SceneColor(red: 0.6, green: 0.6, blue: 0.6)
     let scene = makeScene([
-        filledRect(id: 1, CGRect(x: 0, y: 0, width: 40, height: 40), color: darker),
-        filledRect(id: 2, CGRect(x: 60, y: 0, width: 40, height: 40), color: lighter),
+        textRun(id: 1, CGRect(x: 0, y: 0, width: 80, height: 20), color: grey),
+        filledRect(id: 2, CGRect(x: 0, y: 40, width: 60, height: 60), color: SceneColor(red: 0.85, green: 0, blue: 0)),
     ])
-    let map = PaletteRecolour.colourBlindMap(PaletteRecolour.distinctColours(scene, ids: nil))
-    guard let mappedDark = map[darker], let mappedLight = map[lighter] else { Issue.record("map"); return }
-    let dl = DrawingColorMath.toHSL(mappedDark).lightness
-    let ll = DrawingColorMath.toHSL(mappedLight).lightness
-    #expect(dl <= ll)
+    let mapping = PaletteRecolour.mapping(for: scene, ids: nil, mode: .colourBlindSafe)
+    // The grey text is neutral → unchanged → not in the mapping list; the red fill is.
+    #expect(!mapping.contains { $0.from == grey })
+    #expect(mapping.contains { $0.from == SceneColor(red: 0.85, green: 0, blue: 0) })
 }
 
 // MARK: - Print
