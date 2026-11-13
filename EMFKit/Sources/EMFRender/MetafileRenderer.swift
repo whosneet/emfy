@@ -487,7 +487,8 @@ public enum MetafileRenderer {
              .setStretchBltMode, .setBrushOrgEx, .intersectClipRect, .excludeClipRect, .createPen, .extCreatePen,
              .createBrushIndirect, .createDIBPatternBrushPT, .createMonoBrush,
              .selectObject, .deleteObject, .beginPath, .endPath,
-             .closeFigure, .abortPath, .selectClipPath, .extSelectClipRgn, .moveToEx,
+             .closeFigure, .abortPath, .selectClipPath, .extSelectClipRgn,
+             .offsetClipRgn, .setMetaRgn, .moveToEx,
              .setTextAlign, .setTextColor, .setBkColor, .extCreateFontIndirectW:
             return .state
         case .polyBezier, .polygon, .polyline, .polyBezierTo, .polylineTo,

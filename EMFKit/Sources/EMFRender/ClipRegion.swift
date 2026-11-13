@@ -94,6 +94,25 @@ struct ClipRegion: Equatable {
         primitives = [primitive]
     }
 
+    /// Translates every clip primitive by `delta` (device space) —
+    /// EMR_OFFSETCLIPRGN ([MS-EMF] §2.3.2.4). The caller maps the record's
+    /// logical offset vector through the transform's linear part first. A zero
+    /// delta is a no-op; an empty region (no clip) is unaffected.
+    mutating func offset(by delta: CGPoint) {
+        guard delta != .zero, !primitives.isEmpty else { return }
+        var t = CGAffineTransform(translationX: delta.x, y: delta.y)
+        primitives = primitives.map { primitive in
+            switch primitive {
+            case .rects(let rects):
+                return .rects(rects.map { $0.isNull ? $0 : $0.applying(t) })
+            case .path(let path):
+                return .path(path.copy(using: &t) ?? path)
+            case .excludeRect(let rect):
+                return .excludeRect(rect.applying(t))
+            }
+        }
+    }
+
     /// Applies the clip to `context`, transforming every device-space
     /// primitive into target space with `deviceToTarget` (the same transform
     /// geometry is drawn through). Each primitive intersects the running gstate

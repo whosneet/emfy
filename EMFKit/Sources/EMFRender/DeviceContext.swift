@@ -273,10 +273,29 @@ struct DeviceContext {
             return true
 
         case .excludeClipRect(let clip):
-            // [MS-WMF] §2.3.5.2 META_EXCLUDECLIPRECT: subtract the rectangle
-            // (logical units, transformed to device) from the current clip.
+            // EMR_EXCLUDECLIPRECT ([MS-EMF] §2.3.2.1) / META_EXCLUDECLIPRECT
+            // ([MS-WMF] §2.3.5.2): subtract the rectangle (logical units,
+            // transformed to device) from the current clip.
             let deviceRect = PathBuilder.cgRect(clip).applying(resolvedTransform)
             state.clip.exclude(deviceRect)
+            return true
+
+        case .offsetClipRgn(let offset):
+            // EMR_OFFSETCLIPRGN ([MS-EMF] §2.3.2.4): move the clip by the offset,
+            // in LOGICAL units. The clip is stored in device space, so map the
+            // offset VECTOR through the transform's linear part (no translation):
+            // device delta = (dx·a + dy·c, dx·b + dy·d).
+            let t = resolvedTransform
+            let dx = CGFloat(offset.x) * t.a + CGFloat(offset.y) * t.c
+            let dy = CGFloat(offset.x) * t.b + CGFloat(offset.y) * t.d
+            state.clip.offset(by: CGPoint(x: dx, y: dy))
+            return true
+
+        case .setMetaRgn:
+            // EMR_SETMETARGN ([MS-EMF] §2.3.2.6): folds the current clip into the
+            // meta region and resets the clip to default. The NET visible clip
+            // (meta ∩ clip) is unchanged, and the renderer tracks only that
+            // combined clip, so this is a no-op on the visible region.
             return true
 
         // MARK: Path brackets ([MS-EMF] §2.3.10) — construction state only.

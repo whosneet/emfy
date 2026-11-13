@@ -63,6 +63,8 @@ public enum EMFRecordSummary {
         case .selectClipPath(let mode): return regionModeName(mode)
         case .extSelectClipRgn(let p):
             return "\(regionModeName(p.mode)), \(countNoun(p.rects.count, "rect"))"
+        case .offsetClipRgn(let offset): return point(offset)
+        case .setMetaRgn: return ""
 
         // MARK: 32-bit geometry
         case .polyBezier(let p), .polygon(let p), .polyline(let p),

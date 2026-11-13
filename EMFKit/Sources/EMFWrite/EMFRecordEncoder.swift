@@ -99,6 +99,10 @@ public enum EMFRecordEncoder {
             return try u32Record(67, regionModeRaw(mode))           // §2.3.2.5
         case .extSelectClipRgn(let p):
             return try extSelectClipRgnRecord(p)                    // §2.3.2.2
+        case .offsetClipRgn(let offset):
+            return try pointLRecord(26, offset)                     // §2.3.2.4
+        case .setMetaRgn:
+            return try emptyRecord(28)                              // §2.3.2.6
 
         // MARK: 32-bit geometry ([MS-EMF] §2.3.5, §2.3.11.4)
         case .polyBezier(let p):

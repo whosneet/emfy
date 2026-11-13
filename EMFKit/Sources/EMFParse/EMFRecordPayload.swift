@@ -627,6 +627,12 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case selectClipPath(RegionMode)
     /// EMR_EXTSELECTCLIPRGN (75), §2.3.2.2.
     case extSelectClipRgn(ExtSelectClipRgnPayload)
+    /// EMR_OFFSETCLIPRGN (26), §2.3.2.4. Moves the current clipping region by
+    /// `offset` (logical units).
+    case offsetClipRgn(offset: PointL)
+    /// EMR_SETMETARGN (28), §2.3.2.6. Folds the current clip into the meta
+    /// region and resets the clip; no parameters.
+    case setMetaRgn
 
     // MARK: 32-bit geometry ([MS-EMF] §2.3.5, §2.3.11.4)
 

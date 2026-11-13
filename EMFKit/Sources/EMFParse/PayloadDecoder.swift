@@ -228,7 +228,9 @@ extension EMFFile {
         case 19: return decodeU32(type: type, slice: slice) { .setPolyFillMode(PolygonFillMode($0)) }
         case 20: return decodeU32(type: type, slice: slice) { .setROP2(rawMode: $0) }
         case 21: return decodeU32(type: type, slice: slice) { .setStretchBltMode(StretchBltMode($0)) }
+        case 26: return decodePointL(type: type, slice: slice) { .offsetClipRgn(offset: $0) }
         case 27: return decodePointL(type: type, slice: slice) { .moveToEx(point: $0) }
+        case 28: return .setMetaRgn
         case 29: return decodeRectL(type: type, slice: slice) { .excludeClipRect(clip: $0) }
         case 30: return decodeRectL(type: type, slice: slice) { .intersectClipRect(clip: $0) }
         case 33: return .saveDC

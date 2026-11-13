@@ -141,6 +141,15 @@ struct RenderFixture {
         append(type: 15, payload: body.bytes)
     }
 
+    /// EMR_OFFSETCLIPRGN §2.3.2.4 — offset the clip by a PointL (logical units).
+    mutating func offsetClipRgn(_ x: Int32, _ y: Int32) {
+        var body = LE(); body.i32(x); body.i32(y)
+        append(type: 26, payload: body.bytes)
+    }
+
+    /// EMR_SETMETARGN §2.3.2.6 — no parameters.
+    mutating func setMetaRgn() { append(type: 28, payload: []) }
+
     mutating func beginPath() { append(type: 59, payload: []) }
     mutating func endPath() { append(type: 60, payload: []) }
     mutating func closeFigure() { append(type: 61, payload: []) }
