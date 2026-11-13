@@ -1143,6 +1143,9 @@ struct MacViewerPane: View {
         guard let loaded, session.editing != .editing else { return }
         let contentID = session.loadedContentID
         if loaded.prepared.kind == .wmfRecords {
+            // WMF has no step-through, but its records carry parameter summaries (P3):
+            // populate them before setContent so the first row render shows them.
+            replayDriver.setSummaries(from: loaded.prepared)
             recordModel.setContent(
                 refs: loaded.prepared.recordRefs(), drawingIndices: [],
                 supportsPartial: false, isEMF: false, contentID: contentID

@@ -194,6 +194,21 @@ final class RecordReplayDriver {
         }
     }
 
+    /// Populates the one-line record summaries for a drawing that does NOT configure
+    /// the replay engine — a translated WMF program, which has no EMF step-through but
+    /// whose records still carry parameter summaries (P3). Pure and main-actor (the
+    /// summaries are pre-built on `Prepared`); no render. Call BEFORE `model.setContent`
+    /// so the first row render reads the populated summaries.
+    func setSummaries(from prepared: MetafileRenderer.Prepared) {
+        var map: [Int: String] = [:]
+        for ref in prepared.recordRefs() {
+            if let summary = prepared.recordSummary(at: ref.index), !summary.isEmpty {
+                map[ref.index] = summary
+            }
+        }
+        summaries = map
+    }
+
     /// Requests a render through `index`, coalescing: only the latest request's result
     /// is applied. Updates the outline immediately (cheap) and the raster/state when
     /// the background render lands.
