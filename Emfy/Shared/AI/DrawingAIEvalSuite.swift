@@ -68,7 +68,19 @@ enum DrawingAIEvalSuite {
         // X2b item-0 quality bar can be re-measured quickly without the slow describe/ask
         // cases. The shipping default runs the whole suite.
         let editOnly = env["EMFY_AI_EVALS_EDIT_ONLY"] == "1"
+        // A focused mode (EMFY_AI_EVALS_GEN_ONLY=1) runs ONLY the X2d generate cases, so the
+        // "generate a drawing" bar can be measured quickly without the slower edit/translate
+        // cases.
+        let genOnly = env["EMFY_AI_EVALS_GEN_ONLY"] == "1"
         var results: [CaseResult] = []
+        if genOnly {
+            results.append(await generateCaseFlowchart())
+            results.append(await generateCaseRedCircleBlueSquare())
+            let table = renderTable(results)
+            let gates = renderGates(results)
+            writeReport(results, status: "available", to: outPath)
+            return "EMFY AI EVALS (on-device, generate-only) — \(status)\n\(table)\n\n\(gates)\n\nJSON: \(outPath)"
+        }
         if !editOnly {
             results.append(await caseDescribeFaithfulness(corpusDir: corpusDir))
             results.append(await caseAskAccuracy())
