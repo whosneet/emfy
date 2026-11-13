@@ -166,13 +166,25 @@ enum AIEditScreenshots {
         await wait(timeout: .seconds(8)) { greyModel.afterImage != nil }
         _ = capture(view: DrawingRecolourView(model: greyModel, onClose: {}), size: NSSize(width: 560, height: 560), to: base + "-recolour-greyscale.png")
 
-        // --- Recolour: colour-blind safe ---
+        // --- Recolour: colour-blind safe --- (set the mode BEFORE start so there is a
+        // single render; otherwise the default-mode render can win the race.)
         let cvdSession = DocumentSession(entryID: UUID(), resolve: { _ in bytes }, documentFileName: { "recolour-fixture.emf" })
         let cvdModel = DrawingRecolourModel()
-        await cvdModel.start(session: cvdSession, selection: [])
         cvdModel.mode = .colourBlindSafe
+        await cvdModel.start(session: cvdSession, selection: [])
         await wait(timeout: .seconds(8)) { cvdModel.afterImage != nil }
         _ = capture(view: DrawingRecolourView(model: cvdModel, onClose: {}), size: NSSize(width: 560, height: 560), to: base + "-recolour-cvd.png")
+
+        // --- Recolour scoped to a SELECTION (the editor entry) — header reads "Applies to
+        //     1 selected element". ---
+        if let firstID = (try? SceneImporter.import(data: bytes))?.editableElements.first?.id {
+            let selSession = DocumentSession(entryID: UUID(), resolve: { _ in bytes }, documentFileName: { "recolour-fixture.emf" })
+            let selModel = DrawingRecolourModel()
+            selModel.mode = .print
+            await selModel.start(session: selSession, selection: [firstID])
+            await wait(timeout: .seconds(8)) { selModel.afterImage != nil }
+            _ = capture(view: DrawingRecolourView(model: selModel, onClose: {}), size: NSSize(width: 560, height: 560), to: base + "-recolour-selection.png")
+        }
     }
 
     @MainActor private static func aiEditShot(model: DrawingAIEditModel) -> some View {
@@ -281,8 +293,8 @@ extension AIEditScreenshots {
                 for _ in 0 ..< 100 where edit.preview == nil { try? await Task.sleep(for: .milliseconds(30)) }
             } else {
                 let session = DocumentSession(entryID: UUID(), resolve: { _ in bytes }, documentFileName: { "recolour.emf" })
+                recolour.mode = .colourBlindSafe   // set before start → single render
                 await recolour.start(session: session, selection: [])
-                recolour.mode = .colourBlindSafe
                 for _ in 0 ..< 100 where recolour.afterImage == nil { try? await Task.sleep(for: .milliseconds(30)) }
             }
         }
