@@ -236,7 +236,10 @@ public struct DrawingComparison: Sendable, Equatable {
         let name = kindName(kind)
         if attributes == [.position] { return "\(name.capitalisedFirst) moved" }
         if attributes == [.geometry] { return "\(name.capitalisedFirst) reshaped" }
-        if attributes == [.text] { return "\(name.capitalisedFirst) text changed" }
+        if attributes == [.text] {
+            // Avoid "Text text changed" for a text element.
+            return kind == .text ? "Text changed" : "\(name.capitalisedFirst) text changed"
+        }
         if attributes == [.fillColor] {
             if kind == .text, let o = old.text?.color, let n = new.text?.color {
                 return "\(name.capitalisedFirst) recoloured \(o.hexString) → \(n.hexString)"
