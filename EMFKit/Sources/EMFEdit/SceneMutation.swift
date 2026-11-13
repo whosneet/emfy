@@ -237,6 +237,16 @@ extension Scene {
             // ([MS-EMF] §2.2.13); size is treated as the em height in device-
             // independent logical units of the run's current transform.
             element.text?.logicalHeight = -abs(size)
+            // An EMF+ run sizes from its EmfPlusFont EmSize, NOT logicalHeight, in both the
+            // renderer and the exporter — so a size change must update emSize too, or it is
+            // silently dropped. Re-express it as the World-unit em height (emSize = the
+            // logical em height, unit = World = 0), the same representation a GDI-origin run
+            // uses when exported as EMF+, so the new size renders live AND round-trips
+            // ([MS-EMFPLUS] §2.1.1.32 EmfPlusFont EmSize, §2.1.1.33 UnitType World).
+            if element.text?.isEMFPlus == true {
+                element.text?.emSize = Double(abs(size))
+                element.text?.emSizeUnit = 0
+            }
             element.text?.bold = bold
             element.text?.italic = italic
             element.provenance.edited = true
