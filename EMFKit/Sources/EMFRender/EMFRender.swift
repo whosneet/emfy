@@ -396,6 +396,11 @@ public enum EMFRenderer {
             }
             return
 
+        case .gradientFill(let payload):
+            // A direct draw (not recorded into a path bracket), like text/bitmaps.
+            GradientDrawer.draw(payload, into: context, dc: dc, base: base, log: &log)
+            return
+
         // WMF-sourced direct draws ([MS-WMF] §2.3.3.12/.19). Like text and
         // bitmaps they are never captured into a path bracket.
         case .setPixel(let point, let color):

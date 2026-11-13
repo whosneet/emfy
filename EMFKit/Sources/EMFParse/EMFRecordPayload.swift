@@ -483,6 +483,29 @@ public struct BitBltPayload: Sendable, Equatable {
     }
 }
 
+/// Payload of EMR_GRADIENTFILL ([MS-EMF] §2.3.5.12): a bounding rectangle, the
+/// TriVertex array, the fill mode, and the gradient mesh (rectangles or
+/// triangles indexing the vertices). Decoding validates nVer/nTri against the
+/// record's own `nSize` before allocating and guarantees every mesh index is
+/// within the vertex array.
+public struct GradientFillPayload: Sendable, Equatable {
+    /// Bounding rectangle of all gradient primitives (logical units).
+    public var bounds: RectL
+    /// The gradient vertices.
+    public var vertices: [TriVertex]
+    /// How the mesh interpolates colour.
+    public var mode: GradientMode
+    /// The gradient primitives, indexing `vertices`.
+    public var mesh: GradientMesh
+
+    public init(bounds: RectL, vertices: [TriVertex], mode: GradientMode, mesh: GradientMesh) {
+        self.bounds = bounds
+        self.vertices = vertices
+        self.mode = mode
+        self.mesh = mesh
+    }
+}
+
 /// A decoded record payload — one case per decoded record type (phases 2–3),
 /// plus `.unimplemented` for everything not yet decoded and `.malformed` for
 /// payloads that fail their own validation.
@@ -676,6 +699,9 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case excludeClipRect(clip: RectL)
 
     // MARK: Bitmaps ([MS-EMF] §2.3.1)
+
+    /// EMR_GRADIENTFILL (118), §2.3.5.12.
+    case gradientFill(GradientFillPayload)
 
     /// EMR_STRETCHDIBITS (81), §2.3.1.7.
     case stretchDIBits(StretchDIBitsPayload)

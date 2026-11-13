@@ -98,6 +98,13 @@ public enum EMFRecordSummary {
         case .setPixel(let point, let color): return "\(self.point(point)) \(self.color(color))"
         case .patBlt(let bounds, let rop): return "\(rect(bounds)) \(hex32(rop))"
         case .excludeClipRect(let clip): return rect(clip)
+        case .gradientFill(let p):
+            let primitives: Int
+            switch p.mesh {
+            case .rectangles(let r): primitives = r.count
+            case .triangles(let t): primitives = t.count
+            }
+            return "\(gradientModeName(p.mode)), \(p.vertices.count) vert, \(primitives) prim"
 
         // MARK: Bitmaps
         case .stretchDIBits(let p):
@@ -261,6 +268,15 @@ public enum EMFRecordSummary {
         switch direction {
         case .counterclockwise: return "AD_COUNTERCLOCKWISE"
         case .clockwise: return "AD_CLOCKWISE"
+        case .unknown(let raw): return hex32(raw)
+        }
+    }
+
+    static func gradientModeName(_ mode: GradientMode) -> String {
+        switch mode {
+        case .rectHorizontal: return "RECT_H"
+        case .rectVertical: return "RECT_V"
+        case .triangle: return "TRIANGLE"
         case .unknown(let raw): return hex32(raw)
         }
     }

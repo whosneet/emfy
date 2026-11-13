@@ -271,6 +271,7 @@ extension EMFFile {
         case 91: return decodePolyPoly16(type: type, slice: slice, make: EMFRecordPayload.polyPolygon16)
         case 95: return decodeExtCreatePen(slice: slice)
         case 108: return decodeSmallTextOut(slice: slice)
+        case 118: return decodeGradientFill(slice: slice)
         default: return .unimplemented(type: type)
         }
     }
@@ -936,6 +937,94 @@ extension EMFFile {
         if let s = String(bytes: bytes, encoding: .windowsCP1252) { return s }
         if let s = String(bytes: bytes, encoding: .isoLatin1) { return s }
         return String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// EMR_GRADIENTFILL §2.3.5.12: Bounds RectL at 8, nVer u32 at 24, nTri u32
+    /// at 28, ulMode u32 at 32, then nVer TriVertex objects (§2.2.26, 16 bytes
+    /// each) at 36, then the gradient mesh — nTri GradientRectangle (§2.2.3,
+    /// 8 bytes) for the RECT modes or nTri GradientTriangle (§2.2.4, 12 bytes)
+    /// for the TRIANGLE mode. nVer and nTri are validated against nSize in Int
+    /// arithmetic before any allocation, and every mesh index is checked to be
+    /// within the vertex array (out-of-range → `.malformed`, primer §8).
+    private static func decodeGradientFill(slice: RecordSlice) -> EMFRecordPayload {
+        let type: UInt32 = 118
+        guard let bounds = slice.rectL(8),
+              let rawVer = slice.u32(24),
+              let rawTri = slice.u32(28),
+              let rawMode = slice.u32(32)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 36, actualSize: slice.size))
+        }
+
+        let mode = GradientMode(rawMode)
+        let nVer = Int(rawVer)
+        let nTri = Int(rawTri)
+
+        // Vertices: 16 bytes each, starting at offset 36.
+        let maxVertices = (slice.size - 36) / 16
+        guard nVer <= maxVertices else {
+            return .malformed(type: type, reason: .countTooLarge(declared: nVer, maxFitting: maxVertices))
+        }
+        var vertices: [TriVertex] = []
+        vertices.reserveCapacity(nVer)
+        for index in 0 ..< nVer {
+            let base = 36 + index * 16
+            guard let x = slice.i32(base), let y = slice.i32(base + 4),
+                  let r = slice.u16(base + 8), let g = slice.u16(base + 10),
+                  let b = slice.u16(base + 12), let a = slice.u16(base + 14)
+            else {
+                return .malformed(type: type, reason: .tooSmall(minimumSize: base + 16, actualSize: slice.size))
+            }
+            vertices.append(TriVertex(x: x, y: y, red: r, green: g, blue: b, alpha: a))
+        }
+
+        let meshOffset = 36 + nVer * 16
+
+        // The mesh element size depends on the mode; an unknown mode has no
+        // defined mesh layout, so decode zero primitives (the renderer skips it).
+        let isTriangle = mode == .triangle
+        let elementSize = isTriangle ? 12 : 8
+        let maxPrimitives = (slice.size - meshOffset) / elementSize
+        guard nTri <= maxPrimitives else {
+            return .malformed(type: type, reason: .countTooLarge(declared: nTri, maxFitting: maxPrimitives))
+        }
+
+        // Every index must address a real vertex (§8: no out-of-range reads at
+        // render time).
+        func validIndex(_ raw: UInt32) -> Bool { Int(raw) < nVer }
+
+        let mesh: GradientMesh
+        if isTriangle {
+            var triangles: [GradientTriangle] = []
+            triangles.reserveCapacity(nTri)
+            for index in 0 ..< nTri {
+                let base = meshOffset + index * 12
+                guard let v1 = slice.u32(base), let v2 = slice.u32(base + 4), let v3 = slice.u32(base + 8) else {
+                    return .malformed(type: type, reason: .tooSmall(minimumSize: base + 12, actualSize: slice.size))
+                }
+                guard validIndex(v1), validIndex(v2), validIndex(v3) else {
+                    return .malformed(type: type, reason: .countMismatch(declaredTotal: nVer, sumOfCounts: Int(max(v1, v2, v3))))
+                }
+                triangles.append(GradientTriangle(vertex1: v1, vertex2: v2, vertex3: v3))
+            }
+            mesh = .triangles(triangles)
+        } else {
+            var rectangles: [GradientRectangle] = []
+            rectangles.reserveCapacity(nTri)
+            for index in 0 ..< nTri {
+                let base = meshOffset + index * 8
+                guard let ul = slice.u32(base), let lr = slice.u32(base + 4) else {
+                    return .malformed(type: type, reason: .tooSmall(minimumSize: base + 8, actualSize: slice.size))
+                }
+                guard validIndex(ul), validIndex(lr) else {
+                    return .malformed(type: type, reason: .countMismatch(declaredTotal: nVer, sumOfCounts: Int(max(ul, lr))))
+                }
+                rectangles.append(GradientRectangle(upperLeft: ul, lowerRight: lr))
+            }
+            mesh = .rectangles(rectangles)
+        }
+
+        return .gradientFill(GradientFillPayload(bounds: bounds, vertices: vertices, mode: mode, mesh: mesh))
     }
 
     // MARK: - Bitmap decoders

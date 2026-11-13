@@ -299,6 +299,34 @@ struct RenderFixture {
         append(type: 7, payload: Self.polyPoly32Body(polygons))
     }
 
+    /// A TriVertex ([MS-EMF] §2.2.26): x,y then 16-bit R,G,B,A. The 8-bit
+    /// colour bytes `r`/`g`/`b` are placed in the HIGH byte (value << 8).
+    static func triVertex(x: Int32, y: Int32, r: UInt8, g: UInt8, b: UInt8, a: UInt16 = 0) -> [UInt8] {
+        var w = LE()
+        w.i32(x); w.i32(y)
+        w.u16(UInt16(r) << 8); w.u16(UInt16(g) << 8); w.u16(UInt16(b) << 8); w.u16(a)
+        return w.bytes
+    }
+
+    /// EMR_GRADIENTFILL §2.3.5.12. `mode` is RECT_H(0)/RECT_V(1)/TRIANGLE(2);
+    /// `mesh` is the flat index list (2 per rectangle, 3 per triangle).
+    mutating func gradientFill(
+        bounds: (l: Int32, t: Int32, r: Int32, b: Int32),
+        vertices: [[UInt8]],
+        mode: UInt32,
+        mesh: [UInt32]
+    ) {
+        let perPrim = mode == 2 ? 3 : 2
+        var body = LE()
+        body.i32(bounds.l); body.i32(bounds.t); body.i32(bounds.r); body.i32(bounds.b)  // Bounds@8
+        body.u32(UInt32(vertices.count))             // nVer@24
+        body.u32(UInt32(mesh.count / perPrim))       // nTri@28
+        body.u32(mode)                               // ulMode@32
+        for v in vertices { body.raw(v) }            // vertices@36
+        for index in mesh { body.u32(index) }        // mesh
+        append(type: 118, payload: body.bytes)
+    }
+
     /// EMR_CREATEBRUSHINDIRECT §2.3.7.1 (LogBrushEx §2.2.12).
     mutating func createSolidBrush(index: UInt32, r: UInt8, g: UInt8, b: UInt8) {
         var body = LE()

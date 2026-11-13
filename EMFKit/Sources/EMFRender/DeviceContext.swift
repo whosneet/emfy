@@ -360,7 +360,8 @@ struct DeviceContext {
             return true
 
         // MARK: Text / bitmap DRAWING records — the renderer's job (return false).
-        case .extTextOutA, .extTextOutW, .smallTextOut, .stretchDIBits, .bitBlt, .stretchBlt, .setDIBitsToDevice:
+        case .extTextOutA, .extTextOutW, .smallTextOut, .gradientFill,
+             .stretchDIBits, .bitBlt, .stretchBlt, .setDIBitsToDevice:
             return false
 
         // MARK: Fallback verdicts

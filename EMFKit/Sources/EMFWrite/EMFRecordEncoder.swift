@@ -180,6 +180,12 @@ public enum EMFRecordEncoder {
         case .patBlt:
             throw .unsupportedPayload(label: "patBlt (WMF primitive — use the WMF writer, E0c)")
 
+        case .gradientFill:
+            // The mesh layout (vertices + rectangles/triangles) re-emits from the
+            // original record bytes; it is never lifted into an editable element,
+            // so it stays passthrough-locked (isFaithfullyEncodable is false).
+            throw .unsupportedPayload(label: "gradientFill (mesh — re-emit original bytes)")
+
         // MARK: Bitmaps ([MS-EMF] §2.3.1)
         case .stretchDIBits(let p):
             return try stretchDIBitsRecord(p)                       // §2.3.1.7
@@ -206,7 +212,7 @@ public enum EMFRecordEncoder {
     /// form). The document writer re-emits those from their original bytes.
     public static func isFaithfullyEncodable(_ payload: EMFRecordPayload) -> Bool {
         switch payload {
-        case .unimplemented, .malformed, .patBlt, .extTextOutA, .smallTextOut:
+        case .unimplemented, .malformed, .patBlt, .extTextOutA, .smallTextOut, .gradientFill:
             return false
         case .extCreateFontIndirectW(let p):
             return !p.hasExtendedData

@@ -42,6 +42,82 @@ public struct ColorRef: Sendable, Equatable {
     }
 }
 
+/// A gradient-mesh vertex ([MS-EMF] §2.2.26, TriVertex): a logical point plus a
+/// 16-bit-per-channel colour. GDI writes the colour with the significant value
+/// in the high byte (0xFF00 = full), so the renderer maps a channel to 8-bit by
+/// taking its high byte.
+public struct TriVertex: Sendable, Equatable {
+    public var x: Int32
+    public var y: Int32
+    public var red: UInt16
+    public var green: UInt16
+    public var blue: UInt16
+    public var alpha: UInt16
+
+    public init(x: Int32, y: Int32, red: UInt16, green: UInt16, blue: UInt16, alpha: UInt16) {
+        self.x = x
+        self.y = y
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.alpha = alpha
+    }
+}
+
+/// Gradient-fill mode ([MS-WMF] §2.1.1.11, GradientFill enumeration), carried by
+/// EMR_GRADIENTFILL (§2.3.5.12). Out-of-range values decode to `.unknown`.
+public enum GradientMode: Sendable, Equatable {
+    /// GRADIENT_FILL_RECT_H (0x00): rectangle, left→right colour interpolation.
+    case rectHorizontal
+    /// GRADIENT_FILL_RECT_V (0x01): rectangle, top→bottom colour interpolation.
+    case rectVertical
+    /// GRADIENT_FILL_TRIANGLE (0x02): Gouraud-shaded triangle.
+    case triangle
+    case unknown(UInt32)
+
+    public init(_ raw: UInt32) {
+        switch raw {
+        case 0x00: self = .rectHorizontal
+        case 0x01: self = .rectVertical
+        case 0x02: self = .triangle
+        default: self = .unknown(raw)
+        }
+    }
+}
+
+/// One GradientRectangle ([MS-EMF] §2.2.3): two vertex indices into the record's
+/// TriVertex array — the rectangle's upper-left and lower-right corners.
+public struct GradientRectangle: Sendable, Equatable {
+    public var upperLeft: UInt32
+    public var lowerRight: UInt32
+
+    public init(upperLeft: UInt32, lowerRight: UInt32) {
+        self.upperLeft = upperLeft
+        self.lowerRight = lowerRight
+    }
+}
+
+/// One GradientTriangle ([MS-EMF] §2.2.4): three vertex indices into the
+/// record's TriVertex array.
+public struct GradientTriangle: Sendable, Equatable {
+    public var vertex1: UInt32
+    public var vertex2: UInt32
+    public var vertex3: UInt32
+
+    public init(vertex1: UInt32, vertex2: UInt32, vertex3: UInt32) {
+        self.vertex1 = vertex1
+        self.vertex2 = vertex2
+        self.vertex3 = vertex3
+    }
+}
+
+/// The gradient mesh of an EMR_GRADIENTFILL: rectangles for the RECT_H/RECT_V
+/// modes, triangles for the TRIANGLE mode.
+public enum GradientMesh: Sendable, Equatable {
+    case rectangles([GradientRectangle])
+    case triangles([GradientTriangle])
+}
+
 /// A two-dimensional linear transform ([MS-EMF] §2.2.28, "XForm"): six
 /// little-endian FLOAT values in file order M11, M12, M21, M22, Dx, Dy.
 ///
