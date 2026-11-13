@@ -155,6 +155,27 @@ struct ZoomableMetafileView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
+    /// Renders the low-resolution full-page placeholder once, off the main actor,
+    /// and sets it on `placeholderView` (P2b). `prepared`, `naturalSize` and
+    /// `options` are `Sendable`; the render is area-capped so its one allocation
+    /// stays small, and the view is touched only back on the main actor.
+    @MainActor
+    static func renderPlaceholder(
+        prepared: MetafileRenderer.Prepared,
+        naturalSize: CGSize,
+        options: RenderOptions,
+        into placeholderView: UIImageView
+    ) {
+        Task { @MainActor [weak placeholderView] in
+            let image = await Task.detached(priority: .userInitiated) { () -> CGImage? in
+                let scale = ViewerFit.placeholderScale(forLongSide: max(naturalSize.width, naturalSize.height))
+                return MetafileRenderer.makeImage(prepared, scale: scale, background: .white, options: options)?.0
+            }.value
+            guard let image, let placeholderView else { return }
+            placeholderView.image = UIImage(cgImage: image)
+        }
+    }
+
     func makeUIView(context: Context) -> UIScrollView {
         let scrollView = ZoomScrollView()
         scrollView.delegate = context.coordinator
@@ -197,8 +218,33 @@ struct ZoomableMetafileView: UIViewRepresentable {
         tiled.applyAccessibility(chromeHidden: chromeHidden)
         tiled.setShadow(enabled: pageShadow)
         tiled.setPaint(tilePaint)
+        tiled.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         context.coordinator.tiledView = tiled
-        scrollView.addSubview(tiled)
+
+        // P2b: the zoom view is a container holding the tiled view, so a
+        // low-resolution full-page placeholder can sit BENEATH the tiles. A
+        // placeholder added as the tiled view's own subview would draw ABOVE its
+        // CATiledLayer tiles (a subview is always above its superview's drawn
+        // content); a sibling inside the zoomed container sits behind them and
+        // shows through only where a tile has not drawn yet. Each sharp tile is
+        // opaque (white page + ink), so it covers the placeholder as it lands and
+        // the final pixels are unchanged. A cheap document gets an empty,
+        // transparent container of identical geometry, so nothing changes for it.
+        let zoomView = UIView(frame: CGRect(origin: .zero, size: naturalSize))
+        if ViewerFit.isExpensiveToReplay(playbackOps: prepared.estimatedPlaybackOps) {
+            let placeholderView = UIImageView(frame: zoomView.bounds)
+            placeholderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            placeholderView.contentMode = .scaleToFill
+            placeholderView.isAccessibilityElement = false
+            zoomView.addSubview(placeholderView)
+            context.coordinator.placeholderView = placeholderView
+            Self.renderPlaceholder(prepared: prepared, naturalSize: naturalSize, options: options, into: placeholderView)
+        }
+        tiled.frame = zoomView.bounds
+        zoomView.addSubview(tiled)
+        context.coordinator.zoomView = zoomView
+        context.coordinator.scrollView = scrollView
+        scrollView.addSubview(zoomView)
         scrollView.contentSize = naturalSize
         controller.scrollView = scrollView
 
@@ -266,6 +312,9 @@ struct ZoomableMetafileView: UIViewRepresentable {
         coordinator.findOverlay?.controller = nil
         coordinator.findOverlay?.removeFromSuperview()
         coordinator.findOverlay = nil
+        coordinator.placeholderView?.image = nil
+        coordinator.placeholderView?.removeFromSuperview()
+        coordinator.placeholderView = nil
         if let tiled = coordinator.tiledView {
             tiled.controller = nil
             tiled.onToggleChrome = nil
@@ -273,6 +322,9 @@ struct ZoomableMetafileView: UIViewRepresentable {
             tiled.removeFromSuperview()
         }
         coordinator.tiledView = nil
+        coordinator.zoomView?.removeFromSuperview()
+        coordinator.zoomView = nil
+        coordinator.scrollView = nil
     }
 
     @MainActor
@@ -280,6 +332,14 @@ struct ZoomableMetafileView: UIViewRepresentable {
         var parent: ZoomableMetafileView
         fileprivate weak var tiledView: TiledMetafileView?
         fileprivate weak var findOverlay: IOSFindHighlightView?
+        /// The zoom view: a container holding the placeholder (if any) beneath the
+        /// tiled view, so both ride the scroll view's zoom transform together (P2b).
+        fileprivate weak var zoomView: UIView?
+        /// The scroll view, so the configuration no longer reads it through the
+        /// tiled view's superview (now the container, not the scroll view) (P2b).
+        fileprivate weak var scrollView: UIScrollView?
+        /// The P2b full-page placeholder beneath the tiles (expensive documents only).
+        fileprivate weak var placeholderView: UIImageView?
 
         private var hasSetInitialZoom = false
         private var lastViewportSize: CGSize = .zero
@@ -320,8 +380,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
 
         func configureZoomScales(for viewport: CGSize) {
             guard viewport.width > 0, viewport.height > 0,
-                  let tiled = tiledView,
-                  let scrollView = tiled.superview as? UIScrollView
+                  let scrollView
             else { return }
 
             let natural = parent.naturalSize
@@ -409,7 +468,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
 
         // MARK: UIScrollViewDelegate
 
-        func viewForZooming(in scrollView: UIScrollView) -> UIView? { tiledView }
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { zoomView }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             centreContent(scrollView)
@@ -436,15 +495,13 @@ struct ZoomableMetafileView: UIViewRepresentable {
         }
 
         @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-            guard let tiled = tiledView,
-                  let scrollView = tiled.superview as? UIScrollView
-            else { return }
+            guard let zoomView, let scrollView else { return }
             let fit = parent.controller.fitScale
             let atFit = abs(scrollView.zoomScale - fit) < 0.01
             if atFit {
                 // Fit → 2×, centred on the tap.
                 let target = min(max(2, fit), scrollView.maximumZoomScale)
-                let point = gesture.location(in: tiled)
+                let point = gesture.location(in: zoomView)
                 scrollView.zoom(to: zoomRect(scrollView, scale: target, center: point), animated: !parent.reduceMotion)
                 parent.controller.announceZoom(target)
             } else {
@@ -468,6 +525,10 @@ struct ZoomableMetafileView: UIViewRepresentable {
 private final class TiledMetafileView: UIView {
     private let prepared: MetafileRenderer.Prepared
     private let naturalSize: CGSize
+    /// The CATiledLayer tile side (pt), chosen once from the document's estimated
+    /// replay cost: 512 for a cheap document, 1024 for an expensive one so a fit
+    /// view needs a handful of full-stream replays instead of a dozen-plus (P2b).
+    private let tileSide: CGFloat
     /// One decoded-DIB cache for this document (P2 performance): the tiled layer
     /// replays the record stream once per tile on concurrent threads, so without
     /// it every tile re-decodes each DIB from scratch. Thread-safe and shared.
@@ -527,6 +588,7 @@ private final class TiledMetafileView: UIView {
     init(prepared: MetafileRenderer.Prepared, naturalSize: CGSize, displayScale: CGFloat, options: RenderOptions) {
         self.prepared = prepared
         self.naturalSize = naturalSize
+        self.tileSide = ViewerFit.tileSide(forPlaybackOps: prepared.estimatedPlaybackOps)
         self.optionsLock = OSAllocatedUnfairLock<RenderOptions>(initialState: options)
         super.init(frame: CGRect(origin: .zero, size: naturalSize))
 
@@ -535,7 +597,7 @@ private final class TiledMetafileView: UIView {
         // levels cover the fit scale of a large picture in a small viewport.
         tiled.levelsOfDetail = 8
         tiled.levelsOfDetailBias = 4
-        tiled.tileSize = CGSize(width: 512, height: 512)
+        tiled.tileSize = CGSize(width: tileSide, height: tileSide)
         // Render base tiles at the real display scale, not a constant — this is
         // where the I1 fixed-2× raster is replaced (v3-plan §4 I2).
         tiled.contentsScale = displayScale > 0 ? displayScale : 1
