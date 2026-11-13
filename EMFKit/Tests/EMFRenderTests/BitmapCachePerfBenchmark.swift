@@ -1,6 +1,7 @@
 import CoreGraphics
 import Darwin
 import Foundation
+import ImageIO
 import Testing
 @testable import EMFParse
 @testable import EMFRender
@@ -129,6 +130,35 @@ struct BitmapCachePerfBenchmark {
         }
     }
 
+    // MARK: - makeImage PNG emit (manual; for the P2b crop-diff proof)
+
+    /// Writes `EMFRenderer.makeImage(file, scale)` to a PNG, so a pure-CoreGraphics
+    /// script can crop-compare it against the on-screen viewer capture (proving the
+    /// crisp tiles — not the blurry placeholder — are what's drawn). Not shipped.
+    ///
+    ///   EMFY_EMIT_PNG="/abs/in.emf|/abs/out.png|2.49" swift test -c release \
+    ///     --no-parallel --scratch-path <dir> --filter emitMakeImagePNG
+    @Test("emit makeImage PNG (manual)")
+    func emitMakeImagePNG() throws {
+        guard let spec = ProcessInfo.processInfo.environment["EMFY_EMIT_PNG"] else { return }
+        let parts = spec.split(separator: "|").map(String.init)
+        guard parts.count == 3, let scale = Double(parts[2]) else {
+            print("[emit] bad EMFY_EMIT_PNG spec"); return
+        }
+        let data = try Data(contentsOf: URL(fileURLWithPath: parts[0]))
+        let file = try EMFFile.parse(data)
+        guard let (image, _) = EMFRenderer.makeImage(file, scale: CGFloat(scale), background: .white) else {
+            print("[emit] render failed"); return
+        }
+        let url = URL(fileURLWithPath: parts[1])
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else {
+            print("[emit] dest failed"); return
+        }
+        CGImageDestinationAddImage(dest, image, nil)
+        CGImageDestinationFinalize(dest)
+        print("[emit] wrote \(url.path) (\(image.width)x\(image.height))")
+    }
+
     // MARK: - P2b adaptive-tile + placeholder report
 
     /// The P2b before/after: the cost of a fit-to-window repaint and a 400% repaint
@@ -181,7 +211,13 @@ struct BitmapCachePerfBenchmark {
             print("[p2b] \(label): parse failed — skipped"); return
         }
 
-        let ops = file.records.count
+        // Mirror Prepared.estimatedPlaybackOps: GDI record count, folding in the
+        // EMF+ record count when the file draws through EMF+.
+        let ops: Int = {
+            let gdi = file.records.count
+            guard file.emfPlusPresence() == .drawingContent else { return gdi }
+            return max(gdi, file.emfPlusStream().records.count)
+        }()
         let expensive = ops >= Self.largeTileOpThreshold
         let tileSide = expensive ? Self.largeTileSide : Self.defaultTileSide
 
