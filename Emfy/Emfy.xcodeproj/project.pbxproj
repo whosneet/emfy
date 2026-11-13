@@ -102,6 +102,9 @@
 		F1B000000000000000000001 /* PrintLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000001 /* PrintLayout.swift */; };
 		F1C000000000000000000001 /* PrintLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000001 /* PrintLayout.swift */; };
 		F1B000000000000000000002 /* DrawingClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A000000000000000000002 /* DrawingClipboard.swift */; };
+		A3B000000000000000010002 /* AISharePackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000010001 /* AISharePackage.swift */; };
+		A3B000000000000000010003 /* AISharePackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000010001 /* AISharePackage.swift */; };
+		A3B000000000000000020002 /* AISharePackageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000020001 /* AISharePackageTests.swift */; };
 		F3B000000000000000000001 /* DrawingTextExtraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000001 /* DrawingTextExtraction.swift */; };
 		F3B000000000000000000002 /* DrawingTextFind.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000003 /* DrawingTextFind.swift */; };
 		F3B000000000000000000003 /* DrawingSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A000000000000000000005 /* DrawingSpotlight.swift */; };
@@ -525,6 +528,7 @@
 		F1A000000000000000000009 /* MacPrint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPrint.swift; sourceTree = "<group>"; };
 		F1A000000000000000000001 /* PrintLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintLayout.swift; sourceTree = "<group>"; };
 		F1A000000000000000000002 /* DrawingClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingClipboard.swift; sourceTree = "<group>"; };
+		A3B000000000000000010001 /* AISharePackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISharePackage.swift; sourceTree = "<group>"; };
 		F3A000000000000000000001 /* DrawingTextExtraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextExtraction.swift; sourceTree = "<group>"; };
 		F3A000000000000000000003 /* DrawingTextFind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextFind.swift; sourceTree = "<group>"; };
 		F3A000000000000000000005 /* DrawingSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSpotlight.swift; sourceTree = "<group>"; };
@@ -545,6 +549,7 @@
 		F1A000000000000000000004 /* BatchRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchRenderer.swift; sourceTree = "<group>"; };
 		F1A000000000000000000005 /* PrintLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintLayoutTests.swift; sourceTree = "<group>"; };
 		F1A000000000000000000006 /* DrawingClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingClipboardTests.swift; sourceTree = "<group>"; };
+		A3B000000000000000020001 /* AISharePackageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISharePackageTests.swift; sourceTree = "<group>"; };
 		F3A000000000000000000002 /* DrawingTextExtractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextExtractionTests.swift; sourceTree = "<group>"; };
 		F3A000000000000000000004 /* DrawingTextFindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTextFindTests.swift; sourceTree = "<group>"; };
 		F3A000000000000000000006 /* DrawingSpotlightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingSpotlightTests.swift; sourceTree = "<group>"; };
@@ -896,6 +901,7 @@
 				C00000000000000000000008 /* UpdatesUI.swift */,
 				F1A000000000000000000001 /* PrintLayout.swift */,
 				F1A000000000000000000002 /* DrawingClipboard.swift */,
+				A3B000000000000000010001 /* AISharePackage.swift */,
 				F3A000000000000000000001 /* DrawingTextExtraction.swift */,
 				F3A000000000000000000003 /* DrawingTextFind.swift */,
 				F3A000000000000000000005 /* DrawingSpotlight.swift */,
@@ -994,6 +1000,7 @@
 				C0000000000000000000000A /* UpdateVerifierTests.swift */,
 				F1A000000000000000000005 /* PrintLayoutTests.swift */,
 				F1A000000000000000000006 /* DrawingClipboardTests.swift */,
+				A3B000000000000000020001 /* AISharePackageTests.swift */,
 				F3A000000000000000000002 /* DrawingTextExtractionTests.swift */,
 				F3A000000000000000000004 /* DrawingTextFindTests.swift */,
 				F3A000000000000000000042 /* DrawingTranslationTests.swift */,
@@ -1500,6 +1507,7 @@
 				F1B000000000000000000009 /* MacPrint.swift in Sources */,
 				F1B000000000000000000001 /* PrintLayout.swift in Sources */,
 				F1B000000000000000000002 /* DrawingClipboard.swift in Sources */,
+				A3B000000000000000010002 /* AISharePackage.swift in Sources */,
 				F3B000000000000000000001 /* DrawingTextExtraction.swift in Sources */,
 				F3B000000000000000000002 /* DrawingTextFind.swift in Sources */,
 				F3B000000000000000000003 /* DrawingSpotlight.swift in Sources */,
@@ -1684,6 +1692,7 @@
 				B01100000000000000000312 /* ExportScale.swift in Sources */,
 				F1C000000000000000000001 /* PrintLayout.swift in Sources */,
 				F1C000000000000000000002 /* DrawingClipboard.swift in Sources */,
+				A3B000000000000000010003 /* AISharePackage.swift in Sources */,
 				F3C000000000000000000001 /* DrawingTextExtraction.swift in Sources */,
 				F3C000000000000000000003 /* DrawingTextFind.swift in Sources */,
 				F3C000000000000000000005 /* DrawingSpotlight.swift in Sources */,
@@ -1699,6 +1708,7 @@
 				F1C000000000000000000004 /* BatchRenderer.swift in Sources */,
 				F1C000000000000000000005 /* PrintLayoutTests.swift in Sources */,
 				F1C000000000000000000006 /* DrawingClipboardTests.swift in Sources */,
+				A3B000000000000000020002 /* AISharePackageTests.swift in Sources */,
 				F3C000000000000000000002 /* DrawingTextExtractionTests.swift in Sources */,
 				F3C000000000000000000004 /* DrawingTextFindTests.swift in Sources */,
 				F3C000000000000000000006 /* DrawingSpotlightTests.swift in Sources */,
