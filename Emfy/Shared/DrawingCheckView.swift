@@ -73,36 +73,60 @@ struct DrawingCheckView: View {
     // MARK: Actions
 
     private var actionsRow: some View {
-        HStack(spacing: 10) {
-            if summariseModel.hasEngine, model.summaryData != nil {
-                summariseButton
-            }
-            Button(action: onExport) {
-                Label("Export Report…", systemImage: "square.and.arrow.up")
-            }
-            .accessibilityIdentifier("exportCheckReport")
-            Spacer(minLength: 0)
+        // Fit the inspector width without hyphenating a label: try full labels, then fall
+        // back to icon-only buttons on a narrow (iPad) inspector.
+        ViewThatFits(in: .horizontal) {
+            actionButtons(compact: false)
+            actionButtons(compact: true)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func actionButtons(compact: Bool) -> some View {
+        HStack(spacing: 10) {
+            if summariseModel.hasEngine, model.summaryData != nil {
+                summariseButton(compact: compact)
+            }
+            Button(action: onExport) {
+                actionLabel("Export Report…", "square.and.arrow.up", compact: compact)
+            }
+            .accessibilityIdentifier("exportCheckReport")
+        }
+    }
+
+    private func summariseButton(compact: Bool) -> some View {
+        Group {
+            switch summariseModel.phase {
+            case .streaming:
+                Button(role: .cancel) { summariseModel.cancel() } label: {
+                    actionLabel("Stop", "stop.circle", compact: compact)
+                }
+            default:
+                Button {
+                    guard let data = model.summaryData else { return }
+                    summariseModel.resetIfChanged(key: model.analysisVersion)
+                    summariseModel.summarise(key: model.analysisVersion, data: data)
+                } label: {
+                    actionLabel("Summarise", "sparkles", compact: compact)
+                }
+                .accessibilityIdentifier("summariseCheck")
+            }
+        }
+    }
+
+    /// A button label that never hyphenates: a single-line icon+text when it fits, else
+    /// an icon-only control that keeps the text as its accessibility label.
     @ViewBuilder
-    private var summariseButton: some View {
-        switch summariseModel.phase {
-        case .streaming:
-            Button(role: .cancel) { summariseModel.cancel() } label: {
-                Label("Stop", systemImage: "stop.circle")
-            }
-        default:
-            Button {
-                guard let data = model.summaryData else { return }
-                summariseModel.resetIfChanged(key: model.analysisVersion)
-                summariseModel.summarise(key: model.analysisVersion, data: data)
-            } label: {
-                Label("Summarise", systemImage: "sparkles")
-            }
-            .accessibilityIdentifier("summariseCheck")
+    private func actionLabel(_ title: String, _ icon: String, compact: Bool) -> some View {
+        if compact {
+            Image(systemName: icon)
+                .accessibilityLabel(title)
+        } else {
+            Label(title, systemImage: icon)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 
