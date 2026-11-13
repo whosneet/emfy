@@ -1215,6 +1215,9 @@ final class DocumentSession {
         snapshotStore?.read(for: entryID)?.data
     }
 
+    /// The document's current file name, for a save-a-copy default name (X1b item 2).
+    func currentDocumentFileName() -> String? { documentFileName() }
+
     /// Restores the opened bytes through the same coordinated write, clears the edit
     /// state and undo, and reloads the document (design call E2a-7). Behind a
     /// confirmation in the UI.

@@ -76,6 +76,9 @@
 		C1B0000000000000000000B1 /* DrawingCompareModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000A1 /* DrawingCompareModel.swift */; };
 		C1B0000000000000000000B2 /* DrawingCompareView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000A2 /* DrawingCompareView.swift */; };
 		C1B0000000000000000000B3 /* CompareScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000A3 /* CompareScreenshots.swift */; };
+		C1B0000000000000000000B4 /* DrawingCleanupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000A4 /* DrawingCleanupModel.swift */; };
+		C1B0000000000000000000B5 /* DrawingCleanupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000A5 /* DrawingCleanupView.swift */; };
+		C1B0000000000000000000B6 /* CleanupScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1B0000000000000000000A6 /* CleanupScreenshots.swift */; };
 		A1A0000000000000B1B00006A /* LibrarySearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00006F /* LibrarySearch.swift */; };
 		A1A0000000000000B1B00006T /* LibrarySearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00006F /* LibrarySearch.swift */; };
 		A1A0000000000000B1B00005A /* DrawingTitleTagViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000B1B00005F /* DrawingTitleTagViews.swift */; };
@@ -534,6 +537,9 @@
 		C1B0000000000000000000A1 /* DrawingCompareModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingCompareModel.swift; sourceTree = "<group>"; };
 		C1B0000000000000000000A2 /* DrawingCompareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingCompareView.swift; sourceTree = "<group>"; };
 		C1B0000000000000000000A3 /* CompareScreenshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompareScreenshots.swift; sourceTree = "<group>"; };
+		C1B0000000000000000000A4 /* DrawingCleanupModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingCleanupModel.swift; sourceTree = "<group>"; };
+		C1B0000000000000000000A5 /* DrawingCleanupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingCleanupView.swift; sourceTree = "<group>"; };
+		C1B0000000000000000000A6 /* CleanupScreenshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupScreenshots.swift; sourceTree = "<group>"; };
 		A1A000000000000000000117 /* DrawingAIInspectorViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/DrawingAIInspectorViews.swift"; sourceTree = "<group>"; };
 		A1A000000000000000000119 /* AppleIntelligenceSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/AppleIntelligenceSettingsSection.swift"; sourceTree = "<group>"; };
 		A1A00000000000000000011B /* DrawingAIAvailabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIAvailabilityTests.swift; sourceTree = "<group>"; };
@@ -858,6 +864,9 @@
 				C1B0000000000000000000A1 /* DrawingCompareModel.swift */,
 				C1B0000000000000000000A2 /* DrawingCompareView.swift */,
 				C1B0000000000000000000A3 /* CompareScreenshots.swift */,
+				C1B0000000000000000000A4 /* DrawingCleanupModel.swift */,
+				C1B0000000000000000000A5 /* DrawingCleanupView.swift */,
+				C1B0000000000000000000A6 /* CleanupScreenshots.swift */,
 				B00100000000000000000111 /* OpenRouting.swift */,
 				B00100000000000000000112 /* ViewerFit.swift */,
 				B00100000000000000000140 /* ZoomMath.swift */,
@@ -1456,6 +1465,9 @@
 				C1B0000000000000000000B1 /* DrawingCompareModel.swift in Sources */,
 				C1B0000000000000000000B2 /* DrawingCompareView.swift in Sources */,
 				C1B0000000000000000000B3 /* CompareScreenshots.swift in Sources */,
+				C1B0000000000000000000B4 /* DrawingCleanupModel.swift in Sources */,
+				C1B0000000000000000000B5 /* DrawingCleanupView.swift in Sources */,
+				C1B0000000000000000000B6 /* CleanupScreenshots.swift in Sources */,
 				A1A000000000000000000118 /* DrawingAIInspectorViews.swift in Sources */,
 				A1A00000000000000000011A /* AppleIntelligenceSettingsSection.swift in Sources */,
 				E3D00000000000000000A001 /* LayerEditing.swift in Sources */,

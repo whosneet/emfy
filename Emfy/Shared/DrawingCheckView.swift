@@ -24,6 +24,8 @@ struct DrawingCheckView: View {
     @State private var compareModel = DrawingCompareModel()
     @State private var showingCompare = false
     @State private var pickingBaselineFile = false
+    @State private var cleanupModel = DrawingCleanupModel()
+    @State private var showingCleanup = false
 
     var body: some View {
         @Bindable var model = model
@@ -55,6 +57,9 @@ struct DrawingCheckView: View {
         }
         .fileImporter(isPresented: $pickingBaselineFile, allowedContentTypes: MetafileTypes.readableContentTypes) { result in
             if case .success(let url) = result { loadBaseline(from: url) }
+        }
+        .sheet(isPresented: $showingCleanup) {
+            DrawingCleanupView(model: cleanupModel, fileName: model.documentFileName, onClose: { showingCleanup = false })
         }
         .aiConsentSheet(
             provider: summariseModel.pendingConsent,
@@ -103,6 +108,18 @@ struct DrawingCheckView: View {
             }
             .accessibilityIdentifier("exportCheckReport")
             compareButton(compact: compact)
+            Button { startCleanup() } label: {
+                actionLabel("Clean Up…", "wand.and.stars", compact: compact)
+            }
+            .accessibilityIdentifier("cleanUpDrawing")
+        }
+    }
+
+    private func startCleanup() {
+        showingCleanup = true
+        Task {
+            guard let data = await model.cleanupData() else { return }
+            cleanupModel.analyse(data: data)
         }
     }
 

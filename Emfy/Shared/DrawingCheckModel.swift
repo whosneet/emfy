@@ -192,6 +192,14 @@ final class DrawingCheckModel {
         session?.openedVersionSnapshotData()
     }
 
+    // MARK: Clean-up (X1b item 2)
+
+    /// The open drawing's bytes, for the clean-up & compatibility report.
+    func cleanupData() async -> Data? { await dataProvider?() }
+
+    /// A suggested base file name for a saved copy.
+    var documentFileName: String { session?.currentDocumentFileName() ?? "Drawing.emf" }
+
     // MARK: Canvas highlight
 
     /// The outline for the selected finding's elements, in device space, reusing the

@@ -156,6 +156,7 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
         #if os(macOS)
         CheckScreenshots.runIfNeeded()
         CompareScreenshots.runIfNeeded()
+        CleanupScreenshots.runIfNeeded()
         #endif
         AIProviderScreenshots.runIfNeeded()
         AIShareScreenshots.runIfNeeded()
@@ -289,6 +290,9 @@ private struct RootView: View {
         #if os(iOS) && DEBUG
         if CompareScreenshots.iosRequested {
             CompareScreenshots.IOSScreen()
+                .ignoresSafeArea()
+        } else if CleanupScreenshots.iosRequested {
+            CleanupScreenshots.IOSScreen()
                 .ignoresSafeArea()
         } else if let probeIndex = QuickLookProbeView.requestedStartIndex {
             QuickLookProbeView(startIndex: probeIndex)
