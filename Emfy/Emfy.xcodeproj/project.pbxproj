@@ -38,6 +38,7 @@
 		A2A000000000000000000020 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001F /* AIProviderService.swift */; };
 		A2A000000000000000000021 /* AIProviderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A00000000000000000001F /* AIProviderService.swift */; };
 		A2B00000000000000000109A /* AIProviderScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000109F /* AIProviderScreenshots.swift */; };
+		A3B000000000000000050002 /* AIShareScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B000000000000000050001 /* AIShareScreenshots.swift */; };
 		A2B00000000000000000108A /* AIProviderEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000108F /* AIProviderEditorSheet.swift */; };
 		A2B00000000000000000105A /* AIProviderSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000105F /* AIProviderSettingsSection.swift */; };
 		A2B00000000000000000107A /* AIProviderRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B00000000000000000107F /* AIProviderRouting.swift */; };
@@ -480,6 +481,7 @@
 		A2A00000000000000000001C /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/OpenAIProvider.swift"; sourceTree = "<group>"; };
 		A2A00000000000000000001F /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderService.swift"; sourceTree = "<group>"; };
 		A2B00000000000000000109F /* AIProviderScreenshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/AIProviderScreenshots.swift"; sourceTree = "<group>"; };
+		A3B000000000000000050001 /* AIShareScreenshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/AIShareScreenshots.swift"; sourceTree = "<group>"; };
 		A2B00000000000000000108F /* AIProviderEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/AIProviderEditorSheet.swift"; sourceTree = "<group>"; };
 		A2B00000000000000000105F /* AIProviderSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/AIProviderSettingsSection.swift"; sourceTree = "<group>"; };
 		A2B00000000000000000107F /* AIProviderRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI/Providers/AIProviderRouting.swift"; sourceTree = "<group>"; };
@@ -964,6 +966,7 @@
 				A2A00000000000000000001C /* OpenAIProvider.swift */,
 				A2A00000000000000000001F /* AIProviderService.swift */,
 				A2B00000000000000000109F /* AIProviderScreenshots.swift */,
+				A3B000000000000000050001 /* AIShareScreenshots.swift */,
 				A2B00000000000000000108F /* AIProviderEditorSheet.swift */,
 				A2B00000000000000000105F /* AIProviderSettingsSection.swift */,
 				A2B00000000000000000107F /* AIProviderRouting.swift */,
@@ -1390,6 +1393,7 @@
 				A2A00000000000000000001D /* OpenAIProvider.swift in Sources */,
 				A2A000000000000000000020 /* AIProviderService.swift in Sources */,
 				A2B00000000000000000109A /* AIProviderScreenshots.swift in Sources */,
+				A3B000000000000000050002 /* AIShareScreenshots.swift in Sources */,
 				A2B00000000000000000108A /* AIProviderEditorSheet.swift in Sources */,
 				A2B00000000000000000105A /* AIProviderSettingsSection.swift in Sources */,
 				A2B00000000000000000107A /* AIProviderRouting.swift in Sources */,

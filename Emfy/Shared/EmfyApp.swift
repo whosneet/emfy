@@ -154,6 +154,7 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
         DrawingAIDebugProbe.runIfNeeded()
         DrawingAIScreenshots.runIfNeeded()
         AIProviderScreenshots.runIfNeeded()
+        AIShareScreenshots.runIfNeeded()
         #endif
     }
 
@@ -269,6 +270,8 @@ private struct RootView: View {
         #if os(iOS) && DEBUG
         if AIProviderScreenshots.iosSettingsRequested {
             AIProviderScreenshots.iosSettingsScreen()
+        } else if AIShareScreenshots.iosRequested {
+            AIShareScreenshots.iosScreen()
         } else {
             baseContent
         }
