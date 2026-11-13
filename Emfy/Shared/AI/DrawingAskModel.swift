@@ -199,7 +199,7 @@ final class DrawingAskModel {
             for try await snapshot in stream {
                 if Task.isCancelled { break }
                 guard messages.indices.contains(index) else { break }
-                messages[index].text = snapshot.content
+                messages[index].text = DrawingAIOutputSanitiser.sanitise(snapshot.content)
             }
             if messages.indices.contains(index) {
                 messages[index].streaming = false
@@ -256,7 +256,7 @@ final class DrawingAskModel {
                 service: service, config: config, request: request,
                 onText: { [weak self] text in
                     guard let self, self.messages.indices.contains(index) else { return }
-                    self.messages[index].text = text
+                    self.messages[index].text = DrawingAIOutputSanitiser.sanitise(text)
                 },
                 onTool: { name in if !tools.contains(name) { tools.append(name) } }
             )

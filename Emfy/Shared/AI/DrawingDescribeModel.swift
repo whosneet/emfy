@@ -158,7 +158,7 @@ final class DrawingDescribeModel {
             let stream = session.streamResponse(to: prompt)
             for try await snapshot in stream {
                 if Task.isCancelled { break }
-                text = snapshot.content
+                text = DrawingAIOutputSanitiser.sanitise(snapshot.content)
             }
             phase = Task.isCancelled ? (text.isEmpty ? .idle : .done) : .done
         } catch {
@@ -177,7 +177,7 @@ final class DrawingDescribeModel {
         do {
             let refused = try await DrawingAIProviderRun.stream(
                 service: service, config: config, request: request,
-                onText: { [weak self] value in self?.text = value },
+                onText: { [weak self] value in self?.text = DrawingAIOutputSanitiser.sanitise(value) },
                 onTool: { _ in })
             if refused {
                 phase = .failed("The provider declined this request.")
