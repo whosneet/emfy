@@ -1125,6 +1125,41 @@ enum SettingsSceneScreenshot {
         capture(view: MacGeneralTab().environment(store).environment(settings).padding(.vertical, 8), to: path)
     }
 
+    /// C5a screenshot: renders the What's New release notes (`Changelog.latest`) to a PNG
+    /// with `ImageRenderer`, so the copy can be shot in-process with no Screen Recording
+    /// permission. It mirrors `WhatsNewView` — the same icon, title and `ChangeBullet`
+    /// rows, fed by the same `Changelog.latest` — but lays the bullets out in a plain
+    /// (non-scrolling) stack at natural height, because `ImageRenderer` does not draw a
+    /// `ScrollView`'s lazily laid-out content. The authoritative sheet capture is the iOS
+    /// one; this verifies the Mac copy renders and reads.
+    @MainActor
+    @discardableResult
+    static func captureWhatsNew(to path: String) -> Bool {
+        let entry = Changelog.latest
+        let content = VStack(spacing: 16) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .frame(width: 72, height: 72)
+            Text("What's New in Emfy \(entry.version)")
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(entry.changes, id: \.self) { ChangeBullet(text: $0) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(24)
+        .frame(width: 440)
+        .background(Color(nsColor: .windowBackgroundColor))
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let data = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? data.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
     #if EMFY_DMG
     /// A3a screenshot: hosts the GitHub/DMG-only MCP-server settings group offscreen
     /// and captures it in-process (no Screen Recording permission needed).
@@ -1136,10 +1171,10 @@ enum SettingsSceneScreenshot {
     #endif
 
     @MainActor
-    private static func capture<V: View>(view: V, to path: String) -> Bool {
+    private static func capture<V: View>(view: V, to path: String, size: NSSize = NSSize(width: 520, height: 520)) -> Bool {
         let host = NSHostingView(rootView: view)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 520),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.title = "Settings"
         window.contentView = host

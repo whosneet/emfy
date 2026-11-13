@@ -185,8 +185,14 @@ enum EditorDebugLaunch {
     /// opened file (default "WS-A"), so a work-sourced filename never reaches a log.
     static var recordsLabel: String { value(for: "-EmfyDebugRecordsLabel") ?? "WS-A" }
 
+    /// `-EmfyDebugWhatsNewSheet YES`: on iOS, force the What's New sheet at launch for a
+    /// Simulator capture of the 3.0 release notes (the normal once-per-version path can't be
+    /// relied on deterministically). Suppresses the normal launch presentation (via
+    /// `isActive`) and shows the sheet directly.
+    static var whatsNewSheet: Bool { (value(for: "-EmfyDebugWhatsNewSheet") ?? "NO").uppercased() == "YES" }
+
     /// Whether the launch hook is driving this run.
-    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect || findQuery != nil || findMenuAudit || pictureFixture || settingsScene != nil || translateMenu || spotlightCheckPath != nil }
+    static var isActive: Bool { openPath != nil || script != nil || updatesScene != nil || batchSheet || menuAudit || iosSelect || findQuery != nil || findMenuAudit || pictureFixture || settingsScene != nil || translateMenu || spotlightCheckPath != nil || whatsNewSheet }
 
     /// Builds the `-EmfyDebugPictureFixture` EMF and returns its temp path, or nil when the
     /// flag is off or synthesis fails. The picture is an EMF+ compressed-PNG bitmap of

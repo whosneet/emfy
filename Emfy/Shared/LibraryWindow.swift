@@ -182,6 +182,8 @@ struct LibraryWindow: View {
             var allowWhatsNew = true
             #if DEBUG
             if EditorDebugLaunch.isActive { allowWhatsNew = false }
+            // C5a screenshot: force the sheet for a deterministic Simulator capture.
+            if EditorDebugLaunch.whatsNewSheet { showLaunchWhatsNew = true }
             #endif
             if allowWhatsNew, WhatsNewPresenter.claimLaunchPresentation(enabled: settings.showWhatsNewAfterUpdates) {
                 showLaunchWhatsNew = true
@@ -237,6 +239,14 @@ struct LibraryWindow: View {
             if EditorDebugLaunch.settingsScene == "general", let base = EditorDebugLaunch.screenshotBase {
                 try? await Task.sleep(for: .milliseconds(900))
                 _ = SettingsSceneScreenshot.captureGeneralTab(store: store, settings: settings, to: base + "-i-spotlight-toggle.png")
+                try? await Task.sleep(for: .milliseconds(200))
+                exit(0)
+            }
+            // C5a screenshot: the What's New view (the 3.0 release notes), hosted offscreen
+            // and captured in-process.
+            if EditorDebugLaunch.settingsScene == "whatsnew", let base = EditorDebugLaunch.screenshotBase {
+                try? await Task.sleep(for: .milliseconds(900))
+                _ = SettingsSceneScreenshot.captureWhatsNew(to: base + "-whats-new.png")
                 try? await Task.sleep(for: .milliseconds(200))
                 exit(0)
             }
