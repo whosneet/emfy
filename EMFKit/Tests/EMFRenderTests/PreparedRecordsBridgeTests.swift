@@ -97,19 +97,25 @@ struct PreparedRecordsBridgeTests {
 
     // MARK: - WMF program
 
-    @Test("a WMF program exposes the record list but not the EMF step-through")
+    @Test("a WMF program exposes the record list and summaries but not the EMF step-through")
     func wmfProgramListOnly() throws {
         let data = try Data(contentsOf: TestPaths.corpusFile("gate-wmf-gdi-p2-star.wmf"))
         let prepared = try #require(MetafileRenderer.prepare(try OpenedMetafile.open(data)))
         #expect(prepared.kind == .wmfRecords)
 
         #expect(prepared.makePartialPlayer() == nil)
-        #expect(prepared.recordSummary(at: 0) == nil)
         #expect(prepared.playbackState(throughRecordIndex: 0) == nil)
 
         let refs = prepared.recordRefs()
         #expect(!refs.isEmpty)
         #expect(refs.contains { $0.typeName.hasPrefix("META_") })
         #expect(refs.allSatisfy { $0.offset >= 0 && $0.size >= 0 && !$0.isEMFPlusCarrier })
+
+        // P3: WMF record summaries are now present (non-nil for every row, one per
+        // record), and a real drawing file carries at least one non-empty summary.
+        #expect(refs.indices.allSatisfy { prepared.recordSummary(at: $0) != nil })
+        #expect(refs.indices.contains { !(prepared.recordSummary(at: $0) ?? "").isEmpty })
+        // An out-of-range index is "" (not nil, not a trap).
+        #expect(prepared.recordSummary(at: refs.count + 10) == "")
     }
 }

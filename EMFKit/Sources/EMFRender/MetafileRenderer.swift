@@ -110,6 +110,12 @@ public enum MetafileRenderer {
         /// `recordRefs()` derives on demand from the retained `EMFFile`.
         let wmfRecordRefList: [RecordRef]
 
+        /// The record-inspector one-line summaries for a translated WMF program
+        /// (P3), one per `wmfRecordRefList` row, built from its source `WMFFile` at
+        /// prepare time. Empty for EMF content (whose summaries `recordSummary(at:)`
+        /// decodes on demand).
+        let wmfRecordSummaryList: [String]
+
         /// The parser diagnostics of the decoded EMF — a standalone `.emf`, or a
         /// WMF's played-back embedded EMF. Empty for WMF record playback (that
         /// path's advisory walk diagnostics live on `WMFFile`, which the app does
@@ -151,7 +157,8 @@ public enum MetafileRenderer {
             embeddedEMF: EmbeddedEMF,
             hasGDICopy: Bool,
             recordKinds: [RecordKindCount],
-            wmfRecordRefList: [RecordRef] = []
+            wmfRecordRefList: [RecordRef] = [],
+            wmfRecordSummaryList: [String] = []
         ) {
             self.content = content
             self.kind = kind
@@ -159,6 +166,7 @@ public enum MetafileRenderer {
             self.hasGDICopy = hasGDICopy
             self.recordKinds = recordKinds
             self.wmfRecordRefList = wmfRecordRefList
+            self.wmfRecordSummaryList = wmfRecordSummaryList
             self.deviceBounds = Prepared.deviceBounds(of: content)
             self.naturalSize = deviceBounds.size
         }
@@ -214,7 +222,8 @@ public enum MetafileRenderer {
                 }
                 return Prepared(content: .wmfProgram(WMFTranslator.translate(wmf)), kind: .wmfRecords,
                                 embeddedEMF: .declined, hasGDICopy: false, recordKinds: wmfRecordKinds(wmf),
-                                wmfRecordRefList: Prepared.wmfRecordRefs(wmf))
+                                wmfRecordRefList: Prepared.wmfRecordRefs(wmf),
+                                wmfRecordSummaryList: Prepared.wmfRecordSummaries(wmf))
             }
             let fate: Prepared.EmbeddedEMF
             switch embedded {
@@ -225,7 +234,8 @@ public enum MetafileRenderer {
             }
             return Prepared(content: .wmfProgram(WMFTranslator.translate(wmf)), kind: .wmfRecords,
                             embeddedEMF: fate, hasGDICopy: false, recordKinds: wmfRecordKinds(wmf),
-                            wmfRecordRefList: Prepared.wmfRecordRefs(wmf))
+                            wmfRecordRefList: Prepared.wmfRecordRefs(wmf),
+                            wmfRecordSummaryList: Prepared.wmfRecordSummaries(wmf))
 
         case .gzip, .unknown:
             return nil

@@ -101,13 +101,19 @@ extension MetafileRenderer.Prepared {
         }
     }
 
-    /// The one-line parameter summary for the record at `index`, or `nil` for a
-    /// WMF program (whose summariser is a later carry-in). Pure and non-trapping:
-    /// it decodes the record on demand via the §8-bounded payload path. An
-    /// out-of-range index returns `""`.
+    /// The one-line parameter summary for the record at `index`. Pure and
+    /// non-trapping. EMF: decoded on demand via the §8-bounded payload path. WMF
+    /// program: read from the summaries built at prepare time (`WMFRecordSummary`).
+    /// An out-of-range index returns `""`; `nil` only when no summary source
+    /// exists at all.
     public func recordSummary(at index: Int) -> String? {
-        guard case .emf(let file) = content else { return nil }
-        return file.recordSummary(at: index)
+        switch content {
+        case .emf(let file):
+            return file.recordSummary(at: index)
+        case .wmfProgram:
+            guard wmfRecordSummaryList.indices.contains(index) else { return "" }
+            return wmfRecordSummaryList[index]
+        }
     }
 
     /// The DC state AFTER playing through `throughRecordIndex`, for the inspector's
@@ -137,5 +143,13 @@ extension MetafileRenderer.Prepared {
                 emfPlusRecordCount: 0
             )
         }
+    }
+
+    /// The one-line parameter summaries for a translated WMF program's records,
+    /// one per `WMFFile.records` row ([MS-WMF] §2.3), built at prepare time where
+    /// the `WMFFile` (and its payload bytes) are in scope. Pure and §8-bounded via
+    /// `WMFRecordSummary`.
+    static func wmfRecordSummaries(_ file: WMFFile) -> [String] {
+        file.records.map { WMFRecordSummary.line(for: $0, payload: file.payload(of: $0)) }
     }
 }
