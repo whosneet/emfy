@@ -42,7 +42,7 @@ enum MCPServerInfo {
     static let name = "emfy"
     /// Kept in step with the app's MARKETING_VERSION; the helper has no Info.plist
     /// to read it from, so it is a constant here.
-    static let version = "3.1"
+    static let version = "3.0"
 }
 
 /// The server: given a tool registry and an enable-gate closure, it turns one

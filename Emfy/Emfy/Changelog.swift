@@ -16,8 +16,8 @@ struct ChangelogEntry: Identifiable {
 enum Changelog {
     static let entries: [ChangelogEntry] = [
         ChangelogEntry(
-            version: "3.1",
-            build: "6",
+            version: "3.0",
+            build: "7",
             date: "November 2026",
             changes: [
                 "Windows Metafile (.wmf) files now open, preview, and thumbnail, alongside EMF.",
