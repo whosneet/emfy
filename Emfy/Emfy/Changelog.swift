@@ -19,15 +19,7 @@ enum Changelog {
             version: "3.0",
             build: "7",
             date: "November 2026",
-            changes: [
-                "Windows Metafile (.wmf) files now open, preview, and thumbnail, alongside EMF.",
-                "Compressed metafiles open too: .wmz (gzip-wrapped WMF) and .emz (gzip-wrapped EMF).",
-                "WMF coverage spans the record types LibreOffice exports; when a WMF carries a complete embedded EMF, Emfy plays that for higher fidelity.",
-                "New iPhone and iPad app: a viewer with sharp zoom at any scale, file details, and sharing or export to PNG and PDF.",
-                "Quick Look previews and thumbnails for EMF and WMF files in Files, Mail, and Messages on iPhone and iPad.",
-                "The iPhone and iPad app supports iPhone Duo.",
-                "Steadier rendering of unusual and malformed metafiles.",
-            ]
+            changes: version3Changes
         ),
         ChangelogEntry(
             version: "2.0.2",
@@ -117,4 +109,24 @@ enum Changelog {
 
     /// The most recent release — the version the running app corresponds to.
     static var latest: ChangelogEntry { entries[0] }
+
+    /// The 3.0 headline changes. The common bullets ship in every build; the Mac
+    /// direct-download (GitHub) build adds one line for the features only it has —
+    /// in-app updates and the local MCP server — via `EMFY_DMG`, so the App Store
+    /// build never advertises an updater or server it doesn't contain.
+    private static var version3Changes: [String] {
+        var changes = [
+            "Edit, create and save metafiles. Open EMF, WMF and their compressed .emz and .wmz forms, then change them: select and transform, draw shapes and freehand with Apple Pencil, add and style text, work in layers, and align and snap to a grid. Start a new drawing from scratch, save in place, or revert to the version you opened.",
+            "On iPhone and iPad too. A viewer with razor-sharp zoom at any scale, light editing on iPhone with a full-editor toggle, and Quick Look previews and thumbnails in Files, Mail and Messages.",
+            "Share in any format. Export to PNG, PDF and SVG, print, copy or drag out as true vector, and convert many files at once.",
+            "Find and read the words. Find text across a drawing, read the text inside pictures on your device, show a Translate overlay, and surface your drawings in Spotlight.",
+            "AI that stays in your control. Describe or ask about a drawing, add titles and tags, run an accessibility Check with fixes, compare versions, recolour, translate in place, or create a new drawing from a description. It runs on your device by default with Apple Intelligence; your own AI provider is used only with your key, after you consent, and Arrley receives nothing.",
+            "Built for the Mac. A single library window with multiple windows, Shortcuts, Siri and Finder Services, and a record inspector that steps through a file.",
+            "Sharper, faster rendering. Arcs, pies and gradients, pattern brushes, small and ANSI text, and more clipping — drawn faster, with a bitmap cache and adaptive tiles for large files.",
+        ]
+        #if EMFY_DMG
+        changes.append("Mac direct-download version: automatic in-app updates when a new release is published, and a local MCP server so AI tools you run can read your drawings.")
+        #endif
+        return changes
+    }
 }
