@@ -39,6 +39,17 @@
 				<string>C617.1</string>
 			</array>
 		</dict>
+		<dict>
+			<!-- DrawingOCRService.swift uses ProcessInfo.systemUptime as a monotonic
+			     clock to measure how long an on-device Vision OCR pass takes, purely
+			     to time events within the app (35F9.1). Nothing leaves the device. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
