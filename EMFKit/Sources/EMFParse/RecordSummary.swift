@@ -89,7 +89,7 @@ public enum EMFRecordSummary {
         case .extCreateFontIndirectW(let p):
             let face = quoted(p.logFont.faceName)
             return "#\(p.ihFonts) \(face) h=\(p.logFont.height)"
-        case .extTextOutW(let t):
+        case .extTextOutA(let t), .extTextOutW(let t):
             return "\(quoted(t.string)) @ \(point(t.reference))"
 
         // MARK: WMF-sourced primitives

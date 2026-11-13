@@ -533,6 +533,50 @@ struct RenderFixture {
         append(type: 84, payload: body.bytes)
     }
 
+    /// EMR_EXTTEXTOUTA §2.3.5.7 — the ANSI sibling of extTextOutW. The EmrText
+    /// fixed fields occupy record offsets 36..76; the ANSI string (one byte per
+    /// character) is placed at offset 76, then the optional 4-byte-aligned Dx.
+    /// `ansiBytes` lets a test write exact code-page bytes; by default the string
+    /// is Windows-1252 encoded (round-trips through the CP1252 decoder).
+    mutating func extTextOutA(
+        reference: (x: Int32, y: Int32),
+        ansiBytes: [UInt8],
+        charCount: Int? = nil,
+        options: UInt32 = 0,
+        rectangle: (l: Int32, t: Int32, r: Int32, b: Int32) = (0, 0, 0, 0),
+        dx: [UInt32]? = nil,
+        graphicsMode: UInt32 = 1
+    ) {
+        let offString = 76
+        let chars = charCount ?? ansiBytes.count
+        let dxStart = (offString + ansiBytes.count + 3) & ~3
+        let hasDx = dx != nil
+
+        var body = LE()                                  // record offset 8
+        body.i32(0); body.i32(0); body.i32(0); body.i32(0)   // Bounds@8 (ignored)
+        body.u32(graphicsMode)                           // iGraphicsMode@24
+        body.f32(1)                                      // exScale@28
+        body.f32(1)                                      // eyScale@32
+        body.i32(reference.x); body.i32(reference.y)     // Reference@36
+        body.u32(UInt32(chars))                          // Chars@44
+        body.u32(UInt32(offString))                      // offString@48
+        body.u32(options)                                // Options@52
+        body.i32(rectangle.l); body.i32(rectangle.t)     // Rectangle@56
+        body.i32(rectangle.r); body.i32(rectangle.b)
+        body.u32(hasDx ? UInt32(dxStart) : 0)            // offDx@72
+        body.raw(ansiBytes)                              // ANSI string@76
+        if hasDx {
+            let currentRecordOffset = 8 + body.bytes.count
+            let pad = dxStart - currentRecordOffset
+            if pad > 0 { body.raw([UInt8](repeating: 0, count: pad)) }
+            for value in dx! { body.u32(value) }
+        }
+        let recordSize = 8 + body.bytes.count
+        let alignPad = (4 - recordSize % 4) % 4
+        if alignPad > 0 { body.raw([UInt8](repeating: 0, count: alignPad)) }
+        append(type: 83, payload: body.bytes)
+    }
+
     // MARK: - Phase-4 bitmap records
 
     /// A 40-byte BitmapInfoHeader ([MS-WMF] §2.2.2.3). `height` signed.

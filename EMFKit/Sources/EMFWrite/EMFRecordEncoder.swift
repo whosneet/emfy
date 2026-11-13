@@ -148,6 +148,12 @@ public enum EMFRecordEncoder {
             return try colorRecord(25, color)                       // §2.3.11.10
         case .extCreateFontIndirectW(let p):
             return try extCreateFontRecord(p)                       // §2.3.7.8
+        case .extTextOutA:
+            // The A string was decoded code-page-dependently at parse time;
+            // re-encoding it to ANSI bytes would be lossy, so the document writer
+            // re-emits the original record bytes instead (isFaithfullyEncodable
+            // is false below). A lifted A record is re-synthesised as EXTTEXTOUTW.
+            throw .unsupportedPayload(label: "extTextOutA (ANSI — re-emit original bytes)")
         case .extTextOutW(let p):
             return try extTextOutWRecord(p)                         // §2.3.5.8
 
@@ -195,7 +201,7 @@ public enum EMFRecordEncoder {
     /// form). The document writer re-emits those from their original bytes.
     public static func isFaithfullyEncodable(_ payload: EMFRecordPayload) -> Bool {
         switch payload {
-        case .unimplemented, .malformed, .patBlt:
+        case .unimplemented, .malformed, .patBlt, .extTextOutA:
             return false
         case .extCreateFontIndirectW(let p):
             return !p.hasExtendedData

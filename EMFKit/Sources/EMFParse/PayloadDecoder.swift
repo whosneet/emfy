@@ -260,7 +260,8 @@ extension EMFFile {
         case 80: return decodeSetDIBitsToDevice(slice: slice)
         case 81: return decodeStretchDIBits(slice: slice)
         case 82: return decodeExtCreateFontIndirectW(slice: slice)
-        case 84: return decodeExtTextOutW(slice: slice)
+        case 83: return decodeExtTextOut(slice: slice, type: 83, ansi: true)
+        case 84: return decodeExtTextOut(slice: slice, type: 84, ansi: false)
         case 85: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polyBezier16)
         case 86: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polygon16)
         case 87: return decodePoly16(type: type, slice: slice, make: EMFRecordPayload.polyline16)
@@ -749,17 +750,23 @@ extension EMFFile {
         )
     }
 
-    /// EMR_EXTTEXTOUTW §2.3.5.8: Bounds RectL at 8 (ignored on receipt),
-    /// iGraphicsMode u32 at 24, exScale f32 at 28, eyScale f32 at 32, then the
-    /// EmrText object (§2.2.5) at 36. Fixed part through the EmrText fixed
-    /// fields is 76 bytes (offDx sits at 72).
+    /// EMR_EXTTEXTOUTW §2.3.5.8 and EMR_EXTTEXTOUTA §2.3.5.7: Bounds RectL at 8
+    /// (ignored on receipt), iGraphicsMode u32 at 24, exScale f32 at 28, eyScale
+    /// f32 at 32, then the EmrText object (§2.2.5) at 36. Fixed part through the
+    /// EmrText fixed fields is 76 bytes (offDx sits at 72).
     ///
     /// EmrText fixed fields, at RECORD offsets: Reference PointL at 36, Chars
     /// u32 at 44, offString u32 at 48, Options u32 at 52, Rectangle RectL at 56,
     /// offDx u32 at 72. offString and offDx are RECORD-start-relative (§2.2.5:
     /// "from the start of the record in which this object is contained").
-    private static func decodeExtTextOutW(slice: RecordSlice) -> EMFRecordPayload {
-        let type: UInt32 = 84
+    ///
+    /// The ONLY difference between the two records is the string encoding: the W
+    /// variant's string is `Chars` UTF-16LE code units; the A variant's is
+    /// `Chars` 8-bit ANSI bytes (decoded code-page-dependently — see
+    /// `decodeANSI`). The Dx array is `Chars` (or `2×Chars` under ETO_PDY) u32
+    /// values for both. All offsets/lengths are validated against nSize before
+    /// any allocation (primer §8).
+    private static func decodeExtTextOut(slice: RecordSlice, type: UInt32, ansi: Bool) -> EMFRecordPayload {
         guard let bounds = slice.rectL(8),
               let graphicsMode = slice.u32(24),
               let exScale = slice.f32(28),
@@ -773,7 +780,7 @@ extension EMFFile {
         else {
             return .malformed(type: type, reason: .tooSmall(minimumSize: 76, actualSize: slice.size))
         }
-        _ = bounds // Bounds MUST be ignored on receipt (§2.3.5.8); not carried.
+        _ = bounds // Bounds MUST be ignored on receipt (§2.3.5.7/.8); not carried.
 
         // Hostile floats never propagate (primer §8): reject non-finite scales.
         guard exScale.isFinite, eyScale.isFinite else {
@@ -784,18 +791,29 @@ extension EMFFile {
         let chars = Int(rawChars)
         let offString = Int(rawOffString)
 
-        // String: `chars` UTF-16LE code units at the record-relative offString.
-        // Validate the byte range against nSize before decoding (§8).
-        let stringByteLength = chars * 2
+        // String: `chars` elements at the record-relative offString — 1 byte each
+        // for ANSI, 2 for UTF-16. Validate the byte range against nSize (§8).
+        let stringByteLength = ansi ? chars : chars * 2
         guard offString >= 0, chars >= 0, stringByteLength <= slice.size - offString else {
             return .malformed(type: type, reason: .rangeOutOfBounds(
                 offset: offString, length: stringByteLength, recordSize: slice.size
             ))
         }
-        guard let string = slice.utf16String(at: offString, codeUnits: chars, stopAtNUL: false) else {
-            return .malformed(type: type, reason: .rangeOutOfBounds(
-                offset: offString, length: stringByteLength, recordSize: slice.size
-            ))
+        let string: String
+        if ansi {
+            guard let bytes = slice.bytes(at: offString, length: chars) else {
+                return .malformed(type: type, reason: .rangeOutOfBounds(
+                    offset: offString, length: stringByteLength, recordSize: slice.size
+                ))
+            }
+            string = decodeANSI(bytes)
+        } else {
+            guard let decoded = slice.utf16String(at: offString, codeUnits: chars, stopAtNUL: false) else {
+                return .malformed(type: type, reason: .rangeOutOfBounds(
+                    offset: offString, length: stringByteLength, recordSize: slice.size
+                ))
+            }
+            string = decoded
         }
 
         // Dx: present only when offDx != 0. Length is `chars`, or `2 × chars`
@@ -819,7 +837,7 @@ extension EMFFile {
             dx = values
         }
 
-        return .extTextOutW(ExtTextPayload(
+        let payload = ExtTextPayload(
             graphicsMode: graphicsMode,
             exScale: exScale,
             eyScale: eyScale,
@@ -828,7 +846,22 @@ extension EMFFile {
             string: string,
             options: options,
             dx: dx
-        ))
+        )
+        return ansi ? .extTextOutA(payload) : .extTextOutW(payload)
+    }
+
+    /// Decodes an EMR_EXTTEXTOUTA string's 8-bit bytes to Unicode. EMF ANSI text
+    /// is code-page-dependent (the selected font's charset, [MS-EMF] §2.3.5.7);
+    /// the decoder has no font yet, so it maps via Windows-1252 — the near-
+    /// universal "ANSI" code page for the Latin text these records overwhelmingly
+    /// carry — and falls back to ISO-8859-1, which maps all 256 byte values, so a
+    /// hostile byte can never fail the payload. Non-Latin ANSI code pages
+    /// (Shift-JIS, etc.) are a known approximation, consistent with the rest of
+    /// the text path decoding its string once at parse time.
+    private static func decodeANSI(_ bytes: Data) -> String {
+        if let s = String(bytes: bytes, encoding: .windowsCP1252) { return s }
+        if let s = String(bytes: bytes, encoding: .isoLatin1) { return s }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     // MARK: - Bitmap decoders

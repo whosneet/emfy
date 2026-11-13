@@ -635,6 +635,10 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case setBkColor(ColorRef)
     /// EMR_EXTCREATEFONTINDIRECTW (82), §2.3.7.8.
     case extCreateFontIndirectW(ExtCreateFontPayload)
+    /// EMR_EXTTEXTOUTA (83), §2.3.5.7. The ANSI sibling of EMR_EXTTEXTOUTW:
+    /// identical layout but an 8-bit code-page string (decoded to Unicode by
+    /// the decoder). Shares `ExtTextPayload` and the same renderer text path.
+    case extTextOutA(ExtTextPayload)
     /// EMR_EXTTEXTOUTW (84), §2.3.5.8.
     case extTextOutW(ExtTextPayload)
 

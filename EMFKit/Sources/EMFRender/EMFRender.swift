@@ -363,9 +363,11 @@ public enum EMFRenderer {
         // Text and bitmap records draw directly regardless of path-bracket
         // state — GDI does not record EXTTEXTOUTW or the blits into a path
         // bracket, so an open bracket does not capture them.
-        case .extTextOutW(let text):
-            // Capture BEFORE drawing: the anchor is the pre-draw current
-            // position under TA_UPDATECP.
+        case .extTextOutW(let text), .extTextOutA(let text):
+            // EMR_EXTTEXTOUTA and EMR_EXTTEXTOUTW share ExtTextPayload and the
+            // same text path (the A string was decoded at parse time). Capture
+            // BEFORE drawing: the anchor is the pre-draw current position under
+            // TA_UPDATECP.
             if dc.observer != nil { captureTextOp(text, dc: dc) }
             TextDrawer.draw(text, into: context, dc: &dc, base: base, log: &log)
             return
