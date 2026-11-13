@@ -289,7 +289,10 @@ private struct RootView: View {
     @ViewBuilder
     private var baseContent: some View {
         #if os(iOS) && DEBUG
-        if CompareScreenshots.iosRequested {
+        if AIEditScreenshots.iosRequested {
+            AIEditScreenshots.IOSScreen()
+                .ignoresSafeArea()
+        } else if CompareScreenshots.iosRequested {
             CompareScreenshots.IOSScreen()
                 .ignoresSafeArea()
         } else if CleanupScreenshots.iosRequested {

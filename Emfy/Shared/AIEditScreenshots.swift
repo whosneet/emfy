@@ -1,5 +1,7 @@
-#if DEBUG && os(macOS)
+#if DEBUG
+#if os(macOS)
 import AppKit
+#endif
 import CoreGraphics
 import EMFEdit
 import Foundation
@@ -20,6 +22,7 @@ import SwiftUI
 // `-EmfyDebugAIEditFixture <path>` emits the fixture EMF (for the iPad capture) and exits.
 
 enum AIEditScreenshots {
+    #if os(macOS)
     static func runIfNeeded() {
         let args = ProcessInfo.processInfo.arguments
         if let f = args.firstIndex(of: "-EmfyDebugAIEditFixture"), f + 1 < args.count {
@@ -36,6 +39,7 @@ enum AIEditScreenshots {
             exit(0)
         }
     }
+    #endif
 
     // MARK: Fixture
 
@@ -72,7 +76,8 @@ enum AIEditScreenshots {
         return "{\"operations\":[\(ops)]}"
     }
 
-    // MARK: Capture
+    // MARK: Capture (macOS offscreen)
+    #if os(macOS)
 
     @MainActor
     private static func captureAll(base: String) async {
@@ -153,8 +158,10 @@ enum AIEditScreenshots {
         guard let data = rep.representation(using: .png, properties: [:]) else { return false }
         return (try? data.write(to: URL(fileURLWithPath: path))) != nil
     }
+    #endif
 }
 
+#if os(macOS)
 /// A fitted render of a scene, for the applied-result shot.
 private struct CanvasShot: View {
     let scene: EMFEdit.Scene
@@ -171,4 +178,57 @@ private struct CanvasShot: View {
         }
     }
 }
+#endif
+
+#if os(iOS)
+extension AIEditScreenshots {
+    /// Whether the iPad AI-edit/recolour screen was requested at launch.
+    static var iosRequested: Bool { ProcessInfo.processInfo.arguments.contains("-EmfyDebugAIEditIOS") }
+
+    /// Shows the REAL Recolour sheet (deterministic) and, when `-EmfyDebugAIEditWhich ai`
+    /// is passed, the stub-driven AI edit preview, hosted on iPad for a `simctl` screenshot.
+    struct IOSScreen: View {
+        @State private var recolour = DrawingRecolourModel()
+        @State private var edit = DrawingAIEditModel()
+        @State private var ready = false
+        private var wantsAI: Bool { ProcessInfo.processInfo.arguments.contains("ai-edit") }
+
+        var body: some View {
+            ZStack {
+                Color(.systemGroupedBackground).ignoresSafeArea()
+                if ready {
+                    if wantsAI, edit.preview != nil {
+                        DrawingAIEditView(model: edit, onClose: {}).environment(nil as AIProviderStore?)
+                    } else {
+                        DrawingRecolourView(model: recolour, onClose: {})
+                    }
+                }
+            }
+            .task { await setUp() }
+        }
+
+        @MainActor private func setUp() async {
+            guard let scene = AIEditScreenshots.makeScene(),
+                  let bytes = try? SceneExporter.export(scene, as: .emf).data else { return }
+            if wantsAI {
+                let session = DocumentSession(entryID: UUID(), resolve: { _ in bytes }, documentFileName: { "ai.emf" })
+                await session.beginEditing()
+                edit.configure(session: session)
+                edit.engineOverride = .onDevice
+                let textIDs = session.editingScene?.editableElements.filter { $0.kind == .text }.map(\.id) ?? []
+                edit.producer = { _, _, _ in AIEditScreenshots.cannedPlan(textIDs: textIDs) }
+                edit.instruction = "make the headings dark blue and 2pt bigger"
+                edit.submit()
+                for _ in 0 ..< 100 where edit.preview == nil { try? await Task.sleep(for: .milliseconds(30)) }
+            } else {
+                let session = DocumentSession(entryID: UUID(), resolve: { _ in bytes }, documentFileName: { "recolour.emf" })
+                await recolour.start(session: session, selection: [])
+                recolour.mode = .colourBlindSafe
+                for _ in 0 ..< 100 where recolour.afterImage == nil { try? await Task.sleep(for: .milliseconds(30)) }
+            }
+            ready = true
+        }
+    }
+}
+#endif
 #endif
