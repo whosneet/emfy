@@ -139,13 +139,17 @@ struct ZoomableMetafileView: UIViewRepresentable {
     var options: RenderOptions = .default
     /// The find highlights to draw above the tiles (F3b). `.empty` draws nothing.
     var findHighlights: FindHighlightSet = .empty
-    /// Trailing width to keep clear for the inspector overlay (iPad read-only). The
-    /// scroll view fills the FULL width and fits + centres the page in the region LEFT
-    /// of this inset (full width − `reservedTrailing`), the same way the editable canvas
-    /// handles its inspector — so the page never pins to the edge or hides under the
-    /// overlay (P1). Zero on iPhone (the inspector is a sheet) and when the inspector is
-    /// closed.
+    /// Trailing width the FIT keeps clear for the inspector COLUMN (iPad read-only), so
+    /// the fitted page is always narrow enough to clear the whole column. The scroll view
+    /// fills the full width. Zero on iPhone (the inspector is a sheet) and when closed.
     var reservedTrailing: CGFloat = 0
+    /// Trailing width the CENTRING uses — the inspector's floating translucent PANEL
+    /// footprint, which is narrower than its column (the panel floats a fixed inset inside
+    /// the column). Centring in the panel region while the fit clears the wider column
+    /// leaves an equal margin on each side of the page, so the page sits centred between
+    /// the screen edge and the panel with equal gaps (P1 review). Falls back to
+    /// `reservedTrailing` when zero.
+    var reservedCentreTrailing: CGFloat = 0
     /// Toggles the chrome; reused as the drawing's "Show/Hide controls" action.
     let onSingleTap: () -> Void
 
@@ -291,16 +295,27 @@ struct ZoomableMetafileView: UIViewRepresentable {
         /// The safe-area insets to fit inside: the scroll view's own insets (which
         /// track the bars) while the chrome is shown, and `.zero` when it is hidden
         /// so the drawing fills the screen (§5).
-        private func effectiveInsets(_ scrollView: UIScrollView) -> ViewerFit.Insets {
-            // Always reserve the inspector's trailing strip (`reservedTrailing`), so the
-            // page fits + centres in the clear region beside it; when the chrome is hidden
-            // the bars' safe area is dropped for a full-screen fit, but the inspector strip
-            // (if any) is still kept clear (P1).
-            guard !parent.chromeHidden else {
-                return ViewerFit.Insets(trailing: parent.reservedTrailing)
-            }
+        /// Safe-area insets plus a trailing `reserve` for the inspector. When the chrome is
+        /// hidden the bars' safe area is dropped for a full-screen fit, but the inspector
+        /// strip (if any) is still kept clear (P1).
+        private func insets(_ scrollView: UIScrollView, reserve: CGFloat) -> ViewerFit.Insets {
+            guard !parent.chromeHidden else { return ViewerFit.Insets(trailing: reserve) }
             let i = scrollView.safeAreaInsets
-            return ViewerFit.Insets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right + parent.reservedTrailing)
+            return ViewerFit.Insets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right + reserve)
+        }
+
+        /// The FIT insets reserve the inspector COLUMN (`reservedTrailing`).
+        private func effectiveInsets(_ scrollView: UIScrollView) -> ViewerFit.Insets {
+            insets(scrollView, reserve: parent.reservedTrailing)
+        }
+
+        /// The CENTRING insets reserve the inspector PANEL footprint
+        /// (`reservedCentreTrailing`, falling back to the column), so the fitted page —
+        /// sized to clear the whole column — sits centred up to the panel's edge with an
+        /// equal margin on each side (P1 review).
+        private func centreInsets(_ scrollView: UIScrollView) -> ViewerFit.Insets {
+            let reserve = parent.reservedCentreTrailing > 0 ? parent.reservedCentreTrailing : parent.reservedTrailing
+            return insets(scrollView, reserve: reserve)
         }
 
         func configureZoomScales(for viewport: CGSize) {
@@ -371,7 +386,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
         /// bars while they show (ViewerFit computes the safe-area + slack inset).
         private func centreContent(_ scrollView: UIScrollView) {
             let natural = parent.naturalSize
-            let insets = effectiveInsets(scrollView)
+            let insets = centreInsets(scrollView)
             let centred = ViewerFit.centringInset(
                 content: natural,
                 viewport: scrollView.bounds.size,

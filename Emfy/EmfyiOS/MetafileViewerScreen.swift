@@ -161,6 +161,21 @@ struct MetafileViewerScreen: View {
         return inspectorWidth
     }
 
+    /// The leading inset of the inspector's floating translucent PANEL inside its
+    /// `inspectorWidth` column: the panel's material edge sits this far right of the
+    /// column's left edge (iPadOS 27 measures ~43 pt). The read-only canvas fits to the
+    /// full column but CENTRES up to the panel edge, so this inset's worth of slack is
+    /// split into an equal margin on each side of the page (P1 review). A system metric —
+    /// re-measure if the OS floating-inspector inset changes.
+    private let inspectorPanelLeadingInset: CGFloat = 40
+
+    /// The trailing width the read-only canvas CENTRES against — the inspector panel's
+    /// footprint (column minus its floating leading inset). Zero when no strip is reserved.
+    private var reservedInspectorCentreWidth: CGFloat {
+        let reserved = reservedInspectorWidth
+        return reserved > 0 ? max(0, reserved - inspectorPanelLeadingInset) : 0
+    }
+
     var body: some View {
         // The body is split into chained `some View` layers grouped by concern (chrome,
         // find/inspector, sheets, alerts, reactions) so each is a separate, small
@@ -960,6 +975,7 @@ struct MetafileViewerScreen: View {
                 options: settings.renderOptions,
                 findHighlights: findHighlightSet,
                 reservedTrailing: reservedInspectorWidth,
+                reservedCentreTrailing: reservedInspectorCentreWidth,
                 onSingleTap: { toggleChrome() }
             )
             .ignoresSafeArea()
