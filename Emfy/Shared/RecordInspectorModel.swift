@@ -159,6 +159,7 @@ enum RecordStateFormat {
         switch brush {
         case .none: return "None"
         case .solid(let color): return hex(color)
+        case .pattern(let width, let height): return "Pattern \(width)×\(height)"
         }
     }
 
