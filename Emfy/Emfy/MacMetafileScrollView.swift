@@ -64,6 +64,18 @@ final class MacMetafileZoomController {
         clip.scroll(to: origin)
         scrollView.reflectScrolledClipView(clip)
     }
+
+    /// Centres the document in the viewport, so a P2b 400% viewer screenshot lands on
+    /// the drawing's detailed centre rather than a blank corner (`-EmfyDebugShotCenter`).
+    func debugScrollToDrawingCenter() {
+        guard let scrollView, let doc = scrollView.documentView else { return }
+        let clip = scrollView.contentView
+        let origin = CGPoint(
+            x: doc.frame.midX - clip.bounds.width / 2,
+            y: doc.frame.midY - clip.bounds.height / 2)
+        clip.scroll(to: origin)
+        scrollView.reflectScrolledClipView(clip)
+    }
     #endif
 
     /// The scroll view's live magnification, or the mirrored value before it is set.

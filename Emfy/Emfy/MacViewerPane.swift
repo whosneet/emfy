@@ -301,7 +301,13 @@ struct MacViewerPane: View {
         try? await Task.sleep(for: .milliseconds(800))
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-fit.png")
         controller.setZoom(4.0)
-        controller.debugScrollToTopLeft()   // show the selection's top-left handles at 400%
+        // Centre on the drawing for a P2b viewer proof shot; otherwise top-left to
+        // show an edit-mode selection's handles.
+        if EditorDebugLaunch.shotCenter {
+            controller.debugScrollToDrawingCenter()
+        } else {
+            controller.debugScrollToTopLeft()
+        }
         try? await Task.sleep(for: .milliseconds(800))
         _ = EditorDebugScreenshot.captureLibraryWindow(to: base + "-400.png")
         // Supplementary: prove one committed transform re-renders the canvas (the

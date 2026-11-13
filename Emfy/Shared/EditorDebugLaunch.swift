@@ -29,6 +29,11 @@ enum EditorDebugLaunch {
     /// and at 400% (to `<base>-fit.png` / `<base>-400.png`) then quits.
     static var screenshotBase: String? { value(for: "-EmfyDebugShot") }
 
+    /// `-EmfyDebugShotCenter YES`: the plain viewer screenshot flow centres the page in
+    /// the viewport for the 400% shot (P2b: land on the drawing's detail, not a blank
+    /// corner) instead of scrolling to the top-left.
+    static var shotCenter: Bool { (value(for: "-EmfyDebugShotCenter") ?? "NO").uppercased() == "YES" }
+
     /// `-EmfyDebugInspector YES`: open the file-details/Format inspector after edit mode
     /// and selection, so a capture shows the Format panel (E2c).
     static var showInspector: Bool { (value(for: "-EmfyDebugInspector") ?? "NO").uppercased() == "YES" }
