@@ -54,6 +54,8 @@ final class DrawingAIEditModel {
     var preview: Preview?
     /// The engine footnote ("On-device · Apple Intelligence" / "via …") for the preview.
     private(set) var engineLabel = ""
+    /// The last raw model reply, for DEBUG inspection / the live-run harness. Not shown.
+    @ObservationIgnored private(set) var lastRawReply = ""
     /// Set when a provider edit needs consent; the view presents the consent screen.
     var pendingConsent: AIProviderConfig?
 
@@ -69,6 +71,13 @@ final class DrawingAIEditModel {
     @ObservationIgnored private var scene: Scene?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var pendingInstruction: String?
+    /// The selection the edit is scoped to (empty = whole drawing).
+    @ObservationIgnored var scope: Set<Int> = []
+
+    /// A short description of the edit's scope, for the sheet header.
+    var scopeDescription: String {
+        scope.isEmpty ? "the whole drawing" : "\(scope.count) selected element\(scope.count == 1 ? "" : "s")"
+    }
 
     var isBusy: Bool { phase == .thinking }
 
@@ -83,8 +92,9 @@ final class DrawingAIEditModel {
     /// Whether any engine is available (so the view can show/hide the entry).
     var hasEngine: Bool { engine != nil }
 
-    func configure(session: DocumentSession) {
+    func configure(session: DocumentSession, scope: Set<Int> = []) {
         self.session = session
+        self.scope = scope
     }
 
     /// Resets to idle (e.g. when the sheet is dismissed or the drawing changes).
@@ -141,28 +151,43 @@ final class DrawingAIEditModel {
             phase = .failed("This drawing can’t be edited."); return
         }
         self.scene = scene
-        let block = DrawingAIEditContext.elementsBlock(for: scene)
+        // Scope the described elements to the current selection (intersected with what is
+        // actually editable), so the AI edit stays within the selection when there is one.
+        let editableScope = scope.intersection(Set(scene.editableElements.map(\.id)))
+        let block = DrawingAIEditContext.elementsBlock(for: scene, selectedIDs: editableScope)
 
-        let raw: String
-        do {
-            if let producer {
-                raw = try await producer(text, block, engine)
-            } else {
-                raw = try await defaultProduce(instruction: text, elementsBlock: block, engine: engine)
+        // Produce → sanitiser → strict decode. The live (non-stub) path gets ONE bounded
+        // retry that feeds the decode error back, hardening the JSON channel WITHOUT ever
+        // loosening the decoder or the validator. The stub path never retries.
+        let maxAttempts = (producer == nil) ? 2 : 1
+        var plan: EditPlan?
+        var lastDecodeError = ""
+        var lastRaw = ""
+        for attempt in 0 ..< maxAttempts {
+            let prompt = attempt == 0 ? text : Self.retryInstruction(original: text, error: lastDecodeError)
+            let raw: String
+            do {
+                if let producer {
+                    raw = try await producer(prompt, block, engine)
+                } else {
+                    raw = try await defaultProduce(instruction: prompt, elementsBlock: block, engine: engine)
+                }
+            } catch {
+                if error is CancellationError { phase = .idle; return }
+                phase = .failed(Self.friendly(error))
+                return
             }
-        } catch {
-            if error is CancellationError { phase = .idle; return }
-            phase = .failed(Self.friendly(error))
-            return
+            if Task.isCancelled { phase = .idle; return }
+            lastRaw = raw
+            do {
+                plan = try EditPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw))
+                break
+            } catch {
+                lastDecodeError = "\(error)"
+            }
         }
-        if Task.isCancelled { phase = .idle; return }
-
-        // sanitiser → strict decode → validator.
-        let sanitised = DrawingAIOutputSanitiser.sanitise(raw)
-        let plan: EditPlan
-        do {
-            plan = try EditPlan.decode(fromJSON: sanitised)
-        } catch {
+        lastRawReply = lastRaw   // DEBUG inspection only
+        guard let plan else {
             phase = .failed("The edit couldn’t be understood. Try rephrasing your request.")
             return
         }
@@ -186,7 +211,7 @@ final class DrawingAIEditModel {
 
         preview = Preview(
             before: rendered.before, after: rendered.after,
-            operations: EditPlanDescriber.describe(plan.operations),
+            operations: EditPlanDescriber.describe(plan.operations, in: scene),
             warnings: validation.warnings.map(EditPlanDescriber.describe),
             commands: commands)
         phase = .preview
@@ -268,6 +293,17 @@ final class DrawingAIEditModel {
         return "Something went wrong preparing the edit. Please try again."
     }
 
+    /// The retry prompt: the original request plus the decode error, so the model fixes its
+    /// JSON. Never loosens the decoder — it just gives the model a second, informed try.
+    static func retryInstruction(original: String, error: String) -> String {
+        """
+        \(original)
+
+        (Your previous reply could not be parsed as the required EditPlan JSON: \(error). \
+        Reply with ONLY the JSON object described, and nothing else.)
+        """
+    }
+
     /// A short message for the first validation problem (the preview isn't shown for an
     /// invalid plan).
     static func problemMessage(_ problems: [EditPlanProblem]) -> String {
@@ -294,36 +330,40 @@ final class DrawingAIEditModel {
 }
 
 // MARK: - Human-readable op descriptions (app-layer display text)
+//
+// Describes an edit the way a user sees it — naming a text run by a short excerpt of its
+// text (local UI only, never sent to a model) and counting elements kind-aware
+// ("2 text elements", "3 shapes") — rather than exposing internal element ids.
 
 enum EditPlanDescriber {
-    static func describe(_ operations: [EditOperation]) -> [String] {
-        operations.map(describe)
+    static func describe(_ operations: [EditOperation], in scene: Scene) -> [String] {
+        operations.map { describe($0, in: scene) }
     }
 
-    static func describe(_ operation: EditOperation) -> String {
+    static func describe(_ operation: EditOperation, in scene: Scene) -> String {
         switch operation {
         case .recolorFill(let ids, let color):
-            return "Recolour the fill of \(count(ids)) to \(color.hex)"
+            return "Recolour the fill of \(countPhrase(ids, scene)) to \(color.hex)"
         case .recolorStroke(let ids, let color):
-            return "Recolour the outline of \(count(ids)) to \(color.hex)"
+            return "Recolour the outline of \(countPhrase(ids, scene)) to \(color.hex)"
         case .setText(let id, let text):
-            return "Change text #\(id) to “\(text.prefix(40))”"
+            return "Change \(name(id, scene)) to “\(excerpt(text))”"
         case .setFontSize(let id, let points):
-            return "Set text #\(id) to \(trim(points)) pt"
+            return "Set \(name(id, scene)) to \(trim(points)) pt"
         case .setFontFamily(let id, let family):
-            return "Set text #\(id) font to \(family)"
+            return "Set \(name(id, scene)) font to \(family)"
         case .move(let ids, let dx, let dy):
-            return "Move \(count(ids)) by (\(trim(dx)), \(trim(dy)))"
+            return "Move \(countPhrase(ids, scene)) by (\(trim(dx)), \(trim(dy)))"
         case .scale(let ids, let factor):
-            return "Scale \(count(ids)) by \(trim(factor))×"
+            return "Scale \(countPhrase(ids, scene)) by \(trim(factor))×"
         case .setLineWidth(let ids, let points):
-            return "Set the line width of \(count(ids)) to \(trim(points)) pt"
+            return "Set the line width of \(countPhrase(ids, scene)) to \(trim(points)) pt"
         case .align(let ids, let edge):
-            return "Align \(count(ids)) \(edgeName(edge))"
+            return "Align \(countPhrase(ids, scene)) \(edgeName(edge))"
         case .distribute(let ids, let axis):
-            return "Distribute \(count(ids)) \(axis == .horizontal ? "horizontally" : "vertically")"
+            return "Distribute \(countPhrase(ids, scene)) \(axis == .horizontal ? "horizontally" : "vertically")"
         case .delete(let ids):
-            return "Delete \(count(ids))"
+            return "Delete \(countPhrase(ids, scene))"
         }
     }
 
@@ -334,9 +374,38 @@ enum EditPlanDescriber {
         }
     }
 
-    private static func count(_ ids: [Int]) -> String {
-        let n = Set(ids).count
-        return n == 1 ? "1 element" : "\(n) elements"
+    /// A single element named as the user sees it: a text run by a short excerpt, else by
+    /// kind ("the rectangle").
+    private static func name(_ id: Int, _ scene: Scene) -> String {
+        guard let element = scene.elements.first(where: { $0.id == id }) else { return "the element" }
+        if element.kind == .text, let string = element.text?.string,
+           !string.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "“\(excerpt(string))”"
+        }
+        return "the \(DrawingAIEditContext.kindName(element.kind))"
+    }
+
+    /// A kind-aware count phrase: "2 text elements", "3 shapes", "1 image", else "N elements".
+    private static func countPhrase(_ ids: [Int], _ scene: Scene) -> String {
+        let unique = Array(Set(ids))
+        let n = unique.count
+        let kinds = Set(unique.compactMap { id in scene.elements.first { $0.id == id }?.kind })
+        let noun: String
+        if kinds == [.text] {
+            noun = n == 1 ? "text element" : "text elements"
+        } else if kinds == [.image] {
+            noun = n == 1 ? "image" : "images"
+        } else if !kinds.isEmpty, kinds.allSatisfy({ $0 != .text && $0 != .image }) {
+            noun = n == 1 ? "shape" : "shapes"
+        } else {
+            noun = n == 1 ? "element" : "elements"
+        }
+        return "\(n) \(noun)"
+    }
+
+    private static func excerpt(_ string: String) -> String {
+        let clean = string.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        return clean.count > 24 ? String(clean.prefix(24)) + "…" : clean
     }
 
     private static func trim(_ value: Double) -> String {

@@ -19,12 +19,19 @@ enum DrawingAIEditContext {
     /// Per-run text excerpt cap, in characters.
     static let maxTextPerElement = 120
 
-    /// A fenced, data-only description of the editable elements of `scene`.
-    static func elementsBlock(for scene: Scene) -> String {
-        let editable = scene.editableElements
+    /// A fenced, data-only description of the editable elements of `scene`. When
+    /// `selectedIDs` is non-empty the description is scoped to those elements, so the edit
+    /// is confined to the user's selection.
+    static func elementsBlock(for scene: Scene, selectedIDs: Set<Int> = []) -> String {
+        let editable = selectedIDs.isEmpty
+            ? scene.editableElements
+            : scene.editableElements.filter { selectedIDs.contains($0.id) }
         var lines: [String] = []
         let page = scene.pageBoundsDevice
         lines.append("Page: \(Int(page.width.rounded())) x \(Int(page.height.rounded())) device units.")
+        if !selectedIDs.isEmpty {
+            lines.append("Edit ONLY these selected elements:")
+        }
         lines.append("Editable elements (\(editable.count)):")
         for element in editable.prefix(maxElements) {
             lines.append(describe(element, in: scene))
