@@ -139,6 +139,13 @@ struct ZoomableMetafileView: UIViewRepresentable {
     var options: RenderOptions = .default
     /// The find highlights to draw above the tiles (F3b). `.empty` draws nothing.
     var findHighlights: FindHighlightSet = .empty
+    /// Trailing width to keep clear for the inspector overlay (iPad read-only). The
+    /// scroll view fills the FULL width and fits + centres the page in the region LEFT
+    /// of this inset (full width − `reservedTrailing`), the same way the editable canvas
+    /// handles its inspector — so the page never pins to the edge or hides under the
+    /// overlay (P1). Zero on iPhone (the inspector is a sheet) and when the inspector is
+    /// closed.
+    var reservedTrailing: CGFloat = 0
     /// Toggles the chrome; reused as the drawing's "Show/Hide controls" action.
     let onSingleTap: () -> Void
 
@@ -240,6 +247,10 @@ struct ZoomableMetafileView: UIViewRepresentable {
         // most toggles; this makes the refit reliable even when the insets don't
         // move. Other zoom-scale configuration happens from `layoutSubviews`.
         context.coordinator.refitIfChromeChanged(scrollView, chromeHidden: chromeHidden)
+        // The inspector opening/closing changes the clear region but NOT the scroll view's
+        // bounds or safe area (the canvas fills the full width), so neither layout callback
+        // fires — refit here so the page re-centres into the new clear region (P1).
+        context.coordinator.refitIfReservedTrailingChanged(scrollView, reservedTrailing: reservedTrailing)
     }
 
     /// Stop the CATiledLayer drawing into a view about to be freed, and break the
@@ -270,6 +281,7 @@ struct ZoomableMetafileView: UIViewRepresentable {
         private var lastViewportSize: CGSize = .zero
         private var lastInsets: ViewerFit.Insets = .zero
         private var lastChromeHidden: Bool?
+        private var lastReservedTrailing: CGFloat = 0
         private var appliedFitScale: CGFloat = 1
 
         init(_ parent: ZoomableMetafileView) { self.parent = parent }
@@ -280,9 +292,15 @@ struct ZoomableMetafileView: UIViewRepresentable {
         /// track the bars) while the chrome is shown, and `.zero` when it is hidden
         /// so the drawing fills the screen (§5).
         private func effectiveInsets(_ scrollView: UIScrollView) -> ViewerFit.Insets {
-            guard !parent.chromeHidden else { return .zero }
+            // Always reserve the inspector's trailing strip (`reservedTrailing`), so the
+            // page fits + centres in the clear region beside it; when the chrome is hidden
+            // the bars' safe area is dropped for a full-screen fit, but the inspector strip
+            // (if any) is still kept clear (P1).
+            guard !parent.chromeHidden else {
+                return ViewerFit.Insets(trailing: parent.reservedTrailing)
+            }
             let i = scrollView.safeAreaInsets
-            return ViewerFit.Insets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right)
+            return ViewerFit.Insets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right + parent.reservedTrailing)
         }
 
         func configureZoomScales(for viewport: CGSize) {
@@ -337,6 +355,15 @@ struct ZoomableMetafileView: UIViewRepresentable {
         /// drawing into the former bar area and showing them shrinks it back (§5).
         func refitIfChromeChanged(_ scrollView: UIScrollView, chromeHidden: Bool) {
             guard hasSetInitialZoom, lastChromeHidden != chromeHidden else { return }
+            configureZoomScales(for: scrollView.bounds.size)
+        }
+
+        /// Re-fits when the reserved inspector width changed (the inspector opened or
+        /// closed), so the page re-centres into the clear region beside it (P1). The
+        /// scroll view's bounds don't change, so the layout callbacks don't fire.
+        func refitIfReservedTrailingChanged(_ scrollView: UIScrollView, reservedTrailing: CGFloat) {
+            guard hasSetInitialZoom, lastReservedTrailing != reservedTrailing else { return }
+            lastReservedTrailing = reservedTrailing
             configureZoomScales(for: scrollView.bounds.size)
         }
 

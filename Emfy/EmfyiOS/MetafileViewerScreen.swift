@@ -174,15 +174,17 @@ struct MetafileViewerScreen: View {
     /// The drawing plus the navigation title, toolbars, status bar and top overlays.
     private var baseLayer: some View {
         ZStack {
+            // The canvas background fills the WHOLE viewport, UNDER the inspector overlay
+            // too — so the grey never gives way to a white strip beside the page (P1).
             backgroundColor
                 .ignoresSafeArea()
+            // The drawing fills the full width; the read-only zoomable view fits + centres
+            // the page into the region LEFT of the inspector via its own `reservedTrailing`
+            // inset (the editable canvas does the same with `trailingInset`). Padding the
+            // whole stack (the old code) shrank the grey background with it and left the
+            // page pinned top-left and unfitted (P1).
             drawingLayer
         }
-        // Reserve the inspector overlay's width on the trailing edge so the drawing
-        // keeps clear of it; the scroll view then refits to the visible rect when
-        // the inspector opens/closes, the sidebar collapses, or the device rotates
-        // (item 2). Zero on iPhone, where the inspector is a sheet.
-        .padding(.trailing, reservedInspectorWidth)
         .navigationTitle(entry?.baseName ?? "Metafile")
         .navigationBarTitleDisplayMode(.inline)
         .metafileNavigationSubtitle(subtitle)
@@ -464,6 +466,12 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.findQuery != nil { await runFindScript(); return }
         if EditorDebugLaunch.recordsInspector { await runRecordsScript(); return }
         if EditorDebugLaunch.script == "check" { await runCheckScript(); return }
+        // Read-only viewer with the file-details (Info) inspector open — the P1 iPad
+        // canvas-placement capture. `-EmfyDebugInspector YES` without `-EmfyDebugEdit YES`.
+        if !EditorDebugLaunch.editOnOpen, EditorDebugLaunch.showInspector {
+            showInspector = true
+            return
+        }
         guard EditorDebugLaunch.editOnOpen else { return }
         await session.beginEditing()
         if session.editing == .editing {
@@ -921,6 +929,7 @@ struct MetafileViewerScreen: View {
             ProgressView()
                 .accessibilityLabel("Loading drawing")   // A10
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.trailing, reservedInspectorWidth)   // keep clear of the inspector (P1)
         case .loaded(let model):
             if showsReplayCanvas {
                 RecordReplayView(
@@ -931,6 +940,7 @@ struct MetafileViewerScreen: View {
                     contentToken: replayDriver.contentToken
                 )
                 .ignoresSafeArea()
+                .padding(.trailing, reservedInspectorWidth)   // keep clear of the inspector (P1)
             } else {
             ZoomableMetafileView(
                 prepared: model.prepared,
@@ -949,6 +959,7 @@ struct MetafileViewerScreen: View {
                 ),
                 options: settings.renderOptions,
                 findHighlights: findHighlightSet,
+                reservedTrailing: reservedInspectorWidth,
                 onSingleTap: { toggleChrome() }
             )
             .ignoresSafeArea()
@@ -975,6 +986,7 @@ struct MetafileViewerScreen: View {
         case .failed(let reason):
             failedView(reason)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.trailing, reservedInspectorWidth)   // keep clear of the inspector (P1)
         }
     }
 
