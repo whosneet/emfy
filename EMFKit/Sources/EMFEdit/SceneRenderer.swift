@@ -36,6 +36,12 @@ public enum SceneRenderer {
         /// inserted image ONCE for the whole session instead of re-decoding its DIB
         /// pixel-by-pixel on every tile and every repaint (the E3c review hang).
         let imageCache = ImageDecodeCache()
+        /// Decoded GDI DIBs for UNEDITED imported image/passthrough elements, which
+        /// render by replaying their original `EMR_STRETCHDIBITS` op (P2): without
+        /// this a tiled editor canvas re-decodes the DIB on every tile and every
+        /// drag frame while an imported image is moved or resized. Thread-safe and
+        /// built once per session, like `imageCache`.
+        let dibCache = DIBImageCache()
     }
 
     /// A thread-safe, lazily-populated cache of decoded image pixels, keyed by element
@@ -176,11 +182,11 @@ public enum SceneRenderer {
                     renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
                 } else {
                     let key = element.provenance.sourceRecordIndices.max() ?? -1
-                    if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base) }
+                    if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base, imageCache: source?.dibCache) }
                 }
             case .passthrough:
                 let key = element.provenance.sourceRecordIndices.max() ?? -1
-                if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base) }
+                if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base, imageCache: source?.dibCache) }
             default:
                 if isEdit {
                     renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
@@ -287,7 +293,7 @@ public enum SceneRenderer {
             switch entries[element.id] {
             case .gdi(let op):
                 flush()
-                EMFRenderer.replay(op, into: context, deviceToTarget: base)
+                EMFRenderer.replay(op, into: context, deviceToTarget: base, imageCache: source.dibCache)
             case .plus(let op):
                 batch.insert(op.streamIndex)
             }
