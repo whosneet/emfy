@@ -337,6 +337,9 @@ final class DrawingAITranslateModel {
     // MARK: Messages
 
     private static func friendly(_ error: Error) -> String {
+        if #available(macOS 26, iOS 26, *), DrawingAIEngine.isRefusal(error) {
+            return DrawingAIEditModel.onDeviceRefusalMessage
+        }
         if #available(macOS 26, iOS 26, *), error is LanguageModelSession.GenerationError {
             return DrawingAIEngine.friendlyMessage(for: error)
         }

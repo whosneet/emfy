@@ -191,7 +191,10 @@ final class DrawingAIEditModel {
         }
         lastRawReply = lastRaw   // DEBUG inspection only
         guard let plan else {
-            phase = .failed("The edit couldn’t be understood. Try rephrasing your request.")
+            // A blank reply reads as an on-device refusal; otherwise the output was unusable.
+            phase = .failed(lastRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? Self.onDeviceRefusalMessage
+                : "The edit couldn’t be understood. Try rephrasing your request.")
             return
         }
         let validation = EditPlanValidator.validate(plan, in: scene)
@@ -288,7 +291,15 @@ final class DrawingAIEditModel {
 
     // MARK: Messages
 
+    /// The shared plain message shown when the on-device model refuses a request (its output
+    /// guardrail declines, or it returns no reply). Used by the Edit, Translate and Generate
+    /// flows so a refusal always reads the same way, never as a silent failure.
+    static let onDeviceRefusalMessage = "The on-device model declined this request. Try rewording, or use a configured provider."
+
     private static func friendly(_ error: Error) -> String {
+        if #available(macOS 26, iOS 26, *), DrawingAIEngine.isRefusal(error) {
+            return onDeviceRefusalMessage
+        }
         if #available(macOS 26, iOS 26, *), error is LanguageModelSession.GenerationError {
             return DrawingAIEngine.friendlyMessage(for: error)
         }
