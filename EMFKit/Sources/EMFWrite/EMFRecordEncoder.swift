@@ -98,6 +98,10 @@ public enum EMFRecordEncoder {
             return try poly32Record(5, p)                           // §2.3.5.18
         case .polylineTo(let p):
             return try poly32Record(6, p)                           // §2.3.5.26
+        case .polyPolyline(let p):
+            return try polyPoly32Record(7, p)                       // §2.3.5.30
+        case .polyPolygon(let p):
+            return try polyPoly32Record(8, p)                       // §2.3.5.28
         case .moveToEx(let point):
             return try pointLRecord(27, point)                      // §2.3.11.4
         case .ellipse(let box):
@@ -439,6 +443,26 @@ public enum EMFRecordEncoder {
         }
         for point in p.points {
             b.appendPointS(point)
+        }
+        return try wrap(type, b)
+    }
+
+    /// EMR_POLYPOLYLINE §2.3.5.30 / EMR_POLYPOLYGON §2.3.5.28 — the 32-bit
+    /// analogue: Bounds, NumberOfPolys, total Count, the u32 count array, then
+    /// the PointL (8-byte) values.
+    private static func polyPoly32Record(
+        _ type: UInt32,
+        _ p: PolyPoly32Payload
+    ) throws(EMFWriteError) -> Data {
+        var b = ByteWriter()
+        b.appendRectL(p.bounds)
+        b.appendUInt32(UInt32(clamping: p.pointCounts.count))
+        b.appendUInt32(UInt32(clamping: p.points.count))
+        for count in p.pointCounts {
+            b.appendUInt32(count)
+        }
+        for point in p.points {
+            b.appendPointL(point)
         }
         return try wrap(type, b)
     }

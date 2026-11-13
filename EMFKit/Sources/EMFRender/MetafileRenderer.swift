@@ -490,6 +490,7 @@ public enum MetafileRenderer {
              .setTextAlign, .setTextColor, .setBkColor, .extCreateFontIndirectW:
             return .state
         case .polyBezier, .polygon, .polyline, .polyBezierTo, .polylineTo,
+             .polyPolyline, .polyPolygon,
              .ellipse, .rectangle, .roundRect, .arc, .arcTo, .lineTo,
              .polyBezier16, .polygon16, .polyline16, .polyBezierTo16, .polylineTo16,
              .polyPolyline16, .polyPolygon16, .pie, .chord, .setPixel, .patBlt,

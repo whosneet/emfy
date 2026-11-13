@@ -64,6 +64,8 @@ public enum EMFRecordSummary {
         case .polyBezier(let p), .polygon(let p), .polyline(let p),
              .polyBezierTo(let p), .polylineTo(let p):
             return countNoun(p.points.count, "point")
+        case .polyPolyline(let p), .polyPolygon(let p):
+            return "\(countNoun(p.pointCounts.count, "poly")), \(countNoun(p.points.count, "point"))"
         case .moveToEx(let point): return self.point(point)
         case .ellipse(let box): return rect(box)
         case .rectangle(let box): return rect(box)

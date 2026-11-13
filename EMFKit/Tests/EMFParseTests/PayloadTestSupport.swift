@@ -37,6 +37,7 @@ func payloadCaseMatches(type: UInt32, payload: EMFRecordPayload) -> Bool {
          (5, .polyBezierTo(_)), (6, .polylineTo(_)),
          (85, .polyBezier16(_)), (86, .polygon16(_)), (87, .polyline16(_)),
          (88, .polyBezierTo16(_)), (89, .polylineTo16(_)),
+         (7, .polyPolyline(_)), (8, .polyPolygon(_)),
          (90, .polyPolyline16(_)), (91, .polyPolygon16(_)):
         return true
     default:
@@ -96,6 +97,16 @@ extension EMFRecordPayload {
     var polyPoly16: PolyPoly16Payload? {
         switch self {
         case .polyPolyline16(let p), .polyPolygon16(let p):
+            return p
+        default:
+            return nil
+        }
+    }
+
+    /// The poly-poly 32-bit payload from either carrying case.
+    var polyPoly32: PolyPoly32Payload? {
+        switch self {
+        case .polyPolyline(let p), .polyPolygon(let p):
             return p
         default:
             return nil

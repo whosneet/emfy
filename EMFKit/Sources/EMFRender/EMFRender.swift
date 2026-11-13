@@ -445,6 +445,12 @@ public enum EMFRenderer {
             }
             fillAndStroke(path, context: context, dc: dc, base: base, full: full)
 
+        case .polyPolygon(let poly):
+            forEachSlice(of: poly) { slice in
+                PathBuilder.appendPolygon(slice.map(PathBuilder.cgPoint), to: path, transform: full)
+            }
+            fillAndStroke(path, context: context, dc: dc, base: base, full: full)
+
         case .rectangle(let box):
             path.addRect(PathBuilder.cgRect(box), transform: full)
             fillAndStroke(path, context: context, dc: dc, base: base, full: full)
@@ -472,6 +478,12 @@ public enum EMFRenderer {
             stroke(path, context: context, dc: dc, base: base, full: full)
 
         case .polyPolyline16(let poly):
+            forEachSlice(of: poly) { slice in
+                PathBuilder.appendPolyline(slice.map(PathBuilder.cgPoint), to: path, transform: full)
+            }
+            stroke(path, context: context, dc: dc, base: base, full: full)
+
+        case .polyPolyline(let poly):
             forEachSlice(of: poly) { slice in
                 PathBuilder.appendPolyline(slice.map(PathBuilder.cgPoint), to: path, transform: full)
             }
@@ -598,11 +610,15 @@ public enum EMFRenderer {
             dc.appendFigureToPath { path, t in PathBuilder.appendPolygon(poly.points.map(PathBuilder.cgPoint), to: path, transform: t) }
         case .polyPolygon16(let poly):
             dc.appendFigureToPath { path, t in forEachSlice(of: poly) { slice in PathBuilder.appendPolygon(slice.map(PathBuilder.cgPoint), to: path, transform: t) } }
+        case .polyPolygon(let poly):
+            dc.appendFigureToPath { path, t in forEachSlice(of: poly) { slice in PathBuilder.appendPolygon(slice.map(PathBuilder.cgPoint), to: path, transform: t) } }
         case .polyline(let poly):
             dc.appendFigureToPath { path, t in PathBuilder.appendPolyline(poly.points.map(PathBuilder.cgPoint), to: path, transform: t) }
         case .polyline16(let poly):
             dc.appendFigureToPath { path, t in PathBuilder.appendPolyline(poly.points.map(PathBuilder.cgPoint), to: path, transform: t) }
         case .polyPolyline16(let poly):
+            dc.appendFigureToPath { path, t in forEachSlice(of: poly) { slice in PathBuilder.appendPolyline(slice.map(PathBuilder.cgPoint), to: path, transform: t) } }
+        case .polyPolyline(let poly):
             dc.appendFigureToPath { path, t in forEachSlice(of: poly) { slice in PathBuilder.appendPolyline(slice.map(PathBuilder.cgPoint), to: path, transform: t) } }
         case .polyBezier(let poly):
             dc.appendFigureToPath { path, t in PathBuilder.appendBezier(prefixOfBezier(poly.points.map(PathBuilder.cgPoint), continues: false), to: path, transform: t) }
@@ -734,6 +750,18 @@ public enum EMFRenderer {
     /// slicing stays clamped anyway — defence in depth over a public
     /// initialiser.
     private static func forEachSlice(of poly: PolyPoly16Payload, _ body: (ArraySlice<PointS>) -> Void) {
+        var start = 0
+        for count in poly.pointCounts {
+            let length = min(Int(count), poly.points.count - start)
+            guard length > 0 else { continue }
+            body(poly.points[start ..< start + length])
+            start += length
+        }
+    }
+
+    /// The 32-bit counterpart of `forEachSlice(of:)` for EMR_POLYPOLYLINE /
+    /// EMR_POLYPOLYGON, walking each sub-polygon's PointL slice in file order.
+    private static func forEachSlice(of poly: PolyPoly32Payload, _ body: (ArraySlice<PointL>) -> Void) {
         var start = 0
         for count in poly.pointCounts {
             let length = min(Int(count), poly.points.count - start)
@@ -1046,6 +1074,11 @@ public enum EMFRenderer {
                 PathBuilder.appendPolygon(slice.map(PathBuilder.cgPoint), to: device, transform: t)
             }
             kind = .polyPolygon; fill = true; stroke = true
+        case .polyPolygon(let poly):
+            forEachSlice(of: poly) { slice in
+                PathBuilder.appendPolygon(slice.map(PathBuilder.cgPoint), to: device, transform: t)
+            }
+            kind = .polyPolygon; fill = true; stroke = true
         case .rectangle(let box):
             device.addRect(PathBuilder.cgRect(box), transform: t)
             kind = .rectangle; fill = true; stroke = true
@@ -1070,6 +1103,11 @@ public enum EMFRenderer {
             PathBuilder.appendPolyline(poly.points.map(PathBuilder.cgPoint), to: device, transform: t)
             kind = .polyline; stroke = true
         case .polyPolyline16(let poly):
+            forEachSlice(of: poly) { slice in
+                PathBuilder.appendPolyline(slice.map(PathBuilder.cgPoint), to: device, transform: t)
+            }
+            kind = .polyPolyline; stroke = true
+        case .polyPolyline(let poly):
             forEachSlice(of: poly) { slice in
                 PathBuilder.appendPolyline(slice.map(PathBuilder.cgPoint), to: device, transform: t)
             }

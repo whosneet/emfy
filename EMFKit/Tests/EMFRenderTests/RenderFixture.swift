@@ -266,6 +266,31 @@ struct RenderFixture {
         append(type: 91, payload: body.bytes)
     }
 
+    /// The shared 32-bit poly-poly body: Bounds, NumberOfPolys, total Count,
+    /// the u32 per-poly count array, then all PointL values.
+    private static func polyPoly32Body(_ polygons: [[(Int32, Int32)]]) -> [UInt8] {
+        let all = polygons.flatMap { $0 }
+        let xs = all.map { $0.0 }, ys = all.map { $0.1 }
+        var body = LE()
+        body.i32(xs.min() ?? 0); body.i32(ys.min() ?? 0)
+        body.i32(xs.max() ?? 0); body.i32(ys.max() ?? 0)
+        body.u32(UInt32(polygons.count))
+        body.u32(UInt32(all.count))
+        for polygon in polygons { body.u32(UInt32(polygon.count)) }
+        for (x, y) in all { body.i32(x); body.i32(y) }
+        return body.bytes
+    }
+
+    /// EMR_POLYPOLYGON §2.3.5.28 (32-bit PointL).
+    mutating func polyPolygon(_ polygons: [[(Int32, Int32)]]) {
+        append(type: 8, payload: Self.polyPoly32Body(polygons))
+    }
+
+    /// EMR_POLYPOLYLINE §2.3.5.30 (32-bit PointL).
+    mutating func polyPolyline(_ polygons: [[(Int32, Int32)]]) {
+        append(type: 7, payload: Self.polyPoly32Body(polygons))
+    }
+
     /// EMR_CREATEBRUSHINDIRECT §2.3.7.1 (LogBrushEx §2.2.12).
     mutating func createSolidBrush(index: UInt32, r: UInt8, g: UInt8, b: UInt8) {
         var body = LE()

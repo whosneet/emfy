@@ -212,6 +212,8 @@ extension EMFFile {
         case 4: return decodePoly32(type: type, slice: slice, make: EMFRecordPayload.polyline)
         case 5: return decodePoly32(type: type, slice: slice, make: EMFRecordPayload.polyBezierTo)
         case 6: return decodePoly32(type: type, slice: slice, make: EMFRecordPayload.polylineTo)
+        case 7: return decodePolyPoly32(type: type, slice: slice, make: EMFRecordPayload.polyPolyline)
+        case 8: return decodePolyPoly32(type: type, slice: slice, make: EMFRecordPayload.polyPolygon)
         case 9: return decodeSizeL(type: type, slice: slice) { .setWindowExtEx(extent: $0) }
         case 10: return decodePointL(type: type, slice: slice) { .setWindowOrgEx(origin: $0) }
         case 11: return decodeSizeL(type: type, slice: slice) { .setViewportExtEx(extent: $0) }
@@ -635,6 +637,52 @@ extension EMFFile {
         }
 
         return make(PolyPoly16Payload(bounds: bounds, pointCounts: pointCounts, points: points))
+    }
+
+    /// EMR_POLYPOLYLINE §2.3.5.30 / EMR_POLYPOLYGON §2.3.5.28: the 32-bit
+    /// analogue of `decodePolyPoly16` — Bounds at 8, NumberOfPolys u32 at 24,
+    /// Count u32 at 28, a NumberOfPolys-length u32 array at 32, then Count
+    /// PointL (8-byte) values. Both counts are validated against nSize in Int
+    /// arithmetic before any allocation, and the per-poly counts must sum
+    /// exactly to Count (primer §8).
+    private static func decodePolyPoly32(
+        type: UInt32,
+        slice: RecordSlice,
+        make: (PolyPoly32Payload) -> EMFRecordPayload
+    ) -> EMFRecordPayload {
+        guard let bounds = slice.rectL(8),
+              let rawPolyCount = slice.u32(24),
+              let rawTotal = slice.u32(28)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 32, actualSize: slice.size))
+        }
+
+        let polyCount = Int(rawPolyCount)
+        let maxPolys = (slice.size - 32) / 4
+        guard polyCount <= maxPolys else {
+            return .malformed(type: type, reason: .countTooLarge(declared: polyCount, maxFitting: maxPolys))
+        }
+
+        let pointsOffset = 32 + polyCount * 4
+        let total = Int(rawTotal)
+        // PointL is 8 bytes each (vs PointS's 4 in the 16-bit record).
+        let maxPoints = (slice.size - pointsOffset) / 8
+        guard total <= maxPoints else {
+            return .malformed(type: type, reason: .countTooLarge(declared: total, maxFitting: maxPoints))
+        }
+
+        guard let pointCounts = slice.u32Array(at: 32, count: polyCount),
+              let points = slice.pointsL(at: pointsOffset, count: total)
+        else {
+            return .malformed(type: type, reason: .tooSmall(minimumSize: 32, actualSize: slice.size))
+        }
+
+        let sum = pointCounts.reduce(0) { $0 + Int($1) }
+        guard sum == total else {
+            return .malformed(type: type, reason: .countMismatch(declaredTotal: total, sumOfCounts: sum))
+        }
+
+        return make(PolyPoly32Payload(bounds: bounds, pointCounts: pointCounts, points: points))
     }
 
     // MARK: - Text decoders

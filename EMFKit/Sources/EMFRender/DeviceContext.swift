@@ -352,6 +352,7 @@ struct DeviceContext {
 
         // MARK: Drawing records — the renderer's job
         case .polyBezier, .polygon, .polyline, .polyBezierTo, .polylineTo,
+             .polyPolyline, .polyPolygon,
              .ellipse, .rectangle, .roundRect, .arc, .arcTo, .lineTo,
              .polyBezier16, .polygon16, .polyline16, .polyBezierTo16,
              .polylineTo16, .polyPolyline16, .polyPolygon16,

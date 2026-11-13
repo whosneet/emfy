@@ -79,6 +79,25 @@ public struct PolyPoly16Payload: Sendable, Equatable {
     }
 }
 
+/// Payload of EMR_POLYPOLYLINE / EMR_POLYPOLYGON ([MS-EMF] §2.3.5.30 /
+/// §2.3.5.28): the 32-bit analogue of `PolyPoly16Payload` — Bounds,
+/// NumberOfPolys (u32), Count (u32, total points), a NumberOfPolys-length u32
+/// count array, then Count PointL (8-byte) values. Decoding guarantees
+/// `pointCounts` sums exactly to `points.count`.
+public struct PolyPoly32Payload: Sendable, Equatable {
+    public var bounds: RectL
+    /// Points per sub-polyline/polygon, in file order.
+    public var pointCounts: [UInt32]
+    /// All points, concatenated in sub-polygon order.
+    public var points: [PointL]
+
+    public init(bounds: RectL, pointCounts: [UInt32], points: [PointL]) {
+        self.bounds = bounds
+        self.pointCounts = pointCounts
+        self.points = points
+    }
+}
+
 /// Payload of EMR_ROUNDRECT ([MS-EMF] §2.3.5.35): the inclusive-inclusive
 /// box and the width/height of the corner-rounding ellipse.
 public struct RoundRectPayload: Sendable, Equatable {
@@ -558,6 +577,10 @@ public enum EMFRecordPayload: Sendable, Equatable {
     case polyBezierTo(PolyPointsPayload)
     /// EMR_POLYLINETO (6), §2.3.5.26.
     case polylineTo(PolyPointsPayload)
+    /// EMR_POLYPOLYLINE (7), §2.3.5.30.
+    case polyPolyline(PolyPoly32Payload)
+    /// EMR_POLYPOLYGON (8), §2.3.5.28.
+    case polyPolygon(PolyPoly32Payload)
     /// EMR_MOVETOEX (27), §2.3.11.4. New current position, logical units.
     case moveToEx(point: PointL)
     /// EMR_ELLIPSE (42), §2.3.5.5. Inclusive-inclusive bounding box.
