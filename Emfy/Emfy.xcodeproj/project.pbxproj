@@ -18,6 +18,14 @@
 		C2E00000000000000000B04 /* DrawingRecolourModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F04 /* DrawingRecolourModel.swift */; };
 		C2E00000000000000000A05 /* DrawingRecolourView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F05 /* DrawingRecolourView.swift */; };
 		C2E00000000000000000A06 /* AIEditScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F06 /* AIEditScreenshots.swift */; };
+		C2E00000000000000000A20 /* DrawingAITranslateContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F20 /* DrawingAITranslateContext.swift */; };
+		C2E00000000000000000B20 /* DrawingAITranslateContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F20 /* DrawingAITranslateContext.swift */; };
+		C2E00000000000000000A21 /* DrawingTranslationLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F21 /* DrawingTranslationLanguage.swift */; };
+		C2E00000000000000000B21 /* DrawingTranslationLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F21 /* DrawingTranslationLanguage.swift */; };
+		C2E00000000000000000A22 /* DrawingAITranslateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F22 /* DrawingAITranslateModel.swift */; };
+		C2E00000000000000000B22 /* DrawingAITranslateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F22 /* DrawingAITranslateModel.swift */; };
+		C2E00000000000000000A23 /* DrawingAITranslateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F23 /* DrawingAITranslateView.swift */; };
+		C2E00000000000000000D20 /* DrawingAITranslateModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F24 /* DrawingAITranslateModelTests.swift */; };
 		A1A0000000000000FACE0004 /* DrawingAIScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000FACE0003 /* DrawingAIScreenshots.swift */; };
 		A1A0000000000000RECP000A /* DrawingRecordPurpose.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */; };
 		A1A0000000000000RECP000T /* DrawingRecordPurpose.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */; };
@@ -496,6 +504,11 @@
 /* Begin PBXFileReference section */
 		C2E00000000000000000F07 /* DrawingAIEditModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIEditModelTests.swift; sourceTree = "<group>"; };
 		C2E00000000000000000F08 /* DrawingRecolourModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingRecolourModelTests.swift; sourceTree = "<group>"; };
+		C2E00000000000000000F20 /* DrawingAITranslateContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAITranslateContext.swift; path = "Shared/AI/DrawingAITranslateContext.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F21 /* DrawingTranslationLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingTranslationLanguage.swift; path = "Shared/AI/DrawingTranslationLanguage.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F22 /* DrawingAITranslateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAITranslateModel.swift; path = "Shared/AI/DrawingAITranslateModel.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F23 /* DrawingAITranslateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAITranslateView.swift; path = "Shared/AI/DrawingAITranslateView.swift"; sourceTree = SOURCE_ROOT; };
+		C2E00000000000000000F24 /* DrawingAITranslateModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAITranslateModelTests.swift; sourceTree = "<group>"; };
 		C2E00000000000000000F01 /* DrawingAIEditContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAIEditContext.swift; path = "Shared/AI/DrawingAIEditContext.swift"; sourceTree = SOURCE_ROOT; };
 		C2E00000000000000000F02 /* DrawingAIEditModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAIEditModel.swift; path = "Shared/AI/DrawingAIEditModel.swift"; sourceTree = SOURCE_ROOT; };
 		C2E00000000000000000F03 /* DrawingAIEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAIEditView.swift; path = "Shared/AI/DrawingAIEditView.swift"; sourceTree = SOURCE_ROOT; };
@@ -886,6 +899,10 @@
 				C2E00000000000000000F04 /* DrawingRecolourModel.swift */,
 				C2E00000000000000000F05 /* DrawingRecolourView.swift */,
 				C2E00000000000000000F06 /* AIEditScreenshots.swift */,
+				C2E00000000000000000F20 /* DrawingAITranslateContext.swift */,
+				C2E00000000000000000F21 /* DrawingTranslationLanguage.swift */,
+				C2E00000000000000000F22 /* DrawingAITranslateModel.swift */,
+				C2E00000000000000000F23 /* DrawingAITranslateView.swift */,
 				C1D0000000000000000000A1 /* DrawingCheckModel.swift */,
 				C1D0000000000000000000A2 /* DrawingCheckView.swift */,
 				C1D0000000000000000000A4 /* CheckScreenshots.swift */,
@@ -1094,6 +1111,7 @@
 				C1D0000000000000000000D0 /* DrawingCheckTests.swift */,
 				C2E00000000000000000F07 /* DrawingAIEditModelTests.swift */,
 				C2E00000000000000000F08 /* DrawingRecolourModelTests.swift */,
+				C2E00000000000000000F24 /* DrawingAITranslateModelTests.swift */,
 				C1B0000000000000000000D0 /* DrawingAIOutputSanitiserTests.swift */,
 				C1B0000000000000000000D4 /* DrawingCleanupModelTests.swift */,
 				A1A00000000000000000011D /* DrawingAIContextTests.swift */,
@@ -1495,6 +1513,10 @@
 				C2E00000000000000000A04 /* DrawingRecolourModel.swift in Sources */,
 				C2E00000000000000000A05 /* DrawingRecolourView.swift in Sources */,
 				C2E00000000000000000A06 /* AIEditScreenshots.swift in Sources */,
+				C2E00000000000000000A20 /* DrawingAITranslateContext.swift in Sources */,
+				C2E00000000000000000A21 /* DrawingTranslationLanguage.swift in Sources */,
+				C2E00000000000000000A22 /* DrawingAITranslateModel.swift in Sources */,
+				C2E00000000000000000A23 /* DrawingAITranslateView.swift in Sources */,
 				C1D0000000000000000000B2 /* DrawingCheckView.swift in Sources */,
 				C1D0000000000000000000B4 /* CheckScreenshots.swift in Sources */,
 				C1D0000000000000000000B3 /* DrawingSummariseModel.swift in Sources */,
@@ -1721,6 +1743,10 @@
 				C2E00000000000000000B01 /* DrawingAIEditContext.swift in Sources */,
 				C2E00000000000000000B02 /* DrawingAIEditModel.swift in Sources */,
 				C2E00000000000000000B04 /* DrawingRecolourModel.swift in Sources */,
+				C2E00000000000000000B20 /* DrawingAITranslateContext.swift in Sources */,
+				C2E00000000000000000B21 /* DrawingTranslationLanguage.swift in Sources */,
+				C2E00000000000000000B22 /* DrawingAITranslateModel.swift in Sources */,
+				C2E00000000000000000D20 /* DrawingAITranslateModelTests.swift in Sources */,
 				C1D0000000000000000000C3 /* DrawingSummariseModel.swift in Sources */,
 				C1B0000000000000000000C0 /* DrawingAIOutputSanitiser.swift in Sources */,
 				A1A0000000000000RECP000T /* DrawingRecordPurpose.swift in Sources */,
