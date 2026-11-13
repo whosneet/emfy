@@ -124,4 +124,8 @@ extension FocusedValues {
     /// File ▸ New Drawing works even in an empty window) and read by the Mac File menu.
     /// `nil` only when no window is focused.
     @Entry var newDrawingAction: NewDrawingCommand?
+
+    /// The focused library window's "New Drawing from Description…" action (X2d), read by
+    /// the Mac File menu. `nil` when no AI engine is available (the menu item disables).
+    @Entry var generateDrawingAction: NewDrawingCommand?
 }

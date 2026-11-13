@@ -14,6 +14,7 @@ struct FileMenuCommands: Commands {
     let coordinator: OpenCoordinator
     @FocusedValue(\.viewerActions) private var actions
     @FocusedValue(\.newDrawingAction) private var newDrawing
+    @FocusedValue(\.generateDrawingAction) private var generateDrawing
     @FocusedValue(\.batchConvertAction) private var batchConvert
     @Environment(\.openWindow) private var openWindow
 
@@ -26,6 +27,10 @@ struct FileMenuCommands: Commands {
             Button("New Drawing…") { newDrawing?.present() }
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(newDrawing == nil)
+            // New Drawing from Description… (X2d): AI-generated editable drawing. Disabled
+            // when no AI engine is available (the focused action is then nil).
+            Button("New Drawing from Description…") { generateDrawing?.present() }
+                .disabled(generateDrawing == nil)
             Button("New Window") { openWindow(id: "library") }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }

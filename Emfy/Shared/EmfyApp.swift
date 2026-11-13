@@ -159,6 +159,7 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
         CleanupScreenshots.runIfNeeded()
         AIEditScreenshots.runIfNeeded()
         TranslateScreenshots.runIfNeeded()
+        GenerateScreenshots.runIfNeeded()
         #endif
         AIProviderScreenshots.runIfNeeded()
         AIShareScreenshots.runIfNeeded()
@@ -295,6 +296,9 @@ private struct RootView: View {
                 .ignoresSafeArea()
         } else if TranslateScreenshots.iosRequested {
             TranslateScreenshots.IOSScreen()
+                .ignoresSafeArea()
+        } else if GenerateScreenshots.iosRequested {
+            GenerateScreenshots.IOSScreen()
                 .ignoresSafeArea()
         } else if CompareScreenshots.iosRequested {
             CompareScreenshots.IOSScreen()

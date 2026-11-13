@@ -15,6 +15,7 @@ struct LibraryWindow: View {
     @Environment(RecentsStore.self) private var store
     @Environment(OpenCoordinator.self) private var coordinator
     @Environment(EmfySettings.self) private var settings
+    @Environment(AIProviderStore.self) private var aiProviders: AIProviderStore?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
@@ -31,6 +32,9 @@ struct LibraryWindow: View {
     /// Drives the New Drawing presets sheet (E3a): the Mac File ▸ New Drawing… command
     /// sets it through the focused action; the iPad "+" presents its own copy.
     @State private var showNewDrawing = false
+    /// Drives the "New Drawing from Description…" sheet (X2d); the Mac File menu sets it
+    /// through the focused action.
+    @State private var showGenerateDrawing = false
     #if os(macOS)
     /// Drives the Batch Convert sheet (F1); the Mac File menu sets it through the
     /// focused action.
@@ -58,6 +62,14 @@ struct LibraryWindow: View {
     // Scene-scoped so each window (iOS multi-scene, Mac tabs/windows) restores its
     // own selection rather than sharing one.
     @SceneStorage("library.selection") private var storedSelection: String?
+
+    /// Whether an AI engine (on-device or a configured provider) is available, so the
+    /// "New Drawing from Description…" command shows only when it can actually run (X2d).
+    private var generateDrawingAvailable: Bool {
+        let onDevice = settings.useOnDeviceAI && DrawingAIAvailability.current().isAvailable
+        if let aiProviders { return aiProviders.resolvedEngine(onDeviceAvailable: onDevice) != nil }
+        return onDevice
+    }
 
     var body: some View {
         // The body is split into chained `some View` layers grouped by concern (the split
@@ -316,6 +328,20 @@ struct LibraryWindow: View {
             NewDrawingSheet { preset in
                 Task {
                     if let id = await NewDrawing.create(preset, in: store) {
+                        model.selection = id
+                    }
+                }
+            }
+        }
+        // New Drawing from Description (X2d): the Mac File menu fires this focused action,
+        // published only when an AI engine is available; the sheet opens the generated
+        // drawing as a new, unsaved document on Create.
+        .focusedSceneValue(\.generateDrawingAction, generateDrawingAvailable
+            ? NewDrawingCommand(present: { showGenerateDrawing = true }) : nil)
+        .sheet(isPresented: $showGenerateDrawing) {
+            GenerateDrawingSheet { data in
+                Task {
+                    if let id = await NewDrawing.create(data: data, in: store) {
                         model.selection = id
                     }
                 }

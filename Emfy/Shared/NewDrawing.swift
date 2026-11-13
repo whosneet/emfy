@@ -81,7 +81,6 @@ enum NewDrawing {
     /// main actor; the store does its own off-main file work.
     @MainActor
     static func create(_ preset: NewDrawingPreset, in store: RecentsStore) async -> UUID? {
-        await store.loadIfNeeded()
         let data: Data
         do {
             data = try SceneFactory.blankDocument(pageSizeMillimetres: preset.pageSizeMillimetres)
@@ -89,6 +88,16 @@ enum NewDrawing {
             store.lastErrorMessage = "Emfy couldn’t create a new drawing."
             return nil
         }
+        return await create(data: data, in: store)
+    }
+
+    /// Imports a ready-made EMF (e.g. the one an AI "generate a drawing" produced) as a new
+    /// "Untitled Drawing" and returns its recents entry id, opening it straight into the
+    /// editor. The bytes are written only now — there is no file on disk until the user
+    /// generates/creates — so "Cancel" before this never touches the filesystem.
+    @MainActor
+    static func create(data: Data, in store: RecentsStore) async -> UUID? {
+        await store.loadIfNeeded()
         let name = nextName(existingDisplayNames: store.entries.map(\.displayName))
         let fileName = "\(name).\(fileExtension)"
         // A unique per-call temporary directory, so two quick "New Drawing"s never

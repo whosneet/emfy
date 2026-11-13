@@ -37,6 +37,9 @@ struct RegularSidebarList: View {
     @Environment(RemovalCoordinator.self) private var removal
     @Environment(ToastCenter.self) private var toast
     @Environment(EmfySettings.self) private var settings
+    #if os(iOS)
+    @Environment(AIProviderStore.self) private var aiProviders: AIProviderStore?
+    #endif
     @Environment(\.openWindow) private var openWindow
     @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     @Binding var selection: UUID?
@@ -51,6 +54,8 @@ struct RegularSidebarList: View {
     @State private var activeSheet: RecentsSheet?
     /// Drives the New Drawing presets sheet from the iPad library "+" (E3a).
     @State private var showNewDrawing = false
+    /// Drives the "New Drawing from Description…" sheet from the iPad library "+" (X2d).
+    @State private var showGenerateDrawing = false
     #endif
 
     var body: some View {
@@ -80,6 +85,13 @@ struct RegularSidebarList: View {
                 NewDrawingSheet { preset in
                     Task {
                         if let id = await NewDrawing.create(preset, in: store) { selection = id }
+                    }
+                }
+            }
+            .sheet(isPresented: $showGenerateDrawing) {
+                GenerateDrawingSheet { data in
+                    Task {
+                        if let id = await NewDrawing.create(data: data, in: store) { selection = id }
                     }
                 }
             }
@@ -133,6 +145,16 @@ struct RegularSidebarList: View {
         DrawingTitleTagPolicy.shouldDisplay(aiEnabled: settings.useOnDeviceAI, privateMode: settings.privateMode)
     }
 
+    #if os(iOS)
+    /// Whether an AI engine is available, so the library "+" offers "New Drawing from
+    /// Description…" only when it can actually run (X2d).
+    private var generateDrawingAvailable: Bool {
+        let onDevice = settings.useOnDeviceAI && DrawingAIAvailability.current().isAvailable
+        if let aiProviders { return aiProviders.resolvedEngine(onDeviceAvailable: onDevice) != nil }
+        return onDevice
+    }
+    #endif
+
     private var emptyState: some View {
         ContentUnavailableView {
             Label("No recent files", systemImage: "photo.on.rectangle.angled")
@@ -159,11 +181,15 @@ struct RegularSidebarList: View {
             #endif
         }
         #if os(iOS)
-        // New Drawing (E3a): the iPad library "+" opens the same presets sheet as the
-        // Mac File ▸ New Drawing… command.
+        // New Drawing (E3a) + New Drawing from Description (X2d): the iPad library "+" offers
+        // a blank preset or an AI-generated drawing. The generate item appears only when an
+        // AI engine is available.
         ToolbarItem {
-            Button {
-                showNewDrawing = true
+            Menu {
+                Button { showNewDrawing = true } label: { Label("New Drawing…", systemImage: "doc") }
+                if generateDrawingAvailable {
+                    Button { showGenerateDrawing = true } label: { Label("New Drawing from Description…", systemImage: "wand.and.stars") }
+                }
             } label: {
                 Label("New Drawing", systemImage: "plus")
             }
