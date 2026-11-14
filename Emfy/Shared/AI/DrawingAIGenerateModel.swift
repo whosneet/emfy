@@ -3,6 +3,7 @@ import EMFEdit
 import Foundation
 import FoundationModels
 import Observation
+import os
 
 // MARK: - Generate a drawing from a description (X2d)
 //
@@ -40,6 +41,8 @@ final class DrawingAIGenerateModel {
         case created
         case failed(String)
     }
+
+    nonisolated static let log = Logger(subsystem: "com.avneetsingh.emfy", category: "ai-generate")
 
     private(set) var phase: Phase = .idle
     /// The description text (bound to the field).
@@ -148,6 +151,9 @@ final class DrawingAIGenerateModel {
                 if !decoded.operations.isEmpty { plan = decoded; break }
                 lastDecodeError = "the reply contained no elements; add shapes and text elements for the description"
             } catch {
+                // Log the real decode failure (privately — it quotes untrusted model output)
+                // instead of swallowing it silently (C3–C7). Not fed back into the prompt (FM-7).
+                Self.log.error("AI generate plan decode failed: \(error.localizedDescription, privacy: .private)")
                 lastDecodeError = "\(error)"
             }
         }
@@ -281,13 +287,16 @@ final class DrawingAIGenerateModel {
             return "That description didn’t produce any shapes. Try describing it differently."
         case .tooManyElements:
             return "That drawing is too large to create at once. Try a simpler description."
-        case .coordinateNotFinite, .coordinateOutOfPage, .nonPositiveSize, .tooFewPoints:
+        case .coordinateNotFinite, .coordinateOutOfPage, .nonPositiveSize, .tooFewPoints,
+             .tooManyPoints, .cornerRadiusInvalid:
             return "The drawing used positions or sizes that don’t fit the page. Try again."
         case .invalidColor:
             return "The drawing used a colour I couldn’t read. Try again."
         case .fontSizeOutOfRange:
             return "The drawing used a text size outside a sensible range. Try again."
-        case .textTooLong:
+        case .strokeWidthOutOfRange:
+            return "The drawing used a line thickness outside a sensible range. Try again."
+        case .textTooLong, .fontFamilyTooLong:
             return "One of the labels is too long. Try a shorter description."
         }
     }

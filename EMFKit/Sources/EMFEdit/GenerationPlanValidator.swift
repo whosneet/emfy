@@ -32,6 +32,14 @@ public enum GenerationPlanProblem: Sendable, Equatable {
     case fontSizeOutOfRange(op: Int, points: Double)
     /// A text string exceeds the length cap.
     case textTooLong(op: Int, length: Int, limit: Int)
+    /// A stroke width was not finite, was negative, or exceeded the cap.
+    case strokeWidthOutOfRange(op: Int, points: Double)
+    /// A corner radius was not finite, was negative, or exceeded the page extent.
+    case cornerRadiusInvalid(op: Int)
+    /// A polyline/polygon had more points than the cap.
+    case tooManyPoints(op: Int, count: Int, limit: Int)
+    /// A font family name exceeded the length cap.
+    case fontFamilyTooLong(op: Int, length: Int, limit: Int)
 }
 
 /// The result of validating a generation plan.
@@ -55,19 +63,31 @@ public enum GenerationPlanValidator {
         public var maxFontPoints: Double
         /// How far outside the page an element may bleed, as a fraction of the page extent.
         public var pageMargin: Double
+        /// The largest stroke width (points) an op may carry.
+        public var maxStrokeWidthPoints: Double
+        /// The most points a single polyline/polygon may have.
+        public var maxPointsPerPolyline: Int
+        /// The longest font family name (characters) a text op may carry.
+        public var maxFontFamilyLength: Int
 
         public init(
             maxElements: Int = 300,
             maxTextLength: Int = 500,
             minFontPoints: Double = 4,
             maxFontPoints: Double = 200,
-            pageMargin: Double = 0.05
+            pageMargin: Double = 0.05,
+            maxStrokeWidthPoints: Double = 1000,
+            maxPointsPerPolyline: Int = 1000,
+            maxFontFamilyLength: Int = 100
         ) {
             self.maxElements = maxElements
             self.maxTextLength = maxTextLength
             self.minFontPoints = minFontPoints
             self.maxFontPoints = maxFontPoints
             self.pageMargin = pageMargin
+            self.maxStrokeWidthPoints = maxStrokeWidthPoints
+            self.maxPointsPerPolyline = maxPointsPerPolyline
+            self.maxFontFamilyLength = maxFontFamilyLength
         }
     }
 
@@ -89,21 +109,27 @@ public enum GenerationPlanValidator {
         /// Whether (x, y) is on-page (within the margin).
         func inPage(_ x: Double, _ y: Double) -> Bool { x >= minX && x <= maxX && y >= minY && y <= maxY }
 
+        let maxExtent = max(maxW, maxH)
+
         for (index, op) in plan.operations.enumerated() {
             switch op {
-            case let .rectangle(x, y, w, h, fill, stroke, _),
-                 let .ellipse(x, y, w, h, fill, stroke, _):
+            case let .rectangle(x, y, w, h, fill, stroke, strokeWidth),
+                 let .ellipse(x, y, w, h, fill, stroke, strokeWidth):
                 checkBox(x, y, w, h, op: index, maxW: maxW, maxH: maxH, inPage: inPage, into: &problems)
                 checkColor(fill, op: index, into: &problems)
                 checkColor(stroke, op: index, into: &problems)
+                checkStrokeWidth(strokeWidth, op: index, limits: limits, into: &problems)
 
-            case let .roundedRectangle(x, y, w, h, radius, fill, stroke, _):
+            case let .roundedRectangle(x, y, w, h, radius, fill, stroke, strokeWidth):
                 checkBox(x, y, w, h, op: index, maxW: maxW, maxH: maxH, inPage: inPage, into: &problems)
-                if !radius.isFinite { problems.append(.coordinateNotFinite(op: index)) }
+                if !radius.isFinite || radius < 0 || radius > maxExtent {
+                    problems.append(.cornerRadiusInvalid(op: index))
+                }
                 checkColor(fill, op: index, into: &problems)
                 checkColor(stroke, op: index, into: &problems)
+                checkStrokeWidth(strokeWidth, op: index, limits: limits, into: &problems)
 
-            case let .line(from, to, stroke, _), let .arrow(from, to, stroke, _):
+            case let .line(from, to, stroke, strokeWidth), let .arrow(from, to, stroke, strokeWidth):
                 if !from.isFinite || !to.isFinite {
                     problems.append(.coordinateNotFinite(op: index))
                 } else {
@@ -111,17 +137,20 @@ public enum GenerationPlanValidator {
                     if from == to { problems.append(.nonPositiveSize(op: index)) }
                 }
                 checkColor(stroke, op: index, into: &problems)
+                checkStrokeWidth(strokeWidth, op: index, limits: limits, into: &problems)
 
-            case let .polyline(points, stroke, _):
-                checkPoints(points, op: index, minimum: 2, inPage: inPage, into: &problems)
+            case let .polyline(points, stroke, strokeWidth):
+                checkPoints(points, op: index, minimum: 2, limits: limits, inPage: inPage, into: &problems)
                 checkColor(stroke, op: index, into: &problems)
+                checkStrokeWidth(strokeWidth, op: index, limits: limits, into: &problems)
 
-            case let .polygon(points, fill, stroke, _):
-                checkPoints(points, op: index, minimum: 3, inPage: inPage, into: &problems)
+            case let .polygon(points, fill, stroke, strokeWidth):
+                checkPoints(points, op: index, minimum: 3, limits: limits, inPage: inPage, into: &problems)
                 checkColor(fill, op: index, into: &problems)
                 checkColor(stroke, op: index, into: &problems)
+                checkStrokeWidth(strokeWidth, op: index, limits: limits, into: &problems)
 
-            case let .text(x, y, _, _, string, color, fontSize, _):
+            case let .text(x, y, _, _, string, color, fontSize, fontFamily):
                 if !x.isFinite || !y.isFinite {
                     problems.append(.coordinateNotFinite(op: index))
                 } else if !inPage(x, y) {
@@ -134,6 +163,9 @@ public enum GenerationPlanValidator {
                 }
                 if string.count > limits.maxTextLength {
                     problems.append(.textTooLong(op: index, length: string.count, limit: limits.maxTextLength))
+                }
+                if let fontFamily, fontFamily.count > limits.maxFontFamilyLength {
+                    problems.append(.fontFamilyTooLong(op: index, length: fontFamily.count, limit: limits.maxFontFamilyLength))
                 }
                 checkColor(color, op: index, into: &problems)
             }
@@ -157,12 +189,25 @@ public enum GenerationPlanValidator {
     }
 
     private static func checkPoints(
-        _ points: [GenPoint], op: Int, minimum: Int,
+        _ points: [GenPoint], op: Int, minimum: Int, limits: Limits,
         inPage: (Double, Double) -> Bool, into problems: inout [GenerationPlanProblem]
     ) {
         if points.count < minimum { problems.append(.tooFewPoints(op: op)); return }
+        if points.count > limits.maxPointsPerPolyline {
+            problems.append(.tooManyPoints(op: op, count: points.count, limit: limits.maxPointsPerPolyline))
+        }
         if points.contains(where: { !$0.isFinite }) { problems.append(.coordinateNotFinite(op: op)); return }
         if points.contains(where: { !inPage($0.x, $0.y) }) { problems.append(.coordinateOutOfPage(op: op)) }
+    }
+
+    /// Bounds an optional stroke width: finite, non-negative, within the cap.
+    private static func checkStrokeWidth(
+        _ width: Double?, op: Int, limits: Limits, into problems: inout [GenerationPlanProblem]
+    ) {
+        guard let width else { return }
+        if !width.isFinite || width < 0 || width > limits.maxStrokeWidthPoints {
+            problems.append(.strokeWidthOutOfRange(op: op, points: width))
+        }
     }
 
     private static func checkColor(_ color: GenColor?, op: Int, into problems: inout [GenerationPlanProblem]) {

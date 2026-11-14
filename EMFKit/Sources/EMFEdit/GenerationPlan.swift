@@ -90,8 +90,12 @@ public struct GenerationPage: Sendable, Equatable, Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.preset = (try? container.decodeIfPresent(Preset.self, forKey: .page)) ?? .a4Landscape
-        self.coordinateSpace = (try? container.decodeIfPresent(CoordinateSpace.self, forKey: .coords)) ?? .fraction
+        // Default only when the key is absent/null. A present-but-unknown preset or
+        // coordinate space is REJECTED (no silent fall-back to a4Landscape/fraction):
+        // decodeIfPresent returns nil for an absent key but throws for an unknown raw
+        // value, and we no longer swallow that throw.
+        self.preset = try container.decodeIfPresent(Preset.self, forKey: .page) ?? .a4Landscape
+        self.coordinateSpace = try container.decodeIfPresent(CoordinateSpace.self, forKey: .coords) ?? .fraction
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -304,10 +308,13 @@ extension GenerationPlan: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.page = try GenerationPage(from: decoder)
-        if let ops = try? container.decodeIfPresent([GenerationOp].self, forKey: .elements) {
-            self.operations = ops
-        } else if let ops = try? container.decodeIfPresent([GenerationOp].self, forKey: .operations) {
-            self.operations = ops
+        // Pick the key that is PRESENT and decode it without swallowing — so an unknown
+        // op inside `elements` surfaces as `unknownOperation`, not a misleading
+        // "no elements array". Only a genuinely absent array falls through to `malformed`.
+        if container.contains(.elements) {
+            self.operations = try container.decode([GenerationOp].self, forKey: .elements)
+        } else if container.contains(.operations) {
+            self.operations = try container.decode([GenerationOp].self, forKey: .operations)
         } else {
             throw GenerationPlanDecodingError.malformed("no elements array")
         }

@@ -2,6 +2,15 @@ import EMFEdit
 import Foundation
 import FoundationModels
 
+/// Why mapping a `@Generable` mirror plan onto its domain plan failed: an operation was
+/// missing a field its kind requires, so it couldn't be shaped. The on-device (guided)
+/// path REJECTS the whole plan on any such op — the same all-or-nothing contract the
+/// strict JSON path has (a `missingField`/`unknownOperation` decode throw rejects the
+/// whole plan), so a partial, silently-truncated edit or drawing never reaches preview.
+enum GenMirrorError: Error, Equatable {
+    case unmappableOperation(index: Int)
+}
+
 // MARK: - @Generable mirror plans for the on-device path (F3)
 //
 // The on-device model path for Edit, Translate and New-Drawing uses GUIDED generation
@@ -136,10 +145,18 @@ struct GenEditPlan: Equatable {
     @Guide(description: "The edit operations to apply, in order. Empty if the request can't be expressed with these operations.", .maximumCount(200))
     var operations: [GenEditOperation]
 
-    /// The domain `EditPlan`. An op missing a required field is dropped (not invented),
-    /// so an all-unmappable reply becomes an empty plan the caller retries.
-    func toDomain() -> EditPlan {
-        EditPlan(operations: operations.compactMap { $0.toDomain() })
+    /// The domain `EditPlan`, or a throw if ANY op is missing a field its kind requires.
+    /// The whole plan is rejected rather than silently truncated, matching the strict JSON
+    /// path (C3–C7). An empty `operations` array maps to an empty plan (the validator then
+    /// flags it), and the caller retries.
+    func toDomain() throws -> EditPlan {
+        var mapped: [EditOperation] = []
+        mapped.reserveCapacity(operations.count)
+        for (index, op) in operations.enumerated() {
+            guard let domain = op.toDomain() else { throw GenMirrorError.unmappableOperation(index: index) }
+            mapped.append(domain)
+        }
+        return EditPlan(operations: mapped)
     }
 }
 
@@ -298,11 +315,17 @@ struct GenGeneratePlan: Equatable {
     @Guide(description: "The shapes and text labels that make up the drawing, in order.", .maximumCount(300))
     var elements: [GenGenerateOperation]
 
-    /// The domain `GenerationPlan` (coordinates are always fractions of the page). An op
-    /// missing a required field is dropped, so an all-unmappable reply becomes empty.
-    func toDomain() -> GenerationPlan {
-        GenerationPlan(page: GenerationPage(preset: page.domain, coordinateSpace: .fraction),
-                       operations: elements.compactMap { $0.toDomain() })
+    /// The domain `GenerationPlan` (coordinates are always fractions of the page), or a throw
+    /// if ANY element is missing a field its kind requires — the whole plan is rejected, not
+    /// silently truncated, matching the strict JSON path (C3–C7).
+    func toDomain() throws -> GenerationPlan {
+        var mapped: [GenerationOp] = []
+        mapped.reserveCapacity(elements.count)
+        for (index, op) in elements.enumerated() {
+            guard let domain = op.toDomain() else { throw GenMirrorError.unmappableOperation(index: index) }
+            mapped.append(domain)
+        }
+        return GenerationPlan(page: GenerationPage(preset: page.domain, coordinateSpace: .fraction), operations: mapped)
     }
 }
 
@@ -316,7 +339,7 @@ enum DrawingAIGuided {
     static func editPlanJSON(instructions: String, prompt: String) async throws -> String {
         let session = LanguageModelSession(instructions: instructions)
         let generated = try await session.respond(to: prompt, generating: GenEditPlan.self).content
-        return generated.toDomain().json()
+        return try generated.toDomain().json()
     }
 
     /// A translation batch as the translations JSON (`{"translations":[…]}`), via guided generation.
@@ -330,6 +353,6 @@ enum DrawingAIGuided {
     static func generationPlanJSON(instructions: String, prompt: String) async throws -> String {
         let session = LanguageModelSession(instructions: instructions)
         let generated = try await session.respond(to: prompt, generating: GenGeneratePlan.self).content
-        return generated.toDomain().json()
+        return try generated.toDomain().json()
     }
 }

@@ -54,6 +54,30 @@ struct GenerationPlanTests {
         #expect(throws: (any Error).self) { try GenerationPlan.decode(fromJSON: #"{"page":"a4-landscape"}"#) }
     }
 
+    // C3–C7: a present-but-unknown preset or coordinate space is rejected, not silently
+    // defaulted to a4-landscape / fraction.
+    @Test func unknownPresetThrows() {
+        let json = #"{"page":"tabloid","elements":[{"op":"rectangle","x":0.1,"y":0.1,"w":0.1,"h":0.1}]}"#
+        #expect(throws: (any Error).self) { try GenerationPlan.decode(fromJSON: json) }
+    }
+
+    @Test func unknownCoordinateSpaceThrows() {
+        let json = #"{"page":"a4-landscape","coords":"inches","elements":[{"op":"rectangle","x":0.1,"y":0.1,"w":0.1,"h":0.1}]}"#
+        #expect(throws: (any Error).self) { try GenerationPlan.decode(fromJSON: json) }
+    }
+
+    // C3–C7: an unknown op inside a PRESENT elements array surfaces as `unknownOperation`,
+    // not a misleading "no elements array" malformed error (the `try?` no longer swallows it).
+    @Test func unknownOpInElementsSurfacesUnknownOperation() {
+        let json = #"{"elements":[{"op":"spiral","x":0.1,"y":0.1,"w":0.1,"h":0.1}]}"#
+        #expect {
+            try GenerationPlan.decode(fromJSON: json)
+        } throws: { error in
+            if case GenerationPlanDecodingError.unknownOperation = error { return true }
+            return false
+        }
+    }
+
     @Test func roundTripsThroughOwnJSON() throws {
         let plan = GenerationPlan(page: GenerationPage(preset: .letterPortrait, coordinateSpace: .points), operations: [
             .rectangle(x: 10, y: 20, w: 100, h: 50, fill: GenColor(raw: "#112233"), stroke: GenColor(raw: "navy"), strokeWidth: 3),
@@ -125,6 +149,36 @@ struct GenerationPlanTests {
         let long = String(repeating: "a", count: 501)
         let v = validate([.text(x: 0.1, y: 0.1, w: nil, h: nil, string: long, color: nil, fontSize: 14, fontFamily: nil)])
         #expect(v.problems.contains { if case .textTooLong = $0 { return true }; return false })
+    }
+
+    @Test func rejectsStrokeWidthOutOfRange() {
+        let tooBig = validate([.rectangle(x: 0.1, y: 0.1, w: 0.1, h: 0.1, fill: nil, stroke: nil, strokeWidth: 5000)])
+        #expect(tooBig.problems.contains { if case .strokeWidthOutOfRange = $0 { return true }; return false })
+        let negative = validate([.line(from: GenPoint(x: 0.1, y: 0.1), to: GenPoint(x: 0.3, y: 0.3), stroke: nil, strokeWidth: -1)])
+        #expect(negative.problems.contains { if case .strokeWidthOutOfRange = $0 { return true }; return false })
+        let nan = validate([.polygon(points: [GenPoint(x: 0.1, y: 0.1), GenPoint(x: 0.2, y: 0.2), GenPoint(x: 0.3, y: 0.1)], fill: nil, stroke: nil, strokeWidth: .nan)])
+        #expect(nan.problems.contains { if case .strokeWidthOutOfRange = $0 { return true }; return false })
+    }
+
+    @Test func rejectsCornerRadiusInvalid() {
+        let negative = validate([.roundedRectangle(x: 0.1, y: 0.1, w: 0.2, h: 0.2, cornerRadius: -0.1, fill: nil, stroke: nil, strokeWidth: nil)])
+        #expect(negative.problems.contains { if case .cornerRadiusInvalid = $0 { return true }; return false })
+        let tooBig = validate([.roundedRectangle(x: 0.1, y: 0.1, w: 0.2, h: 0.2, cornerRadius: 5, fill: nil, stroke: nil, strokeWidth: nil)])
+        #expect(tooBig.problems.contains { if case .cornerRadiusInvalid = $0 { return true }; return false })
+        let nan = validate([.roundedRectangle(x: 0.1, y: 0.1, w: 0.2, h: 0.2, cornerRadius: .nan, fill: nil, stroke: nil, strokeWidth: nil)])
+        #expect(nan.problems.contains { if case .cornerRadiusInvalid = $0 { return true }; return false })
+    }
+
+    @Test func rejectsTooManyPoints() {
+        let many = Array(repeating: GenPoint(x: 0.1, y: 0.1), count: 1001)
+        let v = validate([.polyline(points: many, stroke: nil, strokeWidth: nil)])
+        #expect(v.problems.contains { if case .tooManyPoints = $0 { return true }; return false })
+    }
+
+    @Test func rejectsFontFamilyTooLong() {
+        let long = String(repeating: "f", count: 101)
+        let v = validate([.text(x: 0.1, y: 0.1, w: nil, h: nil, string: "x", color: nil, fontSize: 14, fontFamily: long)])
+        #expect(v.problems.contains { if case .fontFamilyTooLong = $0 { return true }; return false })
     }
 
     @Test func acceptsColourWordsAndHex() {

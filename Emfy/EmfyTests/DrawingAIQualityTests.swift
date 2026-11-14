@@ -35,7 +35,7 @@ import Testing
         let gen = GenEditPlan(operations: [
             GenEditOperation(op: .recolorFill, ids: ids, color: "#1F3A93"),
         ])
-        let plan = gen.toDomain()
+        let plan = try gen.toDomain()
         #expect(plan.operations.count == 1)
         if case .recolorFill(let got, let color) = plan.operations[0] {
             #expect(got == ids)
@@ -52,25 +52,26 @@ import Testing
         let gen = GenEditPlan(operations: [
             GenEditOperation(op: .recolorFill, ids: ids, color: "not-a-colour"),
         ])
-        let plan = gen.toDomain()
+        let plan = try gen.toDomain()
         #expect(plan.operations.count == 1)
         let validation = EditPlanValidator.validate(plan, in: scene)
         #expect(!validation.isApplicable)
         #expect(validation.problems.contains { if case .invalidColor = $0 { return true } else { return false } })
     }
 
-    @Test func opMissingRequiredFieldIsDropped() {
+    @Test func opMissingRequiredFieldRejectsWholePlan() {
         guard #available(macOS 26, iOS 26, *) else { return }
-        // recolorFill with no colour, setText with no text, delete with no ids → all dropped.
+        // C3–C7: a single unmappable op (recolorFill with no colour) rejects the WHOLE plan,
+        // matching the strict JSON path, rather than silently dropping the bad op.
         let gen = GenEditPlan(operations: [
             GenEditOperation(op: .recolorFill, ids: [1]),
             GenEditOperation(op: .setText, id: 2),
             GenEditOperation(op: .delete),
         ])
-        #expect(gen.toDomain().operations.isEmpty)
+        #expect(throws: GenMirrorError.self) { try gen.toDomain() }
     }
 
-    @Test func enumFieldsMapToDomainVocabulary() {
+    @Test func allMappableOpsMapToDomainVocabulary() throws {
         guard #available(macOS 26, iOS 26, *) else { return }
         let gen = GenEditPlan(operations: [
             GenEditOperation(op: .align, ids: [1, 2], edge: .centerHorizontal),
@@ -78,7 +79,7 @@ import Testing
             GenEditOperation(op: .scale, ids: [4], factor: 1.3),
             GenEditOperation(op: .setFontSize, id: 5, points: 24),
         ])
-        let ops = gen.toDomain().operations
+        let ops = try gen.toDomain().operations
         #expect(ops.count == 4)
         #expect(ops[0] == .align(ids: [1, 2], edge: .centerHorizontal))
         #expect(ops[1] == .distribute(ids: [1, 2, 3], axis: .vertical))
@@ -121,35 +122,35 @@ import Testing
 
 @Suite struct DrawingAIGenerableGenerateTests {
 
-    @Test func shapesMapAndValidate() {
+    @Test func shapesMapAndValidate() throws {
         guard #available(macOS 26, iOS 26, *) else { return }
         let gen = GenGeneratePlan(page: .a4Landscape, elements: [
             GenGenerateOperation(op: .rectangle, x: 0.1, y: 0.1, w: 0.2, h: 0.15, fill: "light blue"),
             GenGenerateOperation(op: .text, x: 0.12, y: 0.14, text: "Start", color: "dark blue", fontSize: 16),
         ])
-        let plan = gen.toDomain()
+        let plan = try gen.toDomain()
         #expect(plan.page.coordinateSpace == .fraction)
         #expect(plan.operations.count == 2)
         #expect(GenerationPlanValidator.validate(plan).isApplicable)
     }
 
-    @Test func invalidColorMapsButValidatorRejects() {
+    @Test func invalidColorMapsButValidatorRejects() throws {
         guard #available(macOS 26, iOS 26, *) else { return }
         let gen = GenGeneratePlan(page: .a4Portrait, elements: [
             GenGenerateOperation(op: .rectangle, x: 0.1, y: 0.1, w: 0.2, h: 0.2, fill: "not-a-colour"),
         ])
-        let validation = GenerationPlanValidator.validate(gen.toDomain())
+        let validation = GenerationPlanValidator.validate(try gen.toDomain())
         #expect(!validation.isApplicable)
         #expect(validation.problems.contains { if case .invalidColor = $0 { return true } else { return false } })
     }
 
-    @Test func lineAndPolylineMapPoints() {
+    @Test func lineAndPolylineMapPoints() throws {
         guard #available(macOS 26, iOS 26, *) else { return }
         let gen = GenGeneratePlan(page: .a4Landscape, elements: [
             GenGenerateOperation(op: .line, x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.1, stroke: "black"),
             GenGenerateOperation(op: .polyline, points: [GenPointXY(x: 0.1, y: 0.2), GenPointXY(x: 0.3, y: 0.3)], stroke: "red"),
         ])
-        let ops = gen.toDomain().operations
+        let ops = try gen.toDomain().operations
         #expect(ops.count == 2)
         if case .line(let from, let to, _, _) = ops[0] {
             #expect(from == GenPoint(x: 0.1, y: 0.1))
@@ -160,12 +161,13 @@ import Testing
         } else { Issue.record("expected polyline") }
     }
 
-    @Test func shapeMissingSizeIsDropped() {
+    @Test func shapeMissingSizeRejectsWholePlan() {
         guard #available(macOS 26, iOS 26, *) else { return }
+        // C3–C7: one unmappable element (a rectangle with no w/h) rejects the whole plan.
         let gen = GenGeneratePlan(page: .a4Landscape, elements: [
             GenGenerateOperation(op: .rectangle, x: 0.1, y: 0.1), // no w/h
         ])
-        #expect(gen.toDomain().operations.isEmpty)
+        #expect(throws: GenMirrorError.self) { try gen.toDomain() }
     }
 }
 

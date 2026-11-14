@@ -3,6 +3,7 @@ import EMFEdit
 import Foundation
 import FoundationModels
 import Observation
+import os
 
 // MARK: - Edit by instruction (X2a)
 //
@@ -46,6 +47,8 @@ final class DrawingAIEditModel {
         case applied
         case failed(String)
     }
+
+    nonisolated static let log = Logger(subsystem: "com.avneetsingh.emfy", category: "ai-edit")
 
     private(set) var phase: Phase = .idle
     /// The current instruction text (bound to the field).
@@ -202,6 +205,9 @@ final class DrawingAIEditModel {
                 if !decoded.operations.isEmpty { plan = decoded; break }
                 lastDecodeError = "the reply contained no operations; name the element ids listed in the data that should change"
             } catch {
+                // Log the real decode failure (privately — it quotes untrusted model output)
+                // instead of swallowing it silently (C3–C7).
+                Self.log.error("AI edit plan decode failed: \(error.localizedDescription, privacy: .private)")
                 // A fixed hint — never echo the model's own error/reply text back into the
                 // next prompt's instruction slot, which would be an injection path (S6).
                 lastDecodeError = "the reply wasn’t the required EditPlan JSON"

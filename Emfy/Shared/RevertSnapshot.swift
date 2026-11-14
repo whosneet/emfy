@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The one-time "opened version" snapshot that powers Revert to Opened Version
 /// (v3-plan §11.1, design call E2a-7). On the first save of a file opened in Emfy,
@@ -14,6 +15,8 @@ import Foundation
 /// `RecentsStore.Locations.snapshotsDirectory`.
 struct RevertSnapshotStore: Sendable {
     let directory: URL
+
+    private static let log = Logger(subsystem: "com.avneetsingh.emfy", category: "revert-snapshot")
 
     init(directory: URL) { self.directory = directory }
 
@@ -63,9 +66,17 @@ struct RevertSnapshotStore: Sendable {
     /// The opened bytes and original file name, or `nil` when no snapshot exists.
     func read(for id: UUID) -> (data: Data, originalFileName: String)? {
         guard let data = try? Data(contentsOf: dataURL(id)) else { return nil }
-        let name = (try? Data(contentsOf: sidecarURL(id)))
-            .flatMap { try? JSONDecoder().decode(Sidecar.self, from: $0) }?
-            .originalFileName ?? id.uuidString
+        var name = id.uuidString
+        let sidecar = sidecarURL(id)
+        if let sidecarData = try? Data(contentsOf: sidecar) {
+            do {
+                name = try JSONDecoder().decode(Sidecar.self, from: sidecarData).originalFileName
+            } catch {
+                // The bytes are still usable; log the sidecar decode failure (private path)
+                // instead of swallowing it, and fall back to the id for the name (C3–C7).
+                Self.log.error("Couldn't decode revert snapshot sidecar at \(sidecar.path, privacy: .private): \(error.localizedDescription, privacy: .private)")
+            }
+        }
         return (data, name)
     }
 
