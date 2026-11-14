@@ -1125,9 +1125,24 @@ private final class IOSTiledSceneView: UIView {
         tiled.contentsScale = displayScale > 0 ? displayScale : 1
         backgroundColor = .clear
         isOpaque = false
+        // Free the editor canvas's decoded-image memory under pressure (M-2): both the
+        // inserted-image (ImageDecodeCache) and imported-DIB (DIBImageCache) pixels, so
+        // the editor releases them before jetsam, exactly like the viewer canvas. The
+        // next tile re-decodes; the parsed source stays. Posted on the main thread.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(purgeImageCachesOnMemoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
     }
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+    }
+
+    @objc private func purgeImageCachesOnMemoryWarning() {
+        if case .ready(let source) = sourceStateLock.withLock({ $0 }) { source.purgeImageCaches() }
+    }
 
     /// A view-space region to invalidate on the next `setScene` instead of the whole
     /// view, so a committed edit only repaints the changed tiles (E2b item 5).
