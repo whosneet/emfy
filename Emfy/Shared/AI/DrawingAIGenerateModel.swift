@@ -260,11 +260,16 @@ final class DrawingAIGenerateModel {
         return "Something went wrong preparing the drawing. Please try again."
     }
 
+    /// The retry prompt after an unparseable reply. The decode `error` is deliberately
+    /// NOT interpolated (FM-7): it can echo the model's own previous output, so feeding
+    /// it back into the prompt is an injection vector. A fixed hint is used instead; the
+    /// parameter is kept for call-site compatibility and the eval harness.
     static func retryDescription(original: String, error: String) -> String {
-        """
+        _ = error
+        return """
         \(original)
 
-        (Your previous reply could not be parsed as the required drawing JSON: \(error). \
+        (Your previous reply could not be parsed as the required drawing JSON. \
         Reply with ONLY the JSON object described, and nothing else.)
         """
     }
