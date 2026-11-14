@@ -64,6 +64,10 @@ final class DrawingAltTextStore {
         unsupportedNotes: [String]
     ) {
         guard cached(for: contentID) == nil, !inFlight.contains(contentID) else { return }
+        // Respect the on-device AI opt-out and Private mode (FM-5): alt text is
+        // generated on-device, so a user who turned on-device AI off gets none, and a
+        // drawing opened privately produces no AI-derived metadata.
+        guard EmfySettings.shared.useOnDeviceAI, !RecentsStore.shared.isPrivate else { return }
         guard #available(macOS 26, iOS 26, *), DrawingAIEngine.isModelAvailable else { return }
         inFlight.insert(contentID)
         Task { [weak self] in
