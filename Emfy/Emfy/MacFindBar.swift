@@ -45,8 +45,8 @@ struct MacFindBar: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .floatingSurface(in: Capsule())   // C5e G2: Liquid Glass on 26, material below
-        .shadow(radius: 6, y: 3)
-        .padding(.top, 10)
+        // Shadow only pre-26 — glass casts its own, so it would double up (audit G-B).
+        .floatingShadow(radius: 6, y: 3)
         .onChange(of: model.query) { _, _ in scheduleApply() }
         .onAppear {
             fieldFocused = true

@@ -419,11 +419,7 @@ struct MetafileViewerScreen: View {
         } message: { error in
             Text(error.message)
         }
-        .overlay(alignment: .top) {
-            if session.showsExternalChangeBanner {
-                externalChangeBanner
-            }
-        }
+        // The external-change banner now lives in the single top overlay stack (L-B).
         .overlay {
             if exporter.isRendering {
                 ExportProgressOverlay { exporter.cancelExport() }
@@ -992,8 +988,9 @@ struct MetafileViewerScreen: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .floatingSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
+        // Shadow only pre-26 — glass casts its own (audit G-B). Outer margins dropped: the
+        // shared top overlay stack now positions this banner (L-B).
+        .floatingShadow(radius: 8, y: 2, color: .black.opacity(0.12))
     }
 
     /// "Save a Copy as EMF…": exports the scene as EMF and shares it, keeping full
@@ -1985,11 +1982,28 @@ struct MetafileViewerScreen: View {
         }
     }
 
-    /// The pill and banner, wrapped in a `GlassEffectContainer` on 26 so the two
-    /// glass surfaces merge cleanly when both show; a plain stack below (G1).
+    /// The four top floating surfaces — find bar, external-change banner, zoom pill and
+    /// partial-support banner — in ONE stack so they can never overlap (audit L-B), all
+    /// displaced clear of the Duo fold/camera (L-C), and wrapped in a `GlassEffectContainer`
+    /// on 26 so the glass surfaces merge cleanly when more than one shows; a plain stack
+    /// below (G1).
     @ViewBuilder
     private func floatingGroup(xOffset: CGFloat, sideWidth: CGFloat) -> some View {
         let content = VStack(spacing: 8) {
+            if findModel.isPresented {
+                IOSFindBar(model: findModel) {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { findModel.dismiss() }
+                }
+                .frame(maxWidth: sideWidth - 16)
+                .offset(x: xOffset)
+                .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
+            }
+            if session.showsExternalChangeBanner {
+                externalChangeBanner
+                    .frame(maxWidth: sideWidth - 16)
+                    .offset(x: xOffset)
+                    .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
+            }
             if pillVisible {
                 ZoomPill(controller: controller)
                     .offset(x: xOffset)
@@ -2002,6 +2016,8 @@ struct MetafileViewerScreen: View {
                     .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
             }
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: findModel.isPresented)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: session.showsExternalChangeBanner)
         if #available(iOS 26.0, *) {
             GlassEffectContainer(spacing: 8) { content }
         } else {

@@ -14,7 +14,30 @@ struct IOSFindBar: View {
     @State private var debounce: Task<Void, Never>?
 
     var body: some View {
-        HStack(spacing: 10) {
+        // The bar must fit 320 pt even at the largest type sizes, so a roomier layout is
+        // tried first and a tighter one (narrower field, smaller spacing) is used when it
+        // won't fit; Done is `.fixedSize()` so it never hyphenates (audit L-F).
+        ViewThatFits(in: .horizontal) {
+            row(spacing: 10, fieldMinWidth: 120)
+            row(spacing: 6, fieldMinWidth: 48)
+        }
+        .font(.callout)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .floatingSurface(in: Capsule())   // C5e G1: Liquid Glass on 26, material below
+        // Shadow only pre-26 — glass already casts its own; double shadow otherwise (G-B).
+        .floatingShadow(radius: 8, y: 3)
+        .onChange(of: model.query) { _, _ in scheduleApply() }
+        .onAppear {
+            fieldFocused = true
+            model.applyQuery()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Find")
+    }
+
+    private func row(spacing: CGFloat, fieldMinWidth: CGFloat) -> some View {
+        HStack(spacing: spacing) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
             TextField("Find", text: $model.query)
@@ -24,7 +47,7 @@ struct IOSFindBar: View {
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
                 .onSubmit { model.goNext() }
-                .frame(minWidth: 120)
+                .frame(minWidth: fieldMinWidth)
 
             statusLabel
             readingHint
@@ -39,21 +62,8 @@ struct IOSFindBar: View {
 
             Button("Done") { onClose() }
                 .fontWeight(.semibold)
+                .fixedSize()
         }
-        .font(.callout)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .floatingSurface(in: Capsule())   // C5e G1: Liquid Glass on 26, material below
-        .shadow(radius: 8, y: 3)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .onChange(of: model.query) { _, _ in scheduleApply() }
-        .onAppear {
-            fieldFocused = true
-            model.applyQuery()
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Find")
     }
 
     @ViewBuilder
@@ -112,16 +122,10 @@ private struct MetafileFindBarModifier: ViewModifier {
     let ocrEnabled: Bool
     let onOCRToggle: (Bool) -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
+    // The find bar is now rendered inside the viewer's single top overlay stack (L-B), so
+    // this modifier only carries the live-runs task and the match/OCR reactions.
     func body(content: Content) -> some View {
         content
-            .overlay(alignment: .top) {
-                if model.isPresented {
-                    IOSFindBar(model: model) { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { model.dismiss() } }
-                        .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
-                }
-            }
             .task(id: runsKey) { await refreshRuns() }
             .onChange(of: model.current) { _, _ in onCurrentChange() }
             .onChange(of: ocrEnabled) { _, enabled in onOCRToggle(enabled) }

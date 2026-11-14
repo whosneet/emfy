@@ -76,14 +76,10 @@ struct MacViewerPane: View {
             // Format · size under the title, using the shared helper (G6).
             .navigationSubtitle(subtitle)
             .toolbar { toolbarContent }
-            // The find bar slides in above the canvas when Edit ▸ Find ▸ Find… (⌘F) fires
-            // (F3b). Esc (its Done button) closes it.
-            .overlay(alignment: .top) {
-                if findModel.isPresented {
-                    MacFindBar(model: findModel) { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { findModel.dismiss() } }
-                        .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
-                }
-            }
+            // The find bar and the external-change banner share ONE top stack so they can
+            // never overlap (audit L-B), wrapped in a GlassEffectContainer on 26 so the two
+            // glass surfaces merge cleanly. The find bar slides in on ⌘F (F3b); Esc closes it.
+            .overlay(alignment: .top) { topOverlays }
             // Keep the find model's runs current: the renderer observation in viewer mode,
             // the edited scene in edit mode (F3b). Recomputed only when the drawing changes.
             .task(id: findRunsKey) { await refreshFindRuns() }
@@ -248,11 +244,6 @@ struct MacViewerPane: View {
                 contentType: .data,
                 defaultFilename: (entry?.baseName ?? "Metafile") + ".emf"
             ) { _ in }
-            .overlay(alignment: .top) {
-                if session.showsExternalChangeBanner {
-                    externalChangeBanner
-                }
-            }
             .onChange(of: session.lastSaveError != nil) { _, hasError in
                 // A failure that blocks a leave is handled by the R2U2 alert, not a toast.
                 if hasError, let error = session.lastSaveError, !session.isEndingEditing {
@@ -988,6 +979,34 @@ struct MacViewerPane: View {
     }
     #endif
 
+    /// The single top overlay stack (audit L-B): the find bar and the external-change
+    /// banner, so they never overlap, wrapped in a `GlassEffectContainer` on 26 so the two
+    /// glass surfaces merge cleanly; a plain stack below (G2). (The Mac has no zoom pill or
+    /// partial-support banner overlay — those appear in the toolbar / Info inspector.)
+    @ViewBuilder
+    private var topOverlays: some View {
+        let content = VStack(spacing: 8) {
+            if findModel.isPresented {
+                MacFindBar(model: findModel) {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { findModel.dismiss() }
+                }
+                .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
+            }
+            if session.showsExternalChangeBanner {
+                externalChangeBanner
+                    .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .padding(.top, 10)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: findModel.isPresented)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: session.showsExternalChangeBanner)
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 8) { content }
+        } else {
+            content
+        }
+    }
+
     /// The non-modal banner shown when the file changed on disk while there were
     /// unsaved edits (design call E2a-8): keep the edits, or reload and discard them.
     private var externalChangeBanner: some View {
@@ -1000,8 +1019,9 @@ struct MacViewerPane: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .floatingSurface(in: RoundedRectangle(cornerRadius: 10))   // C5e G2
-        .padding(12)
-        .shadow(radius: 4, y: 2)
+        // Shadow only pre-26 — glass casts its own (audit G-B). Outer margin dropped: the
+        // shared top overlay stack now positions this banner (L-B).
+        .floatingShadow(radius: 4, y: 2)
         .confirmationDialog(
             "Reload and discard your edits?",
             isPresented: $showReloadDiscardConfirm,
