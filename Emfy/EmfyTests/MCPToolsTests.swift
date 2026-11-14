@@ -99,6 +99,17 @@ import Testing
         #expect(!result.isError)
     }
 
+    // S8: out-of-range numeric arguments (a crafted client) must not trap on `Int(Double)`;
+    // they fall back to the defaults and the tool answers normally. (NaN/Inf can't travel
+    // through JSON — `JSONSerialization` rejects them — so the finite extremes are the
+    // reachable cases here; the non-finite path is covered by the JSONValue.intValue test.)
+    @Test(arguments: [1e20, -1e20, 0.0])
+    func recordsToleratesExtremeNumericArguments(_ value: Double) throws {
+        let path = try tempCopy("gate-p4-text.emf").path
+        let result = try call("emfy_records", ["path": path, "offset": value, "limit": value])
+        #expect(!result.isError)
+    }
+
     @Test func renderPNGReturnsAValidImageBlock() throws {
         let path = try tempCopy("gate-p4-text.emf").path
         let result = try call("emfy_render", ["path": path, "format": "png", "scale": 2])

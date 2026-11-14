@@ -193,7 +193,9 @@ enum MCPTools {
 
     private static func intArg(_ arguments: [String: Any], _ key: String) -> Int? {
         if let i = arguments[key] as? Int { return i }
-        if let d = arguments[key] as? Double { return Int(d) }
+        // `Int(Double)` traps on NaN/Inf and out-of-range values; round and reject
+        // anything not exactly representable so a crafted argument can't crash (S8).
+        if let d = arguments[key] as? Double { return Int(exactly: d.rounded()) }
         if let s = arguments[key] as? String { return Int(s) }
         return nil
     }

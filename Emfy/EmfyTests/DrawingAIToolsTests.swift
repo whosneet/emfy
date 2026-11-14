@@ -54,6 +54,18 @@ import Testing
         #expect(td.usage.used().contains(DrawingAIToolName.getDrawingText))
     }
 
+    // S1: a prompt-injected extreme startLine must not underflow the -1. Int.min / Int.max
+    // are clamped to the valid line range, so the tool returns a sane answer, not a trap.
+    @Test func getDrawingTextClampsExtremeStartLines() async throws {
+        guard #available(macOS 26, iOS 26, *) else { return }
+        let td = try toolData(for: "gate-p4-text.emf")
+        let tool = GetDrawingTextTool(data: td)
+        let low = try await tool.call(arguments: .init(startLine: Int.min, maxLines: nil))
+        #expect(low.contains("line 1:"))   // clamped up to the first line
+        let high = try await tool.call(arguments: .init(startLine: Int.max, maxLines: 5))
+        #expect(!high.isEmpty)             // clamped down to the last line, no crash
+    }
+
     @Test func findTextFindsAKnownWordAndReportsMisses() async throws {
         guard #available(macOS 26, iOS 26, *) else { return }
         let td = try toolData(for: "gate-p4-text.emf")

@@ -60,6 +60,19 @@ import Testing
         #expect(AIProviderPresets.ollamaBaseURL.absoluteString == "http://localhost:11434/v1")
     }
 
+    // S1: a model can put any number in a tool argument. `JSONValue.intValue` must round
+    // and reject anything not exactly representable rather than trap on `Int(Double)`.
+    @Test func intValueRejectsNonFiniteAndOutOfRangeNumbers() {
+        #expect(JSONValue.number(1e20).intValue == nil)
+        #expect(JSONValue.number(-1e20).intValue == nil)
+        #expect(JSONValue.number(.nan).intValue == nil)
+        #expect(JSONValue.number(.infinity).intValue == nil)
+        #expect(JSONValue.number(-.infinity).intValue == nil)
+        #expect(JSONValue.number(0).intValue == 0)
+        #expect(JSONValue.number(3.7).intValue == 4)    // rounds to nearest
+        #expect(JSONValue.number(-2.5).intValue == -3)  // rounded() is toNearestOrAwayFromZero
+    }
+
     @Test func configCarriesNoKey() {
         // A config is loggable: it must not expose a secret anywhere in its JSON.
         let config = anthropicConfig()

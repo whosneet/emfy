@@ -124,7 +124,10 @@ struct GetDrawingTextTool: Tool {
         data.usage.record(DrawingAIToolName.getDrawingText)
         let lines = data.textLines
         guard !lines.isEmpty else { return "The drawing contains no readable text." }
-        let start = max(0, (arguments.startLine ?? 1) - 1)
+        // Clamp the 1-based line number to [1, lines.count] before the -1, so a
+        // model-supplied huge or negative value can't underflow (S1).
+        let startLine = min(max(1, arguments.startLine ?? 1), lines.count)
+        let start = startLine - 1
         guard start < lines.count else { return "There is no text at that line." }
         let requested = arguments.maxLines ?? DrawingAIToolData.maxTextLinesReturned
         let count = min(max(1, requested), DrawingAIToolData.maxTextLinesReturned, lines.count - start)

@@ -54,7 +54,14 @@ indirect enum JSONValue: Equatable, Sendable {
     }
 
     var stringValue: String? { if case .string(let s) = self { return s } else { return nil } }
-    var intValue: Int? { if case .number(let n) = self { return Int(n) } else { return nil } }
+    /// The value as an `Int`, or nil. Model-supplied numbers are untrusted: `Int(Double)`
+    /// traps on NaN/Inf and on anything outside `Int`'s range, so round to the nearest
+    /// integer and reject anything not exactly representable — a prompt-injected 1e20 or
+    /// NaN becomes nil (handled by the callers' defaults), never a crash (S1).
+    var intValue: Int? {
+        guard case .number(let n) = self else { return nil }
+        return Int(exactly: n.rounded())
+    }
     var objectValue: [String: JSONValue]? { if case .object(let o) = self { return o } else { return nil } }
 
     /// Parses a JSON object string into `[String: JSONValue]`, or nil if it isn't a

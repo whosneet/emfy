@@ -40,7 +40,10 @@ enum AIProviderTools {
             run: { input in
                 let lines = data.textLines
                 guard !lines.isEmpty else { return .ok("The drawing contains no readable text.") }
-                let start = max(0, (input["startLine"]?.intValue ?? 1) - 1)
+                // Clamp the 1-based line number to [1, lines.count] before the -1, so a
+                // model-supplied huge or negative value can't underflow (S1).
+                let startLine = min(max(1, input["startLine"]?.intValue ?? 1), lines.count)
+                let start = startLine - 1
                 guard start < lines.count else { return .ok("There is no text at that line.") }
                 let requested = input["maxLines"]?.intValue ?? DrawingAIToolData.maxTextLinesReturned
                 let count = min(max(1, requested), DrawingAIToolData.maxTextLinesReturned, lines.count - start)
