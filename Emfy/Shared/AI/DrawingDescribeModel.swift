@@ -175,6 +175,8 @@ final class DrawingDescribeModel {
             // drawing's text (F3), over the complete text — identical to per-token grounding.
             text = DrawingDescribeGrounding.groundQuotes(
                 in: DrawingAIOutputSanitiser.sanitise(latest), normalisedHaystack: haystack)
+            // An empty non-cancelled result shows a clear message, not a silent blank (FM-8).
+            if !Task.isCancelled && text.isEmpty { text = DrawingAIEngine.emptyAnswer }
             phase = Task.isCancelled ? (text.isEmpty ? .idle : .done) : .done
         } catch {
             if error is CancellationError { phase = text.isEmpty ? .idle : .done; return }

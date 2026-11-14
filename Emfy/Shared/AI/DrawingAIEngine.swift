@@ -118,4 +118,8 @@ enum DrawingAIEngine {
     }
 
     static let genericFailure = "Something went wrong with the on-device model. Please try again."
+
+    /// Shown in Describe, Explain and Summarise when the on-device model finishes a turn
+    /// with no text at all (FM-8), so the result isn't a silent blank "done".
+    static let emptyAnswer = "The model didn’t return an answer."
 }

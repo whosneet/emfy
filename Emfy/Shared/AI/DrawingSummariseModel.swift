@@ -163,6 +163,8 @@ final class DrawingSummariseModel {
                 if Task.isCancelled { break }
                 text = DrawingAIOutputSanitiser.sanitise(snapshot.content)
             }
+            // An empty non-cancelled result shows a clear message, not a silent blank (FM-8).
+            if !Task.isCancelled && text.isEmpty { text = DrawingAIEngine.emptyAnswer }
             phase = Task.isCancelled ? (text.isEmpty ? .idle : .done) : .done
         } catch {
             if error is CancellationError { phase = text.isEmpty ? .idle : .done; return }
