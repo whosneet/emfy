@@ -12,6 +12,15 @@ struct DrawingCompareView: View {
     @Bindable var model: DrawingCompareModel
     let onClose: () -> Void
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    /// At compact width the canvas and the change list can't sit side by side, so they
+    /// switch behind a segmented control (C5e L1/U2).
+    private enum CompactPane: Hashable { case canvas, changes }
+    @State private var compactPane: CompactPane = .canvas
+
+    private var isCompact: Bool { horizontalSizeClass == .compact }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -25,7 +34,7 @@ struct DrawingCompareView: View {
                 ready
             }
         }
-        .frame(minWidth: 540, minHeight: 460)
+        .macSheetMinFrame(minWidth: 540, minHeight: 460)
     }
 
     // MARK: Header
@@ -39,18 +48,27 @@ struct DrawingCompareView: View {
             }
             Spacer()
             if model.phase == .ready {
-                Picker("Mode", selection: $model.mode) {
-                    ForEach(DrawingCompareModel.Mode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
+                modePicker
             }
             Button("Done", action: onClose).keyboardShortcut(.defaultAction)
         }
         .padding(12)
+    }
+
+    // A menu picker at compact width: a segmented control with three word labels overflows
+    // the iPhone header at large accessibility sizes (C5e L1).
+    @ViewBuilder
+    private var modePicker: some View {
+        let picker = Picker("Mode", selection: $model.mode) {
+            ForEach(DrawingCompareModel.Mode.allCases) { mode in
+                Text(mode.label).tag(mode)
+            }
+        }
+        if isCompact {
+            picker.pickerStyle(.menu).labelsHidden().fixedSize()
+        } else {
+            picker.pickerStyle(.segmented).labelsHidden().fixedSize()
+        }
     }
 
     private var comparing: some View {
@@ -68,7 +86,16 @@ struct DrawingCompareView: View {
 
     // MARK: Ready
 
+    @ViewBuilder
     private var ready: some View {
+        if isCompact {
+            compactReady
+        } else {
+            regularReady
+        }
+    }
+
+    private var regularReady: some View {
         HStack(spacing: 0) {
             canvasArea
                 .frame(minWidth: 300)
@@ -77,6 +104,28 @@ struct DrawingCompareView: View {
             Divider()
             changeList
                 .frame(width: 230)
+        }
+    }
+
+    private var compactReady: some View {
+        VStack(spacing: 0) {
+            Picker("View", selection: $compactPane) {
+                Text("Canvas").tag(CompactPane.canvas)
+                Text("Changes").tag(CompactPane.changes)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
+            switch compactPane {
+            case .canvas:
+                canvasArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(canvasBackground)
+            case .changes:
+                changeList
+            }
         }
     }
 

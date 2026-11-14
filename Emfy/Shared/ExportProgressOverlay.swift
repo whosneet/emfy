@@ -91,4 +91,16 @@ extension View {
                 .overlay(shape.strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
         }
     }
+
+    /// A minimum frame that applies on macOS only (C5e L1/L2). The metafile sheets size a
+    /// window there; on iOS the same minimum would force the content wider than an iPhone
+    /// and clip, so it is dropped and the sheet tracks its presentation detent instead.
+    @ViewBuilder
+    func macSheetMinFrame(minWidth: CGFloat, minHeight: CGFloat) -> some View {
+        #if os(macOS)
+        self.frame(minWidth: minWidth, minHeight: minHeight)
+        #else
+        self
+        #endif
+    }
 }

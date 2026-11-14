@@ -34,7 +34,7 @@ struct DrawingCleanupView: View {
                 content
             }
         }
-        .frame(minWidth: 460, minHeight: 440)
+        .macSheetMinFrame(minWidth: 460, minHeight: 440)
         .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .data, defaultFilename: exportName) { _ in }
     }
 
