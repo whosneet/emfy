@@ -4,6 +4,19 @@ import os
 import SwiftUI
 import UIKit
 
+#if DEBUG
+/// Collects per-refit main-thread timings for the R3 live-resize profile. Off unless
+/// the DEBUG harness turns it on; the hook in `configureZoomScales` costs nothing when
+/// inactive. Single-threaded (main actor), so a plain static is enough.
+@MainActor
+enum RefitProfiler {
+    static var active = false
+    static var samplesMS: [Double] = []
+    static func reset() { samplesMS.removeAll(keepingCapacity: true) }
+    static func record(_ ms: Double) { if active { samplesMS.append(ms) } }
+}
+#endif
+
 /// Drives the viewer's live zoom state across the UIKit bridge and exposes the
 /// imperative commands the toolbar and keyboard shortcuts invoke. One per open
 /// document; the SwiftUI screen observes it for the transient zoom pill and the
@@ -154,6 +167,90 @@ struct ZoomableMetafileView: UIViewRepresentable {
     let onSingleTap: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    #if DEBUG
+    // MARK: - R3: live-resize refit profile
+    //
+    // The simulator can't drag a window, so this harness drives repeated bounds changes
+    // programmatically on a heavy file and measures the MAIN-THREAD cost of the per-frame
+    // refit (`configureZoomScales`, which the scroll view fires on every layout). The
+    // CATiledLayer re-rasterises tiles on its own background queue, so it never blocks the
+    // resize frame — this measures what actually runs on the main thread during a drag.
+    // Launch the iOS app with `EMFY_PROFILE_REFIT=1` (optionally EMFY_PROFILE_REFIT_FILE=
+    // <name under corpus/>); it prints a summary and exits.
+
+    /// Whether the launch asked for the refit profile.
+    static var refitProfileRequested: Bool {
+        ProcessInfo.processInfo.environment["EMFY_PROFILE_REFIT"] == "1"
+    }
+
+    @MainActor
+    static func runRefitProfileIfRequested() {
+        guard refitProfileRequested else { return }
+        Task { @MainActor in
+            let text = await profileRefit()
+            print(text)
+            try? await Task.sleep(for: .milliseconds(100))
+            exit(0)
+        }
+    }
+
+    @MainActor
+    private static func profileRefit() async -> String {
+        let name = ProcessInfo.processInfo.environment["EMFY_PROFILE_REFIT_FILE"] ?? "gate-p2-bigdib.emf"
+        let corpus = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // EmfyiOS
+            .deletingLastPathComponent()   // Emfy
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("corpus/\(name)")
+        guard let data = try? Data(contentsOf: corpus), let loaded = try? MetafileLoader.load(data) else {
+            return "REFIT PROFILE: could not load corpus/\(name)"
+        }
+        let controller = MetafileZoomController()
+        let view = ZoomableMetafileView(
+            prepared: loaded.prepared, naturalSize: loaded.naturalSize, displayScale: 2,
+            drawingLabel: "profile", controller: controller, reduceMotion: true,
+            chromeHidden: false, onSingleTap: {})
+
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        let host = UIHostingController(rootView: view.ignoresSafeArea())
+        window.rootViewController = host
+        window.isHidden = false
+        host.view.frame = window.bounds
+        host.view.layoutIfNeeded()
+
+        // Warm up (first fit), then measure a width sweep that imitates a drag: many
+        // small bounds changes, each forcing a synchronous layout → one refit.
+        RefitProfiler.reset()
+        RefitProfiler.active = true
+        let iterations = 120
+        for i in 0 ..< iterations {
+            let w = 420.0 + Double(i % 60) * 6.0   // 420…774 pt, back and forth
+            host.view.frame = CGRect(x: 0, y: 0, width: w, height: 600)
+            window.frame = host.view.frame
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            await Task.yield()
+        }
+        RefitProfiler.active = false
+        window.isHidden = true
+
+        let samples = RefitProfiler.samplesMS.sorted()
+        guard !samples.isEmpty else { return "REFIT PROFILE: no refits were measured (file=\(name))" }
+        let mean = samples.reduce(0, +) / Double(samples.count)
+        let median = samples[samples.count / 2]
+        let p95 = samples[min(samples.count - 1, Int(Double(samples.count) * 0.95))]
+        let over16 = samples.filter { $0 > 16.0 }.count
+        return """
+        REFIT PROFILE (R3) — file=\(name), records≈\(loaded.prepared.recordKinds.reduce(0) { $0 + $1.count }), natural=\(Int(loaded.naturalSize.width))×\(Int(loaded.naturalSize.height))
+        refits measured: \(samples.count)
+        per-refit ms — min \(fmt(samples.first!)), median \(fmt(median)), mean \(fmt(mean)), p95 \(fmt(p95)), max \(fmt(samples.last!))
+        refits over 16 ms (a dropped 60fps frame): \(over16) of \(samples.count)
+        """
+    }
+
+    private static func fmt(_ v: Double) -> String { String(format: "%.3f", v) }
+    #endif
 
     /// Renders the low-resolution full-page placeholder once, off the main actor,
     /// and sets it on `placeholderView` (P2b). `prepared`, `naturalSize` and
@@ -382,6 +479,10 @@ struct ZoomableMetafileView: UIViewRepresentable {
             guard viewport.width > 0, viewport.height > 0,
                   let scrollView
             else { return }
+            #if DEBUG
+            let profileStart = RefitProfiler.active ? CFAbsoluteTimeGetCurrent() : 0
+            defer { if RefitProfiler.active { RefitProfiler.record((CFAbsoluteTimeGetCurrent() - profileStart) * 1000) } }
+            #endif
 
             let natural = parent.naturalSize
             let insets = effectiveInsets(scrollView)

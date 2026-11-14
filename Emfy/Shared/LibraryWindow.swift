@@ -305,6 +305,8 @@ struct LibraryWindow: View {
             try? await Task.sleep(for: .milliseconds(900))
             showNewDrawing = true
         }
+        // R3: the live-resize refit profile harness (prints a summary and exits).
+        .task { ZoomableMetafileView.runRefitProfileIfRequested() }
         #endif
     }
 
