@@ -97,6 +97,7 @@ struct DrawingRecolourView: View {
                             set: { model.brandHex[index] = $0 }))
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 90)
+                            .accessibilityLabel("Brand colour \(index + 1)")
                     }
                 }
                 Button {
@@ -104,6 +105,7 @@ struct DrawingRecolourView: View {
                 } label: { Image(systemName: "plus.circle") }
                 .buttonStyle(.borderless)
                 .disabled(model.brandHex.count >= 8)
+                .accessibilityLabel("Add brand colour")
             }
             .accessibilityIdentifier("brandColours")
         }

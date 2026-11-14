@@ -284,6 +284,7 @@ struct RecordsInspectorPanel: View {
             )
             .disabled(!model.canStep)
             .accessibilityLabel("Record scrubber")
+            .accessibilityValue("Record \(model.selectedIndex + 1) of \(model.recordCount)")
 
             if !model.supportsPartial {
                 Text(model.stepUnavailableNote)

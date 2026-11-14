@@ -179,6 +179,8 @@ struct DrawingCompareView: View {
             HStack(spacing: 8) {
                 Text(model.baselineLabel).font(.caption2).foregroundStyle(.secondary)
                 Slider(value: $model.onionValue, in: 0...1)
+                    .accessibilityLabel("Blend")
+                    .accessibilityValue("\(Int((model.onionValue * 100).rounded()))% \(model.currentLabel)")
                 Text(model.currentLabel).font(.caption2).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 8)
@@ -265,13 +267,18 @@ struct DrawingCompareView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(model.changes) { change in
-                            changeRow(change)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(change.id == model.selectedChangeID ? Color.accentColor.opacity(0.16) : Color.clear)
-                                .contentShape(Rectangle())
-                                .onTapGesture { model.select(changeID: change.id) }
+                            Button {
+                                model.select(changeID: change.id)
+                            } label: {
+                                changeRow(change)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(change.id == model.selectedChangeID ? Color.accentColor.opacity(0.16) : Color.clear)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(change.id == model.selectedChangeID ? .isSelected : [])
                             Divider()
                         }
                     }

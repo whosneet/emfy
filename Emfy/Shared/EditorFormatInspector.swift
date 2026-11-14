@@ -385,6 +385,8 @@ struct FormatSections: View {
                 get: { liveOpacity },
                 set: { liveOpacity = $0; session.apply(model.opacityCommand($0), coalescing: SceneCoalescingKey("opacity-\(opacityGesture)")) }
             ), in: 0...1, onEditingChanged: { if !$0 { opacityGesture += 1 } })
+            .accessibilityLabel("Opacity")
+            .accessibilityValue("\(Int((liveOpacity * 100).rounded()))%")
             Text("\(Int((liveOpacity * 100).rounded()))%")
                 .monospacedDigit()
                 .frame(width: 44, alignment: .trailing)

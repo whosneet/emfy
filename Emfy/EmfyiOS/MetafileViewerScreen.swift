@@ -2259,6 +2259,7 @@ private struct PenPaletteSheet: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(swatch.name)
+                            .accessibilityAddTraits(editorModel.penStyle.color == swatch.color ? .isSelected : [])
                         }
                     }
                     .frame(maxWidth: .infinity)
