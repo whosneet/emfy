@@ -36,28 +36,61 @@ struct AIProviderEditorSheet: View {
     @State private var pendingConsent: AIProviderConfig?
     /// The committed provider id, once this sheet has persisted it.
     @State private var committedID: String?
+    /// Whether a typed key has already been saved to the Keychain (so it isn't "unsaved").
+    @State private var savedKey = false
+    /// The opening field snapshot, to detect uncommitted edits in Add mode (C5e U4).
+    @State private var initialSnapshot: String
+    @State private var showDiscardConfirm = false
 
     enum TestOutcome: Equatable { case ok, failure(String) }
 
     init(config: AIProviderConfig?) {
         self.config = config
+        let kind0: AIProviderKind
+        let name0: String
+        let baseURL0: String
+        let model0: String
         if let config {
-            _kind = State(initialValue: config.kind)
+            kind0 = config.kind
+            name0 = config.displayName
+            baseURL0 = config.baseURL.absoluteString
+            model0 = config.model
             _preset = State(initialValue: CompatiblePreset.matching(config.baseURL))
-            _name = State(initialValue: config.displayName)
-            _baseURLString = State(initialValue: config.baseURL.absoluteString)
-            _model = State(initialValue: config.model)
-            _replacingKey = State(initialValue: false)
             _committedID = State(initialValue: config.id)
         } else {
-            _kind = State(initialValue: .anthropic)
+            kind0 = .anthropic
+            name0 = AIProviderKindLabel.text(.anthropic)
+            baseURL0 = AIProviderPresets.anthropicBaseURL.absoluteString
+            model0 = AIProviderPresets.anthropicDefaultModel
             _preset = State(initialValue: .openRouter)
-            _name = State(initialValue: AIProviderKindLabel.text(.anthropic))
-            _baseURLString = State(initialValue: AIProviderPresets.anthropicBaseURL.absoluteString)
-            _model = State(initialValue: AIProviderPresets.anthropicDefaultModel)
-            _replacingKey = State(initialValue: false)
             _committedID = State(initialValue: nil)
         }
+        _kind = State(initialValue: kind0)
+        _name = State(initialValue: name0)
+        _baseURLString = State(initialValue: baseURL0)
+        _model = State(initialValue: model0)
+        _replacingKey = State(initialValue: false)
+        _initialSnapshot = State(initialValue: "\(kind0)|\(name0)|\(baseURL0)|\(model0)")
+    }
+
+    private var currentSnapshot: String { "\(kind)|\(name)|\(baseURLString)|\(model)" }
+
+    /// Whether the sheet holds edits that dismissing would discard (C5e U4). Save, Test
+    /// connection and Load models all commit as they go, so committed work isn't "unsaved".
+    private var hasUnsavedInput: Bool {
+        if !apiKey.isEmpty, !savedKey { return true }
+        guard let draft = draftConfig() else { return false }
+        if let stored = store.provider(id: providerID) {
+            return draft.kind != stored.kind
+                || draft.displayName != stored.displayName
+                || draft.baseURL != stored.baseURL
+                || draft.model != stored.model
+        }
+        return committedID == nil && currentSnapshot != initialSnapshot
+    }
+
+    private func cancelTapped() {
+        if hasUnsavedInput { showDiscardConfirm = true } else { dismiss() }
     }
 
     private var isEditing: Bool { config != nil }
@@ -80,7 +113,7 @@ struct AIProviderEditorSheet: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Cancel") { cancelTapped() }.keyboardShortcut(.cancelAction)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isEditing ? "Done" : "Add") { save() }
@@ -94,6 +127,13 @@ struct AIProviderEditorSheet: View {
                 store: store,
                 onAllow: { pendingConsent = nil; Task { await runTest() } },
                 onDeny: { pendingConsent = nil })
+        }
+        // Block swipe-to-dismiss while there are uncommitted edits, and confirm before
+        // discarding them (C5e U4).
+        .interactiveDismissDisabled(hasUnsavedInput)
+        .confirmationDialog("Discard changes?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+            Button("Discard", role: .destructive) { dismiss() }
+            Button("Keep Editing", role: .cancel) {}
         }
         #if os(macOS)
         .frame(width: 480, height: 560)
@@ -325,6 +365,7 @@ struct AIProviderEditorSheet: View {
             if !apiKey.isEmpty { store.setKey(apiKey, for: draft.id) }
         }
         replacingKey = false
+        if !apiKey.isEmpty { savedKey = true }
         return store.provider(id: draft.id) ?? draft
     }
 

@@ -251,13 +251,18 @@ private struct FontSubstitutionEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var requested: String
     @State private var replacement: String
+    @State private var showDiscardConfirm = false
     @FocusState private var requestedFocused: Bool
     private let isEditing: Bool
+    private let initialRequested: String
+    private let initialReplacement: String
     private let onSave: (String, String) -> Void
 
     init(draft: FontSubstitutionDraft, onSave: @escaping (String, String) -> Void) {
         _requested = State(initialValue: draft.requested)
         _replacement = State(initialValue: draft.replacement)
+        initialRequested = draft.requested
+        initialReplacement = draft.replacement
         isEditing = draft.editingID != nil
         self.onSave = onSave
     }
@@ -265,6 +270,15 @@ private struct FontSubstitutionEditorSheet: View {
     private var trimmedRequested: String { requested.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedReplacement: String { replacement.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSave: Bool { !trimmedRequested.isEmpty && !trimmedReplacement.isEmpty }
+
+    /// Whether dismissing would discard typed input (C5e U4).
+    private var hasUnsavedInput: Bool {
+        requested != initialRequested || replacement != initialReplacement
+    }
+
+    private func cancelTapped() {
+        if hasUnsavedInput { showDiscardConfirm = true } else { dismiss() }
+    }
 
     var body: some View {
         NavigationStack {
@@ -299,7 +313,7 @@ private struct FontSubstitutionEditorSheet: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { cancelTapped() }
                         .keyboardShortcut(.cancelAction)   // A-M6: Esc cancels
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -313,6 +327,13 @@ private struct FontSubstitutionEditorSheet: View {
             }
             // Land the keyboard/VoiceOver cursor in the Requested field (A-M6).
             .onAppear { requestedFocused = true }
+        }
+        // Block swipe-to-dismiss while there is typed input, and confirm before discarding
+        // it (C5e U4).
+        .interactiveDismissDisabled(hasUnsavedInput)
+        .confirmationDialog("Discard changes?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+            Button("Discard", role: .destructive) { dismiss() }
+            Button("Keep Editing", role: .cancel) {}
         }
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 360)

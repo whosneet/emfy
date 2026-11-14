@@ -19,6 +19,8 @@ struct DrawingAITranslateView: View {
     var body: some View {
         sheetBody
             .onAppear { model.providerStore = providerStore }
+            // Cancel an in-flight request if the sheet is swiped away (C5e U4).
+            .onDisappear { model.cancel() }
             // Announce the translation (or failure) to VoiceOver (C5e A6).
             .onChange(of: model.phase) { _, phase in
                 switch phase {
