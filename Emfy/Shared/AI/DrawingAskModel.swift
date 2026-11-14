@@ -58,6 +58,24 @@ final class DrawingAskModel {
     /// The bounded context for the provider path (built once per drawing).
     @ObservationIgnored private var providerBundle: DrawingAIContextProvider.Bundle?
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// On-device turns taken on the CURRENT grounded session. The session is
+    /// re-grounded (and this reset) when it overflows the context window or after
+    /// `maxGroundedTurns`, which caps how far the on-device transcript can grow (F2).
+    @ObservationIgnored private var groundedTurns = 0
+
+    /// The on-device transcript cap: after this many turns the next question
+    /// re-grounds in a fresh session, bounding the context the model must hold.
+    nonisolated static let maxGroundedTurns = 12
+
+    /// Shown when the on-device model overflows its context window: the session is
+    /// dropped and the next question re-reads the drawing from scratch (F2).
+    nonisolated static let contextResetNotice = "This conversation got too long for the on-device model, so Emfy started fresh. Ask your question again and it’ll re-read the drawing."
+
+    /// Whether the next on-device question must (re-)ground in a fresh session: when
+    /// there is no session yet, or the transcript has reached the turn cap (F2).
+    nonisolated static func shouldReground(hasSession: Bool, groundedTurns: Int) -> Bool {
+        !hasSession || groundedTurns >= maxGroundedTurns
+    }
 
     var canSend: Bool {
         !isResponding && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -89,6 +107,7 @@ final class DrawingAskModel {
         sessionBox = nil
         context = nil
         usage = nil
+        groundedTurns = 0
         providerBundle = nil
         pendingConsent = nil
         pendingQuestion = nil
@@ -132,7 +151,6 @@ final class DrawingAskModel {
     private func start(question: String, engine: AIEngineChoice, dataProvider: @escaping @Sendable () async -> Data?) {
         draft = ""
         messages.append(Message(role: .user, text: question))
-        let isFirstTurn = messages.filter { $0.role == .assistant }.isEmpty
         isResponding = true
         let fileName = self.fileName
         let notes = self.unsupportedNotes
@@ -140,7 +158,7 @@ final class DrawingAskModel {
             guard let self else { return }
             switch engine {
             case .onDevice:
-                await self.respondOnDevice(question: question, isFirstTurn: isFirstTurn, dataProvider: dataProvider, fileName: fileName, unsupportedNotes: notes)
+                await self.respondOnDevice(question: question, dataProvider: dataProvider, fileName: fileName, unsupportedNotes: notes)
             case .provider(let config):
                 await self.respondProvider(question: question, config: config, dataProvider: dataProvider, fileName: fileName, unsupportedNotes: notes)
             }
@@ -159,12 +177,17 @@ final class DrawingAskModel {
 
     // MARK: On-device path
 
-    private func respondOnDevice(question: String, isFirstTurn: Bool, dataProvider: @escaping @Sendable () async -> Data?, fileName: String, unsupportedNotes: [String]) async {
+    private func respondOnDevice(question: String, dataProvider: @escaping @Sendable () async -> Data?, fileName: String, unsupportedNotes: [String]) async {
         guard #available(macOS 26, iOS 26, *), DrawingAIEngine.isModelAvailable else {
             finishWithError("On-device AI isn’t available right now.")
             return
         }
-        if sessionBox == nil {
+        // (Re)ground in a fresh session when there is none yet, or after the
+        // transcript cap — the next question then re-reads the drawing (F2). A
+        // grounded turn uses the full ask prompt; a continuing turn uses the lighter
+        // follow-up prompt.
+        let mustGround = Self.shouldReground(hasSession: sessionBox != nil, groundedTurns: groundedTurns)
+        if mustGround {
             guard let data = await dataProvider() else {
                 finishWithError("Emfy couldn’t read this drawing for the model.")
                 return
@@ -182,13 +205,14 @@ final class DrawingAskModel {
             sessionBox = DrawingAIEngine.makeSession(toolData: toolData)
             context = bundle.context
             usage = recorder
+            groundedTurns = 0
         }
         guard let session = sessionBox as? LanguageModelSession, let context else {
             finishWithError("Emfy couldn’t start the on-device model.")
             return
         }
         usage?.reset()
-        let prompt = isFirstTurn
+        let prompt = mustGround
             ? DrawingAIPrompt.askPrompt(question: question, context: context)
             : DrawingAIPrompt.followUpPrompt(question: question)
         let label = AIEngineLabel.text(for: .onDevice)
@@ -209,10 +233,26 @@ final class DrawingAskModel {
                     messages[index].failed = true
                 }
             }
+            groundedTurns += 1
             isResponding = false
         } catch {
             if error is CancellationError {
                 if messages.indices.contains(index) { messages[index].streaming = false }
+                isResponding = false
+                return
+            }
+            // Context-window overflow: drop the session so the NEXT question grounds
+            // afresh, and tell the user plainly rather than failing the chat (F2).
+            if DrawingAIEngine.isContextOverflow(error) {
+                sessionBox = nil
+                self.context = nil
+                usage = nil
+                groundedTurns = 0
+                if messages.indices.contains(index) {
+                    messages[index].streaming = false
+                    messages[index].text = Self.contextResetNotice
+                    messages[index].failed = true
+                }
                 isResponding = false
                 return
             }
