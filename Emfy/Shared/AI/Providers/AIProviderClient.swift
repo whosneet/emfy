@@ -122,13 +122,26 @@ struct AIProviderRequest: Sendable {
     var model: String
     /// Whether to stream (SSE). The viewer always streams; false is for a one-shot.
     var streaming: Bool
+    /// The data categories this send actually includes, so the consent gate can be
+    /// enforced per purpose (S-4): an Ask send lists `.question`, a Describe send does
+    /// not. `AIProviderService.stream` authorises against exactly these, so a provider
+    /// consented only for another purpose cannot carry this one's data.
+    var requiredCategories: [AIDataCategory]
 
-    init(system: String, userPrompt: String, tools: [AIProviderTool], model: String, streaming: Bool = true) {
+    init(
+        system: String,
+        userPrompt: String,
+        tools: [AIProviderTool],
+        model: String,
+        streaming: Bool = true,
+        requiredCategories: [AIDataCategory] = []
+    ) {
         self.system = system
         self.userPrompt = userPrompt
         self.tools = tools
         self.model = model
         self.streaming = streaming
+        self.requiredCategories = requiredCategories
     }
 }
 

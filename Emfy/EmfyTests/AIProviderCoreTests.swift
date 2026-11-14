@@ -36,7 +36,10 @@ import Testing
         let config = anthropicConfig(host: host)
         let defaults = UserDefaults(suiteName: "test-" + UUID().uuidString)!
         let consent = AIConsentStore(defaults: defaults)
-        if consented { consent.grant(config.id, categories: ["Drawing text", "Drawing structure"]) }
+        // Grant the REAL drawing-data categories (S-4): the service now authorises each
+        // send against the categories the request actually needs (Ask needs "your
+        // question"), so a grant of arbitrary strings would no longer pass the gate.
+        if consented { consent.grant(config.id, purpose: .drawingData) }
         let keys = InMemoryKeyStore()
         try keys.setKey(key, for: config.id)
         let service = AIProviderService(keyStore: keys, consentStore: consent, sessionFactory: { [self] in stubSession() }, backoff: backoff)
@@ -127,6 +130,37 @@ import Testing
         #expect(store.authorize("p") == nil)
     }
 
+    // S-4: granting one purpose must MERGE into any existing grant, not overwrite it —
+    // approving titling after Ask must keep the "your question" category Ask relies on.
+    @Test func consentCategoriesMergeAcrossPurposes() {
+        let defaults = UserDefaults(suiteName: "test-" + UUID().uuidString)!
+        let store = AIConsentStore(defaults: defaults)
+        store.grant("p", purpose: .drawingData)
+        #expect(store.hasCategory("p", .question))
+        // Granting titles must NOT drop the question category drawing-data added.
+        store.grant("p", purpose: .titles)
+        #expect(store.hasCategory("p", .question), "merging must keep the earlier purpose's categories")
+        #expect(store.hasCategory("p", .titles))
+        #expect(store.hasCategory("p", .drawingText))
+        // No duplicate category entries after a re-grant.
+        let cats = store.record(for: "p")?.categories ?? []
+        #expect(Set(cats).count == cats.count)
+    }
+
+    // S-4: `authorize(requiring:)` enforces consent PER PURPOSE — an Ask (needs "your
+    // question") is refused by a provider consented only for background titling.
+    @Test func authorizeEnforcesRequiredCategoriesPerPurpose() {
+        let defaults = UserDefaults(suiteName: "test-" + UUID().uuidString)!
+        let store = AIConsentStore(defaults: defaults)
+        store.grant("p", purpose: .titles)   // titling: no .question
+        #expect(store.authorize("p") != nil, "bare authorize only needs consent to exist")
+        #expect(store.authorize("p", requiring: [.question]) == nil, "titling consent must not satisfy an Ask")
+        #expect(store.authorize("p", purpose: .titles) != nil)
+        // After also granting drawing data, the Ask requirement is satisfied.
+        store.grant("p", purpose: .drawingData)
+        #expect(store.authorize("p", requiring: [.question]) != nil)
+    }
+
     @Test func removingProviderDeletesKeyAndConsent() throws {
         let (svc, config) = try service(consented: true)
         try svc.removeProvider(config.id)
@@ -154,6 +188,75 @@ import Testing
         #expect(throws: ProviderError.insecureURL) {
             try AITransport.validate(URL(string: "http://example.com/v1")!)
         }
+    }
+
+    // S-5: the loopback check accepts ONLY real loopback literals. A dotted name that
+    // merely starts with "127." (the old `hasPrefix` bug) must be rejected.
+    @Test func loopbackAcceptsOnlyRealLoopbackLiterals() {
+        #expect(AITransport.isLoopback("127.0.0.1"))
+        #expect(AITransport.isLoopback("127.255.255.254"))
+        #expect(AITransport.isLoopback("localhost"))
+        #expect(AITransport.isLoopback("::1"))
+        #expect(AITransport.isLoopback("[::1]"))
+        // Spoofs the old prefix check would have accepted:
+        #expect(!AITransport.isLoopback("127.attacker.com"))
+        #expect(!AITransport.isLoopback("127.0.0.1.evil.com"))
+        #expect(!AITransport.isLoopback("1270.0.0.1"))
+        #expect(!AITransport.isLoopback("128.0.0.1"))
+        #expect(!AITransport.isLoopback("notlocalhost.com"))
+        // And the plain-http validate honours it: a "127."-prefixed name is rejected.
+        #expect(throws: ProviderError.insecureURL) {
+            try AITransport.validate(URL(string: "http://127.attacker.com/v1")!)
+        }
+    }
+
+    // S-8: LAN / private-network hosts are recognised (the iOS `validate` refuses them;
+    // the helper itself is cross-platform so it is tested here on every platform).
+    @Test func lanHostRecognisesPrivateAndLinkLocalAndMDNS() {
+        #expect(AITransport.isLANHost("10.0.0.5"))
+        #expect(AITransport.isLANHost("172.16.3.4"))
+        #expect(AITransport.isLANHost("172.31.255.255"))
+        #expect(!AITransport.isLANHost("172.32.0.1"))     // outside 172.16/12
+        #expect(AITransport.isLANHost("192.168.1.10"))
+        #expect(AITransport.isLANHost("169.254.1.1"))     // link-local
+        #expect(AITransport.isLANHost("printer.local"))   // mDNS
+        #expect(!AITransport.isLANHost("api.openai.com")) // public
+        #expect(!AITransport.isLANHost("127.0.0.1"))      // loopback is not LAN
+        #expect(!AITransport.isLANHost("8.8.8.8"))
+    }
+
+    #if os(iOS)
+    // S-8: on iOS there is no LAN AI — `validate` refuses a private/link-local/.local
+    // host regardless of scheme (owner decision).
+    @Test func iosValidateRejectsLANHosts() {
+        for host in ["192.168.1.5", "10.0.0.2", "169.254.0.1", "server.local"] {
+            #expect(throws: ProviderError.lanBlocked) {
+                try AITransport.validate(URL(string: "https://\(host)/v1")!)
+            }
+        }
+        // A public HTTPS host still validates on iOS.
+        #expect(throws: Never.self) { try AITransport.validate(URL(string: "https://api.openai.com/v1")!) }
+    }
+    #endif
+
+    // S-6: the AI session refuses HTTP redirects, so the key and fenced drawing data
+    // never follow a 3xx to another host. The delegate returns nil from
+    // willPerformHTTPRedirection.
+    @Test func aiSessionDelegateRefusesRedirects() async {
+        let delegate = AINoRedirectDelegate()
+        let session = URLSession.shared
+        let task = session.dataTask(with: URL(string: "https://host-a.example")!)
+        defer { task.cancel() }
+        let response = HTTPURLResponse(
+            url: URL(string: "https://host-a.example")!, statusCode: 302, httpVersion: "HTTP/1.1",
+            headerFields: ["Location": "https://host-b.example/steal"])!
+        let newRequest = URLRequest(url: URL(string: "https://host-b.example/steal")!)
+        let followed: URLRequest? = await withCheckedContinuation { continuation in
+            delegate.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: newRequest) {
+                continuation.resume(returning: $0)
+            }
+        }
+        #expect(followed == nil, "the AI session must not follow a redirect to another host")
     }
 
     // MARK: Error mapping

@@ -33,7 +33,10 @@ struct AIProviderService: Sendable {
     /// Streams an answer for a configured provider. Throws `.consentRequired`
     /// before anything leaves the device when consent is absent.
     func stream(config: AIProviderConfig, request: AIProviderRequest) throws -> AsyncThrowingStream<AIProviderEvent, Error> {
-        guard let grant = consentStore.authorize(config.id) else {
+        // Enforce consent PER PURPOSE (S-4): the request lists the categories it
+        // actually sends, and the gate requires all of them to be covered by the
+        // recorded grant — not merely that some consent exists.
+        guard let grant = consentStore.authorize(config.id, requiring: request.requiredCategories) else {
             throw ProviderError.consentRequired(providerID: config.id)
         }
         let key = (try? keyStore.key(for: config.id)).flatMap { $0 } ?? ""
@@ -79,7 +82,9 @@ enum AIProviderRequestBuilder {
             userPrompt: DrawingAIPrompt.askPrompt(question: question, context: bundle.context),
             tools: AIProviderTools.all(data: bundle.toolData),
             model: model,
-            streaming: streaming
+            streaming: streaming,
+            // Ask sends the drawing data AND the user's question (S-4).
+            requiredCategories: [.drawingText, .formatAndPage, .recordCounts, .question]
         )
     }
 
@@ -90,7 +95,9 @@ enum AIProviderRequestBuilder {
             userPrompt: DrawingAIPrompt.describePrompt(for: bundle.context),
             tools: AIProviderTools.all(data: bundle.toolData),
             model: model,
-            streaming: streaming
+            streaming: streaming,
+            // Describe sends the drawing data but no question (S-4).
+            requiredCategories: [.drawingText, .formatAndPage, .recordCounts]
         )
     }
 }

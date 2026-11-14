@@ -63,7 +63,7 @@ enum AIModelCatalog {
             if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         }
 
-        let (bytes, response) = try await session.bytes(for: request)
+        let (bytes, response) = try await session.bytes(for: request, delegate: AITransport.noRedirectDelegate)
         guard let http = response as? HTTPURLResponse else {
             throw ProviderError.transport("no response")
         }

@@ -82,7 +82,14 @@ extension AIConsentStore {
     }
 
     /// Grants consent for a purpose, recording that purpose's exact categories.
+    /// Merges into any existing grant (S-4), so granting Ask then titling keeps both.
     func grant(_ providerID: String, purpose: AIConsentPurpose, date: Date = Date()) {
         grant(providerID, categories: purpose.categoryStrings, date: date)
+    }
+
+    /// Returns a grant only when the recorded consent covers every category this
+    /// purpose requires (S-4). A convenience over `authorize(_:requiring:)`.
+    func authorize(_ providerID: String, purpose: AIConsentPurpose) -> AIConsentGrant? {
+        authorize(providerID, requiring: purpose.categories)
     }
 }

@@ -11,22 +11,70 @@ import Foundation
 
 enum AITransport {
 
-    /// The loopback hosts plain http:// is permitted for.
+    /// The loopback hosts plain http:// is permitted for. Only REAL loopback
+    /// literals qualify (S-5): the IPv4 127.0.0.0/8 block parsed as four octets,
+    /// the IPv6 ::1, and the "localhost" name. The old `hasPrefix("127.")` wrongly
+    /// accepted "127.attacker.com"; a substring/prefix test on a dotted name can be
+    /// spoofed, so a hostname is now parsed as an IPv4 literal before the /8 check.
     static func isLoopback(_ host: String) -> Bool {
         let h = host.lowercased()
         if h == "localhost" || h.hasSuffix(".localhost") { return true }
-        if h == "127.0.0.1" || h == "::1" || h == "[::1]" { return true }
-        if h.hasPrefix("127.") { return true }
+        if h == "::1" || h == "[::1]" { return true }
+        if let octets = ipv4Octets(h), octets[0] == 127 { return true }
         return false
     }
 
-    /// Rejects a plain-http URL to a non-loopback host. HTTPS always passes.
+    /// Parses `host` as a dotted-quad IPv4 literal (exactly four 0–255 octets, ASCII
+    /// digits only), or nil if it is not one. "127.attacker.com" has three parts and
+    /// a non-numeric part, so it is nil — never mistaken for an address (S-5/S-8).
+    static func ipv4Octets(_ host: String) -> [Int]? {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return nil }
+        var octets: [Int] = []
+        for part in parts {
+            guard !part.isEmpty, part.count <= 3,
+                  part.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let value = Int(part), (0 ... 255).contains(value) else { return nil }
+            octets.append(value)
+        }
+        return octets
+    }
+
+    /// Whether `host` is a LAN / private-network destination: an mDNS `.local`
+    /// name, or an IPv4 literal in a private (10/8, 172.16/12, 192.168/16) or
+    /// link-local (169.254/16) range. Used to block LAN AI on iOS (S-8). Loopback
+    /// (the device itself) is NOT LAN and is handled separately.
+    static func isLANHost(_ host: String) -> Bool {
+        let h = host.lowercased()
+        if h == "local" || h.hasSuffix(".local") { return true }
+        guard let o = ipv4Octets(h) else { return false }
+        if o[0] == 10 { return true }                               // 10.0.0.0/8
+        if o[0] == 172, (16 ... 31).contains(o[1]) { return true }  // 172.16.0.0/12
+        if o[0] == 192, o[1] == 168 { return true }                 // 192.168.0.0/16
+        if o[0] == 169, o[1] == 254 { return true }                 // 169.254.0.0/16
+        return false
+    }
+
+    /// Rejects a plain-http URL to a non-loopback host. HTTPS always passes — except
+    /// on iOS, where a LAN / private-network host is refused entirely regardless of
+    /// scheme (no LAN AI on iOS, owner decision; S-8).
     static func validate(_ url: URL) throws {
         let scheme = (url.scheme ?? "").lowercased()
+        let host = url.host ?? ""
+        #if os(iOS)
+        if isLANHost(host) { throw ProviderError.lanBlocked }
+        #endif
         if scheme == "https" { return }
-        if scheme == "http", let host = url.host, isLoopback(host) { return }
+        if scheme == "http", isLoopback(host) { return }
         throw ProviderError.insecureURL
     }
+
+    /// A shared, stateless per-task delegate that refuses every HTTP redirect
+    /// (S-6). Passed to `bytes(for:delegate:)` so the URLSession does NOT retain it
+    /// (a session-level delegate leaks an ephemeral per-send session), while still
+    /// stopping a 3xx from carrying the API key and the fenced drawing data to
+    /// another host.
+    static let noRedirectDelegate = AINoRedirectDelegate()
 
     /// An ephemeral session: no cookies, no cache, with timeouts. `protocolClasses`
     /// lets tests inject a `URLProtocol` stub.
@@ -95,7 +143,10 @@ enum AITransport {
         var attempt = 0
         while true {
             do {
-                let (bytes, response) = try await session.bytes(for: request)
+                // The per-task no-redirect delegate (S-6) keeps the key and the
+                // fenced drawing data on the user-approved host even if the server
+                // answers with a 3xx to elsewhere.
+                let (bytes, response) = try await session.bytes(for: request, delegate: noRedirectDelegate)
                 guard let http = response as? HTTPURLResponse else {
                     throw ProviderError.transport("no response")
                 }
@@ -141,6 +192,24 @@ enum AITransport {
             return (nil, nil)
         }
         return (error["type"] as? String, error["message"] as? String)
+    }
+}
+
+/// Refuses every HTTP redirect (S-6). A provider that answers a send with a 3xx to
+/// a different host would otherwise have the request — carrying the `Authorization`
+/// / `x-api-key` header and the fenced drawing data — re-sent there by URLSession's
+/// default redirect following. Returning `nil` from the completion handler stops the
+/// redirect and delivers the 3xx response itself, which the caller treats as a
+/// non-200 (a typed transport/HTTP error), so nothing follows the hop.
+final class AINoRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
 

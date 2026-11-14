@@ -57,9 +57,17 @@ struct AIConsentStore: Sendable {
     /// Whether consent is currently granted for a provider.
     func isGranted(_ providerID: String) -> Bool { record(for: providerID) != nil }
 
-    /// Grants consent for a provider, recording the agreed categories and the date.
+    /// Grants consent for a provider, MERGING the agreed categories into any already
+    /// recorded for it (S-4). Granting one purpose must not silently drop categories a
+    /// previous purpose approved — e.g. approving background titling after Ask must
+    /// keep the "your question" category Ask relies on. Order is preserved: existing
+    /// categories first, then any newly-agreed ones not already present.
     func grant(_ providerID: String, categories: [String], date: Date = Date()) {
-        let record = AIConsentRecord(granted: true, date: date, categories: categories)
+        var merged = record(for: providerID)?.categories ?? []
+        for category in categories where !merged.contains(category) {
+            merged.append(category)
+        }
+        let record = AIConsentRecord(granted: true, date: date, categories: merged)
         if let data = try? JSONEncoder().encode(record) {
             defaults.set(data, forKey: key(providerID))
         }
@@ -73,7 +81,20 @@ struct AIConsentStore: Sendable {
     /// Returns a grant IFF consent is currently recorded, else nil. This is the
     /// ONLY source of an `AIConsentGrant`, so a send cannot happen without consent.
     func authorize(_ providerID: String) -> AIConsentGrant? {
-        guard isGranted(providerID) else { return nil }
+        authorize(providerID, requiring: [])
+    }
+
+    /// Returns a grant only when consent is recorded AND every required category is
+    /// present in the grant (S-4). This is what enforces consent PER PURPOSE: an Ask
+    /// send requires the "your question" category, so a provider consented only for
+    /// background titling (which never includes the question) cannot be used to send a
+    /// question. `AIConsentStore` is the only minter of `AIConsentGrant`, so the gate
+    /// cannot be bypassed.
+    func authorize(_ providerID: String, requiring categories: [AIDataCategory]) -> AIConsentGrant? {
+        guard let record = record(for: providerID) else { return nil }
+        for category in categories where !record.categories.contains(category.rawValue) {
+            return nil
+        }
         return AIConsentGrant(providerID: providerID)
     }
 }

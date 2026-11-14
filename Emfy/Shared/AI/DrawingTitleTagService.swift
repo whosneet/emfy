@@ -188,7 +188,10 @@ final class DrawingTitleTagService {
             userPrompt: DrawingAIPrompt.titleTagsJSONPrompt(for: context),
             tools: [],
             model: config.model,
-            streaming: true)
+            streaming: true,
+            // Background titling requires the distinct titling consent category (S-4),
+            // on top of the drawing-text categories it sends.
+            requiredCategories: [.drawingText, .formatAndPage, .recordCounts, .titles])
         var text = ""
         do {
             let stream = try service.stream(config: config, request: request)

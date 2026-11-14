@@ -12,6 +12,9 @@ enum ProviderError: Error, Equatable, Sendable {
     case consentRequired(providerID: String)
     /// The base URL is plain `http://` for a non-loopback host (HTTPS required).
     case insecureURL
+    /// The host is a LAN / private-network destination and this is iOS, where LAN
+    /// AI is not allowed (owner decision; S-8).
+    case lanBlocked
     /// No API key is configured for a provider that needs one.
     case missingKey
     /// The request body couldn't be built.
@@ -60,6 +63,8 @@ enum ProviderError: Error, Equatable, Sendable {
             return "Allow this provider before sending the drawing to it."
         case .insecureURL:
             return "This provider's address isn't secure. Use an https:// address, or a local endpoint."
+        case .lanBlocked:
+            return "Local-network AI providers aren't available on iPhone or iPad. Use a provider with an https:// address."
         case .missingKey:
             return "Add an API key for this provider in Settings."
         case .encodingFailed:
