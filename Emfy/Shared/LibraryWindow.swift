@@ -153,6 +153,9 @@ struct LibraryWindow: View {
             // current Rendering options so the opening render honours them (S1b). Set before
             // any selection can commit, since the model now owns the session (L4/N1).
             model.sessionFactory = { id in DocumentSession(entryID: id, store: store, options: settings.renderOptions) }
+            // Guard a Remove of the open, dirty editing document so its unsaved edits aren't
+            // thrown away (R2U3): the removal surface awaits this before it removes.
+            removal.removalGuard = { [model] id in await model.guardRemoval(of: id) }
             await store.loadIfNeeded()
             // Sync the settings-driven cap and Private mode into the store before the
             // first open can add anything (S1a-5).
@@ -321,8 +324,14 @@ struct LibraryWindow: View {
         .onChange(of: store.entries) { _, _ in
             if let id = model.selection, store.entry(id: id) == nil {
                 // The shown entry was removed (here, in another window, Clear Recents, or a
-                // prune): the file is gone, so clear without the save guard (C4a H8).
-                model.clearSelection()
+                // prune). If it's the open, dirty editing document its file may still exist, so
+                // flush its edits to disk before tearing down rather than silently discarding
+                // them (R2U3); otherwise the file is gone, so clear without the guard (C4a H8).
+                if model.session?.editing == .editing, model.session?.isDirty == true {
+                    model.handleSelectedEntryRemoved()
+                } else {
+                    model.clearSelection()
+                }
             }
         }
         .onChange(of: model.selection) { _, id in
@@ -550,7 +559,10 @@ struct LibraryWindow: View {
     /// switch is blocked or cancelled the committed value is unchanged, so the sidebar's
     /// highlight (and the compact push) reconcile back to the current document (U1).
     private var selectionBinding: Binding<UUID?> {
-        Binding(get: { model.selection }, set: { model.select($0) })
+        // Read the OPTIMISTIC selection so a list tap / system Back reflects at once and doesn't
+        // flicker or re-push while the guarded commit runs; a held or cancelled switch rolls it
+        // back to the committed selection (A-B/R2N1).
+        Binding(get: { model.displayedSelection }, set: { model.select($0) })
     }
 
     /// Imports a file arriving from Finder / Files / Mail / Messages and shows it per

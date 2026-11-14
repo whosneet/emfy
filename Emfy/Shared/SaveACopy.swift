@@ -82,10 +82,30 @@ final class RemovalCoordinator {
     /// The id to remove once a single Save a Copy completes.
     @ObservationIgnored private var pendingSingleRemovalID: UUID?
 
+    /// A per-window guard consulted before removing an entry that may be the open, dirty editing
+    /// document (R2U3): it runs the save guard and returns `false` to abort the removal (the user
+    /// must resolve a save decision on the document first). Set by `LibraryWindow`; `nil`
+    /// elsewhere ⇒ no guard, remove straight away.
+    @ObservationIgnored var removalGuard: ((UUID) async -> Bool)?
+
     /// Asks to remove a single entry. Ordinary entries are removed at once (with the
-    /// Undo toast); a received entry raises the Save-a-Copy confirmation.
+    /// Undo toast); a received entry raises the Save-a-Copy confirmation. The open, dirty
+    /// editing document's edits are saved (or its save dialog is raised) first, so a Remove
+    /// never discards them (R2U3).
     func requestRemoval(id: UUID, store: RecentsStore, toast: ToastCenter?) {
         guard let entry = store.entry(id: id) else { return }
+        if let removalGuard {
+            Task { @MainActor in
+                guard await removalGuard(id) else { return }   // aborted: resolve the save first
+                guard store.entry(id: id) != nil else { return }
+                self.beginRemoval(id: id, entry: entry, store: store, toast: toast)
+            }
+        } else {
+            beginRemoval(id: id, entry: entry, store: store, toast: toast)
+        }
+    }
+
+    private func beginRemoval(id: UUID, entry: RecentEntry, store: RecentsStore, toast: ToastCenter?) {
         let plan = RemovalConfirmation.plan(forSingleReceived: entry.importedFileName != nil)
         if plan.needsConfirmation {
             singleRequest = SingleRequest(id: id, displayName: entry.displayName)
