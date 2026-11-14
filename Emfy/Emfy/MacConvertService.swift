@@ -25,15 +25,24 @@ final class MacConvertService: NSObject {
     // `@MainActor`; each is the first keyword of its NSMessage selector in Info.plist.
 
     @objc func convertToPDF(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>?) {
-        handle(pboard, format: .pdf)
+        begin(pboard, format: .pdf)
     }
 
     @objc func convertToPNG(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>?) {
-        handle(pboard, format: .png)
+        begin(pboard, format: .png)
     }
 
     @objc func convertToSVG(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>?) {
-        handle(pboard, format: .svg)
+        begin(pboard, format: .svg)
+    }
+
+    /// The Services callback must return promptly: it reads the file selection SYNCHRONOUSLY
+    /// (the pasteboard is only valid for the life of the callback), then kicks the conversion
+    /// and any panels/alerts onto a later turn and returns. Converting or running a modal
+    /// inside the callback blocks the Services machinery and can wedge Finder (SI-M).
+    private func begin(_ pboard: NSPasteboard, format: BatchOutputFormat) {
+        let urls = Self.fileURLs(from: pboard)
+        Task { @MainActor in await self.handle(urls, format: format) }
     }
 
     // MARK: - Dispatch
@@ -47,12 +56,13 @@ final class MacConvertService: NSObject {
         #endif
     }
 
-    /// Reads the pasteboard, plans the run and carries it out. The services menu only
-    /// delivers file selections of the declared types (NSSendFileTypes), but the plan
-    /// re-filters defensively; an empty or non-metafile selection is a silent no-op.
+    /// Plans the run from the already-read file selection and carries it out. The services
+    /// menu only delivers file selections of the declared types (NSSendFileTypes), but the
+    /// plan re-filters defensively; an empty or non-metafile selection is a silent no-op.
+    /// Runs OUTSIDE the Services callback (see `begin`), so the conversion is off-main and a
+    /// panel/alert is free to be modal.
     @MainActor
-    func handle(_ pboard: NSPasteboard, format: BatchOutputFormat) {
-        let urls = Self.fileURLs(from: pboard)
+    func handle(_ urls: [URL], format: BatchOutputFormat) async {
         let plan = ConvertServicePlanner.plan(
             inputs: urls, format: format, flavour: flavour,
             fileExists: { FileManager.default.fileExists(atPath: $0.path) })
@@ -60,13 +70,13 @@ final class MacConvertService: NSObject {
         case .nothing:
             return
         case .writeBesideOriginals(let outputs):
-            let run = convert(outputs, format: format)
+            let run = await convert(outputs, format: format)
             reveal(run.written)
             report(converted: run.converted, skipped: run.skipped)
         case .savePanel(let input, let directory, let fileName):
-            runSavePanel(input: input, directory: directory, fileName: fileName, format: format)
+            await runSavePanel(input: input, directory: directory, fileName: fileName, format: format)
         case .chooseFolder(let inputs, let directory):
-            runChooseFolder(inputs: inputs, directory: directory, format: format)
+            await runChooseFolder(inputs: inputs, directory: directory, format: format)
         }
     }
 
@@ -85,32 +95,35 @@ final class MacConvertService: NSObject {
     // MARK: - Conversion
 
     /// Converts a batch of planned outputs with the current Export settings, writing each
-    /// to its claimed URL. Hostile/unreadable inputs and write failures are skipped and
-    /// counted, never fatal (§8). Returns the tally plus the URLs actually written.
+    /// to its claimed URL. The render + write runs off the main actor (SI-M), so the
+    /// Services turn never janks the UI. Hostile/unreadable inputs and write failures are
+    /// skipped and counted, never fatal (§8). Returns the tally plus the URLs written.
     @MainActor
     private func convert(_ outputs: [ConvertServicePlanner.Output], format: BatchOutputFormat)
-        -> (converted: Int, skipped: Int, written: [URL]) {
+        async -> (converted: Int, skipped: Int, written: [URL]) {
         let settings = renderSettings()
-        var converted = 0
-        var skipped = 0
-        var written: [URL] = []
-        for output in outputs {
-            let (result, url) = convertOne(input: output.input, to: output.output, format: format, settings: settings)
-            switch result {
-            case .converted:
-                converted += 1
-                if let url { written.append(url) }
-            case .skipped:
-                skipped += 1
+        return await Task.detached(priority: .userInitiated) {
+            var converted = 0
+            var skipped = 0
+            var written: [URL] = []
+            for output in outputs {
+                let (result, url) = Self.convertOne(input: output.input, to: output.output, format: format, settings: settings)
+                switch result {
+                case .converted:
+                    converted += 1
+                    if let url { written.append(url) }
+                case .skipped:
+                    skipped += 1
+                }
             }
-        }
-        return (converted, skipped, written)
+            return (converted, skipped, written)
+        }.value
     }
 
     /// Converts one file and writes it to `destination`. Returns the classification and,
-    /// on success, the written URL.
-    @MainActor
-    private func convertOne(
+    /// on success, the written URL. `nonisolated static` so it runs off the main actor
+    /// inside the detached conversion task (SI-M).
+    nonisolated private static func convertOne(
         input: URL, to destination: URL, format: BatchOutputFormat,
         settings: (scale: Int, background: RenderBackground, options: RenderOptions)
     ) -> (ConvertServicePlanner.FileResult, URL?) {
@@ -144,7 +157,7 @@ final class MacConvertService: NSObject {
     /// Sandboxed single file: a save panel pre-set to the original's folder and name.
     /// Choosing a destination grants the write; Cancel is a silent no-op.
     @MainActor
-    private func runSavePanel(input: URL, directory: URL, fileName: String, format: BatchOutputFormat) {
+    private func runSavePanel(input: URL, directory: URL, fileName: String, format: BatchOutputFormat) async {
         let panel = NSSavePanel()
         panel.directoryURL = directory
         panel.nameFieldStringValue = fileName
@@ -152,8 +165,12 @@ final class MacConvertService: NSObject {
         panel.canCreateDirectories = true
         panel.prompt = "Convert"
         panel.message = "Choose where to save the converted \(format.displayName)."
+        NSApp.activate()   // a Service runs from Finder; bring Emfy's panel to the front (SI-L)
         guard panel.runModal() == .OK, let destination = panel.url else { return }
-        let (result, url) = convertOne(input: input, to: destination, format: format, settings: renderSettings())
+        let settings = renderSettings()
+        let (result, url) = await Task.detached(priority: .userInitiated) {
+            Self.convertOne(input: input, to: destination, format: format, settings: settings)
+        }.value
         switch result {
         case .converted:
             if let url { reveal([url]) }
@@ -167,7 +184,7 @@ final class MacConvertService: NSObject {
     /// the first original's folder. "Choose" grants folder access; then every input is
     /// converted into it with no-overwrite naming.
     @MainActor
-    private func runChooseFolder(inputs: [URL], directory: URL, format: BatchOutputFormat) {
+    private func runChooseFolder(inputs: [URL], directory: URL, format: BatchOutputFormat) async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -176,12 +193,13 @@ final class MacConvertService: NSObject {
         panel.directoryURL = directory
         panel.prompt = "Choose"
         panel.message = "Choose a folder for the converted files."
+        NSApp.activate()   // bring Emfy's panel to the front (SI-L)
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         let outputs = ConvertServicePlanner.outputs(
             for: inputs, format: format,
             directory: { _ in folder },
             fileExists: { FileManager.default.fileExists(atPath: $0.path) })
-        let run = convert(outputs, format: format)
+        let run = await convert(outputs, format: format)
         reveal(run.written)
         report(converted: run.converted, skipped: run.skipped)
     }
@@ -207,6 +225,7 @@ final class MacConvertService: NSObject {
             ? "One file wasn’t a drawing Emfy could convert, so it was skipped."
             : "\(skipped) files weren’t drawings Emfy could convert, so they were skipped."
         alert.addButton(withTitle: "OK")
+        NSApp.activate()   // bring the summary alert to the front (SI-L)
         alert.runModal()
     }
 
@@ -257,13 +276,16 @@ extension MacConvertService {
         let pboard = NSPasteboard(name: NSPasteboard.Name("EmfyConvertServiceProbe"))
         pboard.clearContents()
         pboard.writeObjects([copy as NSURL])
-        shared.handle(pboard, format: format)
-
-        let sibling = copy.deletingPathExtension().appendingPathExtension(format.pathExtension)
-        if FileManager.default.fileExists(atPath: sibling.path) {
-            finish("OK \(sibling.path)")
+        let urls = fileURLs(from: pboard)
+        // handle() is now async (SI-M); drive it to completion before checking the sibling.
+        Task { @MainActor in
+            await shared.handle(urls, format: format)
+            let sibling = copy.deletingPathExtension().appendingPathExtension(format.pathExtension)
+            if FileManager.default.fileExists(atPath: sibling.path) {
+                finish("OK \(sibling.path)")
+            }
+            finish("FAIL no sibling at \(sibling.path)")
         }
-        finish("FAIL no sibling at \(sibling.path)")
     }
 
     private static func debugFormat(from args: [String]) -> BatchOutputFormat {

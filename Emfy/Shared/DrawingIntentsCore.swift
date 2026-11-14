@@ -248,6 +248,8 @@ struct ConvertDrawingIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<IntentFile> {
+        // Ask Shortcuts to supply a value rather than failing with a generic error (SI-M).
+        guard drawing != nil || file != nil else { throw $drawing.needsValueError() }
         let input = try await AppIntentDrawing.bytes(entity: drawing, file: file)
         let chosenFormat = format
         let chosenScale = scale
@@ -287,6 +289,8 @@ struct GetTextFromDrawingIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // Ask Shortcuts to supply a value rather than failing with a generic error (SI-M).
+        guard drawing != nil || file != nil else { throw $drawing.needsValueError() }
         let input = try await AppIntentDrawing.bytes(entity: drawing, file: file)
         let includePics = includePictures
         let text = try await Task.detached(priority: .userInitiated) {
@@ -316,6 +320,8 @@ struct GetDrawingInfoIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // Ask Shortcuts to supply a value rather than failing with a generic error (SI-M).
+        guard drawing != nil || file != nil else { throw $drawing.needsValueError() }
         let input = try await AppIntentDrawing.bytes(entity: drawing, file: file)
         let name = input.name
         let info = try await Task.detached(priority: .userInitiated) {

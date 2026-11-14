@@ -1,3 +1,4 @@
+import AppIntents
 import Foundation
 
 // MARK: - Recents → Spotlight bridge (F3d)
@@ -39,6 +40,12 @@ final class RecentsSpotlightBridge: RecentsLifecycleObserver {
 
     private var pending: Set<UUID> = []
     private var flushTask: Task<Void, Never>?
+    private var shortcutUpdateTask: Task<Void, Never>?
+    /// Bumped on every clear/remove/wipe. A flush captures the generation before it builds
+    /// items (an async parse/OCR) and drops the batch if the generation changed while it
+    /// was building — so a re-index in flight when the user clears recents never re-adds the
+    /// cleared drawings (SI-M). Cleared drawings never come back.
+    private var generation = 0
 
     init(
         coordinator: DrawingSpotlightCoordinator,
@@ -58,16 +65,16 @@ final class RecentsSpotlightBridge: RecentsLifecycleObserver {
 
     // MARK: Lifecycle sink (fire-and-forget; the store never awaits these)
 
-    func recentsEntryAddedOrRefreshed(id: UUID) { enqueue([id]) }
+    func recentsEntryAddedOrRefreshed(id: UUID) { enqueue([id]); scheduleShortcutParameterUpdate() }
 
-    func recentsEntriesRemoved(ids: [UUID]) { Task { await removeNow(ids) } }
+    func recentsEntriesRemoved(ids: [UUID]) { Task { await removeNow(ids) }; scheduleShortcutParameterUpdate() }
 
-    func recentsCleared() { Task { await clearNow() } }
+    func recentsCleared() { Task { await clearNow() }; scheduleShortcutParameterUpdate() }
 
-    func recentsPrivateModeChanged() { Task { await settingsOrPrivateChangedNow() } }
+    func recentsPrivateModeChanged() { Task { await settingsOrPrivateChangedNow() }; scheduleShortcutParameterUpdate() }
 
     /// Index every current entry (the app-launch sync), throttled.
-    func syncAll() { enqueue(currentEntryIDs()) }
+    func syncAll() { enqueue(currentEntryIDs()); scheduleShortcutParameterUpdate() }
 
     /// The Settings toggle or Private mode changed (fire-and-forget wrapper).
     func settingsOrPrivateChanged() { Task { await settingsOrPrivateChangedNow() } }
@@ -75,11 +82,13 @@ final class RecentsSpotlightBridge: RecentsLifecycleObserver {
     // MARK: Awaitable internals (also the unit-test surface)
 
     func removeNow(_ ids: [UUID]) async {
+        generation &+= 1
         pending.subtract(ids)
         await coordinator.entriesRemoved(ids: ids.map(\.uuidString))
     }
 
     func clearNow() async {
+        generation &+= 1
         pending.removeAll()
         flushTask?.cancel()
         await coordinator.recentsCleared()
@@ -88,6 +97,7 @@ final class RecentsSpotlightBridge: RecentsLifecycleObserver {
     /// Wipe when indexing is off or Private; otherwise re-sync every current entry.
     func settingsOrPrivateChangedNow() async {
         if DrawingSpotlightPolicy.shouldWipeAll(enabled: isEnabled(), privateMode: isPrivate()) {
+            generation &+= 1
             pending.removeAll()
             flushTask?.cancel()
             await coordinator.indexingDisabledOrPrivate()
@@ -119,6 +129,21 @@ final class RecentsSpotlightBridge: RecentsLifecycleObserver {
         scheduleFlush()
     }
 
+    /// Debounced refresh of the App Shortcut parameters — the suggested-drawings list Siri
+    /// and the Shortcuts app offer — so they track the live recents set instead of going
+    /// stale (SI-M). Independent of the Spotlight toggle: the shortcut entity list isn't the
+    /// Spotlight index, so it refreshes on every recents change. Reuses the bridge's throttle
+    /// so a burst (the launch sync) coalesces into one refresh.
+    private func scheduleShortcutParameterUpdate() {
+        shortcutUpdateTask?.cancel()
+        let throttle = self.throttle
+        shortcutUpdateTask = Task { @MainActor [weak self] in
+            if throttle > .zero { try? await Task.sleep(for: throttle) }
+            guard self != nil, !Task.isCancelled else { return }
+            EmfyShortcuts.updateAppShortcutParameters()
+        }
+    }
+
     private func scheduleFlush() {
         flushTask?.cancel()
         let throttle = self.throttle
@@ -134,10 +159,14 @@ final class RecentsSpotlightBridge: RecentsLifecycleObserver {
         pending.removeAll()
         guard !ids.isEmpty else { return }
         guard DrawingSpotlightPolicy.shouldIndex(enabled: isEnabled(), privateMode: isPrivate()) else { return }
+        let generationAtStart = generation
         var items: [DrawingSpotlightItem] = []
         for id in ids {
             if let item = await buildItem(id) { items.append(item) }
         }
+        // A clear/remove/wipe happened while we were building: drop this now-stale batch so a
+        // cleared drawing can't come back (SI-M).
+        guard generation == generationAtStart else { return }
         await coordinator.reindex(items, enabled: isEnabled(), privateMode: isPrivate())
     }
 }
