@@ -82,17 +82,29 @@ struct MCPToolRegistry: @unchecked Sendable {
     func listSchema() -> [[String: Any]] { tools.map(\.schema) }
     func tool(named name: String) -> MCPTool? { tools.first { $0.name == name } }
 
-    /// The production registry: the five read-only drawing tools.
-    static let standard = MCPToolRegistry(tools: [
-        MCPTools.info, MCPTools.text, MCPTools.find, MCPTools.records, MCPTools.render,
-    ])
+    /// The production registry: the five read-only drawing tools, each bound to the
+    /// approved-folder provider (read fresh per call, so a Settings change takes
+    /// effect without restarting the helper). Defaults to the App Group list; tests
+    /// inject their own folders (S9).
+    static func standard(
+        allowedFolders: @escaping @Sendable () -> [String] = { AppGroup.mcpAllowedFolders() }
+    ) -> MCPToolRegistry {
+        MCPToolRegistry(tools: [
+            MCPTools.info(allowedFolders: allowedFolders),
+            MCPTools.text(allowedFolders: allowedFolders),
+            MCPTools.find(allowedFolders: allowedFolders),
+            MCPTools.records(allowedFolders: allowedFolders),
+            MCPTools.render(allowedFolders: allowedFolders),
+        ])
+    }
 }
 
 // MARK: - Path safety
 
 /// Validates the `path` argument before any bytes are read. Absolute paths to
-/// existing regular metafiles only; symlinks are resolved and then re-checked, and
-/// the file is size-capped before it is opened.
+/// existing regular metafiles only, and only inside a folder the user has approved
+/// (S9); symlinks are resolved and then re-checked, and the file is size-capped
+/// before it is opened.
 enum MCPPathSafety {
     /// The largest file the server will read. EMFKit's own front door caps again
     /// after this, but refusing early keeps a hostile 10 GB path from ever being
@@ -101,23 +113,54 @@ enum MCPPathSafety {
     /// The metafile extensions the server serves.
     static let allowedExtensions: Set<String> = ["emf", "emz", "wmf", "wmz"]
 
-    /// Resolves and validates `path`, returning a canonical file URL or throwing a
-    /// typed failure with a client-facing message.
-    static func resolve(_ path: String) throws -> URL {
+    /// The single generic error for a file that is missing, outside every approved
+    /// folder, or unreadable. Deliberately identical across those cases so the server
+    /// never reveals whether a file exists outside the folders the user approved — a
+    /// probe for `/Users/x/Secrets/plan.emf` reads the same as one for a file that is
+    /// simply gone (S9).
+    static let notAvailableMessage = "That drawing isn’t available to Emfy’s MCP server."
+
+    /// Whether `resolvedPath` sits inside one of `folders` (equal to it, or under it
+    /// at a path-component boundary). Both sides are symlink-resolved and standardised
+    /// so a `/var` vs `/private/var` or trailing-slash difference can't fool the test,
+    /// and so `/a/bc` never matches an approved `/a/b`.
+    static func isPath(_ resolvedPath: String, withinAnyOf folders: [String]) -> Bool {
+        let target = URL(fileURLWithPath: resolvedPath).resolvingSymlinksInPath().standardizedFileURL.path
+        for folder in folders where !folder.isEmpty {
+            let base = URL(fileURLWithPath: folder).resolvingSymlinksInPath().standardizedFileURL.path
+            if target == base { return true }
+            let baseWithSlash = base.hasSuffix("/") ? base : base + "/"
+            if target.hasPrefix(baseWithSlash) { return true }
+        }
+        return false
+    }
+
+    /// Resolves and validates `path` against the approved `allowedFolders`, returning
+    /// a canonical file URL or throwing a typed failure with a client-facing message.
+    static func resolve(_ path: String, allowedFolders: [String] = AppGroup.mcpAllowedFolders()) throws -> URL {
         guard !path.isEmpty else { throw MCPToolFailure("Provide a \"path\" to a drawing file.") }
         guard path.hasPrefix("/") else {
             throw MCPToolFailure("Path must be absolute (start with “/”); got a relative path.")
         }
 
-        // Resolve symlinks and normalise, THEN re-check everything against the
-        // resolved target — a symlink must not smuggle in a directory or a
-        // non-metafile.
+        // Resolve symlinks and normalise, THEN check everything against the resolved
+        // target — a symlink must not smuggle in a directory, a non-metafile, or a
+        // path that escapes an approved folder.
         let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
+
+        // Approved-folder gate, FIRST (before touching the filesystem for existence),
+        // checked against the symlink-resolved target. A path outside every approved
+        // folder — or when no folder is approved — is refused with the SAME generic
+        // message a missing or unreadable file gets, so existence outside the approved
+        // folders never leaks (S9).
+        guard isPath(resolved.path, withinAnyOf: allowedFolders) else {
+            throw MCPToolFailure(notAvailableMessage)
+        }
 
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: resolved.path, isDirectory: &isDirectory) else {
-            throw MCPToolFailure("No file exists at that path.")
+            throw MCPToolFailure(notAvailableMessage)
         }
         guard !isDirectory.boolValue else {
             throw MCPToolFailure("That path is a directory, not a drawing file.")
@@ -141,10 +184,12 @@ enum MCPPathSafety {
     }
 
     /// Reads and prepares the drawing at `path`, applying every path check first.
-    static func openPrepared(_ path: String) throws -> (OpenedMetafile, MetafileRenderer.Prepared) {
-        let url = try resolve(path)
+    static func openPrepared(_ path: String, allowedFolders: [String] = AppGroup.mcpAllowedFolders()) throws -> (OpenedMetafile, MetafileRenderer.Prepared) {
+        let url = try resolve(path, allowedFolders: allowedFolders)
+        // An unreadable file (gone, offline, or permission-denied) gives the SAME
+        // generic message as a missing or disallowed path (S9).
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
-            throw MCPToolFailure("Couldn’t read that file; it may be offline or damaged.")
+            throw MCPToolFailure(notAvailableMessage)
         }
         guard let opened = try? OpenedMetafile.open(data) else {
             throw MCPToolFailure("That isn’t a readable EMF, EMZ, WMF or WMZ drawing.")
@@ -208,7 +253,7 @@ enum MCPTools {
 
     // MARK: emfy_info
 
-    static let info = MCPTool(
+    static func info(allowedFolders: @escaping @Sendable () -> [String]) -> MCPTool { MCPTool(
         name: "emfy_info",
         description: "Summarise a metafile drawing: its format, physical page size in millimetres, record count, whether it contains text or pictures, and which record types Emfy can’t render." + untrustedNote,
         inputSchema: pathSchema()
@@ -217,7 +262,7 @@ enum MCPTools {
             guard let path = stringArg(arguments, "path") else {
                 throw MCPToolFailure("Provide a \"path\" to a drawing file.")
             }
-            let (opened, prepared) = try MCPPathSafety.openPrepared(path)
+            let (opened, prepared) = try MCPPathSafety.openPrepared(path, allowedFolders: allowedFolders())
             let observation = MetafileRenderer.observe(prepared)
             let hasText = !DrawingTextExtractor.extract(from: observation).isEmpty
             let hasPictures = hasEmbeddedPicture(observation)
@@ -238,11 +283,11 @@ enum MCPTools {
             }
             return .text(lines.joined(separator: "\n"))
         }
-    }
+    } }
 
     // MARK: emfy_text
 
-    static let text = MCPTool(
+    static func text(allowedFolders: @escaping @Sendable () -> [String]) -> MCPTool { MCPTool(
         name: "emfy_text",
         description: "Extract the text of a drawing in reading order (top-to-bottom, left-to-right), one run per line — the same order as Emfy’s Copy All Text. Returns an empty result when the drawing carries no text." + untrustedNote,
         inputSchema: pathSchema([
@@ -257,17 +302,17 @@ enum MCPTools {
                 throw MCPToolFailure("Provide a \"path\" to a drawing file.")
             }
             _ = boolArg(arguments, "includePictures")   // accepted; helper does drawing text only
-            let (_, prepared) = try MCPPathSafety.openPrepared(path)
+            let (_, prepared) = try MCPPathSafety.openPrepared(path, allowedFolders: allowedFolders())
             let observation = MetafileRenderer.observe(prepared)
             let runs = DrawingTextExtractor.extract(from: observation)
             let all = DrawingTextExtractor.copyAllText(runs)
             return .text(all.isEmpty ? "(no text in this drawing)" : all)
         }
-    }
+    } }
 
     // MARK: emfy_find
 
-    static let find = MCPTool(
+    static func find(allowedFolders: @escaping @Sendable () -> [String]) -> MCPTool { MCPTool(
         name: "emfy_find",
         description: "Find a query string in a drawing’s text, case- and accent-insensitively. Returns the number of matches and each matching text run in reading order." + untrustedNote,
         inputSchema: pathSchema([
@@ -281,7 +326,7 @@ enum MCPTools {
             guard let query = stringArg(arguments, "query"), !query.isEmpty else {
                 throw MCPToolFailure("Provide a non-empty \"query\" to search for.")
             }
-            let (_, prepared) = try MCPPathSafety.openPrepared(path)
+            let (_, prepared) = try MCPPathSafety.openPrepared(path, allowedFolders: allowedFolders())
             let observation = MetafileRenderer.observe(prepared)
             let runs = DrawingTextExtractor.extract(from: observation)
             let ordered = DrawingTextExtractor.readingOrder(runs)
@@ -298,11 +343,11 @@ enum MCPTools {
             }
             return .text(lines.joined(separator: "\n"))
         }
-    }
+    } }
 
     // MARK: emfy_records
 
-    static let records = MCPTool(
+    static func records(allowedFolders: @escaping @Sendable () -> [String]) -> MCPTool { MCPTool(
         name: "emfy_records",
         description: "List a drawing’s records in file order: index, record-type name, byte offset, byte size, and a one-line parameter summary. Page with “offset” and “limit” (limit is capped at 500)." + untrustedNote,
         inputSchema: pathSchema([
@@ -314,7 +359,7 @@ enum MCPTools {
             guard let path = stringArg(arguments, "path") else {
                 throw MCPToolFailure("Provide a \"path\" to a drawing file.")
             }
-            let (_, prepared) = try MCPPathSafety.openPrepared(path)
+            let (_, prepared) = try MCPPathSafety.openPrepared(path, allowedFolders: allowedFolders())
             let refs = prepared.recordRefs()
             let start = max(0, intArg(arguments, "offset") ?? 0)
             let limit = min(500, max(1, intArg(arguments, "limit") ?? 100))
@@ -331,7 +376,7 @@ enum MCPTools {
             }
             return .text(lines.joined(separator: "\n"))
         }
-    }
+    } }
 
     // MARK: emfy_render
 
@@ -340,7 +385,7 @@ enum MCPTools {
     /// The largest rendered payload returned (PNG or PDF), before base64.
     static let maxRenderBytes = 20 * 1024 * 1024
 
-    static let render = MCPTool(
+    static func render(allowedFolders: @escaping @Sendable () -> [String]) -> MCPTool { MCPTool(
         name: "emfy_render",
         description: "Render a drawing to an image. format “png” returns a base64 PNG image block (long side capped at 4096 px); format “pdf” returns a vector PDF resource. “scale” (1–4) multiplies the PNG resolution. Output is capped at 20 MB.",
         inputSchema: pathSchema([
@@ -352,7 +397,7 @@ enum MCPTools {
             guard let path = stringArg(arguments, "path") else {
                 throw MCPToolFailure("Provide a \"path\" to a drawing file.")
             }
-            let (_, prepared) = try MCPPathSafety.openPrepared(path)
+            let (_, prepared) = try MCPPathSafety.openPrepared(path, allowedFolders: allowedFolders())
             let format = (stringArg(arguments, "format") ?? "png").lowercased()
             switch format {
             case "pdf":
@@ -385,7 +430,7 @@ enum MCPTools {
                 throw MCPToolFailure("Unknown format “\(format)”. Use “png” or “pdf”.")
             }
         }
-    }
+    } }
 
     // MARK: - Helpers
 

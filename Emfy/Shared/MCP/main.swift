@@ -20,7 +20,7 @@ import Foundation
 private let maxRequestLineBytes = 16 * 1024 * 1024
 
 func runEmfyMCPServer() {
-    let server = MCPServer(tools: .standard, isEnabled: { AppGroup.mcpServerEnabled() })
+    let server = MCPServer(tools: .standard(), isEnabled: { AppGroup.mcpServerEnabled() })
 
     func logStderr(_ message: String) {
         FileHandle.standardError.write(Data((message + "\n").utf8))

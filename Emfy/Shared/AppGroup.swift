@@ -67,4 +67,20 @@ enum AppGroup {
     static func mcpServerEnabled() -> Bool {
         UserDefaults(suiteName: identifier)?.bool(forKey: mcpServerEnabledKey) ?? false
     }
+
+    /// The shared-suite key for the MCP server's approved-folder list: the absolute
+    /// paths of the folders the user has allowed an AI app to read drawings from. The
+    /// app (Settings) writes it; the `emfy-mcp` helper reads it before serving any
+    /// file (S9).
+    static let mcpAllowedFoldersKey = "settings.mcp.allowedFolders"
+
+    /// The folders the MCP server may read drawings from, read by NAME from the
+    /// shared suite (same reasoning as `mcpServerEnabled`). **Default EMPTY** — the
+    /// safer default: the GitHub/DMG helper is unsandboxed and driven by an external
+    /// AI client, so it serves nothing until the user explicitly approves a folder in
+    /// Settings (fail-closed), rather than pre-granting broad folders like Documents.
+    /// Absent, non-array, or empty ⇒ no folder is approved and every path is refused.
+    static func mcpAllowedFolders() -> [String] {
+        (UserDefaults(suiteName: identifier)?.array(forKey: mcpAllowedFoldersKey) as? [String]) ?? []
+    }
 }

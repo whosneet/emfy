@@ -138,6 +138,14 @@ final class EmfySettings {
         didSet { sharedDefaults.set(mcpServerEnabled, forKey: AppGroup.mcpServerEnabledKey) }
     }
 
+    /// The folders the MCP server may read drawings from (S9): absolute paths the user
+    /// approved in Settings. Persisted through the App Group suite so the `emfy-mcp`
+    /// helper — a separate process — reads the same list. Default EMPTY (fail-closed):
+    /// the helper serves nothing until the user adds a folder.
+    var mcpAllowedFolders: [String] {
+        didSet { sharedDefaults.set(mcpAllowedFolders, forKey: AppGroup.mcpAllowedFoldersKey) }
+    }
+
     // MARK: Library extras
 
     /// Recents ordering. Today recents sort by most-recently-opened, so `.date`.
@@ -271,6 +279,8 @@ final class EmfySettings {
         // The MCP-server enable toggle lives in the shared suite (read by the
         // helper process). Default OFF, like every new opt-in surface.
         mcpServerEnabled = Self.bool(sharedDefaults, AppGroup.mcpServerEnabledKey, default: false)
+        // The MCP approved-folder list (S9) lives in the shared suite too. Default empty.
+        mcpAllowedFolders = (sharedDefaults.array(forKey: AppGroup.mcpAllowedFoldersKey) as? [String]) ?? []
         // Rendering (S1b) reads from `sharedDefaults`. As with every other setting,
         // assignment in `init` doesn't trigger `didSet`, so construction reads without
         // writing back; the decoded table is already bounded.

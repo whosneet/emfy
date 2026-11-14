@@ -34,11 +34,23 @@ import Testing
         return dest
     }
 
-    private let server = MCPServer(tools: .standard, isEnabled: { true })
+    // Every test file is created under `FileManager.default.temporaryDirectory`, so
+    // approving that one root lets the existing happy-path and specific-rejection tests
+    // reach the file through the S9 approved-folder gate. The S9 tests below build their
+    // own narrower servers to exercise the gate itself.
+    private let server = MCPServer(
+        tools: .standard(allowedFolders: { [FileManager.default.temporaryDirectory.path] }),
+        isEnabled: { true })
 
     /// Calls a tool and returns its (text, isError). Non-text content is summarised
     /// as "[image]" / "[resource]" so callers can assert the block type.
     private func call(_ name: String, _ arguments: [String: Any]) throws -> (text: String, isError: Bool, content: [[String: Any]]) {
+        try call(on: server, name, arguments)
+    }
+
+    /// As `call`, but against a caller-supplied server (so an S9 test can narrow the
+    /// approved folders).
+    private func call(on server: MCPServer, _ name: String, _ arguments: [String: Any]) throws -> (text: String, isError: Bool, content: [[String: Any]]) {
         let requestObject: [String: Any] = [
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": ["name": name, "arguments": arguments],
@@ -180,9 +192,12 @@ import Testing
     }
 
     @Test func rejectsMissingFile() throws {
-        let result = try call("emfy_info", ["path": "/tmp/does-not-exist-\(UUID().uuidString).emf"])
+        // A missing file inside an approved folder gives the generic "not available"
+        // message — identical to a disallowed path, so existence never leaks (S9).
+        let missing = try tempDir().appendingPathComponent("does-not-exist-\(UUID().uuidString).emf")
+        let result = try call("emfy_info", ["path": missing.path])
         #expect(result.isError)
-        #expect(result.text.contains("No file"))
+        #expect(result.text == MCPPathSafety.notAvailableMessage)
     }
 
     @Test func rejectsOversizeFile() throws {
@@ -207,6 +222,87 @@ import Testing
         let result = try call("emfy_text", ["path": link.path])
         #expect(!result.isError)
         #expect(result.text.contains("Hello Emfy 123"))
+    }
+
+    // MARK: - S9: approved folders + generic error
+
+    @Test func rejectsPathOutsideApprovedFolders() throws {
+        // A real metafile that exists and is readable, but sits outside every approved
+        // folder, is refused with the generic message — not served.
+        let outside = try tempDir()                   // the approved folder lives here
+        let real = try tempCopy("gate-p4-text.emf")   // a genuine .emf, in a different temp dir
+        let approved = outside.appendingPathComponent("approved", isDirectory: true)
+        try FileManager.default.createDirectory(at: approved, withIntermediateDirectories: true)
+        let gated = MCPServer(tools: .standard(allowedFolders: { [approved.path] }), isEnabled: { true })
+        let file = try call(on: gated, "emfy_info", ["path": real.path])
+        #expect(file.isError)
+        #expect(file.text == MCPPathSafety.notAvailableMessage)
+    }
+
+    @Test func rejectsSymlinkEscapingApprovedFolder() throws {
+        // A symlink INSIDE an approved folder that points OUT of it must be refused:
+        // the resolved target is outside the approved folder (S9 symlink re-check).
+        let base = try tempDir()
+        let approved = base.appendingPathComponent("approved", isDirectory: true)
+        let secret = base.appendingPathComponent("secret", isDirectory: true)
+        try FileManager.default.createDirectory(at: approved, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secret, withIntermediateDirectories: true)
+        let realOutside = secret.appendingPathComponent("hidden.emf")
+        try FileManager.default.copyItem(at: corpusURL("gate-p4-text.emf"), to: realOutside)
+        let link = approved.appendingPathComponent("link.emf")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: realOutside)
+        let gated = MCPServer(tools: .standard(allowedFolders: { [approved.path] }), isEnabled: { true })
+        let result = try call(on: gated, "emfy_text", ["path": link.path])
+        #expect(result.isError)
+        #expect(result.text == MCPPathSafety.notAvailableMessage)
+    }
+
+    @Test func acceptsFileInsideApprovedFolder() throws {
+        // The positive counterpart: a real metafile inside an approved folder is served.
+        let approved = try tempDir()
+        let real = approved.appendingPathComponent("doc.emf")
+        try FileManager.default.copyItem(at: corpusURL("gate-p4-text.emf"), to: real)
+        let gated = MCPServer(tools: .standard(allowedFolders: { [approved.path] }), isEnabled: { true })
+        let result = try call(on: gated, "emfy_text", ["path": real.path])
+        #expect(!result.isError)
+        #expect(result.text.contains("Hello Emfy 123"))
+    }
+
+    @Test func errorsAreIdenticalAcrossMissingDisallowedAndUnreadable() throws {
+        let approved = try tempDir()
+        // (1) disallowed: a real file outside the approved folder.
+        let elsewhere = try tempCopy("gate-p4-text.emf")
+        // (2) missing: a path inside the approved folder with nothing there.
+        let missing = approved.appendingPathComponent("gone-\(UUID().uuidString).emf")
+        // (3) unreadable: a real .emf inside the approved folder with read denied.
+        let unreadable = approved.appendingPathComponent("locked.emf")
+        try FileManager.default.copyItem(at: corpusURL("gate-p4-text.emf"), to: unreadable)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: unreadable.path)
+
+        func message(_ folders: [String], _ path: String) throws -> (text: String, isError: Bool) {
+            let srv = MCPServer(tools: .standard(allowedFolders: { folders }), isEnabled: { true })
+            let r = try call(on: srv, "emfy_info", ["path": path])
+            return (r.text, r.isError)
+        }
+        let disallowed = try message([approved.path], elsewhere.path)
+        let notThere = try message([approved.path], missing.path)
+        let denied = try message([approved.path], unreadable.path)
+        // Restore permissions so the temp cleanup/OS can remove it.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: unreadable.path)
+
+        #expect(disallowed.isError && notThere.isError && denied.isError)
+        #expect(disallowed.text == MCPPathSafety.notAvailableMessage)
+        #expect(disallowed.text == notThere.text)
+        #expect(notThere.text == denied.text)
+    }
+
+    @Test func emptyApprovedListServesNothing() throws {
+        // The default (no folders approved) is fail-closed: even a real file is refused.
+        let real = try tempCopy("gate-p4-text.emf")
+        let closed = MCPServer(tools: .standard(allowedFolders: { [] }), isEnabled: { true })
+        let result = try call(on: closed, "emfy_info", ["path": real.path])
+        #expect(result.isError)
+        #expect(result.text == MCPPathSafety.notAvailableMessage)
     }
 
     // MARK: - Client configuration snippet

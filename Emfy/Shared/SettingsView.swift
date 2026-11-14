@@ -797,10 +797,62 @@ private struct MacMCPTab: View {
             } footer: {
                 Text(MCPSettingsFooter.explanation)
             }
+
+            Section {
+                if settings.mcpAllowedFolders.isEmpty {
+                    Text("No folders yet. The server can’t read any drawing until you add one.")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                } else {
+                    ForEach(settings.mcpAllowedFolders, id: \.self) { path in
+                        LabeledContent {
+                            Button {
+                                settings.mcpAllowedFolders.removeAll { $0 == path }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Remove this folder")
+                            .accessibilityLabel("Remove \((path as NSString).lastPathComponent)")
+                        } label: {
+                            Label {
+                                Text((path as NSString).lastPathComponent)
+                                Text(path).font(.caption).foregroundStyle(.secondary)
+                            } icon: {
+                                Image(systemName: "folder")
+                            }
+                        }
+                    }
+                }
+                Button("Add Folder…") { addFolder() }
+            } header: {
+                Text("Folders the server can read")
+            } footer: {
+                Text(MCPSettingsFooter.foldersExplanation)
+            }
         }
         .formStyle(.grouped)
         .frame(width: macSettingsWidth)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Picks a folder to add to the approved list. Deduplicated; the stored value is
+    /// the resolved, standardised path so it matches the helper's own resolution (S9).
+    private func addFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        panel.message = "Choose a folder the MCP server may read drawings from."
+        guard panel.runModal() == .OK else { return }
+        var folders = settings.mcpAllowedFolders
+        for url in panel.urls {
+            let path = url.resolvingSymlinksInPath().standardizedFileURL.path
+            if !folders.contains(path) { folders.append(path) }
+        }
+        settings.mcpAllowedFolders = folders
     }
 
     private func copyConfiguration() {
@@ -817,9 +869,10 @@ private struct MacMCPTab: View {
     }
 }
 
-/// The MCP group's single read-only explanation sentence.
+/// The MCP group's read-only explanation sentences.
 private enum MCPSettingsFooter {
     static let explanation = "Emfy’s MCP server is a local, read-only helper that lets an AI app you configure read a drawing’s text, records and rendered image through Emfy. It never changes files and never uses the network. It stays off until you turn it on."
+    static let foldersExplanation = "The server reads drawings only from the folders you add here, and nowhere else. Start with none — add just the folders you want an AI app to see. Files outside them are refused."
 }
 #endif
 

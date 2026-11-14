@@ -278,7 +278,14 @@ struct LibraryWindow: View {
         .task {
             if EditorDebugLaunch.settingsScene == "mcp", let base = EditorDebugLaunch.screenshotBase {
                 try? await Task.sleep(for: .milliseconds(900))
-                _ = SettingsSceneScreenshot.captureMCPTab(settings: settings, to: base + "-mcp-settings.png")
+                // A throwaway settings seeded with the enable toggle on and two example
+                // approved folders, so the S9 folder control is visible in the shot.
+                let suite = UserDefaults(suiteName: "emfy.screenshot.mcp") ?? .standard
+                for key in suite.dictionaryRepresentation().keys { suite.removeObject(forKey: key) }
+                let shot = EmfySettings(defaults: suite, sharedDefaults: suite)
+                shot.mcpServerEnabled = true
+                shot.mcpAllowedFolders = [NSHomeDirectory() + "/Documents", NSHomeDirectory() + "/Desktop"]
+                _ = SettingsSceneScreenshot.captureMCPTab(settings: shot, to: base + "-mcp-settings.png")
                 try? await Task.sleep(for: .milliseconds(200))
                 exit(0)
             }

@@ -10,7 +10,7 @@ import Testing
 
     /// A server whose enable gate is fixed for the test.
     private func server(enabled: Bool) -> MCPServer {
-        MCPServer(tools: .standard, isEnabled: { enabled })
+        MCPServer(tools: .standard(), isEnabled: { enabled })
     }
 
     /// Parses a reply line into a JSON object for assertions.
