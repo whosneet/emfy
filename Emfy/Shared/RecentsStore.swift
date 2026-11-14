@@ -113,6 +113,13 @@ final class RecentsStore {
     /// result can't re-trigger generation. `nil` in tests and when AI isn't wired.
     @ObservationIgnored var onEntryChanged: ((UUID) -> Void)?
 
+    /// Called to purge privacy-sensitive *derived* caches — the recognised-text (OCR)
+    /// caches — on Clear Recents and when leaving Private mode (ST4). Wired by the app
+    /// to the OCR service; `nil` in tests and where OCR isn't present, so the store's
+    /// behaviour is unchanged without it. The per-entry revert snapshots are pruned by
+    /// `removeSideFiles`; this covers the content-keyed caches `removeSideFiles` can't.
+    @ObservationIgnored var onPurgeDerivedCaches: (() -> Void)?
+
     nonisolated static let log = Logger(subsystem: "com.avneetsingh.emfy", category: "recents")
 
     init(locations: Locations = .standard) {
@@ -305,7 +312,15 @@ final class RecentsStore {
     func setPrivate(_ on: Bool) {
         guard isPrivate != on else { return }
         isPrivate = on
-        if !on { purgeSessionPrivate() }
+        if !on {
+            purgeSessionPrivate()
+            // A drawing opened privately may have seeded the content-keyed OCR cache,
+            // which `purgeSessionPrivate`'s per-entry side-file deletion can't reach.
+            // Purge it when Private mode turns off so nothing recognised privately
+            // survives on disk (ST4). The per-entry revert snapshots are already pruned
+            // by `purgeSessionPrivate`.
+            onPurgeDerivedCaches?()
+        }
         // Private on wipes the index; off re-syncs (the bridge decides, F3d).
         lifecycleObserver?.recentsPrivateModeChanged()
     }
@@ -630,30 +645,35 @@ final class RecentsStore {
         thumbnailCache.removeAll()
         entries.removeAll()
         persist()
+        // Remove the whole revert-snapshot tree — not just the per-entry folders above,
+        // so any orphaned snapshot is swept too (ST4).
+        try? FileManager.default.removeItem(at: locations.snapshotsDirectory)
+        // Purge the recognised-text caches: Clear Recents should leave no derived text
+        // from any cleared drawing on disk (ST4).
+        onPurgeDerivedCaches?()
         // Wipe the whole Spotlight domain (F3d).
         lifecycleObserver?.recentsCleared()
     }
 
     // MARK: - Ordering, cap, persistence
 
-    /// Chooses which entries to drop when the list is over `max` (C4a H3 cap policy,
-    /// owner decision): evict the oldest *non-received* entries first, and a received
-    /// entry (`importedFileName != nil`, Emfy's only copy) only when no non-received
-    /// entry is left to drop. Pinned entries are **exempt** (S1a Library extras), so
-    /// they are never candidates — a library heavy with pins can sit above the cap.
-    /// Pure, for the cap test. Behaviour is unchanged for data without pins.
+    /// Chooses which entries to drop when the list is over `max` (ST3, owner
+    /// decision 14 Nov): only plain file *references* are ever evicted. An "owned"
+    /// drawing — one Emfy holds the only copy of (received, New, or AI-generated;
+    /// `importedFileName != nil`) — is NEVER evicted by the cap, because dropping it
+    /// would destroy the user's only copy. Pinned entries are exempt too (S1a
+    /// Library extras). When only owned and/or pinned entries remain, the list is
+    /// allowed to sit *above* the cap rather than lose a drawing. The oldest
+    /// references go first. Pure, for the cap test.
     nonisolated static func entriesToEvict(from entries: [RecentEntry], max: Int) -> [RecentEntry] {
         let overflow = entries.count - Swift.max(max, 0)
         guard overflow > 0 else { return [] }
-        let candidates = entries.filter { !($0.isPinned ?? false) }
-        let oldestFirst = candidates.sorted { $0.openedAt < $1.openedAt }
-        let nonReceived = oldestFirst.filter { $0.importedFileName == nil }
-        let received = oldestFirst.filter { $0.importedFileName != nil }
-        var evict = Array(nonReceived.prefix(overflow))
-        if evict.count < overflow {
-            evict.append(contentsOf: received.prefix(overflow - evict.count))
-        }
-        return evict
+        // Only unpinned plain references are candidates; owned drawings are never
+        // evicted, so the overflow is taken entirely from references, oldest first.
+        let candidates = entries
+            .filter { !($0.isPinned ?? false) && $0.importedFileName == nil }
+            .sorted { $0.openedAt < $1.openedAt }
+        return Array(candidates.prefix(overflow))
     }
 
     private func sortAndCap() {
@@ -790,6 +810,10 @@ final class RecentsStore {
         sweepDirectory(locations.thumbnailsDirectory, keeping: keepThumbnails, cutoff: startedAt)
         sweepDirectory(locations.importedDirectory, keeping: keepImported, cutoff: startedAt)
         ExportTemp.sweep(startedAt: startedAt)
+        // Reclaim `EmfyNewDrawing-*` import stages a crash or kill left between the write
+        // and the store's import (ST5). The import copies the bytes into Imported/, so a
+        // pre-cutoff stage is always safe to delete.
+        ExportTemp.sweepPrefixed(NewDrawing.tempDirectoryPrefix, startedAt: startedAt)
         sweepPrivateImports(except: locations.privateImportedDirectory, startedAt: startedAt)
     }
 

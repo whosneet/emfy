@@ -49,15 +49,29 @@ import Testing
         #expect(evicted == ["ordinaryOld"])   // the oldest ORDINARY entry, not the older received one
     }
 
-    @Test func evictsReceivedOnlyWhenNoOrdinaryEntryLeftToDrop() {
+    @Test func ownedDrawingsAreNeverEvicted() {
+        // ST3 (owner, 14 Nov): owned drawings (Emfy holds the only copy) are never
+        // evicted by the cap. With only references left to drop AND the cap already
+        // met by the owned copies, the list sits above the cap rather than lose one.
         let entries = [
             entry("receivedOld", daysAgo: 10, received: true),
             entry("receivedMid", daysAgo: 5, received: true),
             entry("ordinary", daysAgo: 1, received: false),
         ]
-        // max 1 → drop 2: the ordinary one first, then the oldest received.
+        // max 1: only the plain reference is evictable; both owned copies stay, so
+        // the list stays at 2 (above the cap) rather than dropping a received copy.
         let evicted = RecentsStore.entriesToEvict(from: entries, max: 1).map(\.displayName)
-        #expect(evicted == ["ordinary", "receivedOld"])
+        #expect(evicted == ["ordinary"])
+    }
+
+    @Test func onlyOwnedDrawingsLeftYieldsNoEviction() {
+        // When every over-cap entry is owned, nothing is evicted (ST3).
+        let entries = [
+            entry("ownedA", daysAgo: 3, received: true),
+            entry("ownedB", daysAgo: 2, received: true),
+            entry("ownedC", daysAgo: 1, received: true),
+        ]
+        #expect(RecentsStore.entriesToEvict(from: entries, max: 1).isEmpty)
     }
 }
 
