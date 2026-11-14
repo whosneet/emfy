@@ -445,9 +445,10 @@ struct LibraryWindow: View {
         )
         #endif
         #if os(iOS)
-        // A resize floor on iPad so a window can't shrink below where the split view,
-        // sheets and inspector work (R2). No-op on iPhone (no sizeRestrictions).
-        .background(SceneMinimumSize(minimumSize: CGSize(width: 600, height: 480)))
+        // A small resize floor on iPad (the compact layout's size), so a window can't
+        // shrink below where the UI works yet still allows the iPadOS 26 half-width and
+        // portrait halves (audit L-A). iPad-only; never constrains iPhone.
+        .background(SceneMinimumSize(minimumSize: CGSize(width: 320, height: 400)))
         #endif
     }
 

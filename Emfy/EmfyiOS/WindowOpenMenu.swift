@@ -1,11 +1,13 @@
 import SwiftUI
 import UIKit
 
-/// Sets the host window scene's minimum size (R2), so a resizable iPad window can't
-/// shrink below where the split view, sheets and inspector work. A no-op on iPhone,
-/// where `UIWindowScene.sizeRestrictions` is nil. Attached as a hidden background view
-/// so it rides along with the library window and re-applies whenever it (re)attaches to
-/// a scene.
+/// Sets the host window scene's minimum size on iPad only (R2; audit L-A), so a
+/// resizable iPad window can't shrink below where the compact layout works — but it is
+/// small enough (320×400) to allow the iPadOS 26 half-width and portrait halves, which
+/// the old 600×480 blocked. Applied ONLY for the `.pad` idiom: iPhone (including the
+/// iOS 27 iPhone Mirroring window) must never be constrained, so the restriction is
+/// skipped there even if `sizeRestrictions` is non-nil. Attached as a hidden background
+/// view so it rides along with the library window and re-applies on (re)attach.
 struct SceneMinimumSize: UIViewRepresentable {
     let minimumSize: CGSize
 
@@ -13,6 +15,11 @@ struct SceneMinimumSize: UIViewRepresentable {
         var minimumSize: CGSize = .zero
         override func didMoveToWindow() {
             super.didMoveToWindow()
+            apply()
+        }
+        func apply() {
+            // iPad only — never constrain iPhone or iPhone Mirroring (L-A).
+            guard UIDevice.current.userInterfaceIdiom == .pad else { return }
             window?.windowScene?.sizeRestrictions?.minimumSize = minimumSize
         }
     }
@@ -27,7 +34,7 @@ struct SceneMinimumSize: UIViewRepresentable {
 
     func updateUIView(_ uiView: MinSizeView, context: Context) {
         uiView.minimumSize = minimumSize
-        uiView.window?.windowScene?.sizeRestrictions?.minimumSize = minimumSize
+        uiView.apply()
     }
 }
 
