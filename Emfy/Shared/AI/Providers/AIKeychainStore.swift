@@ -29,12 +29,21 @@ struct KeychainKeyStore: AIKeyStore {
     /// The shared service name for every Emfy AI key.
     static let service = "com.avneetsingh.emfy.ai"
 
-    private func baseQuery(for providerID: String) -> [String: Any] {
-        [
+    /// The item query. On macOS it selects the modern data-protection keychain
+    /// (`kSecUseDataProtectionKeychain`), which gives API keys file-protection semantics
+    /// instead of the legacy file-based keychain (S3); `dataProtection: false` reproduces
+    /// the pre-S3 query so an existing key can be read and migrated. On iOS the
+    /// data-protection keychain is always used, so the attribute is omitted.
+    private func baseQuery(for providerID: String, dataProtection: Bool = true) -> [String: Any] {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
             kSecAttrAccount as String: providerID,
         ]
+        #if os(macOS)
+        if dataProtection { query[kSecUseDataProtectionKeychain as String] = true }
+        #endif
+        return query
     }
 
     func setKey(_ key: String, for providerID: String) throws {
@@ -43,9 +52,13 @@ struct KeychainKeyStore: AIKeyStore {
             return
         }
         guard let data = key.data(using: .utf8) else { throw KeychainError(status: errSecParam) }
-        // Replace: delete any existing item, then add a fresh one with the
-        // device-only, after-first-unlock accessibility the brief requires.
+        // Replace: delete any existing item — including a pre-S3 copy in the legacy
+        // keychain on macOS — then add a fresh one to the data-protection keychain with
+        // the device-only, after-first-unlock accessibility the brief requires.
         SecItemDelete(baseQuery(for: providerID) as CFDictionary)
+        #if os(macOS)
+        SecItemDelete(baseQuery(for: providerID, dataProtection: false) as CFDictionary)
+        #endif
         var add = baseQuery(for: providerID)
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -54,7 +67,20 @@ struct KeychainKeyStore: AIKeyStore {
     }
 
     func key(for providerID: String) throws -> String? {
-        var query = baseQuery(for: providerID)
+        if let key = try copyKey(for: providerID, dataProtection: true) { return key }
+        #if os(macOS)
+        // Migrate a key written by a pre-S3 build into the legacy keychain: read it, then
+        // rewrite it into the data-protection keychain so later reads find it there (S3).
+        if let legacy = try copyKey(for: providerID, dataProtection: false) {
+            try? setKey(legacy, for: providerID)
+            return legacy
+        }
+        #endif
+        return nil
+    }
+
+    private func copyKey(for providerID: String, dataProtection: Bool) throws -> String? {
+        var query = baseQuery(for: providerID, dataProtection: dataProtection)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
@@ -69,6 +95,10 @@ struct KeychainKeyStore: AIKeyStore {
 
     func deleteKey(for providerID: String) throws {
         let status = SecItemDelete(baseQuery(for: providerID) as CFDictionary)
+        #if os(macOS)
+        // Also clear any pre-S3 legacy-keychain copy (best effort).
+        SecItemDelete(baseQuery(for: providerID, dataProtection: false) as CFDictionary)
+        #endif
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError(status: status)
         }
