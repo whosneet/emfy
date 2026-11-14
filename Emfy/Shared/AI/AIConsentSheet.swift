@@ -111,28 +111,40 @@ struct AIConsentSheet: View {
 
     private var iosBody: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    header
-                    lists
+            Group {
+                // iOS 26's safeAreaBar supplies the glass bar treatment; older systems keep
+                // the safeAreaInset path with an explicit .bar background (C5e G4).
+                if #available(iOS 26.0, *) {
+                    iosScrollBody.safeAreaBar(edge: .bottom) { bottomButtons }
+                } else {
+                    iosScrollBody.safeAreaInset(edge: .bottom) { bottomButtons.background(.bar) }
                 }
-                .padding()
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 10) {
-                    Button(action: allow) {
-                        Text("Allow").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Button("Don’t Allow", role: .cancel) { deny() }
-                        .frame(maxWidth: .infinity)
-                }
-                .padding()
-                .background(.bar)
             }
             .navigationTitle("Allow sending?")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    private var iosScrollBody: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                header
+                lists
+            }
+            .padding()
+        }
+    }
+
+    private var bottomButtons: some View {
+        VStack(spacing: 10) {
+            Button(action: allow) {
+                Text("Allow").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            Button("Don’t Allow", role: .cancel) { deny() }
+                .frame(maxWidth: .infinity)
+        }
+        .padding()
     }
     #endif
 }
