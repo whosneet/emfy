@@ -1,6 +1,36 @@
 import SwiftUI
 import UIKit
 
+/// Sets the host window scene's minimum size (R2), so a resizable iPad window can't
+/// shrink below where the split view, sheets and inspector work. A no-op on iPhone,
+/// where `UIWindowScene.sizeRestrictions` is nil. Attached as a hidden background view
+/// so it rides along with the library window and re-applies whenever it (re)attaches to
+/// a scene.
+struct SceneMinimumSize: UIViewRepresentable {
+    let minimumSize: CGSize
+
+    final class MinSizeView: UIView {
+        var minimumSize: CGSize = .zero
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            window?.windowScene?.sizeRestrictions?.minimumSize = minimumSize
+        }
+    }
+
+    func makeUIView(context: Context) -> MinSizeView {
+        let view = MinSizeView()
+        view.minimumSize = minimumSize
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ uiView: MinSizeView, context: Context) {
+        uiView.minimumSize = minimumSize
+        uiView.window?.windowScene?.sizeRestrictions?.minimumSize = minimumSize
+    }
+}
+
 /// The user activity that carries a selected entry into a freshly-opened window.
 enum WindowOpenActivity {
     static let type = "com.avneetsingh.emfy.openInNewWindow"

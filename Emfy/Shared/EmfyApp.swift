@@ -54,6 +54,12 @@ struct EmfyApp: App {
                 .environment(coordinator)
                 .environment(settings)
                 .environment(aiProviders)
+                #if os(macOS)
+                // A sensible floor so a window can't shrink below where the sidebar,
+                // detail and inspector all work, or where the sheets (Compare ≈540 pt)
+                // fit (R2). Paired with `.windowResizability(.contentMinSize)` below.
+                .frame(minWidth: 640, minHeight: 480)
+                #endif
                 #if DEBUG
                 // The DEBUG appearance flag drives SwiftUI's colorScheme too (NSApp's
                 // appearance alone only reaches AppKit), so a capture shows the inspector
@@ -67,6 +73,10 @@ struct EmfyApp: App {
                 .handlesExternalEvents(preferring: Set(["*"]), allowing: Set(["*"]))
                 #endif
         }
+        #if os(macOS)
+        // Honour the content's minimum frame as the window's resize floor (R2).
+        .windowResizability(.contentMinSize)
+        #endif
         #if os(macOS)
         // The full Mac menu bar (C3b scope 2): the standard sidebar/inspector View
         // toggles, File (Open…, Open Recent, Export, Share), View (zoom), and Help.

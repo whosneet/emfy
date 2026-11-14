@@ -423,6 +423,11 @@ struct LibraryWindow: View {
             }
         )
         #endif
+        #if os(iOS)
+        // A resize floor on iPad so a window can't shrink below where the split view,
+        // sheets and inspector work (R2). No-op on iPhone (no sizeRestrictions).
+        .background(SceneMinimumSize(minimumSize: CGSize(width: 600, height: 480)))
+        #endif
     }
 
     /// Re-injects every observable the window's columns, pushed viewers and sheets
