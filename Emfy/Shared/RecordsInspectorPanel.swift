@@ -56,6 +56,10 @@ struct ViewerInspectorPanel<Info: View>: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
             .padding(.bottom, 6)
+            // A restored `.ask` tab with AI off has no matching segment, so the picker shows
+            // nothing selected; fall back to Info (audit L-G / N2 regression).
+            .onAppear { if tab == .ask, !aiAvailable { tab = .info } }
+            .onChange(of: aiAvailable) { _, available in if !available, tab == .ask { tab = .info } }
 
             Divider()
 
