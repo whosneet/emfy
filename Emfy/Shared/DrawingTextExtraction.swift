@@ -196,6 +196,33 @@ enum DrawingTextExtractor {
         return byTop.map(\.element)
     }
 
+    // MARK: Visual line count
+
+    /// The number of distinct visual text lines among `runs`, for the deterministic
+    /// "how many lines of text" fact (FM-3). Non-blank runs whose vertical centres
+    /// fall within the same row band (the `readingOrder` band — half the median run
+    /// height, 1pt floor) count as ONE line, so a line split across several runs
+    /// (kerned words, styled spans drawn as separate EXTTEXTOUTW records) isn't
+    /// over-counted; whitespace-only runs don't count at all. A plain run count (the
+    /// old behaviour) over-reported both.
+    static func visualLineCount(_ runs: [DrawingTextRun]) -> Int {
+        let meaningful = runs.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard meaningful.count > 1 else { return meaningful.count }
+        let heights = meaningful.map { max($0.boundsDevice.height, 0) }.sorted()
+        let median = heights[heights.count / 2]
+        let band = max(median * 0.5, 1)
+        // Single-linkage clustering on the sorted vertical axis: a new line begins
+        // only where the gap to the previous run's centre exceeds the band.
+        let sortedMidY = meaningful.map { $0.boundsDevice.midY }.sorted()
+        var lines = 1
+        var previous = sortedMidY[0]
+        for midY in sortedMidY.dropFirst() {
+            if midY - previous > band { lines += 1 }
+            previous = midY
+        }
+        return lines
+    }
+
     // MARK: Copy All Text
 
     /// Every run's text in reading order as plain text, one run per line. OCR

@@ -29,7 +29,8 @@ enum DrawingAIContextProvider {
         }
         let observation = MetafileRenderer.observe(prepared)
         let runs = DrawingTextExtractor.readingOrder(DrawingTextExtractor.extract(from: observation))
-        let textLines = runs.filter { $0.source == .drawing }.map(\.text)
+        let drawingRuns = runs.filter { $0.source == .drawing }
+        let textLines = drawingRuns.map(\.text)
         let pictures = DrawingPictureEnumerator.pictures(from: observation)
         let recordCount = prepared.recordKinds.reduce(0) { $0 + $1.count }
         let info = DrawingInfo(
@@ -45,7 +46,8 @@ enum DrawingAIContextProvider {
             recordKinds: prepared.recordKinds,
             textRuns: textLines,
             hasPictures: info.hasPictures,
-            unsupportedNotes: unsupportedNotes
+            unsupportedNotes: unsupportedNotes,
+            textLineCount: DrawingTextExtractor.visualLineCount(drawingRuns)
         )
         let toolData = DrawingAIToolData(textLines: textLines, info: info, recordKinds: prepared.recordKinds)
         return Bundle(context: context, toolData: toolData)

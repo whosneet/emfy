@@ -47,6 +47,38 @@ import Testing
         #expect(runs.map(\.text) == ["real"])
     }
 
+    // MARK: Visual line count (FM-3)
+
+    @Test func visualLineCountGroupsMultiRunLines() {
+        // Two visual rows, each drawn as three separate runs (kerned words) at the
+        // same y. Row height 10 → band 5. The old per-run count would say 6.
+        let input = [
+            run("Hello", CGRect(x: 0, y: 0, width: 20, height: 10)),
+            run("there", CGRect(x: 25, y: 0, width: 20, height: 10)),
+            run("world", CGRect(x: 50, y: 0, width: 20, height: 10)),
+            run("second", CGRect(x: 0, y: 40, width: 20, height: 10)),
+            run("line", CGRect(x: 25, y: 40, width: 20, height: 10)),
+            run("here", CGRect(x: 50, y: 40, width: 20, height: 10)),
+        ]
+        #expect(DrawingTextExtractor.visualLineCount(input) == 2)
+    }
+
+    @Test func visualLineCountIgnoresWhitespaceRuns() {
+        let input = [
+            run("alpha", CGRect(x: 0, y: 0, width: 20, height: 10)),
+            run("   ", CGRect(x: 25, y: 0, width: 20, height: 10)),     // whitespace-only
+            run("beta", CGRect(x: 0, y: 40, width: 20, height: 10)),
+        ]
+        #expect(DrawingTextExtractor.visualLineCount(input) == 2)
+    }
+
+    @Test func visualLineCountEdgeCounts() {
+        #expect(DrawingTextExtractor.visualLineCount([]) == 0)
+        #expect(DrawingTextExtractor.visualLineCount([run("only", CGRect(x: 0, y: 0, width: 10, height: 10))]) == 1)
+        // A lone whitespace run is not a line.
+        #expect(DrawingTextExtractor.visualLineCount([run("  ", CGRect(x: 0, y: 0, width: 10, height: 10))]) == 0)
+    }
+
     // MARK: Reading order
 
     @Test func readingOrderSortsTopToBottomLeftToRight() {

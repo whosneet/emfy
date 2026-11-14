@@ -64,7 +64,8 @@ struct DrawingAIContext: Equatable, Sendable {
         recordKinds: [MetafileRenderer.RecordKindCount],
         textRuns: [String],
         hasPictures: Bool,
-        unsupportedNotes: [String]
+        unsupportedNotes: [String],
+        textLineCount: Int? = nil
     ) -> DrawingAIContext {
         let mapped: [RecordCount] = recordKinds.map { RecordCount(name: $0.name, count: $0.count) }
         let sorted: [RecordCount] = mapped.sorted { a, b in
@@ -81,7 +82,9 @@ struct DrawingAIContext: Equatable, Sendable {
             textTruncated: truncated,
             hasPictures: hasPictures,
             unsupportedSummary: Array(unsupportedNotes.prefix(unsupportedLimit)),
-            textLineCount: textRuns.count
+            // Prefer the geometry-grouped visual-line count the provider passes (FM-3);
+            // without geometry fall back to the non-blank run count, never the raw count.
+            textLineCount: textLineCount ?? textRuns.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
         )
     }
 
