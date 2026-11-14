@@ -16,17 +16,22 @@ import Foundation
 ///   `BitmapDecoder.decode` would have produced, so a cached render is
 ///   byte-identical to an uncached one. A render with NO cache (every snapshot
 ///   test, Quick Look, export) takes the unchanged decode path.
-/// - Thread-safe. A single `NSLock` guards all state. The decode runs while the
-///   lock is held, so each distinct key decodes EXACTLY ONCE even under the
-///   tiled layer's concurrent threads; the decode is pure pixel work
-///   (`BitmapDecoder`, no CoreText), so holding the lock across it cannot
-///   deadlock the font-lookup pool (MEMORY: macos-27-2 font-provider hang).
+/// - Thread-safe, decode OUTSIDE the lock. An `NSCondition` guards all state,
+///   but the decode runs with the lock RELEASED (M3 release fix): the first
+///   caller for a key marks it in-flight, decodes, then re-takes the lock to
+///   publish; concurrent callers for the SAME key wait on the condition and
+///   reuse the result, so each key still decodes exactly once under the tiled
+///   layer's concurrent threads while decodes for DIFFERENT keys run in
+///   parallel. Not holding the lock across the decode keeps a pathological
+///   decode from stalling every other tile thread.
 /// - Memory is bounded. Entries are evicted least-recently-used once the total
-///   decoded-byte cost would exceed `memoryBudget`, so a document with many
-///   large DIBs (or many zoom levels) never grows without limit.
+///   decoded-byte cost would exceed `memoryBudget`. A single entry larger than
+///   the whole budget is returned UNCACHED (M3): caching it would evict the
+///   entire resident set for one pathological bitmap, so it is handed back
+///   without being stored and without disturbing the other entries.
 ///
-/// `@unchecked Sendable`: every access to the mutable dictionary, LRU order and
-/// running cost goes through `lock`.
+/// `@unchecked Sendable`: every access to the mutable dictionary, LRU order,
+/// running cost and in-flight set goes through `condition`.
 public final class DIBImageCache: @unchecked Sendable {
 
     /// Identifies a decoded DIB within ONE document: the source record index
@@ -87,11 +92,16 @@ public final class DIBImageCache: @unchecked Sendable {
     /// levels a viewer walks, all stay resident; small enough to stay bounded.
     public static let defaultMemoryBudget = 64 * 1024 * 1024
 
-    private let lock = NSLock()
+    /// Guards every mutable field below AND signals in-flight decodes: a waiter
+    /// blocks on it until the decoding thread publishes its result and broadcasts.
+    private let condition = NSCondition()
     private var entries: [Key: Entry] = [:]
     /// LRU order, oldest first. A key appears exactly once.
     private var order: [Key] = []
     private var currentCost = 0
+    /// Keys a thread is currently decoding with the lock released; a second caller
+    /// for the same key waits rather than decoding it again (single decode per key).
+    private var inFlight: Set<Key> = []
     private let memoryBudget: Int
 
     public init(memoryBudget: Int = DIBImageCache.defaultMemoryBudget) {
@@ -101,22 +111,51 @@ public final class DIBImageCache: @unchecked Sendable {
     /// Returns the cached decode for `key`, or runs `decode` (once) and caches
     /// it. `decode` returns `nil` when the DIB is unsupported/undecodable; a
     /// `nil` result is NOT cached (it is cheap to re-establish and carries its
-    /// own log). The decode runs under the lock, so concurrent callers for the
-    /// same key share a single decode.
+    /// own log). The decode runs with the lock RELEASED; concurrent callers for
+    /// the same key wait and share the single decode (M3). An over-budget result
+    /// is returned uncached, leaving the resident set untouched.
     func decodedImage(forKey key: Key, decode: () -> Decoded?) -> Decoded? {
-        lock.lock()
-        defer { lock.unlock() }
-        if let entry = entries[key] {
-            touch(key)
-            return entry.decoded
+        condition.lock()
+        while true {
+            if let entry = entries[key] {
+                touch(key)
+                condition.unlock()
+                return entry.decoded
+            }
+            // Another thread is already decoding this key: wait for it to publish,
+            // then re-check (it may have produced an entry, or an uncached/nil
+            // result, in which case this thread takes over the decode).
+            if inFlight.contains(key) {
+                condition.wait()
+                continue
+            }
+            inFlight.insert(key)
+            break
         }
-        guard let decoded = decode() else { return nil }
-        let cost = max(1, decoded.image.bytesPerRow * decoded.image.height)
-        insert(key, Entry(decoded: decoded, cost: cost))
+        condition.unlock()
+
+        // Decode with the lock released so a slow decode cannot stall other tile
+        // threads, and so decodes for different keys proceed in parallel.
+        let decoded = decode()
+
+        condition.lock()
+        inFlight.remove(key)
+        if let decoded {
+            let cost = max(1, decoded.image.bytesPerRow * decoded.image.height)
+            // An entry larger than the whole budget is returned UNCACHED, without
+            // evicting the resident set: caching it would force every other entry
+            // out for a single pathological bitmap (M3).
+            if cost <= memoryBudget {
+                insert(key, Entry(decoded: decoded, cost: cost))
+            }
+        }
+        // Wake every waiter for this (or any) key so they re-check the cache.
+        condition.broadcast()
+        condition.unlock()
         return decoded
     }
 
-    // MARK: - LRU bookkeeping (all callers hold `lock`)
+    // MARK: - LRU bookkeeping (all callers hold `condition`)
 
     private func touch(_ key: Key) {
         guard let position = order.firstIndex(of: key) else { return }
@@ -132,9 +171,10 @@ public final class DIBImageCache: @unchecked Sendable {
     }
 
     /// Drops least-recently-used entries until the total cost is within budget.
-    /// A single entry larger than the whole budget is evicted too, so the cache
-    /// never holds more than `memoryBudget` bytes (it then re-decodes that DIB
-    /// each time — acceptable for a pathological, over-budget bitmap).
+    /// Only ever called with an about-to-insert entry whose own cost is already
+    /// ≤ `memoryBudget` (an over-budget entry is returned uncached and never
+    /// inserted), so the just-inserted key — appended last in `order` — is never
+    /// the one evicted: the loop stops once the older entries are gone.
     private func evictToBudget() {
         while currentCost > memoryBudget, let oldest = order.first {
             order.removeFirst()
@@ -148,13 +188,13 @@ public final class DIBImageCache: @unchecked Sendable {
 
     /// The number of resident entries.
     public var count: Int {
-        lock.lock(); defer { lock.unlock() }
+        condition.lock(); defer { condition.unlock() }
         return entries.count
     }
 
     /// The total resident decoded-byte cost (≤ `memoryBudget`).
     public var residentCost: Int {
-        lock.lock(); defer { lock.unlock() }
+        condition.lock(); defer { condition.unlock() }
         return currentCost
     }
 }

@@ -4,6 +4,15 @@ import Testing
 @testable import EMFParse
 @testable import EMFRender
 
+/// A tiny lock-guarded counter for asserting how many times a decode closure ran
+/// under concurrency (the in-flight-dedupe proof).
+private final class OSAllocatedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func increment() { lock.lock(); count += 1; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+}
+
 /// The decoded-DIB cache (P2 performance): one decode per (record, crop,
 /// budget), reused across a tiled viewer's concurrent tiles, bounded by an LRU
 /// memory budget. Pixels are unchanged — the cache stores exactly what
@@ -125,13 +134,61 @@ struct DIBImageCacheTests {
         #expect(key1Redecoded == true, "the least-recently-used key must have been evicted")
     }
 
-    @Test("an entry larger than the whole budget is evicted, never retained over budget")
+    @Test("an entry larger than the whole budget is returned uncached, never retained over budget")
     func oversizedEntryNotRetained() throws {
         let cache = DIBImageCache(memoryBudget: 100)   // smaller than one 8×8 (256 B)
         let img = try image(8, 8)
-        _ = cache.decodedImage(forKey: key(0)) { self.decoded(img) }
+        let result = cache.decodedImage(forKey: key(0)) { self.decoded(img) }
+        #expect(result?.image === img, "the over-budget image is still returned to the caller")
         #expect(cache.count == 0, "a single over-budget entry must not be retained")
         #expect(cache.residentCost == 0)
+    }
+
+    @Test("an over-budget entry does not evict the resident set (M3)")
+    func oversizedEntryLeavesOthersResident() throws {
+        // Budget holds two 8×8 (256-byte) entries; a 32×32 (4096-byte) image is
+        // far over budget.
+        let cache = DIBImageCache(memoryBudget: 512)
+        let small = try image(8, 8)
+        _ = cache.decodedImage(forKey: key(0)) { self.decoded(small) }
+        _ = cache.decodedImage(forKey: key(1)) { self.decoded(small) }
+        #expect(cache.count == 2)
+        let bigCost = cache.residentCost
+
+        // Insert an over-budget entry: it is returned but neither cached nor
+        // allowed to evict the two resident small entries.
+        let big = try image(32, 32)
+        let result = cache.decodedImage(forKey: key(99)) { self.decoded(big) }
+        #expect(result?.image === big)
+        #expect(cache.count == 2, "the resident set must survive an over-budget insert")
+        #expect(cache.residentCost == bigCost)
+
+        // Both small keys are still resident (no re-decode).
+        var redecoded = false
+        _ = cache.decodedImage(forKey: key(0)) { redecoded = true; return self.decoded(small) }
+        _ = cache.decodedImage(forKey: key(1)) { redecoded = true; return self.decoded(small) }
+        #expect(redecoded == false, "the over-budget insert must not have evicted the small entries")
+    }
+
+    @Test("concurrent gets of one key decode exactly once (in-flight dedupe)")
+    func concurrentSameKeyDecodesOnce() throws {
+        let cache = DIBImageCache()
+        let img = try image(8, 8)
+        let decodeCount = OSAllocatedCounter()
+        // Many threads race on the SAME key. The first marks it in-flight and
+        // decodes (slowly); the rest wait on the condition and reuse the result,
+        // so the decode closure runs exactly once.
+        DispatchQueue.concurrentPerform(iterations: 64) { _ in
+            let result = cache.decodedImage(forKey: self.key(0)) {
+                decodeCount.increment()
+                // Hold briefly so the other threads pile up as waiters.
+                Thread.sleep(forTimeInterval: 0.01)
+                return self.decoded(img)
+            }
+            #expect(result?.image === img)
+        }
+        #expect(decodeCount.value == 1, "one key under concurrent demand must decode exactly once")
+        #expect(cache.count == 1)
     }
 
     /// Renders `file` into a fresh `side`×`side` sRGB bitmap and returns its raw
