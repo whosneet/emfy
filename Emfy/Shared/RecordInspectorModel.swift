@@ -268,8 +268,12 @@ enum RecordStateFormat {
 final class RecordInspectorModel {
     /// The record list rows for the current drawing.
     private(set) var refs: [RecordRef] = []
-    /// The type-name filter query, bound to the filter field.
-    var filterText = ""
+    /// The type-name filter query, bound to the filter field. Recomputes the stored
+    /// `filteredIndices` on change rather than filtering `refs` on every view update
+    /// (P11), so a long record list is scanned once per keystroke, not once per step.
+    var filterText = "" {
+        didSet { if filterText != oldValue { recomputeFilteredIndices() } }
+    }
     /// The step-through "through record" index (0 ..< refs.count).
     private(set) var selectedIndex = 0
     /// Whether per-record stepping is available (false for an EMF+ drawing file
@@ -295,9 +299,14 @@ final class RecordInspectorModel {
     /// True once a drawing has been loaded into the model.
     var hasRecords: Bool { !refs.isEmpty }
 
-    /// The indices of the rows the filter shows, in file order.
-    var filteredIndices: [Int] {
-        RecordInspectorLogic.filteredIndices(refs, query: filterText)
+    /// The indices of the rows the filter shows, in file order. Stored and recomputed
+    /// only when the filter query or `refs` change (P11), not derived on every access —
+    /// the step controls and the list read it once per frame.
+    private(set) var filteredIndices: [Int] = []
+
+    /// Rebuilds `filteredIndices` for the current `refs` and `filterText`.
+    private func recomputeFilteredIndices() {
+        filteredIndices = RecordInspectorLogic.filteredIndices(refs, query: filterText)
     }
 
     /// Loads a drawing's record list. A re-load of the same content id keeps the
@@ -310,6 +319,7 @@ final class RecordInspectorModel {
         summaryCache.removeAll()
         self.contentID = contentID
         self.refs = refs
+        recomputeFilteredIndices()
         self.drawingIndices = drawingIndices.sorted()
         self.supportsPartial = supportsPartial
         self.isEMF = isEMF

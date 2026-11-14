@@ -163,11 +163,10 @@ struct RecordsInspectorPanel: View {
         let indices = model.filteredIndices
         ScrollViewReader { proxy in
             list(indices, unsupported: unsupported)
-                // Keep the current record visible as the step index moves (scrubber,
-                // ‹ ›, Home/End, or the arrow keys), so the list follows the replay.
-                .onChange(of: model.selectedIndex) { _, index in
-                    withAnimation(.easeInOut(duration: 0.15)) { proxy.scrollTo(index, anchor: .center) }
-                }
+                // The scroll-follow lives in a zero-size child that OWNS the
+                // `selectedIndex` dependency (P11), so stepping scrolls the list
+                // without re-evaluating this body (and rebuilding the whole row list).
+                .overlay(RecordScrollFollower(model: model, proxy: proxy))
         }
     }
 
@@ -340,5 +339,22 @@ struct RecordsInspectorPanel: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// A zero-size child that keeps the current record visible as the step index moves
+/// (scrubber, ‹ ›, Home/End, or the arrow keys). It owns the `selectedIndex`
+/// dependency so the enclosing list body doesn't re-evaluate on every step (P11).
+private struct RecordScrollFollower: View {
+    let model: RecordInspectorModel
+    let proxy: ScrollViewProxy
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .onChange(of: model.selectedIndex) { _, index in
+                withAnimation(.easeInOut(duration: 0.15)) { proxy.scrollTo(index, anchor: .center) }
+            }
     }
 }
