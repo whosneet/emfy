@@ -101,6 +101,20 @@ extension View {
         }
     }
 
+    /// A drop shadow applied ONLY below iOS/macOS 26 (audit G-B). On 26 the shared
+    /// `floatingSurface` uses Liquid Glass, which casts its own shadow, so an explicit
+    /// shadow on top of it doubles up; below 26 the material surface still needs one.
+    @ViewBuilder
+    func floatingShadow(radius: CGFloat, y: CGFloat, color: Color? = nil) -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            self
+        } else if let color {
+            self.shadow(color: color, radius: radius, y: y)
+        } else {
+            self.shadow(radius: radius, y: y)
+        }
+    }
+
     /// Guarantees at least a 44×44 pt hit area on iOS (the HIG touch-target minimum) without
     /// changing the glyph size; on macOS it only sets the content shape, where a pointer
     /// handles the existing smaller controls (C5e A5).

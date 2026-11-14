@@ -127,7 +127,8 @@ struct ToastView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .floatingSurface(in: Capsule())
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+        // Shadow only pre-26 — glass casts its own, so it would double up (audit G-B).
+        .floatingShadow(radius: 8, y: 2, color: .black.opacity(0.12))
         .accessibilityElement(children: .combine)
         // The toast is one combined element, so its trailing button isn't separately
         // focusable; an accessibility action gives VoiceOver / Switch Control a route to it
