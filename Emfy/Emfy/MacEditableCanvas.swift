@@ -26,7 +26,7 @@ struct MacEditingContainer: View {
         Group {
             if let scene = session.editingScene {
                 MacEditableCanvas(
-                    scene: scene, editorModel: editorModel, controller: controller,
+                    scene: scene, editorModel: editorModel, editVersion: session.editVersion, controller: controller,
                     // Reading the armed tools here makes the container observe them, so the
                     // canvas's cursor refreshes the moment a shape or pen is armed/disarmed.
                     armedTool: editorModel.armedShapeTool,
@@ -99,6 +99,10 @@ struct MacEditingContainer: View {
 struct MacEditableCanvas: NSViewRepresentable {
     let scene: EMFEdit.Scene
     let editorModel: EditorModel
+    /// The session's edit version, so the coordinator can memoise per-edit-version derived
+    /// data (the selection's device bounds) and rebuild it only when the scene actually
+    /// changes (P4). Defaulted so only the container passes it.
+    var editVersion: Int = 0
     let controller: MacMetafileZoomController
     /// The armed shape-creation tool (E3a). Stored so a change re-runs `updateNSView`
     /// and refreshes the canvas cursor (crosshair when armed); the coordinator reads
@@ -278,8 +282,8 @@ struct MacEditableCanvas: NSViewRepresentable {
         func debugBeginSnappedMoveDrag(moveID: Int, towardID: Int) -> Bool {
             selection.replace(with: moveID)
             overlay?.needsDisplay = true
-            guard let moveBox = scene.elements.first(where: { $0.id == moveID })?.selectionBoundsDevice,
-                  let targetBox = scene.elements.first(where: { $0.id == towardID })?.selectionBoundsDevice else { return false }
+            guard let moveBox = scene.element(id: moveID)?.selectionBoundsDevice,
+                  let targetBox = scene.element(id: towardID)?.selectionBoundsDevice else { return false }
             let startView = mapping.viewPoint(fromDevice: CGPoint(x: moveBox.midX, y: moveBox.midY))
             let endDevice = CGPoint(x: targetBox.midX + mapping.deviceLength(fromViewLength: 3), y: moveBox.midY)
             let endView = mapping.viewPoint(fromDevice: endDevice)
@@ -386,9 +390,23 @@ struct MacEditableCanvas: NSViewRepresentable {
 
         // MARK: Selection bounds
 
+        /// Memoised selection device bounds (P4): the overlay draw and handle hit tests ask for
+        /// this every pointer move, and computing it re-derives each selected element's bounds
+        /// (text runs recompute their metrics). The scene only changes with the edit version and
+        /// the selection changes between interactions, so cache by (version, ids).
+        private var selectionBoundsCache: (version: Int, ids: Set<Int>, box: CGRect?)?
+        private func selectionBoundsDevice() -> CGRect? {
+            let version = parent.editVersion
+            let ids = selection.ids
+            if let c = selectionBoundsCache, c.version == version, c.ids == ids { return c.box }
+            let box = selection.boundsDevice(in: scene)
+            selectionBoundsCache = (version, ids, box)
+            return box
+        }
+
         /// The selection's bounding box in paper-view coordinates, or nil.
         func selectionViewBounds() -> CGRect? {
-            guard let deviceBox = selection.boundsDevice(in: scene) else { return nil }
+            guard let deviceBox = selectionBoundsDevice() else { return nil }
             return mapping.viewRect(fromDevice: deviceBox)
         }
 
@@ -690,7 +708,7 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// element (design call E2c-5); on anything else it is ignored.
         func doubleClick(at viewPoint: CGPoint) {
             guard let id = hitElement(at: viewPoint),
-                  let element = scene.elements.first(where: { $0.id == id }),
+                  let element = scene.element(id: id),
                   element.kind == .text else { return }
             presentTextEdit(for: id)
         }
@@ -698,7 +716,7 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Opens the text-edit popover for a text element, anchored to the run. Shared by
         /// double-click and the DEBUG hook.
         func presentTextEdit(for id: Int) {
-            guard let element = scene.elements.first(where: { $0.id == id }),
+            guard let element = scene.element(id: id),
                   element.kind == .text, let text = element.text else { return }
             selection.replace(with: id)
             parent.editorModel.textEdit = TextEditRequest(id: id, anchor: anchor(for: element), initialText: text.string)
@@ -953,9 +971,10 @@ struct MacEditableCanvas: NSViewRepresentable {
             var xs: [CGFloat] = []
             var ys: [CGFloat] = []
             if guides {
-                for element in scene.elements where !selection.contains(element.id) {
+                scene.forEachElement { element in
+                    guard !selection.contains(element.id) else { return }
                     let b = element.selectionBoundsDevice
-                    guard !b.isNull else { continue }
+                    guard !b.isNull else { return }
                     xs.append(contentsOf: [b.minX, b.midX, b.maxX])
                     ys.append(contentsOf: [b.minY, b.midY, b.maxY])
                 }
@@ -1550,7 +1569,8 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
         if let draggingTransform { context.concatenate(draggingTransform) }
         context.setStrokeColor(accent.withAlphaComponent(0.9).cgColor)
         context.setLineWidth(1 / mag)
-        for element in coordinator.scene.elements where coordinator.selection.contains(element.id) {
+        coordinator.scene.forEachElement { element in
+            guard coordinator.selection.contains(element.id) else { return }
             let box = coordinator.mapping.viewRect(fromDevice: element.selectionBoundsDevice)
             if !box.isNull { context.stroke(box.insetBy(dx: -0.5 / mag, dy: -0.5 / mag)) }
         }

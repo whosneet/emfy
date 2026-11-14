@@ -17,6 +17,15 @@ struct SceneMutationTests {
         return try SceneImporter.import(data: try Data(contentsOf: url))
     }
 
+    // P4: forEachElement visits every element in the same z-order as `elements`, without
+    // allocating the combined array.
+    @Test func forEachElementVisitsEveryElementInZOrder() throws {
+        let scene = try house()
+        var collected: [Int] = []
+        scene.forEachElement { collected.append($0.id) }
+        #expect(collected == scene.elements.map(\.id))
+    }
+
     @Test func translateMovesBoundsAndFlagsEdited() throws {
         var scene = try house()
         let id = try #require(scene.editableElements.first?.id)

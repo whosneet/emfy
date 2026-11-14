@@ -220,6 +220,15 @@ public struct Scene: Sendable, Equatable {
         layers.flatMap(\.elements)
     }
 
+    /// Calls `body` for every element in z-order without allocating the combined
+    /// `elements` array — for the per-frame hot paths (overlay draw, snap candidates)
+    /// that only iterate (P4).
+    public func forEachElement(_ body: (Element) -> Void) {
+        for layer in layers {
+            for element in layer.elements { body(element) }
+        }
+    }
+
     /// Editable (non-passthrough) elements.
     public var editableElements: [Element] {
         elements.filter { $0.kind != .passthrough }

@@ -104,8 +104,10 @@ extension CGRect {
 
 extension Scene {
 
-    /// Locates an element by id across layers, or nil.
-    func element(id: Int) -> Element? {
+    /// Locates an element by id across layers, or nil. Iterates the layers directly so
+    /// no combined `elements` array is allocated — used by the per-interaction hit tests
+    /// and lookups in the editor canvases (P4).
+    public func element(id: Int) -> Element? {
         for layer in layers {
             if let found = layer.elements.first(where: { $0.id == id }) { return found }
         }

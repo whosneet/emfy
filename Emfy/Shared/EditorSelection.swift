@@ -51,10 +51,15 @@ struct EditorSelection: Equatable {
     /// The union device-space bounding box of the selected elements, or nil when
     /// nothing valid is selected — the box the overlay draws its handles around.
     func boundsDevice(in scene: Scene) -> CGRect? {
+        guard !ids.isEmpty else { return nil }
         var box = CGRect.null
-        for element in scene.elements where ids.contains(element.id) {
-            let bounds = element.selectionBoundsDevice
-            if !bounds.isNull { box = box.isNull ? bounds : box.union(bounds) }
+        // Iterate the layers directly so no combined `elements` array is allocated on
+        // this per-frame path (P4).
+        for layer in scene.layers {
+            for element in layer.elements where ids.contains(element.id) {
+                let bounds = element.selectionBoundsDevice
+                if !bounds.isNull { box = box.isNull ? bounds : box.union(bounds) }
+            }
         }
         return box.isNull ? nil : box
     }

@@ -32,7 +32,7 @@ struct MetafileEditingContainer: View {
         Group {
             if let scene = session.editingScene {
                 EditableMetafileCanvas(
-                    scene: scene, editorModel: editorModel, controller: controller,
+                    scene: scene, editorModel: editorModel, editVersion: session.editVersion, controller: controller,
                     displayScale: displayScale, tilePaint: tilePaint, options: options, lightMode: lightMode,
                     findHighlights: findHighlights,
                     apply: { command, key in session.apply(command, coalescing: key) },
@@ -94,6 +94,10 @@ struct MetafileEditingContainer: View {
 struct EditableMetafileCanvas: UIViewRepresentable {
     let scene: EMFEdit.Scene
     let editorModel: EditorModel
+    /// The session's edit version, so the coordinator can memoise per-edit-version derived
+    /// data (the selection's device bounds) and rebuild it only when the scene actually
+    /// changes (P4). Defaulted so only the container passes it.
+    var editVersion: Int = 0
     let controller: MetafileZoomController
     var displayScale: CGFloat = 2
     var tilePaint: TilePaint = .plain
@@ -295,8 +299,22 @@ struct EditableMetafileCanvas: UIViewRepresentable {
 
         // MARK: Selection geometry
 
+        /// Memoised selection device bounds (P4): the overlay draw and handle hit tests ask for
+        /// this every pointer move, and computing it re-derives each selected element's bounds
+        /// (text runs recompute their metrics). The scene only changes with the edit version and
+        /// the selection changes between interactions, so cache by (version, ids).
+        private var selectionBoundsCache: (version: Int, ids: Set<Int>, box: CGRect?)?
+        private func selectionBoundsDevice() -> CGRect? {
+            let version = parent.editVersion
+            let ids = selection.ids
+            if let c = selectionBoundsCache, c.version == version, c.ids == ids { return c.box }
+            let box = selection.boundsDevice(in: scene)
+            selectionBoundsCache = (version, ids, box)
+            return box
+        }
+
         func selectionViewBounds() -> CGRect? {
-            guard let box = selection.boundsDevice(in: scene) else { return nil }
+            guard let box = selectionBoundsDevice() else { return nil }
             return mapping.viewRect(fromDevice: box)
         }
         private func strokeTolerance() -> CGFloat { mapping.deviceLength(fromViewLength: 10) }
@@ -421,7 +439,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             guard let overlay else { return }
             let p = g.location(in: overlay)
             guard let id = hitElement(at: p),
-                  let element = scene.elements.first(where: { $0.id == id }),
+                  let element = scene.element(id: id),
                   element.kind == .text else { return }
             presentTextEdit(for: id)
         }
@@ -444,7 +462,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         /// Opens the text-edit popover for a text element, anchored to the run. Shared by
         /// double-tap and the DEBUG hook.
         func presentTextEdit(for id: Int) {
-            guard let element = scene.elements.first(where: { $0.id == id }),
+            guard let element = scene.element(id: id),
                   element.kind == .text, let text = element.text else { return }
             selection = selection.afterClick(hit: id, additive: false)
             parent.editorModel.textEdit = TextEditRequest(id: id, anchor: anchor(for: element), initialText: text.string)
@@ -875,9 +893,10 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             var xs: [CGFloat] = []
             var ys: [CGFloat] = []
             if model.snapToGuides {
-                for element in scene.elements where !selection.contains(element.id) {
+                scene.forEachElement { element in
+                    guard !selection.contains(element.id) else { return }
                     let b = element.selectionBoundsDevice
-                    guard !b.isNull else { continue }
+                    guard !b.isNull else { return }
                     xs.append(contentsOf: [b.minX, b.midX, b.maxX])
                     ys.append(contentsOf: [b.minY, b.midY, b.maxY])
                 }
@@ -1443,7 +1462,8 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
         if let draggingTransform { context.concatenate(draggingTransform) }
         context.setStrokeColor(accent.withAlphaComponent(0.9).cgColor)
         context.setLineWidth(1 / mag)
-        for element in coordinator.scene.elements where coordinator.selection.contains(element.id) {
+        coordinator.scene.forEachElement { element in
+            guard coordinator.selection.contains(element.id) else { return }
             let box = coordinator.mapping.viewRect(fromDevice: element.selectionBoundsDevice)
             if !box.isNull { context.stroke(box.insetBy(dx: -0.5 / mag, dy: -0.5 / mag)) }
         }
