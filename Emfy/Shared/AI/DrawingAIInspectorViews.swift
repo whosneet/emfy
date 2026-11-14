@@ -67,6 +67,17 @@ struct DrawingDescribeSection: View {
             Label("Describe", systemImage: "sparkles")
         }
         .onAppear { model.providerStore = providerStore }
+        // Announce the Describe result (or failure) to VoiceOver (audit R2A3).
+        .onChange(of: model.phase) { old, phase in
+            switch phase {
+            case .done where old != .done:
+                VoiceOverAnnouncement.post("Description ready.")
+            case .failed(let message):
+                VoiceOverAnnouncement.post(message)
+            default:
+                break
+            }
+        }
         .aiConsentSheet(
             provider: model.pendingConsent,
             purpose: .drawingData,
@@ -184,6 +195,9 @@ struct DrawingAskView: View {
                     .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
                     .textSelection(.enabled)
             }
+            // Name the speaker so VoiceOver tells apart question from answer (R2A8).
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("You: \(message.text)")
         case .assistant:
             VStack(alignment: .leading, spacing: 4) {
                 if message.text.isEmpty && message.streaming {
@@ -204,6 +218,9 @@ struct DrawingAskView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // Name the speaker so VoiceOver tells apart question from answer (R2A8).
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(message.text.isEmpty && message.streaming ? "Emfy: Thinking…" : "Emfy: \(message.text)")
         }
     }
 
@@ -222,6 +239,7 @@ struct DrawingAskView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Stop")
+                .minTouchTarget()
             } else {
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill").font(.title2)
@@ -229,6 +247,7 @@ struct DrawingAskView: View {
                 .buttonStyle(.plain)
                 .disabled(!model.canSend)
                 .accessibilityLabel("Send")
+                .minTouchTarget()
             }
         }
         .padding(.horizontal, 12)
