@@ -24,6 +24,10 @@ protocol RecentsLifecycleObserver: AnyObject {
 
 @MainActor
 final class RecentsSpotlightBridge: RecentsLifecycleObserver {
+    /// Refreshes the App Shortcut parameter list. Set by the app (`SpotlightService`), because
+    /// `EmfyShortcuts` lives only in the app target; this file is also compiled into the tests.
+    @MainActor static var shortcutParametersNeedUpdate: (@MainActor () -> Void)?
+
     private let coordinator: DrawingSpotlightCoordinator
     /// Builds the searchable item for an entry id (off-main inside), or `nil` when the entry
     /// is gone or unreadable. Injected so the heavy parse/OCR stays in the app's service.
@@ -140,7 +144,7 @@ final class RecentsSpotlightBridge: RecentsLifecycleObserver {
         shortcutUpdateTask = Task { @MainActor [weak self] in
             if throttle > .zero { try? await Task.sleep(for: throttle) }
             guard self != nil, !Task.isCancelled else { return }
-            EmfyShortcuts.updateAppShortcutParameters()
+            Self.shortcutParametersNeedUpdate?()
         }
     }
 

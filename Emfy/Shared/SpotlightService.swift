@@ -34,6 +34,7 @@ final class SpotlightService {
             currentEntryIDs: { store.nonPrivateEntries.map(\.id) },
             buildItem: { [weak self] id in await self?.buildItem(for: id) ?? nil }
         )
+        RecentsSpotlightBridge.shortcutParametersNeedUpdate = { EmfyShortcuts.updateAppShortcutParameters() }
         self.bridge = bridge
         store.lifecycleObserver = bridge
     }
