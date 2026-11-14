@@ -201,6 +201,10 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         private var lastTrailingInset: CGFloat = -1
         fileprivate var drag: DragState?
 
+        /// Bumped at each drag start so an off-main ghost rasterisation that finishes after the
+        /// drag ended (or after a newer drag began) discards its stale raster (P1).
+        private var ghostGeneration = 0
+
         init(_ parent: EditableMetafileCanvas) {
             self.parent = parent
             super.init()
@@ -915,8 +919,25 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         private func prepareGhost() {
             guard let box = selectionViewBounds(), let deviceBox = selection.boundsDevice(in: scene) else { return }
             drag?.ghostViewBounds = box
-            drag?.ghost = GhostRasterizer.image(scene: scene, ids: selection.ids, deviceBounds: deviceBox, pixelScale: max(1, zoom) * parent.displayScale)
+            // Hide the selection on the tile immediately and let the overlay draw the moving
+            // outline; rasterise the ghost OFF the main thread, reusing the tile's prepared
+            // source, so a text/image/EMF+ selection never re-parses and re-observes the whole
+            // file on the main thread at drag start (P1). The outline shows until the raster lands.
             tiledView?.setHiddenIDs(selection.ids)
+            let scene = self.scene
+            let ids = selection.ids
+            let pixelScale = max(1, zoom) * parent.displayScale
+            let source = tiledView?.readyRenderSource
+            ghostGeneration &+= 1
+            let generation = ghostGeneration
+            Task { [weak self] in
+                let raster = await Task.detached(priority: .userInitiated) {
+                    GhostRaster(image: GhostRasterizer.image(scene: scene, ids: ids, deviceBounds: deviceBox, pixelScale: pixelScale, source: source))
+                }.value
+                guard let self, self.ghostGeneration == generation, self.drag != nil else { return }
+                self.drag?.ghost = raster.image
+                self.overlay?.setNeedsDisplay()
+            }
         }
 
         /// Invalidate only the region a committed edit touches (E2b item 5).
@@ -1050,6 +1071,13 @@ private final class IOSTiledSceneView: UIView {
     /// A view-space region to invalidate on the next `setScene` instead of the whole
     /// view, so a committed edit only repaints the changed tiles (E2b item 5).
     var pendingDirtyRegion: CGRect?
+
+    /// The prepared render source once ready, so the ghost rasteriser can reuse the one
+    /// file parse/observe instead of re-parsing on the main thread at drag start (P1).
+    var readyRenderSource: SceneRenderer.SceneRenderSource? {
+        if case .ready(let source) = sourceStateLock.withLock({ $0 }) { return source }
+        return nil
+    }
 
     /// Prepares the render source once, off the main actor, for a scene that needs
     /// it; a no-op for a pure-geometry scene. On arrival the view redraws so every

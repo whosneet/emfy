@@ -18,11 +18,22 @@ enum SceneGhostSupport {
     }
 }
 
+/// A `Sendable` box for a rasterised ghost, so a background rasterisation can hand the
+/// immutable `CGImage` back to the main actor (P1). The `CGImage` is read-only.
+struct GhostRaster: @unchecked Sendable {
+    let image: CGImage?
+}
+
 /// Rasterises just the selected elements into a transparent image, once at drag
 /// start, so the live drag only moves/scales/rotates that image — never re-renders
 /// the scene per frame (design call E2b-6).
 enum GhostRasterizer {
-    static func image(scene: Scene, ids: Set<Int>, deviceBounds: CGRect, pixelScale: CGFloat) -> CGImage? {
+    /// Rasterises the selection. `source` is the tiled canvas's already-prepared render
+    /// source (P1): passing it reuses the one parse/observe of the file instead of
+    /// re-parsing and re-observing the whole metafile on the (main) calling thread when the
+    /// selection contains text/image/passthrough or EMF+ content. `nil` for a pure-geometry
+    /// selection or a one-off caller, where an internal prepare is cheap or unneeded.
+    static func image(scene: Scene, ids: Set<Int>, deviceBounds: CGRect, pixelScale: CGFloat, source: SceneRenderer.SceneRenderSource? = nil) -> CGImage? {
         guard !ids.isEmpty, deviceBounds.width > 0, deviceBounds.height > 0 else { return nil }
         let width = max(1, Int((deviceBounds.width * pixelScale).rounded()))
         let height = max(1, Int((deviceBounds.height * pixelScale).rounded()))
@@ -39,7 +50,12 @@ enum GhostRasterizer {
         let selected = scene.elements.filter { ids.contains($0.id) }
         let layer = Layer(id: 0, name: "ghost", elements: selected)
         let subset = Scene(pageBoundsDevice: deviceBounds, layers: [layer], partition: scene.partition, source: scene.source)
-        SceneRenderer.render(subset, into: context, target: CGRect(x: 0, y: 0, width: width, height: height))
+        let target = CGRect(x: 0, y: 0, width: width, height: height)
+        if let source {
+            SceneRenderer.render(subset, into: context, target: target, source: source)
+        } else {
+            SceneRenderer.render(subset, into: context, target: target)
+        }
         return context.makeImage()
     }
 }

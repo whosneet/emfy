@@ -234,6 +234,10 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Live drag state. `nil` between drags.
         fileprivate var drag: DragState?
 
+        /// Bumped at each drag start so an off-main ghost rasterisation that finishes after the
+        /// drag ended (or after a newer drag began) discards its stale raster (P1).
+        private var ghostGeneration = 0
+
         init(_ parent: MacEditableCanvas) {
             self.parent = parent
             super.init()
@@ -899,8 +903,25 @@ struct MacEditableCanvas: NSViewRepresentable {
         private func prepareGhost() {
             guard let box = selectionViewBounds(), let deviceBox = selection.boundsDevice(in: scene) else { return }
             drag?.ghostViewBounds = box
-            drag?.ghost = GhostRasterizer.image(scene: scene, ids: selection.ids, deviceBounds: deviceBox, pixelScale: max(1, magnification) * (overlay?.window?.backingScaleFactor ?? 2))
+            // Hide the selection on the tile immediately and let the overlay draw the moving
+            // outline; rasterise the ghost OFF the main thread, reusing the tile's prepared
+            // source, so a text/image/EMF+ selection never re-parses and re-observes the whole
+            // file on the main thread at drag start (P1). The outline shows until the raster lands.
             tiledView?.setHiddenIDs(selection.ids)
+            let scene = self.scene
+            let ids = selection.ids
+            let pixelScale = max(1, magnification) * (overlay?.window?.backingScaleFactor ?? 2)
+            let source = tiledView?.readyRenderSource
+            ghostGeneration &+= 1
+            let generation = ghostGeneration
+            Task { [weak self] in
+                let raster = await Task.detached(priority: .userInitiated) {
+                    GhostRaster(image: GhostRasterizer.image(scene: scene, ids: ids, deviceBounds: deviceBox, pixelScale: pixelScale, source: source))
+                }.value
+                guard let self, self.ghostGeneration == generation, self.drag != nil else { return }
+                self.drag?.ghost = raster.image
+                self.overlay?.needsDisplay = true
+            }
         }
 
         // MARK: Snapping + grid (E3e)
@@ -1179,6 +1200,13 @@ private final class TiledSceneView: NSView {
     /// view, so a committed move/resize/nudge only repaints the changed tiles (E2b item
     /// 5). Set on the main thread by the coordinator before it applies the edit.
     var pendingDirtyRegion: CGRect?
+
+    /// The prepared render source once ready, so the ghost rasteriser can reuse the one
+    /// file parse/observe instead of re-parsing on the main thread at drag start (P1).
+    var readyRenderSource: SceneRenderer.SceneRenderSource? {
+        if case .ready(let source) = sourceStateLock.withLock({ $0 }) { return source }
+        return nil
+    }
 
     /// Prepares the render source once, off the main actor, for a scene that needs
     /// it (replay/passthrough/EMF+). A pure-geometry scene needs none, so this is a
