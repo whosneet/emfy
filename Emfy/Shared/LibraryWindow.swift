@@ -156,6 +156,9 @@ struct LibraryWindow: View {
             // Guard a Remove of the open, dirty editing document so its unsaved edits aren't
             // thrown away (R2U3): the removal surface awaits this before it removes.
             removal.removalGuard = { [model] id in await model.guardRemoval(of: id) }
+            // Guard a bulk Clear Recents the same way, so the open, dirty editing document's edits
+            // aren't thrown away by a clear (item 0 / R2U3).
+            removal.clearGuard = { [model] in await model.guardClear() }
             await store.loadIfNeeded()
             // Sync the settings-driven cap and Private mode into the store before the
             // first open can add anything (S1a-5).

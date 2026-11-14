@@ -132,6 +132,17 @@ final class LibraryWindowModel {
         id == selection && session?.editing == .editing && session?.isDirty == true
     }
 
+    /// Runs the save guard before a bulk Clear Recents (item 0 / R2U3). A clear removes every
+    /// entry, including the open document, so it must resolve that document's save exactly like a
+    /// single-entry Remove: a clean EMF autosaves and the clear proceeds; a dirty WMF/WMZ (or a
+    /// save error) raises its dialog and returns `false`, so the clear is aborted and the user
+    /// resolves the save on the document first. No open editing document ⇒ proceed. Awaited by the
+    /// clear surface.
+    func guardClear() async -> Bool {
+        guard let selection else { return true }
+        return await guardRemoval(of: selection)
+    }
+
     /// Runs the save guard for a remove of the open, dirty document (R2U3): ends editing, which
     /// autosaves a clean EMF and returns `true` (remove proceeds), or — for a WMF/WMZ or a save
     /// error — raises the save-choice dialog and returns `false`, so the removal is aborted and

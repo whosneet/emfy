@@ -1215,6 +1215,45 @@ private final class FlakyWrite: @unchecked Sendable {
         await model.session?.beginEditing()         // editing but not dirty
         #expect(!model.removalNeedsGuard(a))
     }
+
+    // MARK: - Item 0: Clear Recents is guarded like a single-entry Remove
+
+    // A dirty WMF open document aborts a bulk clear and raises its save dialog, so the clear
+    // can't silently discard the WMF edit.
+    @Test func clearGuardHoldsADirtyWMF() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.wmf" })
+        let a = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        let permitted = await model.guardClear()
+        #expect(!permitted)                         // clear aborted; the user resolves the save
+        #expect(session.pendingWMFConfirmation != nil)
+        #expect(boxes.box(for: a).count == 0)
+    }
+
+    // A dirty EMF open document autosaves on the way out, then the clear proceeds.
+    @Test func clearGuardSavesAnEMFThenPermits() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.emf" })
+        let a = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        let permitted = await model.guardClear()
+        #expect(permitted)                          // the edit saved first ⇒ clear proceeds
+        #expect(boxes.box(for: a).count == 1)
+        #expect(session.editing == .notEditing)
+    }
+
+    // No open document (or a non-editing one) ⇒ the clear proceeds with no guard.
+    @Test func clearGuardPermitsWhenNoDocumentIsOpen() async {
+        let model = LibraryWindowModel()
+        #expect(await model.guardClear())           // nothing selected ⇒ nothing to lose
+    }
 }
 
 // MARK: - Store pruning + real-file round trip

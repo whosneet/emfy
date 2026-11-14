@@ -88,6 +88,12 @@ final class RemovalCoordinator {
     /// elsewhere ⇒ no guard, remove straight away.
     @ObservationIgnored var removalGuard: ((UUID) async -> Bool)?
 
+    /// A per-window guard consulted before a bulk Clear Recents (item 0 / R2U3): it runs the save
+    /// guard on the open, dirty editing document and returns `false` to abort the clear (the user
+    /// must resolve a WMF save dialog / save-failure alert on the document first). Set by
+    /// `LibraryWindow`; `nil` elsewhere ⇒ no guard, clear straight away.
+    @ObservationIgnored var clearGuard: (() async -> Bool)?
+
     /// Asks to remove a single entry. Ordinary entries are removed at once (with the
     /// Undo toast); a received entry raises the Save-a-Copy confirmation. The open, dirty
     /// editing document's edits are saved (or its save dialog is raised) first, so a Remove
@@ -187,7 +193,19 @@ final class RemovalCoordinator {
     /// The folder exporter finished for Clear.
     func finishFolderExport(success: Bool, store: RecentsStore) {
         guard success else { return }
-        store.clear()
+        performClear(store: store)
+    }
+
+    /// Clears Recents, but resolves the open, dirty editing document's save first when a window
+    /// guard is installed (item 0 / R2U3): an EMF autosaves and the clear proceeds; a WMF/WMZ or a
+    /// save error raises its dialog and the clear is aborted until the user decides. With no guard
+    /// (surfaces outside a library window) it clears straight away.
+    func performClear(store: RecentsStore) {
+        guard let clearGuard else { store.clear(); return }
+        Task { @MainActor in
+            guard await clearGuard() else { return }   // aborted: resolve the save first
+            store.clear()
+        }
     }
 
     private func uniqueName(_ name: String, in files: [String: Data]) -> String {
@@ -240,7 +258,7 @@ private struct RecentsRemovalModifier: ViewModifier {
                 if RemovalConfirmation.plan(scope: .clear, receivedCount: request.receivedCount, totalCount: request.totalCount).offersSaveCopy {
                     Button("Save a Copy…") { coordinator.saveCopiesThenClear(store: store) }
                 }
-                Button("Clear Recents", role: .destructive) { store.clear() }
+                Button("Clear Recents", role: .destructive) { coordinator.performClear(store: store) }
                 Button("Cancel", role: .cancel) {}
             } message: { request in
                 Text(RemovalConfirmation.plan(scope: .clear, receivedCount: request.receivedCount, totalCount: request.totalCount).message)
