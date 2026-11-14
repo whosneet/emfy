@@ -327,7 +327,7 @@ struct SettingsModelTests {
         #expect(redecoded.isPinned == true)
     }
 
-    // MARK: - Cap eviction (pinned-exempt, received-last)
+    // MARK: - Cap eviction (pinned-exempt, owned never evicted — ST3)
 
     @Test
     func capEvictsOldestUnpinnedNonReceivedFirstAndExemptsPinned() {
@@ -347,9 +347,11 @@ struct SettingsModelTests {
         #expect(Set(RecentsStore.entriesToEvict(from: entries, max: 2).map(\.id))
                 == Set([normalOld.id, normalNew.id]))
 
-        // Cap 1 → both normals, then the received copy. Pinned still exempt.
+        // Cap 1 → both normals go; the received copy and the pinned entry are exempt
+        // (ST3: owned drawings are never evicted), so the list sits above the cap.
         let evict3 = RecentsStore.entriesToEvict(from: entries, max: 1)
-        #expect(Set(evict3.map(\.id)) == Set([normalOld.id, normalNew.id, receivedMid.id]))
+        #expect(Set(evict3.map(\.id)) == Set([normalOld.id, normalNew.id]))
+        #expect(!evict3.contains { $0.id == receivedMid.id })
         #expect(!evict3.contains { $0.id == pinnedOld.id })
 
         // All pinned, over the cap → nothing evicted.
@@ -382,9 +384,12 @@ struct SettingsModelTests {
         #expect(Set(to1.evicted.map(\.id)) == Set([normalOld.id, normalMid.id, normalNew.id]))
         #expect(to1.dropsReceivedFile == false)
 
+        // ST3: even a cap of 0 never evicts the received (owned) copy — only the three
+        // plain references go, and the received copy keeps the list above the cap.
         let to0 = RecentsCapPolicy.shrink(entries, to: 0)
-        #expect(to0.evicted.count == 4)
-        #expect(to0.dropsReceivedFile == true)
+        #expect(to0.evicted.count == 3)
+        #expect(to0.dropsReceivedFile == false)
+        #expect(!to0.evicted.contains { $0.id == received.id })
 
         #expect(RecentsCapPolicy.shrink(entries, to: 10).evicted.isEmpty)
     }
@@ -512,10 +517,12 @@ struct SettingsModelTests {
         let r3 = entry(name: "r3.emf", bytes: 1, opened: at(30), received: true)
         let entries = [n1, r1, r2, r3]
 
-        // Cap 1 → the lone non-received, then the two oldest received copies.
+        // ST3: received (owned) copies are never evicted, so even an aggressive shrink
+        // drops only the lone non-received reference and affects no received file.
         let to1 = RecentsCapPolicy.shrink(entries, to: 1)
-        #expect(to1.dropsReceivedFile == true)
-        #expect(Set(to1.evictedReceived.map(\.id)) == Set([r1.id, r2.id]))
+        #expect(to1.dropsReceivedFile == false)
+        #expect(to1.evictedReceived.isEmpty)
+        #expect(to1.evicted.map(\.id) == [n1.id])
 
         // Cap 3 → only the non-received drops; no received file is affected.
         let to3 = RecentsCapPolicy.shrink(entries, to: 3)
@@ -617,12 +624,13 @@ struct SettingsModelTests {
         #expect(store.entries.count == 5)
         #expect(store.privateIDs.count == 3)
 
-        // Lower the cap to 1: only the two persisted entries are accounted, so one is
-        // evicted and no private entry is touched.
+        // Lower the cap to 1: no private entry is touched (they never count toward the
+        // cap), and the two persisted entries are owned copies, which ST3 never evicts —
+        // so both survive and the list sits above the cap rather than lose a drawing.
         store.applyCap(1)
         await store.waitForPersistenceForTesting()
         #expect(store.privateIDs.count == 3)
-        #expect(persistedNames(store).count == 1)
+        #expect(persistedNames(store).count == 2)
     }
 
     // MARK: - Cold-launch ordering (review #2)
@@ -651,50 +659,21 @@ struct SettingsModelTests {
         return (dir, store, settings, name, CapReductionController())
     }
 
+    // ST3: a library of owned copies is never shrunk by lowering the cap. Lowering the
+    // cap raises no "drop a received copy" confirmation (that path is obsolete), opens
+    // no exporter, and keeps every owned drawing — the list simply sits above the cap.
     @Test @MainActor
-    func capControllerCancelRestoresAndReduceAnywayShrinks() async throws {
+    func capControllerNeverDropsOwnedDrawingsWhenLoweringTheCap() async throws {
         let (dir, store, settings, suite, cap) = try await seededCapScenario(count: 12)
         defer { try? FileManager.default.removeItem(at: dir); UserDefaults.standard.removePersistentDomain(forName: suite) }
 
-        // Lowering 50 → 10 would drop a received copy, so it confirms (pending set).
+        // Lowering 50 → 10 over 12 owned copies: no confirmation, no exporter, applied
+        // at once — and every owned drawing survives (ST3).
         cap.handleChange(from: .fifty, to: .ten, store: store)
-        #expect(cap.pending != nil)
-
-        // Cancel restores the picker and leaves Recents untouched.
-        cap.cancel(settings: settings)
+        await store.waitForPersistenceForTesting()
         #expect(cap.pending == nil)
-        #expect(settings.recentsToKeep == .fifty)
-        #expect(store.entries.count == 12)
-
-        // Reduce Anyway shrinks to the new cap.
-        cap.handleChange(from: .fifty, to: .ten, store: store)
-        cap.reduceAnyway(store: store)
-        await store.waitForPersistenceForTesting()
-        #expect(store.entries.count == 10)
-    }
-
-    @Test @MainActor
-    func capControllerExportFailureRestoresAndSuccessShrinks() async throws {
-        let (dir, store, settings, suite, cap) = try await seededCapScenario(count: 12)
-        defer { try? FileManager.default.removeItem(at: dir); UserDefaults.standard.removePersistentDomain(forName: suite) }
-
-        // Export failure (or cancel) must restore the picker — not leave it ahead of
-        // the store, which never shrank.
-        cap.handleChange(from: .fifty, to: .ten, store: store)
-        cap.saveCopiesThenReduce(store: store, settings: settings)
-        await cap.waitForExportPreparationForTesting()
-        #expect(cap.isExporting)
-        cap.finishExport(success: false, store: store, settings: settings)
-        #expect(settings.recentsToKeep == .fifty)
-        #expect(store.entries.count == 12)
-
-        // A successful export shrinks.
-        cap.handleChange(from: .fifty, to: .ten, store: store)
-        cap.saveCopiesThenReduce(store: store, settings: settings)
-        await cap.waitForExportPreparationForTesting()
-        cap.finishExport(success: true, store: store, settings: settings)
-        await store.waitForPersistenceForTesting()
-        #expect(store.entries.count == 10)
+        #expect(cap.isExporting == false)
+        #expect(store.entries.count == 12)        // owned copies never evicted
     }
 
     // MARK: - Export scale/cap selection

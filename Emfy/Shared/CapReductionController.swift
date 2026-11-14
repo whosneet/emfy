@@ -47,6 +47,9 @@ final class CapReductionController {
     func handleChange(from old: EmfySettings.RecentsCap, to new: EmfySettings.RecentsCap, store: RecentsStore) {
         let visible = store.entries.filter { !store.privateIDs.contains($0.id) }
         let decision = RecentsCapPolicy.shrink(visible, to: new.count)
+        // Under ST3 the cap never evicts an owned (received/New/AI) copy, so
+        // `dropsReceivedFile` is always false and the confirmation/export branch below is
+        // unreachable — kept as a safety net should the eviction policy ever change.
         if decision.dropsReceivedFile {
             pending = Pending(newCap: new.count, oldCap: old, affected: decision.evictedReceived)
         } else {
