@@ -1,5 +1,8 @@
 import CoreSpotlight
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// One library window: a `NavigationSplitView` with a recents sidebar and a viewer
 /// detail (v3-plan §9.1). On macOS and regular-width iPad it is a true multi-column
@@ -547,9 +550,30 @@ struct LibraryWindow: View {
         case .frontWindow:
             if model.selection != id { model.select(id) }
         case .newWindow:
+            #if os(iOS)
+            activateNewWindow(for: id)
+            #else
             openWindow(id: "library", value: LibraryWindowValue(entryID: id))
+            #endif
         }
     }
+
+    #if os(iOS)
+    /// Opens a new window for `id` through the scene-activation API so a failure falls
+    /// back to the front window instead of silently dropping the open. The iPhone Duo
+    /// outer display can't create a second window — and `supportsMultipleWindows` is
+    /// true on BOTH Duo displays, so it can't tell them apart (Axiom resize-auditor §15)
+    /// — so the request's error handler is the only reliable fallback (R1). iOS 17+. The
+    /// carried user activity shows the entry in the new window (handled by
+    /// `.onContinueUserActivity` above).
+    private func activateNewWindow(for id: UUID) {
+        var request = UISceneSessionActivationRequest(role: .windowApplication)
+        request.userActivity = WindowOpenActivity.make(id)
+        UIApplication.shared.activateSceneSession(for: request) { _ in
+            Task { @MainActor in if model.selection != id { model.select(id) } }
+        }
+    }
+    #endif
 }
 
 /// The detail: the platform viewer over a `DocumentSession` the window model owns and

@@ -126,9 +126,7 @@ struct RecentTileView: View {
 struct RecentListRow: View {
     @Environment(RecentsStore.self) private var store
     @Environment(EmfySettings.self) private var settings
-    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     @Environment(\.displayScale) private var displayScale
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let entry: RecentEntry
     let isSelecting: Bool
@@ -158,7 +156,6 @@ struct RecentListRow: View {
 
     var body: some View {
         rowContent
-            .contextMenu { menu }
             .swipeActions(edge: .trailing) {
                 Button(role: .destructive, action: onRemove) { Label("Remove", systemImage: "trash") }
             }
@@ -201,12 +198,28 @@ struct RecentListRow: View {
                     .accessibilityLabel(accessibilityLabel)
             }
         } else {
-            Button(action: onOpen) { rowBody }
-                .buttonStyle(.plain)
+            // A tap opens; a long press shows the UIKit context menu whose "Open in New
+            // Window" uses UIWindowScene.ActivationAction — the SAME menu the grid tile
+            // uses (WindowOpenMenu.TileOpenInteraction). It shows the "Open" alternate
+            // where a second window can't be created (iPhone, Duo outer) and makes one
+            // where it can, instead of the old `openWindow` gated on
+            // supportsMultipleWindows, which failed silently on the Duo outer display (R1).
+            rowBody
                 .contentShape(Rectangle())
+                .overlay(
+                    TileOpenInteraction(
+                        entryID: entry.id,
+                        onOpen: onOpen,
+                        onRemove: onRemove,
+                        isPinned: store.isPinned(entry.id),
+                        canPin: !isPrivate,
+                        onPin: { store.togglePin(entry.id) }
+                    )
+                )
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(accessibilityLabel)
                 .accessibilityAddTraits(.isButton)
+                .accessibilityAction(.default) { onOpen() }
                 .accessibilityActions {
                     if !isPrivate {
                         Button(store.isPinned(entry.id) ? "Unpin" : "Pin") { store.togglePin(entry.id) }
@@ -277,28 +290,6 @@ struct RecentListRow: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
             }
-    }
-
-    @ViewBuilder
-    private var menu: some View {
-        if OpenRouting.offersNewWindow(supportsMultipleWindows: supportsMultipleWindows) {
-            Button {
-                openWindow(id: "library", value: LibraryWindowValue(entryID: entry.id))
-            } label: {
-                Label("Open in New Window", systemImage: "macwindow.badge.plus")
-            }
-        }
-        if !isPrivate {
-            let pinned = store.isPinned(entry.id)
-            Button {
-                store.togglePin(entry.id)
-            } label: {
-                Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin")
-            }
-        }
-        Button(role: .destructive, action: onRemove) {
-            Label("Remove from Recents", systemImage: "trash")
-        }
     }
 
     private var accessibilityLabel: String {
