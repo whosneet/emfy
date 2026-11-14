@@ -339,7 +339,13 @@ struct LibraryWindow: View {
             guard let id = CoreSpotlightActivity.entryID(from: activity) else { return }
             Task {
                 await store.loadIfNeeded()
-                if store.entry(id: id) != nil { model.select(id) }
+                if store.entry(id: id) != nil {
+                    model.select(id)
+                } else {
+                    // The Spotlight index still held an entry that's been removed from Recents
+                    // (C5e U6): tell the user instead of doing nothing.
+                    toastCenter.show("That drawing is no longer in Recents", systemImage: "clock.badge.xmark")
+                }
             }
         }
         // New Drawing (E3a): the Mac File menu fires this focused action; every window
