@@ -21,27 +21,40 @@ struct DrawingCleanupView: View {
     @State private var exporting = false
 
     var body: some View {
+        #if os(iOS)
+        // A standard sheet: a NavigationStack with the shared Done toolbar (audit G-D).
+        NavigationStack {
+            phaseBody
+                .navigationTitle("Clean up & compatibility")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { SheetDoneToolbar { onClose() } }
+                .modifier(CleanupSheetModifiers(exporting: $exporting, exportDocument: exportDocument, exportName: exportName, model: model))
+        }
+        #else
         VStack(spacing: 0) {
             header
             Divider()
-            switch model.phase {
-            case .idle, .analysing:
-                analysing
-            case .failed(let message):
-                ContentUnavailableView("Couldn’t analyse", systemImage: "exclamationmark.triangle", description: Text(message))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .ready:
-                content
-            }
+            phaseBody
         }
         .macSheetMinFrame(minWidth: 460, minHeight: 440)
-        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .data, defaultFilename: exportName) { _ in }
-        // Announce a Clean-up failure to VoiceOver (audit R2A3).
-        .onChange(of: model.phase) { _, phase in
-            if case .failed(let message) = phase { VoiceOverAnnouncement.post(message) }
+        .modifier(CleanupSheetModifiers(exporting: $exporting, exportDocument: exportDocument, exportName: exportName, model: model))
+        #endif
+    }
+
+    @ViewBuilder
+    private var phaseBody: some View {
+        switch model.phase {
+        case .idle, .analysing:
+            analysing
+        case .failed(let message):
+            ContentUnavailableView("Couldn’t analyse", systemImage: "exclamationmark.triangle", description: Text(message))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .ready:
+            content
         }
     }
 
+    #if os(macOS)
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
@@ -54,6 +67,7 @@ struct DrawingCleanupView: View {
         }
         .padding(12)
     }
+    #endif
 
     private var analysing: some View {
         VStack(spacing: 10) {
@@ -224,5 +238,23 @@ struct DrawingCleanupView: View {
         let safeBase = base.isEmpty ? "Drawing" : base
         let safeExt = ext.isEmpty ? "emf" : ext
         return "\(safeBase)-\(suffix).\(safeExt)"
+    }
+}
+
+/// The exporter + failure-announcement modifiers the Clean-up sheet shares between its iOS
+/// NavigationStack body and the Mac header body (G-D), so neither branch duplicates them.
+private struct CleanupSheetModifiers: ViewModifier {
+    @Binding var exporting: Bool
+    let exportDocument: MetafileCopyDocument
+    let exportName: String
+    let model: DrawingCleanupModel
+
+    func body(content: Content) -> some View {
+        content
+            .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .data, defaultFilename: exportName) { _ in }
+            // Announce a Clean-up failure to VoiceOver (audit R2A3).
+            .onChange(of: model.phase) { _, phase in
+                if case .failed(let message) = phase { VoiceOverAnnouncement.post(message) }
+            }
     }
 }

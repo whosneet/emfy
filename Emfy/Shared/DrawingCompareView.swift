@@ -22,58 +22,81 @@ struct DrawingCompareView: View {
     private var isCompact: Bool { horizontalSizeClass == .compact }
 
     var body: some View {
+        #if os(iOS)
+        // A standard sheet: a NavigationStack with the shared Done toolbar, so the close
+        // control matches every other iOS sheet (glass X on 26, "Done" below) instead of a
+        // hand-rolled header button (audit G-D).
+        NavigationStack {
+            VStack(spacing: 0) {
+                iosSubheader
+                Divider()
+                phaseBody
+            }
+            .navigationTitle("Compare versions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { SheetDoneToolbar { onClose() } }
+        }
+        #else
         VStack(spacing: 0) {
             header
             Divider()
-            switch model.phase {
-            case .idle, .comparing:
-                comparing
-            case .failed(let message):
-                failed(message)
-            case .ready:
-                ready
-            }
+            phaseBody
         }
         .macSheetMinFrame(minWidth: 540, minHeight: 460)
+        #endif
     }
-
-    // MARK: Header
 
     @ViewBuilder
-    private var header: some View {
-        if isCompact {
-            // Title + Done always visible on one row, the mode picker on its own row below —
-            // so the Done button is never pushed off-screen and the picker never fills the
-            // header at large accessibility sizes (C5e L1 review).
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    titleBlock
-                    Spacer(minLength: 8)
-                    Button("Done", action: onClose).keyboardShortcut(.defaultAction)
-                        .lineLimit(1)
-                }
-                if model.phase == .ready {
-                    compactModeMenu
-                }
-            }
-            .padding(12)
-        } else {
-            HStack(spacing: 12) {
-                titleBlock
-                Spacer()
-                if model.phase == .ready {
-                    Picker("Mode", selection: $model.mode) {
-                        ForEach(DrawingCompareModel.Mode.allCases) { mode in
-                            Text(mode.label).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented).labelsHidden().fixedSize()
-                }
-                Button("Done", action: onClose).keyboardShortcut(.defaultAction)
-            }
-            .padding(12)
+    private var phaseBody: some View {
+        switch model.phase {
+        case .idle, .comparing:
+            comparing
+        case .failed(let message):
+            failed(message)
+        case .ready:
+            ready
         }
     }
+
+    #if os(iOS)
+    /// The iOS subheader under the nav bar: the version subtitle, and the mode menu when a
+    /// comparison is ready. The title and Done live in the navigation bar (G-D).
+    @ViewBuilder
+    private var iosSubheader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(model.baselineLabel) → \(model.currentLabel)")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if model.phase == .ready {
+                compactModeMenu
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+    }
+    #endif
+
+    // MARK: Header (Mac)
+
+    #if os(macOS)
+    @ViewBuilder
+    private var header: some View {
+        HStack(spacing: 12) {
+            titleBlock
+            Spacer()
+            if model.phase == .ready {
+                Picker("Mode", selection: $model.mode) {
+                    ForEach(DrawingCompareModel.Mode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+            }
+            Button("Done", action: onClose).keyboardShortcut(.defaultAction)
+        }
+        .padding(12)
+    }
+    #endif
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
