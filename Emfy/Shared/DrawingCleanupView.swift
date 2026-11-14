@@ -36,6 +36,10 @@ struct DrawingCleanupView: View {
         }
         .macSheetMinFrame(minWidth: 460, minHeight: 440)
         .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .data, defaultFilename: exportName) { _ in }
+        // Announce a Clean-up failure to VoiceOver (audit R2A3).
+        .onChange(of: model.phase) { _, phase in
+            if case .failed(let message) = phase { VoiceOverAnnouncement.post(message) }
+        }
     }
 
     private var header: some View {

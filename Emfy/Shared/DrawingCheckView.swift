@@ -58,6 +58,12 @@ struct DrawingCheckView: View {
                 onCancel: { model.cancelPendingFix() })
         }
         .onAppear { summariseModel.providerStore = providerStore }
+        // Announce a Check failure (analysis finished with no report) to VoiceOver (R2A3).
+        .onChange(of: model.isAnalysing) { wasAnalysing, analysing in
+            if wasAnalysing, !analysing, model.report == nil {
+                VoiceOverAnnouncement.post("This drawing couldn’t be checked.")
+            }
+        }
         .sheet(isPresented: $showingCompare) {
             DrawingCompareView(model: compareModel, onClose: { showingCompare = false })
         }

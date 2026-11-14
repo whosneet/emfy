@@ -118,6 +118,17 @@ struct MetafileInfoView: View {
         .onChange(of: aiInputs?.contentID) { _, id in
             explainModel.resetIfChanged(key: id ?? 0)
         }
+        // Announce the Explain result (or failure) to VoiceOver (audit R2A3).
+        .onChange(of: explainModel.phase) { old, phase in
+            switch phase {
+            case .done where old != .done:
+                VoiceOverAnnouncement.post("Explanation ready.")
+            case .failed(let message):
+                VoiceOverAnnouncement.post(message)
+            default:
+                break
+            }
+        }
         // A provider Explain presents the consent screen before any send (A2b).
         .aiConsentSheet(
             provider: explainModel.pendingConsent,
