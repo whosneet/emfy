@@ -64,10 +64,24 @@ final class AIProviderStore {
         providers.append(config)
     }
 
-    /// Replaces a provider's config (name, base URL, model) in place.
+    /// Replaces a provider's config (name, base URL, model) in place. Consent is bound to
+    /// the (kind, host) the user approved; if either changes, the drawing data and stored
+    /// key would otherwise reach a different host under the old consent, so consent is
+    /// dropped and the user must allow the new host again (S2).
     func updateProvider(_ config: AIProviderConfig) {
         guard let index = providers.firstIndex(where: { $0.id == config.id }) else { return }
+        if !Self.consentSurvivesEdit(from: providers[index], to: config) {
+            service.revokeConsent(config.id)
+        }
         providers[index] = config
+    }
+
+    /// Whether an edit keeps the existing consent: only when the provider kind and the
+    /// Base URL host are both unchanged (host compared case-insensitively). Pure, so the
+    /// policy is unit-tested and the editor can warn before saving (S2).
+    nonisolated static func consentSurvivesEdit(from old: AIProviderConfig, to new: AIProviderConfig) -> Bool {
+        old.kind == new.kind
+            && old.baseURL.host?.lowercased() == new.baseURL.host?.lowercased()
     }
 
     /// Removes a provider entirely: its config, its key AND its consent (core API).

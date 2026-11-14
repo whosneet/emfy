@@ -49,6 +49,40 @@ import Testing
         #expect(store.selectedEngineID == AIEngineSelection.appleID) // selection reset
     }
 
+    // S2: consent is bound to the (kind, host) the user approved. Editing a provider's
+    // Base URL host must drop consent, so drawing data and the key can't reach a new host
+    // under the old grant; a cosmetic edit (name/model, same host) keeps it.
+    @Test func editingTheHostRevokesConsentButACosmeticEditKeepsIt() {
+        let (store, _, _) = make()
+        let compat = AIProviderConfig(id: "c1", kind: .openAICompatible, displayName: "Local", baseURL: URL(string: "https://host-a.example/v1")!, model: "m")
+        store.addProvider(compat, key: "k")
+        store.grantConsent("c1", purpose: .drawingData)
+        #expect(store.isConsentGranted("c1"))
+
+        // A name/model change on the same host keeps consent.
+        var cosmetic = compat
+        cosmetic.displayName = "Renamed"
+        cosmetic.model = "m2"
+        store.updateProvider(cosmetic)
+        #expect(store.isConsentGranted("c1"))
+
+        // Changing the host drops consent — the consent sheet is required again.
+        var moved = cosmetic
+        moved.baseURL = URL(string: "https://host-b.example/v1")!
+        store.updateProvider(moved)
+        #expect(store.isConsentGranted("c1") == false)
+    }
+
+    @Test func consentSurvivesEditPolicy() {
+        let a = AIProviderConfig(id: "x", kind: .openAICompatible, displayName: "A", baseURL: URL(string: "https://H.Example/v1")!, model: "m")
+        var differentHost = a; differentHost.baseURL = URL(string: "https://host.example/v1")!
+        #expect(!AIProviderStore.consentSurvivesEdit(from: a, to: differentHost))
+        var caseOnly = a; caseOnly.baseURL = URL(string: "https://h.example/v1")!   // host differs only by case
+        #expect(AIProviderStore.consentSurvivesEdit(from: a, to: caseOnly))
+        var kindChange = a; kindChange.kind = .openAI
+        #expect(!AIProviderStore.consentSurvivesEdit(from: a, to: kindChange))
+    }
+
     @Test func providersAndSelectionPersist() {
         let defaults = UserDefaults(suiteName: "persist-" + UUID().uuidString)!
         do {

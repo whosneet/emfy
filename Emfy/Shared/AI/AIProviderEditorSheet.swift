@@ -148,7 +148,22 @@ struct AIProviderEditorSheet: View {
             }
         } header: {
             Text("Details")
+        } footer: {
+            // S2: consent (and the stored key) were approved for a specific host. Warn
+            // before saving that changing it re-targets where drawing data would go and
+            // requires approving the new host again.
+            if isEditing, hostChanged, store.isConsentGranted(providerID) {
+                Text("You’ve pointed this provider at a different server. Emfy will ask your permission again before sending any drawing there.")
+                    .foregroundStyle(.orange)
+            }
         }
+    }
+
+    /// Whether the edited Base URL now points at a different host (or kind) than the saved
+    /// provider, so saving will drop consent (S2).
+    private var hostChanged: Bool {
+        guard let original = config, let draft = draftConfig() else { return false }
+        return !AIProviderStore.consentSurvivesEdit(from: original, to: draft)
     }
 
     @ViewBuilder
