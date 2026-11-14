@@ -39,36 +39,70 @@ struct DrawingCompareView: View {
 
     // MARK: Header
 
+    @ViewBuilder
     private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Compare versions").font(.headline)
-                Text("\(model.baselineLabel) → \(model.currentLabel)")
-                    .font(.caption).foregroundStyle(.secondary)
+        if isCompact {
+            // Title + Done always visible on one row, the mode picker on its own row below —
+            // so the Done button is never pushed off-screen and the picker never fills the
+            // header at large accessibility sizes (C5e L1 review).
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    titleBlock
+                    Spacer(minLength: 8)
+                    Button("Done", action: onClose).keyboardShortcut(.defaultAction)
+                        .lineLimit(1)
+                }
+                if model.phase == .ready {
+                    compactModeMenu
+                }
             }
-            Spacer()
-            if model.phase == .ready {
-                modePicker
+            .padding(12)
+        } else {
+            HStack(spacing: 12) {
+                titleBlock
+                Spacer()
+                if model.phase == .ready {
+                    Picker("Mode", selection: $model.mode) {
+                        ForEach(DrawingCompareModel.Mode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                }
+                Button("Done", action: onClose).keyboardShortcut(.defaultAction)
             }
-            Button("Done", action: onClose).keyboardShortcut(.defaultAction)
+            .padding(12)
         }
-        .padding(12)
     }
 
-    // A menu picker at compact width: a segmented control with three word labels overflows
-    // the iPhone header at large accessibility sizes (C5e L1).
-    @ViewBuilder
-    private var modePicker: some View {
-        let picker = Picker("Mode", selection: $model.mode) {
-            ForEach(DrawingCompareModel.Mode.allCases) { mode in
-                Text(mode.label).tag(mode)
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Compare versions").font(.headline)
+            Text("\(model.baselineLabel) → \(model.currentLabel)")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // A full-width menu at compact width: a label I control so the mode name wraps instead of
+    // clipping, and the whole header stays short (C5e L1 review).
+    private var compactModeMenu: some View {
+        Menu {
+            Picker("Mode", selection: $model.mode) {
+                ForEach(DrawingCompareModel.Mode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text("View:").foregroundStyle(.secondary)
+                Text(model.mode.label)
+                    .fixedSize(horizontal: false, vertical: true)
+                Image(systemName: "chevron.up.chevron.down").font(.caption)
+                Spacer(minLength: 0)
             }
         }
-        if isCompact {
-            picker.pickerStyle(.menu).labelsHidden().fixedSize()
-        } else {
-            picker.pickerStyle(.segmented).labelsHidden().fixedSize()
-        }
+        .accessibilityIdentifier("compareMode")
     }
 
     private var comparing: some View {
