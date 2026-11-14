@@ -36,7 +36,8 @@ struct EmfyTests {
     private func makeStore(in dir: URL) -> RecentsStore {
         RecentsStore(locations: .init(
             supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
-            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true),
+            documentsDirectory: dir.appendingPathComponent("Documents", isDirectory: true)
         ))
     }
 
@@ -353,13 +354,143 @@ struct EmfyTests {
         #expect(purgeCount == 1)        // leaving Private purges once
     }
 
+    // MARK: - ST2 owned-drawings migration
+
+    private func ownedEntry(_ importedName: String, bookmark: Data = Data([0])) -> RecentEntry {
+        RecentEntry(
+            id: UUID(), displayName: "d.emf", formatLabel: "EMF", fullFormatName: "Enhanced Metafile",
+            byteCount: 3, openedAt: Date(), bookmark: bookmark, thumbnailFileName: nil,
+            fileIdentity: "/x/d.emf", importedFileName: importedName, reloadToken: UUID()
+        )
+    }
+
+    /// A bookmarker standing in for the platform's real one, so the migration's
+    /// move/rebookmark logic is tested without a security-scoped bookmark (which a
+    /// test process can't create for an arbitrary file).
+    private func pathBookmark(_ url: URL) -> Data? { Data(url.standardizedFileURL.path.utf8) }
+
+    // ST2: an owned copy in the legacy folder is moved to the destination and its
+    // bookmark refreshed.
+    @Test func migrationMovesOwnedCopyAndRefreshesBookmark() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let legacy = dir.appendingPathComponent("Imported", isDirectory: true)
+        let dest = dir.appendingPathComponent("Documents", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let name = "\(UUID().uuidString).emf"
+        try Data([1, 2, 3]).write(to: legacy.appendingPathComponent(name))
+        let entry = ownedEntry(name, bookmark: Data([9]))
+
+        let result = RecentsStore.migrateOwnedCopies(entries: [entry], from: legacy, to: dest, makeBookmark: pathBookmark)
+
+        #expect(result.movedCount == 1)
+        #expect(result.allSucceeded)
+        #expect(!FileManager.default.fileExists(atPath: legacy.appendingPathComponent(name).path))   // source gone
+        #expect(FileManager.default.fileExists(atPath: dest.appendingPathComponent(name).path))      // at destination
+        #expect(result.updatedEntries[0].bookmark == pathBookmark(dest.appendingPathComponent(name))) // rebookmarked
+    }
+
+    // ST2: running the migration twice is a no-op the second time (idempotent).
+    @Test func migrationIsIdempotent() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let legacy = dir.appendingPathComponent("Imported", isDirectory: true)
+        let dest = dir.appendingPathComponent("Documents", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let name = "\(UUID().uuidString).emf"
+        try Data([1]).write(to: legacy.appendingPathComponent(name))
+
+        let first = RecentsStore.migrateOwnedCopies(entries: [ownedEntry(name)], from: legacy, to: dest, makeBookmark: pathBookmark)
+        let second = RecentsStore.migrateOwnedCopies(entries: first.updatedEntries, from: legacy, to: dest, makeBookmark: pathBookmark)
+
+        #expect(first.movedCount == 1)
+        #expect(second.movedCount == 0)        // nothing left to move
+        #expect(second.allSucceeded)
+        #expect(FileManager.default.fileExists(atPath: dest.appendingPathComponent(name).path))
+    }
+
+    // ST2: crash-safety — a copy already at the destination (moved, but the bookmark
+    // wasn't persisted before a crash) has its bookmark refreshed on resume, and any
+    // leftover legacy copy is cleared.
+    @Test func migrationResumesAfterAnInterruptedMove() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let legacy = dir.appendingPathComponent("Imported", isDirectory: true)
+        let dest = dir.appendingPathComponent("Documents", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        let name = "\(UUID().uuidString).emf"
+        // The file already moved; a stale legacy leftover also exists; the entry's
+        // bookmark still points at the old location (the crash was before persist).
+        try Data([2]).write(to: dest.appendingPathComponent(name))
+        try Data([2]).write(to: legacy.appendingPathComponent(name))
+        let entry = ownedEntry(name, bookmark: Data([9]))
+
+        let result = RecentsStore.migrateOwnedCopies(entries: [entry], from: legacy, to: dest, makeBookmark: pathBookmark)
+
+        #expect(result.movedCount == 0)        // nothing newly moved
+        #expect(result.allSucceeded)
+        #expect(!FileManager.default.fileExists(atPath: legacy.appendingPathComponent(name).path))   // leftover cleared
+        #expect(result.updatedEntries[0].bookmark == pathBookmark(dest.appendingPathComponent(name))) // bookmark fixed
+    }
+
+    // ST2: a failed bookmark leaves the migration INCOMPLETE (not all succeeded), so
+    // the store won't write its marker and will resume next launch.
+    @Test func migrationReportsFailureWhenBookmarkingFails() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let legacy = dir.appendingPathComponent("Imported", isDirectory: true)
+        let dest = dir.appendingPathComponent("Documents", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let name = "\(UUID().uuidString).emf"
+        try Data([1]).write(to: legacy.appendingPathComponent(name))
+
+        let result = RecentsStore.migrateOwnedCopies(entries: [ownedEntry(name)], from: legacy, to: dest, makeBookmark: { _ in nil })
+
+        #expect(!result.allSucceeded)   // bookmarking failed ⇒ incomplete ⇒ resume later
+    }
+
+    // ST2: the sweep never deletes a referenced copy whose move hasn't completed —
+    // a legacy copy still named in keepImported survives (no delete during migration).
+    @Test func sweepKeepsAReferencedInFlightLegacyCopy() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let locations = RecentsStore.Locations(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true),
+            documentsDirectory: dir.appendingPathComponent("Documents", isDirectory: true)
+        )
+        try FileManager.default.createDirectory(at: locations.legacyImportedDirectory, withIntermediateDirectories: true)
+        let referenced = "referenced.emf"
+        let orphan = "orphan.emf"
+        try Data([1]).write(to: locations.legacyImportedDirectory.appendingPathComponent(referenced))
+        try Data([1]).write(to: locations.legacyImportedDirectory.appendingPathComponent(orphan))
+
+        RecentsStore.sweep(locations: locations, keepThumbnails: [], keepImported: [referenced])
+
+        #expect(FileManager.default.fileExists(atPath: locations.legacyImportedDirectory.appendingPathComponent(referenced).path))
+        #expect(!FileManager.default.fileExists(atPath: locations.legacyImportedDirectory.appendingPathComponent(orphan).path))
+    }
+
+    // ST2: after loadIfNeeded the migration marker is written and the support directory
+    // is no longer excluded from backup (recents.json is backed up).
+    @MainActor
+    @Test func loadRunsMigrationAndRestoresBackupInclusion() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        _ = writeEMF(to: dir, name: "m.emf")
+        _ = await store.handleOpenedURL(dir.appendingPathComponent("m.emf"))
+
+        #expect(FileManager.default.fileExists(atPath: store.locations.migrationMarkerURL.path))
+        let excluded = try store.locations.supportDirectory.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup
+        #expect(excluded != true)   // not excluded ⇒ backed up (ST2)
+    }
+
     // ST1: a normal, fully-decoded load still sweeps genuine orphans.
     @MainActor
     @Test func normalLoadStillSweepsOrphans() async throws {
         let dir = makeTempDir(); defer { cleanup(dir) }
         let store = makeStore(in: dir)
-        try FileManager.default.createDirectory(at: store.locations.importedDirectory, withIntermediateDirectories: true)
-        let orphan = store.locations.importedDirectory.appendingPathComponent("orphan.emf")
+        // The swept owned-copies directory is the legacy Imported/ on iOS (Documents is
+        // never swept, ST2) and Application Support/Imported on macOS — both the
+        // `legacyImportedDirectory` here.
+        try FileManager.default.createDirectory(at: store.locations.legacyImportedDirectory, withIntermediateDirectories: true)
+        let orphan = store.locations.legacyImportedDirectory.appendingPathComponent("orphan.emf")
         try Data([0]).write(to: orphan)
         // No store file ⇒ a clean, sweep-eligible load with nothing referenced.
 
@@ -377,11 +508,11 @@ struct EmfyTests {
             cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
         )
         try FileManager.default.createDirectory(at: locations.thumbnailsDirectory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: locations.importedDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: locations.legacyImportedDirectory, withIntermediateDirectories: true)
         try Data([0]).write(to: locations.thumbnailsDirectory.appendingPathComponent("keep.png"))
         try Data([0]).write(to: locations.thumbnailsDirectory.appendingPathComponent("orphan.png"))
-        try Data([0]).write(to: locations.importedDirectory.appendingPathComponent("keep.emf"))
-        try Data([0]).write(to: locations.importedDirectory.appendingPathComponent("orphan.emf"))
+        try Data([0]).write(to: locations.legacyImportedDirectory.appendingPathComponent("keep.emf"))
+        try Data([0]).write(to: locations.legacyImportedDirectory.appendingPathComponent("orphan.emf"))
         let exportDir = ExportTemp.makeDirectory()
         try FileManager.default.createDirectory(at: exportDir, withIntermediateDirectories: true)
 
@@ -389,8 +520,8 @@ struct EmfyTests {
 
         #expect(FileManager.default.fileExists(atPath: locations.thumbnailsDirectory.appendingPathComponent("keep.png").path))
         #expect(!FileManager.default.fileExists(atPath: locations.thumbnailsDirectory.appendingPathComponent("orphan.png").path))
-        #expect(FileManager.default.fileExists(atPath: locations.importedDirectory.appendingPathComponent("keep.emf").path))
-        #expect(!FileManager.default.fileExists(atPath: locations.importedDirectory.appendingPathComponent("orphan.emf").path))
+        #expect(FileManager.default.fileExists(atPath: locations.legacyImportedDirectory.appendingPathComponent("keep.emf").path))
+        #expect(!FileManager.default.fileExists(atPath: locations.legacyImportedDirectory.appendingPathComponent("orphan.emf").path))
         #expect(!FileManager.default.fileExists(atPath: exportDir.path))
     }
 
@@ -406,10 +537,10 @@ struct EmfyTests {
             cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
         )
         try FileManager.default.createDirectory(at: locations.thumbnailsDirectory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: locations.importedDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: locations.legacyImportedDirectory, withIntermediateDirectories: true)
 
-        let orphan = locations.importedDirectory.appendingPathComponent("orphan.emf")
-        let freshImport = locations.importedDirectory.appendingPathComponent("fresh.emf")
+        let orphan = locations.legacyImportedDirectory.appendingPathComponent("orphan.emf")
+        let freshImport = locations.legacyImportedDirectory.appendingPathComponent("fresh.emf")
         let freshThumb = locations.thumbnailsDirectory.appendingPathComponent("fresh.png")
         try Data([0]).write(to: orphan)
         try Data([0]).write(to: freshImport)

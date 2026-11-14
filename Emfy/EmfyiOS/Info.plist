@@ -44,6 +44,11 @@
 	<string>Emfy saves pictures you export to your photo library.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- Expose the app's Documents folder in the Files app under "Emfy" (ST2), so the
+	     owned drawings Emfy holds the only copy of — received, New and AI-generated —
+	     are visible, openable and backed up, rather than hidden in a container. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<!-- Multiple windows (v3-plan §9.1): iPad (and the iPhone Duo inner display in a

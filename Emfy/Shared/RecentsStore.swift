@@ -146,16 +146,129 @@ final class RecentsStore {
             Self.loadEntries(from: locations)
         }.value
         entries = loaded.entries.sorted { $0.openedAt > $1.openedAt }
+        // Migrate owned drawings out of the legacy hidden, backup-excluded Imported/
+        // folder into the backed-up, Files-visible location, and restore backup
+        // inclusion for recents.json (ST2). Runs BEFORE the sweep, and the sweep is held
+        // back unless migration completed, so the sweep can never delete a copy mid-move.
+        // Only a trustworthy (clean) load marks the migration complete: a transiently
+        // corrupt or partial store retries next launch, when more owned entries may
+        // decode (their legacy copies are kept meanwhile — the sweep is skipped too).
+        let migration = migrateOwnedDrawingsIfNeeded(storeTrustworthy: loaded.maySweep)
+        if migration.changed { persist() }
         // Complete the launch sweep before signalling the store is loaded, so a
         // cold-launch open (which awaits `loadIfNeeded` before importing its
         // copy) can't have that freshly written copy or thumbnail deleted by a
         // still-running sweep (the C2 race). Skip the sweep entirely when the load was
         // unreadable or partial, so a transient read failure or one bad entry can't wipe every
-        // imported/received/New/AI drawing (ST1/C1).
-        if loaded.maySweep {
+        // imported/received/New/AI drawing (ST1/C1) — and when the ST2 migration is
+        // incomplete, so a half-moved copy is never reclaimed.
+        if loaded.maySweep && migration.complete {
             await runLaunchSweep()
         }
         didLoad = true
+    }
+
+    // MARK: - ST2 owned-drawings migration
+
+    /// Runs the owned-drawings migration once, idempotently and resumably (ST2):
+    /// restores backup inclusion for the support directory (so recents.json is backed
+    /// up), moves each owned copy out of the legacy hidden `Imported/` folder into the
+    /// backed-up, Files-visible owned-drawings location, and refreshes its bookmark.
+    /// Returns whether entries changed (so the caller persists) and whether migration
+    /// is COMPLETE (so the caller may run the launch sweep). A marker short-circuits
+    /// steady-state launches; a crash before the marker resumes the whole migration,
+    /// which is safe because every step is idempotent.
+    private func migrateOwnedDrawingsIfNeeded(storeTrustworthy: Bool) -> (changed: Bool, complete: Bool) {
+        // Existing installs excluded the support directory from backup; un-excluding it
+        // is idempotent, so it runs every launch until the migration marker is written.
+        Self.includeInBackup(locations.supportDirectory)
+        if FileManager.default.fileExists(atPath: locations.migrationMarkerURL.path) {
+            return (false, true)
+        }
+        let result = Self.migrateOwnedCopies(
+            entries: entries,
+            from: locations.legacyImportedDirectory,
+            to: locations.ownedDrawingsDirectory,
+            makeBookmark: { Self.makeBookmark(for: $0) }
+        )
+        let changed = result.updatedEntries != entries
+        if changed { entries = result.updatedEntries }
+        guard result.allSucceeded else { return (changed, false) }
+        // Mark complete only once every owned copy is at its destination with a fresh
+        // bookmark AND the load was trustworthy, so an interrupted or untrustworthy run
+        // resumes in full next launch.
+        guard storeTrustworthy else { return (changed, false) }
+        // The support directory may not exist yet on a clean first launch (nothing has
+        // persisted), so create it before writing the marker (and re-assert backup
+        // inclusion now that it exists).
+        try? FileManager.default.createDirectory(at: locations.supportDirectory, withIntermediateDirectories: true)
+        Self.includeInBackup(locations.supportDirectory)
+        try? Data().write(to: locations.migrationMarkerURL, options: Self.writeOptions)
+        return (changed, true)
+    }
+
+    /// The outcome of moving owned copies to the ST2 location.
+    struct OwnedMigration: Sendable {
+        var updatedEntries: [RecentEntry]
+        /// `true` only when every owned copy ended up at its destination with a fresh
+        /// bookmark (or was already gone from disk); `false` leaves the marker unwritten
+        /// so the next launch resumes.
+        var allSucceeded: Bool
+        var movedCount: Int
+    }
+
+    /// Moves each owned entry's copy from `legacy` to `destination` and refreshes its
+    /// bookmark (ST2). Idempotent and crash-safe: a copy already at the destination (an
+    /// interrupted earlier run, or a bookmark that wasn't persisted) just has its
+    /// bookmark refreshed and any leftover legacy copy removed; a copy still only in
+    /// `legacy` is moved destination-first (`moveItem` never deletes the source before
+    /// the destination exists). An owned entry whose copy is missing from both is left
+    /// untouched (the viewer surfaces `.notFound`). When `legacy == destination`
+    /// (macOS) nothing moves. Pure but for the filesystem, so the move/resume logic is
+    /// unit-tested with injected directories and bookmarker.
+    nonisolated static func migrateOwnedCopies(
+        entries: [RecentEntry],
+        from legacy: URL,
+        to destination: URL,
+        makeBookmark: (URL) -> Data?
+    ) -> OwnedMigration {
+        var updated = entries
+        guard legacy.standardizedFileURL != destination.standardizedFileURL else {
+            return OwnedMigration(updatedEntries: updated, allSucceeded: true, movedCount: 0)
+        }
+        let fm = FileManager.default
+        var allSucceeded = true
+        var moved = 0
+        for index in updated.indices {
+            guard let name = updated[index].importedFileName else { continue }
+            let src = legacy.appendingPathComponent(name)
+            let dst = destination.appendingPathComponent(name)
+            if fm.fileExists(atPath: dst.path) {
+                // Already at the destination (possibly from an interrupted run): refresh
+                // the bookmark and clear any leftover legacy copy.
+                if let bookmark = makeBookmark(dst), !bookmark.isEmpty {
+                    updated[index].bookmark = bookmark
+                } else {
+                    allSucceeded = false
+                }
+                try? fm.removeItem(at: src)
+            } else if fm.fileExists(atPath: src.path) {
+                do {
+                    try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+                    try fm.moveItem(at: src, to: dst)
+                    moved += 1
+                    if let bookmark = makeBookmark(dst), !bookmark.isEmpty {
+                        updated[index].bookmark = bookmark
+                    } else {
+                        allSucceeded = false
+                    }
+                } catch {
+                    allSucceeded = false
+                }
+            }
+            // Neither exists → the copy is gone; leave the entry as is.
+        }
+        return OwnedMigration(updatedEntries: updated, allSucceeded: allSucceeded, movedCount: moved)
     }
 
     // MARK: - Opening a file
@@ -743,9 +856,11 @@ final class RecentsStore {
             try? FileManager.default.removeItem(at: locations.thumbnailsDirectory.appendingPathComponent(name))
         }
         if let name = entry.importedFileName {
-            // A Private-mode import lives in the per-launch temp directory, a normal
-            // one in Imported/; the name is a UUID, so removing from both is safe (S-M3).
-            try? FileManager.default.removeItem(at: locations.importedDirectory.appendingPathComponent(name))
+            // An owned copy lives in the ST2 owned-drawings location, a Private-mode one
+            // in the per-launch temp directory, and a not-yet-migrated one in the legacy
+            // Imported/ folder; the name is a UUID, so removing from all three is safe.
+            try? FileManager.default.removeItem(at: locations.ownedDrawingsDirectory.appendingPathComponent(name))
+            try? FileManager.default.removeItem(at: locations.legacyImportedDirectory.appendingPathComponent(name))
             try? FileManager.default.removeItem(at: locations.privateImportedDirectory.appendingPathComponent(name))
         }
         try? FileManager.default.removeItem(
@@ -808,7 +923,20 @@ final class RecentsStore {
     /// `startedAt`, so a file written after the sweep began survives (C2 race).
     nonisolated static func sweep(locations: Locations, keepThumbnails: Set<String>, keepImported: Set<String>, startedAt: Date = Date()) {
         sweepDirectory(locations.thumbnailsDirectory, keeping: keepThumbnails, cutoff: startedAt)
-        sweepDirectory(locations.importedDirectory, keeping: keepImported, cutoff: startedAt)
+        #if os(iOS)
+        // On iOS the owned-drawings directory is the user-visible Documents folder
+        // (exposed via UIFileSharingEnabled, ST2): a file the user added there must
+        // never be reclaimed, so Documents is NOT swept. Owned copies are removed
+        // explicitly (removeSideFiles) and are never cap-evicted (ST3). Only the legacy
+        // hidden Imported/ folder is swept, to clear stragglers after the ST2 move,
+        // keeping any copy whose move hasn't completed (never delete during migration).
+        sweepDirectory(locations.legacyImportedDirectory, keeping: keepImported, cutoff: startedAt)
+        #else
+        // On macOS the owned-drawings directory is the app-private Application
+        // Support/Imported folder (same as the legacy location) — safe to reclaim
+        // orphans, keeping referenced copies.
+        sweepDirectory(locations.ownedDrawingsDirectory, keeping: keepImported, cutoff: startedAt)
+        #endif
         ExportTemp.sweep(startedAt: startedAt)
         // Reclaim `EmfyNewDrawing-*` import stages a crash or kill left between the write
         // and the store's import (ST5). The import copies the bytes into Imported/, so a
@@ -932,18 +1060,18 @@ final class RecentsStore {
         )
     }
 
-    /// Copies `data` into the import directory as `<uuid>.<ext>` and bookmarks the
-    /// copy. A Private-mode import goes to the per-launch temporary directory, which
+    /// Copies `data` into the owned-drawings directory as `<uuid>.<ext>` and bookmarks
+    /// the copy. A Private-mode import goes to the per-launch temporary directory, which
     /// is never backed up and never persists past the session (S-M3); a normal import
-    /// goes to Imported/ and excludes the container from backup. Returns the bookmark
-    /// and the copy's file name (for later cleanup), or `nil` on failure.
+    /// goes to the ST2 owned-drawings location (the Documents folder on iOS, Application
+    /// Support/Imported on macOS) — backed up, and on iOS visible in Files. Returns the
+    /// bookmark and the copy's file name (for later cleanup), or `nil` on failure.
     private nonisolated static func importCopy(data: Data, originalName: String, locations: Locations, isPrivate: Bool) -> (bookmark: Data, fileName: String)? {
         let ext = MetafileFormatLabel.importedExtension(for: originalName)
         let name = UUID().uuidString + "." + ext
-        let directory = isPrivate ? locations.privateImportedDirectory : locations.importedDirectory
+        let directory = isPrivate ? locations.privateImportedDirectory : locations.ownedDrawingsDirectory
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            if !isPrivate { excludeFromBackup(locations.supportDirectory) }
             let fileURL = directory.appendingPathComponent(name)
             try data.write(to: fileURL, options: writeOptions)
             guard let bookmark = makeBookmark(for: fileURL), !bookmark.isEmpty else {
@@ -1165,12 +1293,14 @@ final class RecentsStore {
 
     // MARK: - Backup exclusion and image helpers (nonisolated)
 
-    /// Keeps the recents store and imported copies out of device backups (§i).
-    /// Application Support is backed up by default, unlike Caches.
-    nonisolated static func excludeFromBackup(_ directory: URL) {
+    /// Restores backup inclusion for a directory excluded by an earlier build (ST2):
+    /// owned drawings and recents.json should be backed up, so the support directory is
+    /// no longer excluded. Idempotent — setting the value to `false` is a no-op when it
+    /// was never excluded.
+    nonisolated static func includeInBackup(_ directory: URL) {
         var url = directory
         var values = URLResourceValues()
-        values.isExcludedFromBackup = true
+        values.isExcludedFromBackup = false
         try? url.setResourceValues(values)
     }
 
@@ -1194,9 +1324,9 @@ final class RecentsStore {
 
     // MARK: - Locations
 
-    /// Where the store keeps its files. Application Support/Emfy for recents.json
-    /// and imported copies (backed up, excluded from backup per §i); Caches for
-    /// the regenerable thumbnails.
+    /// Where the store keeps its files. Application Support/Emfy for recents.json and
+    /// (on macOS) owned-drawing copies; the Documents directory for owned drawings on
+    /// iOS (ST2); Caches for the regenerable thumbnails.
     struct Locations: Sendable {
         var supportDirectory: URL
         var cachesDirectory: URL
@@ -1204,20 +1334,46 @@ final class RecentsStore {
         /// never Application Support, so it leaves no persistent copy (S-M3). Defaults
         /// to this launch's `EmfyPrivate-<uuid>/`; tests inject their own.
         var privateImportedDirectory: URL = RecentsStore.privateImportLaunchDirectory
+        /// The app's Documents directory — the ST2 home for owned drawings on iOS, so
+        /// they are backed up and visible in the Files app under "Emfy". Injected so
+        /// tests use a temporary container, never the real one.
+        var documentsDirectory: URL = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
 
         var storeURL: URL { supportDirectory.appendingPathComponent("recents.json") }
         var corruptStoreURL: URL { supportDirectory.appendingPathComponent("recents.corrupt.json") }
-        var importedDirectory: URL { supportDirectory.appendingPathComponent("Imported", isDirectory: true) }
+        /// The legacy hidden, backup-excluded home for owned copies, kept as the ST2
+        /// migration source (and, on macOS, still the live location).
+        var legacyImportedDirectory: URL { supportDirectory.appendingPathComponent("Imported", isDirectory: true) }
+        /// The current home for owned drawings — received copies, New and AI-generated
+        /// (ST2). iOS: the app's Documents directory, so they are backed up and visible
+        /// in Files under "Emfy". macOS: Application Support/Emfy/Imported (unchanged) —
+        /// not hidden there and, once backup inclusion is restored, backed up by Time
+        /// Machine, so no move is needed.
+        var ownedDrawingsDirectory: URL {
+            #if os(iOS)
+            documentsDirectory
+            #else
+            legacyImportedDirectory
+            #endif
+        }
+        /// Back-compat alias for the owned-copies directory, now the ST2 location.
+        var importedDirectory: URL { ownedDrawingsDirectory }
         var thumbnailsDirectory: URL { cachesDirectory.appendingPathComponent("EmfyThumbnails", isDirectory: true) }
         /// Where the one-time "opened version" revert snapshots live, one subfolder per
         /// entry id (E2a-7). Pruned with the entry (`removeSideFiles`).
         var snapshotsDirectory: URL { supportDirectory.appendingPathComponent("Snapshots", isDirectory: true) }
+        /// Written once the ST2 owned-drawings migration completes, so steady-state
+        /// launches skip the scan; absent ⇒ (re)run, which is idempotent and resumable.
+        var migrationMarkerURL: URL { supportDirectory.appendingPathComponent(".owned-migrated") }
 
         static var standard: Locations {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Emfy", isDirectory: true)
             let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            return Locations(supportDirectory: support, cachesDirectory: caches)
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            return Locations(supportDirectory: support, cachesDirectory: caches, documentsDirectory: documents)
         }
     }
 }
@@ -1263,7 +1419,8 @@ private actor RecentsPersistence {
     func write(_ entries: [RecentEntry], to locations: RecentsStore.Locations) {
         do {
             try FileManager.default.createDirectory(at: locations.supportDirectory, withIntermediateDirectories: true)
-            RecentsStore.excludeFromBackup(locations.supportDirectory)
+            // recents.json is backed up now (ST2): no backup exclusion is applied here,
+            // and the ST2 migration un-excludes any directory an earlier build excluded.
             let data = try JSONEncoder().encode(entries)
             try data.write(to: locations.storeURL, options: RecentsStore.writeOptions)
         } catch {
