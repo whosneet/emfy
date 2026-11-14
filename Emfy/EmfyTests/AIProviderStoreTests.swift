@@ -152,6 +152,31 @@ import Testing
         #expect(throws: (any Error).self) { try store.setKey("k", for: "p1") }
     }
 
+    // C2: a single bad provider config — malformed, or one whose `kind` this build
+    // doesn't recognise (written by a newer version) — must be skipped on load, never
+    // wipe every configured provider.
+    @Test func oneBadProviderConfigDoesNotWipeTheList() {
+        let good = #"{"id":"g","kind":"anthropic","displayName":"Claude","baseURL":"https://api.anthropic.com","model":"m"}"#
+        let unknownKind = #"{"id":"u","kind":"gemini","displayName":"Future","baseURL":"https://x.example","model":"m"}"#
+        let malformed = #"{"id":"m","displayName":"NoKind"}"#
+        let json = "[\(good),\(unknownKind),\(malformed)]"
+        let configs = AIProviderStore.decodeProviders(Data(json.utf8))
+        #expect(configs.map(\.id) == ["g"])   // the good one survives; the unknown/malformed are dropped
+    }
+
+    @Test func decodeProvidersTolerateATruncatedBlob() {
+        #expect(AIProviderStore.decodeProviders(Data("not json".utf8)).isEmpty)
+        #expect(AIProviderStore.decodeProviders(Data("{".utf8)).isEmpty)
+    }
+
+    @Test func loadProvidersSkipsABadEntryFromDefaults() {
+        let defaults = UserDefaults(suiteName: "c2-" + UUID().uuidString)!
+        let good = #"{"id":"g","kind":"openAI","displayName":"GPT","baseURL":"https://api.openai.com/v1","model":"m"}"#
+        let unknownKind = #"{"id":"u","kind":"gemini","displayName":"Future","baseURL":"https://x.example","model":"m"}"#
+        defaults.set(Data("[\(unknownKind),\(good)]".utf8), forKey: "settings.ai.providers")
+        #expect(AIProviderStore.loadProviders(defaults).map(\.id) == ["g"])
+    }
+
     @Test func engineOptionsAndResolution() throws {
         let (store, _, _) = make()
         try store.addProvider(config(), key: "k")

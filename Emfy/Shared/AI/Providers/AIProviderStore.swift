@@ -208,12 +208,34 @@ final class AIProviderStore {
         }
     }
 
-    private static func loadProviders(_ defaults: UserDefaults) -> [AIProviderConfig] {
-        guard let data = defaults.data(forKey: Keys.providers),
-              let decoded = try? JSONDecoder().decode([AIProviderConfig].self, from: data) else {
-            return []
+    static func loadProviders(_ defaults: UserDefaults) -> [AIProviderConfig] {
+        guard let data = defaults.data(forKey: Keys.providers) else { return [] }
+        return decodeProviders(data)
+    }
+
+    /// Decodes the persisted provider list element by element (C2), so a single bad
+    /// config — a malformed entry or one whose `AIProviderKind` this build doesn't
+    /// know (e.g. one written by a newer version) — is skipped rather than wiping
+    /// every configured provider. Pure, so the per-item tolerance is unit-tested.
+    nonisolated static func decodeProviders(_ data: Data) -> [AIProviderConfig] {
+        let decoder = JSONDecoder()
+        // Decode each element on its own: an unknown `kind` or a missing field fails
+        // only that element, and the surrounding good configs are preserved.
+        if let wrappers = try? decoder.decode([FailableProvider].self, from: data) {
+            return wrappers.compactMap(\.config)
         }
-        return decoded
+        // The top level wasn't even an array (truncated/corrupt blob): start empty
+        // rather than trap. The stored keys and consent are untouched.
+        return []
+    }
+
+    /// Decodes an `AIProviderConfig` or, on failure, nothing — so one malformed or
+    /// unknown-kind element never fails the whole array (C2).
+    private struct FailableProvider: Decodable {
+        let config: AIProviderConfig?
+        init(from decoder: Decoder) throws {
+            config = try? decoder.singleValueContainer().decode(AIProviderConfig.self)
+        }
     }
 
     private enum Keys {
