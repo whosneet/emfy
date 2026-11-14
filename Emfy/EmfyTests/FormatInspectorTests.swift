@@ -382,3 +382,29 @@ private let blue = SceneColor(red: 0, green: 0, blue: 1)
         }
     }
 }
+
+// MARK: - P8: slider-apply throttle
+
+@MainActor
+@Suite struct SliderApplyThrottleTests {
+    // The first submit fires immediately (so the control feels live).
+    @Test func firstSubmitFiresImmediately() {
+        let throttle = SliderApplyThrottle(hz: 60)
+        var fired: [Int] = []
+        throttle.submit { fired.append(1) }
+        #expect(fired == [1])
+    }
+
+    // A rapid burst coalesces: only the first fires synchronously; the rest wait for the
+    // trailing timer, and the LAST value is the one delivered (never dropped).
+    @Test func burstCoalescesAndDeliversTheLastValue() async {
+        let throttle = SliderApplyThrottle(hz: 60)
+        var fired: [Int] = []
+        for v in 1...20 { throttle.submit { fired.append(v) } }
+        #expect(fired == [1])                       // only the first fired synchronously
+        // Let the trailing fire land (≥ 1/60 s).
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        #expect(fired.last == 20)                    // the final value was delivered
+        #expect(fired.count < 20)                    // the middle values coalesced away
+    }
+}

@@ -192,17 +192,20 @@ struct MacEditableCanvas: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.tiledView?.setScene(scene)
+        context.coordinator.tiledView?.setScene(scene, version: editVersion)
         context.coordinator.tiledView?.ensureSourcePrepared()
         context.coordinator.tiledView?.setPaint(tilePaint)
         context.coordinator.tiledView?.setOptions(options)
         scrollView.documentView?.shadow = pageShadow ? MacMetafileScrollView.makePaperShadow() : nil
         controller.scrollView = scrollView
-        // A scene/selection change (undo, redo, a committed edit) redraws the overlay.
+        // A scene/selection/find/grid change redraws the overlay; an unrelated `updateView`
+        // (a slider on another control, the text popover) leaves it alone (P8).
         if let overlay = context.coordinator.overlay {
             overlay.findHighlights = findHighlights   // live find highlights (F3b)
-            overlay.needsDisplay = true
-            overlay.window?.invalidateCursorRects(for: overlay)
+            if context.coordinator.overlayInputsChanged(version: editVersion, findHighlights: findHighlights) {
+                overlay.needsDisplay = true
+                overlay.window?.invalidateCursorRects(for: overlay)
+            }
         }
     }
 
@@ -241,6 +244,30 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Bumped at each drag start so an off-main ghost rasterisation that finishes after the
         /// drag ended (or after a newer drag began) discards its stale raster (P1).
         private var ghostGeneration = 0
+
+        /// Whether anything the selection overlay actually draws changed since the last
+        /// `updateView`, so an unrelated update (tile paint, render options, the text popover,
+        /// the inspector trailing inset) doesn't force a redraw of the chrome (P8).
+        private struct OverlayKey: Equatable {
+            var version: Int
+            var selection: Set<Int>
+            var find: FindHighlightSet
+            var showGrid: Bool
+            var armedShape: ShapeToolKind?
+            var armedPen: Bool
+            var armedText: Bool
+        }
+        private var lastOverlayKey: OverlayKey?
+        func overlayInputsChanged(version: Int, findHighlights: FindHighlightSet) -> Bool {
+            let model = parent.editorModel
+            let key = OverlayKey(
+                version: version, selection: model.selection.ids, find: findHighlights,
+                showGrid: model.showGrid,
+                armedShape: model.armedShapeTool, armedPen: model.armedPen, armedText: model.armedTextTool)
+            if key == lastOverlayKey { return false }
+            lastOverlayKey = key
+            return true
+        }
 
         init(_ parent: MacEditableCanvas) {
             self.parent = parent
@@ -1252,7 +1279,15 @@ private final class TiledSceneView: NSView {
         }
     }
 
-    func setScene(_ scene: EMFEdit.Scene) {
+    /// The edit version of the scene last stored, so an `updateView` that did not change the
+    /// scene (a slider tick on an unrelated control, arming a tool, opening the text popover)
+    /// skips the full-view repaint entirely (P8). `Int.min` forces the first store.
+    private var lastSceneVersion = Int.min
+
+    func setScene(_ scene: EMFEdit.Scene, version: Int) {
+        // Unchanged scene ⇒ nothing to repaint. The tiles already hold this scene.
+        guard version != lastSceneVersion else { return }
+        lastSceneVersion = version
         sceneLock.withLock { $0 = scene }
         if let region = pendingDirtyRegion {
             pendingDirtyRegion = nil

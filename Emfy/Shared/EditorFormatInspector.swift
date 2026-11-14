@@ -82,6 +82,9 @@ struct FormatSections: View {
     // run coalesces to one entry (design call 3).
     @State private var opacityGesture = 0
     @State private var strokeWidthGesture = 0
+    // Throttle the continuous opacity-slider applies to ~60 Hz so a fast scrub doesn't commit
+    // a scene mutation + repaint on every display tick (P8).
+    @State private var opacityThrottle = SliderApplyThrottle()
     // Live, editable values so a slider/field tracks the pointer without waiting for
     // the model to round-trip through the scene.
     @State private var liveOpacity: Double = 1
@@ -383,7 +386,13 @@ struct FormatSections: View {
         HStack {
             Slider(value: Binding(
                 get: { liveOpacity },
-                set: { liveOpacity = $0; session.apply(model.opacityCommand($0), coalescing: SceneCoalescingKey("opacity-\(opacityGesture)")) }
+                set: { value in
+                    liveOpacity = value
+                    let gesture = opacityGesture
+                    opacityThrottle.submit {
+                        session.apply(model.opacityCommand(value), coalescing: SceneCoalescingKey("opacity-\(gesture)"))
+                    }
+                }
             ), in: 0...1, onEditingChanged: { if !$0 { opacityGesture += 1 } })
             .accessibilityLabel("Opacity")
             .accessibilityValue("\(Int((liveOpacity * 100).rounded()))%")

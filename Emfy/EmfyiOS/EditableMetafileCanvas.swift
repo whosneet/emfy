@@ -167,7 +167,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
 
     func updateUIView(_ scrollView: UIScrollView, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.tiledView?.setScene(scene)
+        context.coordinator.tiledView?.setScene(scene, version: editVersion)
         context.coordinator.tiledView?.ensureSourcePrepared()
         context.coordinator.tiledView?.setPaint(tilePaint)
         context.coordinator.tiledView?.setOptions(options)
@@ -176,7 +176,11 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         // view's bounds, so re-fit/centre here (the canvas still fills the full width).
         context.coordinator.configureZoomScales(for: scrollView.bounds.size)
         context.coordinator.overlay?.findHighlights = findHighlights   // live find highlights (F3b)
-        context.coordinator.overlay?.setNeedsDisplay()
+        // A scene/selection/find/grid/tool change redraws the overlay; an unrelated update
+        // (the text popover, the inspector inset, tile paint) leaves the chrome alone (P8).
+        if context.coordinator.overlayInputsChanged(version: editVersion, findHighlights: findHighlights) {
+            context.coordinator.overlay?.setNeedsDisplay()
+        }
     }
 
     static func dismantleUIView(_ scrollView: UIScrollView, coordinator: Coordinator) {
@@ -208,6 +212,31 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         /// Bumped at each drag start so an off-main ghost rasterisation that finishes after the
         /// drag ended (or after a newer drag began) discards its stale raster (P1).
         private var ghostGeneration = 0
+
+        /// Whether anything the selection overlay actually draws changed since the last
+        /// `updateView`, so an unrelated update (tile paint, render options, the text popover,
+        /// the inspector trailing inset) doesn't force a redraw of the chrome (P8).
+        private struct OverlayKey: Equatable {
+            var version: Int
+            var selection: Set<Int>
+            var find: FindHighlightSet
+            var showGrid: Bool
+            var lightMode: Bool
+            var armedShape: ShapeToolKind?
+            var armedPen: Bool
+            var armedText: Bool
+        }
+        private var lastOverlayKey: OverlayKey?
+        func overlayInputsChanged(version: Int, findHighlights: FindHighlightSet) -> Bool {
+            let model = parent.editorModel
+            let key = OverlayKey(
+                version: version, selection: model.selection.ids, find: findHighlights,
+                showGrid: model.showGrid, lightMode: parent.lightMode,
+                armedShape: model.armedShapeTool, armedPen: model.armedPen, armedText: model.armedTextTool)
+            if key == lastOverlayKey { return false }
+            lastOverlayKey = key
+            return true
+        }
 
         init(_ parent: EditableMetafileCanvas) {
             self.parent = parent
@@ -1125,7 +1154,15 @@ private final class IOSTiledSceneView: UIView {
         }
     }
 
-    func setScene(_ scene: EMFEdit.Scene) {
+    /// The edit version of the scene last stored, so an `updateView` that did not change the
+    /// scene (a slider tick on an unrelated control, arming a tool, opening the text popover)
+    /// skips the full-view repaint entirely (P8). `Int.min` forces the first store.
+    private var lastSceneVersion = Int.min
+
+    func setScene(_ scene: EMFEdit.Scene, version: Int) {
+        // Unchanged scene ⇒ nothing to repaint. The tiles already hold this scene.
+        guard version != lastSceneVersion else { return }
+        lastSceneVersion = version
         sceneLock.withLock { $0 = scene }
         if let region = pendingDirtyRegion {
             pendingDirtyRegion = nil

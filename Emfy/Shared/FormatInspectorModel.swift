@@ -1,5 +1,40 @@
 import CoreGraphics
 import EMFEdit
+import Foundation
+
+/// Coalesces a continuous slider's rapid `apply` calls to about 60 Hz, always firing the
+/// latest value on a trailing timer (P8): a 120 Hz slider scrub otherwise commits a scene
+/// mutation + canvas repaint on every display tick. The final value is never dropped — the
+/// trailing fire delivers the last `submit`.
+@MainActor final class SliderApplyThrottle {
+    private var lastFire = Date.distantPast
+    private var pending: (() -> Void)?
+    private var scheduled: DispatchWorkItem?
+    private let minInterval: TimeInterval
+
+    init(hz: Double = 60) { self.minInterval = 1.0 / max(1, hz) }
+
+    func submit(_ action: @escaping () -> Void) {
+        pending = action
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastFire)
+        if elapsed >= minInterval {
+            fire()
+        } else if scheduled == nil {
+            let item = DispatchWorkItem { [weak self] in self?.fire() }
+            scheduled = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + (minInterval - elapsed), execute: item)
+        }
+    }
+
+    private func fire() {
+        scheduled?.cancel(); scheduled = nil
+        lastFire = Date()
+        let action = pending
+        pending = nil
+        action?()
+    }
+}
 
 /// The Format inspector's derived, testable state (E2c): it reads a selection of
 /// editable `Element`s and reports the displayed value of each property, or a
