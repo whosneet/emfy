@@ -372,6 +372,9 @@
 		B01100000000000000000112 /* ViewerFit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000112 /* ViewerFit.swift */; };
 		B01100000000000000000120 /* DocumentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000110 /* DocumentSession.swift */; };
 		B0110000000000000000F102 /* LibraryWindowModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000F101 /* LibraryWindowModel.swift */; };
+		B0110000000000000000F201 /* OpenCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000136 /* OpenCoordinator.swift */; };
+		B0110000000000000000F202 /* LibraryWindowValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000132 /* LibraryWindowValue.swift */; };
+		B0110000000000000000F203 /* MetafileTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000135 /* MetafileTypes.swift */; };
 		B01100000000000000000121 /* OpenRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000111 /* OpenRouting.swift */; };
 		B01100000000000000000122 /* ViewerFit.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000112 /* ViewerFit.swift */; };
 		B01100000000000000000123 /* DocumentHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B001000000000000000000F1 /* DocumentHostTests.swift */; };
@@ -1863,6 +1866,9 @@
 				B0110000000000000000010A /* EMFExport.swift in Sources */,
 				B01100000000000000000120 /* DocumentSession.swift in Sources */,
 				B0110000000000000000F102 /* LibraryWindowModel.swift in Sources */,
+				B0110000000000000000F201 /* OpenCoordinator.swift in Sources */,
+				B0110000000000000000F202 /* LibraryWindowValue.swift in Sources */,
+				B0110000000000000000F203 /* MetafileTypes.swift in Sources */,
 				E2A0000000000000000000A2 /* RevertSnapshot.swift in Sources */,
 				E2A0000000000000000000B2 /* DocumentEditingSupport.swift in Sources */,
 				E2A0000000000000000000C2 /* DocumentEditingTests.swift in Sources */,
