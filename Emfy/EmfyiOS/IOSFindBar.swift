@@ -43,8 +43,7 @@ struct IOSFindBar: View {
         .font(.callout)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator))
+        .floatingSurface(in: Capsule())   // C5e G1: Liquid Glass on 26, material below
         .shadow(radius: 8, y: 3)
         .padding(.horizontal, 16)
         .padding(.top, 8)

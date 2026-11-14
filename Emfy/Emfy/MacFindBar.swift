@@ -44,8 +44,7 @@ struct MacFindBar: View {
         .font(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator))
+        .floatingSurface(in: Capsule())   // C5e G2: Liquid Glass on 26, material below
         .shadow(radius: 6, y: 3)
         .padding(.top, 10)
         .onChange(of: model.query) { _, _ in scheduleApply() }

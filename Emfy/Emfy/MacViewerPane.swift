@@ -940,7 +940,7 @@ struct MacViewerPane: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .floatingSurface(in: RoundedRectangle(cornerRadius: 10))   // C5e G2
         .padding(12)
         .shadow(radius: 4, y: 2)
         .confirmationDialog(
@@ -995,7 +995,7 @@ struct MacViewerPane: View {
             Text(readout)
                 .font(.system(.body, design: .rounded).monospacedDigit())
                 .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(.regularMaterial, in: Capsule())
+                .floatingSurface(in: Capsule())   // C5e G2
                 .padding(.bottom, 24)
         }
     }
