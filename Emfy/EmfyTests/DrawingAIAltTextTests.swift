@@ -12,6 +12,23 @@ import Testing
         #expect(DrawingAltText.fallbackLabel(fileName: "") == "Drawing")
     }
 
+    // F5: untrusted model alt text is sanitised and capped before it becomes a label.
+    @Test func cleanStripsScaffoldingAndCapsLength() {
+        // Echoed grounding scaffolding is removed.
+        let leaked = "<drawing-content>secret data</drawing-content>A plain page of text."
+        #expect(DrawingAltText.clean(leaked) == "A plain page of text.")
+
+        // A runaway reply is capped to ~200 characters with an ellipsis, on a word break.
+        let long = String(repeating: "word ", count: 100)   // 500 chars
+        let cleaned = DrawingAltText.clean(long)
+        #expect(cleaned.count <= DrawingAltText.maxLength + 1)   // +1 for the ellipsis
+        #expect(cleaned.hasSuffix("…"))
+        #expect(!cleaned.contains("  "))   // no dangling partial word/space
+
+        // A short, clean sentence is returned unchanged.
+        #expect(DrawingAltText.clean("A blue circle.") == "A blue circle.")
+    }
+
     @MainActor
     @Test func storeCachesByContentIdAndFallsBack() {
         let store = DrawingAltTextStore()

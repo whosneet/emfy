@@ -77,7 +77,9 @@ final class DrawingAltTextStore {
             let session = DrawingAIEngine.makeSession(toolData: bundle.toolData)
             let prompt = DrawingAIPrompt.altTextPrompt(for: bundle.context)
             if let text = try? await session.respond(to: prompt).content {
-                self?.store(text, for: contentID)
+                // The model's description is untrusted: strip any echoed grounding
+                // scaffolding and cap it before it becomes a VoiceOver label (F5).
+                self?.store(DrawingAltText.clean(text), for: contentID)
             }
         }
     }
@@ -91,5 +93,26 @@ enum DrawingAltText {
     static func fallbackLabel(fileName: String) -> String {
         let name = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? "Drawing" : "Drawing, \(name)"
+    }
+
+    /// The alt-text length cap: a VoiceOver label should be one short sentence, so a
+    /// runaway or injected model reply can't become an unbounded announcement (F5).
+    static let maxLength = 200
+
+    /// Cleans untrusted model alt text for display: strips any echoed grounding
+    /// scaffolding (`DrawingAIOutputSanitiser`) and caps the result at `maxLength`
+    /// characters, breaking on a word boundary where possible (F5). Pure.
+    static func clean(_ raw: String) -> String {
+        capped(DrawingAIOutputSanitiser.sanitise(raw), to: maxLength)
+    }
+
+    private static func capped(_ text: String, to limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let head = text.prefix(limit)
+        if let lastSpace = head.lastIndex(of: " ") {
+            let trimmed = head[..<lastSpace].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed + "…" }
+        }
+        return head.trimmingCharacters(in: .whitespacesAndNewlines) + "…"
     }
 }
