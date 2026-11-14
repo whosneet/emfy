@@ -74,9 +74,18 @@ final class DrawingAIEditModel {
     /// The selection the edit is scoped to (empty = whole drawing).
     @ObservationIgnored var scope: Set<Int> = []
 
-    /// A short description of the edit's scope, for the sheet header.
+    /// A short description of the edit's scope, for the sheet header. Built from the
+    /// EDITABLE part of the selection (S-3): a selection of only locked/passthrough
+    /// elements reads honestly as "none editable", never as a count that would then
+    /// silently widen to the whole drawing.
     var scopeDescription: String {
-        scope.isEmpty ? "the whole drawing" : "\(scope.count) selected element\(scope.count == 1 ? "" : "s")"
+        if scope.isEmpty { return "the whole drawing" }
+        guard let scene = session?.editingScene else {
+            return "\(scope.count) selected element\(scope.count == 1 ? "" : "s")"
+        }
+        let editable = scope.intersection(Set(scene.editableElements.map(\.id))).count
+        if editable == 0 { return "the selection (nothing editable is selected)" }
+        return "\(editable) selected element\(editable == 1 ? "" : "s")"
     }
 
     var isBusy: Bool { phase == .thinking }
@@ -154,6 +163,13 @@ final class DrawingAIEditModel {
         // Scope the described elements to the current selection (intersected with what is
         // actually editable), so the AI edit stays within the selection when there is one.
         let editableScope = scope.intersection(Set(scene.editableElements.map(\.id)))
+        // A scope WAS given but nothing in it is editable (all locked or passthrough):
+        // fail with a clear message rather than widening the edit to the whole drawing
+        // (S-3). Widening would silently edit elements the user never selected.
+        if !scope.isEmpty, editableScope.isEmpty {
+            phase = .failed("None of the selected elements can be edited (they’re locked or can’t be changed). Select something editable, or clear the selection to edit the whole drawing.")
+            return
+        }
         let block = DrawingAIEditContext.elementsBlock(for: scene, selectedIDs: editableScope)
 
         // Produce → sanitiser → strict decode. The live (non-stub) path gets ONE bounded

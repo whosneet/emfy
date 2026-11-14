@@ -75,6 +75,29 @@ private func wait(_ model: DrawingAIEditModel, until condition: @escaping () -> 
         #expect(out.contains("Reply with ONLY the JSON object"))
     }
 
+    // S-3: a scope WAS given but nothing in it is editable (all locked/passthrough, or
+    // here a selection that matches no editable element) — the model must FAIL with a
+    // clear message, not widen the edit to the whole drawing and never call the model.
+    @Test func scopeWithNothingEditableFailsInsteadOfWidening() async throws {
+        let bytes = try fixtureBytes()
+        let session = makeSession(bytes)
+        let model = DrawingAIEditModel()
+        model.configure(session: session, scope: [999_999])   // a selection with nothing editable
+        model.engineOverride = .onDevice
+        var producerCalled = false
+        model.producer = { _, _, _ in producerCalled = true; return "{\"operations\":[]}" }
+        model.instruction = "make everything blue"
+        model.submit()
+        await wait(model) { if case .failed = model.phase { return true }; return false }
+
+        guard case .failed(let message) = model.phase else {
+            Issue.record("expected .failed, got \(model.phase)"); return
+        }
+        #expect(message.lowercased().contains("selected"))
+        #expect(producerCalled == false, "the model must not run with a silently widened whole-drawing scope")
+        #expect(session.isDirty == false)
+    }
+
     @Test func invalidPlanFailsWithoutMutation() async throws {
         let bytes = try fixtureBytes()
         let session = makeSession(bytes)
