@@ -85,18 +85,23 @@ struct DrawingAIEditView: View {
         }
     }
 
-    @ViewBuilder
     private var phaseActions: some View {
-        switch model.phase {
-        case .idle, .applied:
-            inputActions
-        case .thinking:
-            thinkingActions
-        case .preview:
-            if model.preview != nil { previewActions } else { inputActions }
-        case .failed:
-            failureActions
+        Group {
+            switch model.phase {
+            case .idle, .applied:
+                inputActions
+            case .thinking:
+                thinkingActions
+            case .preview:
+                if model.preview != nil { previewActions } else { inputActions }
+            case .failed:
+                failureActions
+            }
         }
+        // Single-line labels that shrink rather than wrap into a hyphenated circle at the
+        // largest accessibility text sizes (C5e A3 review).
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 
     private var header: some View {

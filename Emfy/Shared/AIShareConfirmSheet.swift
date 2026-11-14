@@ -60,5 +60,8 @@ struct AIShareConfirmSheet: View {
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("sendToAIConfirm")
         }
+        // Single-line labels that shrink rather than wrap at the largest AX sizes (C5e A3 review).
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 }

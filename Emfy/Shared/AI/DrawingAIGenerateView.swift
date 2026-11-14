@@ -103,18 +103,22 @@ struct DrawingAIGenerateView: View {
         }
     }
 
-    @ViewBuilder
     private var phaseActions: some View {
-        switch model.phase {
-        case .idle, .created:
-            inputActions
-        case .thinking:
-            thinkingActions
-        case .preview:
-            if model.preview != nil { previewActions } else { inputActions }
-        case .failed:
-            failureActions
+        Group {
+            switch model.phase {
+            case .idle, .created:
+                inputActions
+            case .thinking:
+                thinkingActions
+            case .preview:
+                if model.preview != nil { previewActions } else { inputActions }
+            case .failed:
+                failureActions
+            }
         }
+        // Single-line labels that shrink rather than wrap at the largest AX sizes (C5e A3 review).
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 
     private var header: some View {

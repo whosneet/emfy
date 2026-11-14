@@ -201,5 +201,9 @@ struct DrawingRecolourView: View {
                 .disabled(!model.canApply)
                 .accessibilityIdentifier("recolourApply")
         }
+        // Single-line labels that shrink rather than wrap into a hyphenated circle at the
+        // largest accessibility text sizes (C5e A3 review).
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 }
