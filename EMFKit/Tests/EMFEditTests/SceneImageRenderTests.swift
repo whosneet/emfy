@@ -124,8 +124,11 @@ struct SceneImageRenderTests {
         scene.insert(try #require(SceneFactory.makeImage(cgImage: cg, destRectDevice: CGRect(x: 100, y: 100, width: 300, height: 300), id: 0)), at: 0)
         let source = try #require(SceneRenderer.prepare(scene))
         let element = try #require(scene.editableElements.first { $0.kind == .image })
-        let first = source.imageCache.image(for: element)
-        let second = source.imageCache.image(for: element)
+        // A generous budget keeps native resolution so the memoised instance is
+        // returned verbatim on the second get (M2: keyed by id AND budget).
+        let budget = (w: 4096, h: 4096)
+        let first = source.imageCache.image(for: element, budget: budget)
+        let second = source.imageCache.image(for: element, budget: budget)
         #expect(first != nil)
         // Same decoded instance returned (memoised, not re-decoded).
         #expect(first === second)

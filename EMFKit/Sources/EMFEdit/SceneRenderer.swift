@@ -44,28 +44,138 @@ public enum SceneRenderer {
         let dibCache = DIBImageCache()
     }
 
-    /// A thread-safe, lazily-populated cache of decoded image pixels, keyed by element
-    /// id. An edited/new `.image` element's pixels never change (edits move/resize/rotate
-    /// or re-alpha it, never repaint it), so one decode serves every tile and repaint of
-    /// the session. `@unchecked Sendable`: the only mutable state is a lock-guarded
-    /// dictionary of immutable `CGImage`s, safe to read from every tile thread.
+    /// A thread-safe, cost-bounded cache of decoded image pixels for edited/new
+    /// `.image` elements, keyed by element id AND the decode budget. An element's
+    /// pixels never change (edits move/resize/rotate or re-alpha it, never repaint
+    /// it), so one decode per (id, budget) serves every tile and repaint of the
+    /// session. The source image is decoded DOWNSAMPLED to the destination
+    /// footprint (the canvas budget) so a 100 Mpx inserted photo shown small does
+    /// not sit full-resolution in memory (M2), and the resident set is bounded by
+    /// an LRU memory budget comparable to `DIBImageCache`. The decode runs with the
+    /// lock released and dedupes in-flight decodes per key (one decode per key even
+    /// under the tiled layer's concurrent threads). `@unchecked Sendable`: every
+    /// field below is guarded by `condition`.
     final class ImageDecodeCache: @unchecked Sendable {
-        private let lock = NSLock()
-        private var images: [Int: CGImage] = [:]
-
-        /// The decoded native-resolution `CGImage` for `element`'s image, decoded once and
-        /// memoised by id; nil when the element carries no decodable image.
-        func image(for element: Element) -> CGImage? {
-            lock.lock()
-            let cached = images[element.id]
-            lock.unlock()
-            if let cached { return cached }
-            guard let image = element.image, let cg = SceneImageCoding.cgImage(for: image) else { return nil }
-            lock.lock()
-            images[element.id] = cg
-            lock.unlock()
-            return cg
+        /// Identifies a decoded image: the element id plus the budget it was decoded
+        /// to (0,0 means "no budget — native resolution"). Two zoom levels key
+        /// separate entries, as in `DIBImageCache`.
+        struct Key: Hashable, Sendable {
+            let id: Int
+            let budgetW: Int
+            let budgetH: Int
         }
+
+        private struct Entry {
+            let image: CGImage
+            let cost: Int
+        }
+
+        /// The per-session memory budget, matching `DIBImageCache.defaultMemoryBudget`.
+        static let defaultMemoryBudget = 64 * 1024 * 1024
+
+        private let condition = NSCondition()
+        private var entries: [Key: Entry] = [:]
+        private var order: [Key] = []
+        private var currentCost = 0
+        private var inFlight: Set<Key> = []
+        private let memoryBudget: Int
+
+        init(memoryBudget: Int = ImageDecodeCache.defaultMemoryBudget) {
+            self.memoryBudget = max(1, memoryBudget)
+        }
+
+        /// The decoded `CGImage` for `element`, downsampled to `budget` (the
+        /// destination footprint), decoded once per (id, budget) and memoised; nil
+        /// when the element carries no decodable image.
+        func image(for element: Element, budget: (w: Int, h: Int)?) -> CGImage? {
+            let key = Key(id: element.id, budgetW: budget?.w ?? 0, budgetH: budget?.h ?? 0)
+            return cached(forKey: key) { ImageDecodeCache.decode(element, budget: budget) }
+        }
+
+        /// The caching core (also the test seam): returns the cached image for `key`
+        /// or runs `decode` exactly once. The decode runs with the lock RELEASED;
+        /// concurrent callers for the same key wait and share the one decode. An
+        /// over-budget result is returned uncached, leaving the resident set intact
+        /// (same contract as `DIBImageCache`).
+        func cached(forKey key: Key, decode: () -> CGImage?) -> CGImage? {
+            condition.lock()
+            while true {
+                if let entry = entries[key] {
+                    touch(key)
+                    condition.unlock()
+                    return entry.image
+                }
+                if inFlight.contains(key) {
+                    condition.wait()
+                    continue
+                }
+                inFlight.insert(key)
+                break
+            }
+            condition.unlock()
+
+            let decoded = decode()
+
+            condition.lock()
+            inFlight.remove(key)
+            if let decoded {
+                let cost = max(1, decoded.bytesPerRow * decoded.height)
+                if cost <= memoryBudget { insert(key, Entry(image: decoded, cost: cost)) }
+            }
+            condition.broadcast()
+            condition.unlock()
+            return decoded
+        }
+
+        /// Decodes `element`'s image, downsampled to `budget` when the native pixels
+        /// exceed it (never upsamples). A nil budget decodes at native resolution.
+        static func decode(_ element: Element, budget: (w: Int, h: Int)?) -> CGImage? {
+            guard let image = element.image, let native = SceneImageCoding.cgImage(for: image) else { return nil }
+            guard let budget, native.width > budget.w || native.height > budget.h else { return native }
+            return downsample(native, toBudget: budget) ?? native
+        }
+
+        /// Redraws `image` into an sRGB bitmap sized to fit inside `budget`,
+        /// preserving aspect and never exceeding the native size. Nil on an
+        /// allocation failure (the caller then keeps the native image).
+        private static func downsample(_ image: CGImage, toBudget budget: (w: Int, h: Int)) -> CGImage? {
+            let nativeW = max(1, image.width), nativeH = max(1, image.height)
+            let scale = min(Double(max(1, budget.w)) / Double(nativeW),
+                            Double(max(1, budget.h)) / Double(nativeH), 1)
+            let outW = max(1, Int((Double(nativeW) * scale).rounded(.down)))
+            let outH = max(1, Int((Double(nativeH) * scale).rounded(.down)))
+            guard outW < nativeW || outH < nativeH, let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let ctx = CGContext(
+                      data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: 0,
+                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return nil }
+            ctx.interpolationQuality = .high
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: outW, height: outH))
+            return ctx.makeImage()
+        }
+
+        // MARK: - LRU bookkeeping (all callers hold `condition`)
+
+        private func touch(_ key: Key) {
+            guard let position = order.firstIndex(of: key) else { return }
+            order.remove(at: position)
+            order.append(key)
+        }
+
+        private func insert(_ key: Key, _ entry: Entry) {
+            entries[key] = entry
+            order.append(key)
+            currentCost += entry.cost
+            while currentCost > memoryBudget, let oldest = order.first {
+                order.removeFirst()
+                if let removed = entries.removeValue(forKey: oldest) { currentCost -= removed.cost }
+            }
+        }
+
+        // MARK: - Introspection (tests)
+
+        var count: Int { condition.lock(); defer { condition.unlock() }; return entries.count }
+        var residentCost: Int { condition.lock(); defer { condition.unlock() }; return currentCost }
     }
 
     /// Whether `render` needs a prepared source for this scene — true when it
@@ -172,7 +282,7 @@ public enum SceneRenderer {
                 // Edited IMPORTED images keep the synthesis path below, which matches the
                 // exported file exactly (a source crop, or a content-drop the exporter
                 // applies). Falls back to synthesis only if the pixels can't be decoded.
-                if let cg = decodedImage(element, source: source) {
+                if let cg = decodedImage(element, source: source, base: base) {
                     drawImageDirect(element, cg, into: context, base: base)
                 } else {
                     renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
@@ -275,7 +385,7 @@ public enum SceneRenderer {
                 // never synthesise → re-decode per tile (the E3c review hang). Edited
                 // imported images keep the EMF+ synthesis below (source crop / fidelity).
                 if element.kind == .image, element.provenance.sourceRecordIndices.isEmpty,
-                   let cg = decodedImage(element, source: source) {
+                   let cg = decodedImage(element, source: source, base: base) {
                     drawImageDirect(element, cg, into: context, base: base)
                     continue
                 }
@@ -333,13 +443,59 @@ public enum SceneRenderer {
 
     // MARK: - Direct image draw (E3c review: no per-tile re-decode)
 
-    /// The decoded pixels for an edited/new image element: the session cache when a
-    /// prepared `source` is present (a tiled canvas), else a one-off decode (a `makeImage`
-    /// or a test, where one decode per call is fine).
-    private static func decodedImage(_ element: Element, source: SceneRenderSource?) -> CGImage? {
-        if let source { return source.imageCache.image(for: element) }
+    /// The decoded pixels for an edited/new image element, downsampled to its
+    /// on-canvas footprint (the decode budget): the session cache when a prepared
+    /// `source` is present (a tiled canvas), else a one-off budgeted decode (a
+    /// `makeImage` or a test, where one decode per call is fine).
+    private static func decodedImage(_ element: Element, source: SceneRenderSource?, base: CGAffineTransform) -> CGImage? {
+        let budget = footprintBudget(element, base: base)
+        if let source { return source.imageCache.image(for: element, budget: budget) }
+        return ImageDecodeCache.decode(element, budget: budget)
+    }
+
+    /// The destination footprint of `element`'s image in target pixels — how many
+    /// pixels it actually occupies on screen — used as the decode budget so a large
+    /// photo shown small is decoded small (M2). Returns nil (decode at native) when
+    /// the element carries no image or the mapped footprint is non-finite. Clamped
+    /// to the shared canvas caps so an extreme zoom cannot ask for an unbounded
+    /// decode.
+    private static func footprintBudget(_ element: Element, base: CGAffineTransform) -> (w: Int, h: Int)? {
         guard let image = element.image else { return nil }
-        return SceneImageCoding.cgImage(for: image)
+        let corners: [CGPoint]
+        if let explicit = image.destCornersDevice, explicit.count == 4 {
+            corners = explicit
+        } else {
+            let r = image.destRectDevice.standardized
+            corners = [CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
+                       CGPoint(x: r.maxX, y: r.maxY), CGPoint(x: r.minX, y: r.maxY)]
+        }
+        let mapped = corners.map { $0.applying(base) }
+        let xs = mapped.map(\.x), ys = mapped.map(\.y)
+        guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
+              minX.isFinite, maxX.isFinite, minY.isFinite, maxY.isFinite else { return nil }
+        let w = ceilToDimension(maxX - minX)
+        let h = ceilToDimension(maxY - minY)
+        return clampToCanvasCaps(w: max(1, w), h: max(1, h))
+    }
+
+    /// Ceils a finite footprint side to an Int in [0, canvasDimensionCap], so the
+    /// conversion cannot trap or overflow for any finite input (§8).
+    private static func ceilToDimension(_ value: CGFloat) -> Int {
+        let ceiled = value.rounded(.up)
+        if ceiled <= 0 { return 0 }
+        if ceiled >= CGFloat(EMFRenderer.canvasDimensionCap) { return EMFRenderer.canvasDimensionCap }
+        return Int(ceiled)
+    }
+
+    /// Clamps a budget to the shared per-side and area canvas caps, preserving
+    /// aspect on the area clamp (mirrors `EMFRenderer`/`BitmapDecoder`).
+    private static func clampToCanvasCaps(w: Int, h: Int) -> (w: Int, h: Int) {
+        let cw = max(1, min(w, EMFRenderer.canvasDimensionCap))
+        let ch = max(1, min(h, EMFRenderer.canvasDimensionCap))
+        let area = cw * ch
+        guard area > EMFRenderer.canvasAreaCap else { return (cw, ch) }
+        let scale = (Double(EMFRenderer.canvasAreaCap) / Double(area)).squareRoot()
+        return (max(1, Int((Double(cw) * scale).rounded(.down))), max(1, Int((Double(ch) * scale).rounded(.down))))
     }
 
     /// Draws `cg` (the element's decoded pixels) into `context` filling the image's
