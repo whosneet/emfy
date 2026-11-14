@@ -484,6 +484,7 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "pen-strokes" { await runPenStrokesScript(); return }
         if EditorDebugLaunch.script == "text-image" { await runTextImageScript(); return }
         if EditorDebugLaunch.script == "wmf-done" { await runWMFDoneScript(); return }
+        if EditorDebugLaunch.script == "wmf-leave" { await runWMFLeaveScript(); return }
         if EditorDebugLaunch.script == "text-popover" { await runTextPopoverScript(); return }
         if EditorDebugLaunch.script == "layers" { await runLayersScript(); return }
         if EditorDebugLaunch.script == "align-grid" { await runAlignGridScript(); return }
@@ -792,6 +793,22 @@ struct MetafileViewerScreen: View {
         try? await Task.sleep(for: .milliseconds(200))
         await session.endEditing()   // the Done path
         Self.logScript("ios wmf-done: dirty=\(session.isDirty) wmfPending=\(session.pendingWMFConfirmation != nil) ending=\(session.isEndingEditing) editing=\(session.editing == .editing)")
+    }
+
+    /// C5d U1 proof: open a WMF → edit mode → one edit → leave the document (the guarded
+    /// Back / deselect, `onBack`). The window model runs the save guard, which raises the
+    /// "Save as WMF?" choice and HOLDS the navigation (nothing discarded), so a simulator
+    /// screenshot shows the dialog over the still-shown document. Stays alive for the capture.
+    @MainActor
+    private func runWMFLeaveScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios wmf-leave: begin editing failed"); return }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        _ = session.debugInsertText("Edited", originDevice: CGPoint(x: page.width * 0.15, y: page.height * 0.2))
+        try? await Task.sleep(for: .milliseconds(200))
+        onBack()   // the guarded leave: window model raises the WMF choice and holds the nav
+        try? await Task.sleep(for: .milliseconds(600))
+        Self.logScript("ios wmf-leave: wmfPending=\(session.pendingWMFConfirmation != nil) ending=\(session.isEndingEditing) editing=\(session.editing == .editing)")
     }
 
     /// iPad text-popover proof (E3c): blank drawing → edit mode → insert a text element and
