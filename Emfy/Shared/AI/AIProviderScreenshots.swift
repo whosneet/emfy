@@ -33,7 +33,7 @@ enum AIProviderScreenshots {
             consentStore: AIConsentStore(defaults: defaults),
             sessionFactory: { AITransport.makeSession(protocolClasses: [ProviderShotStubProtocol.self]) })
         let config = AIProviderConfig(kind: .anthropic, displayName: "Anthropic", baseURL: AIProviderPresets.anthropicBaseURL, model: AIProviderPresets.anthropicDefaultModel)
-        store.addProvider(config, key: "sk-screenshot-demo")
+        try? store.addProvider(config, key: "sk-screenshot-demo")   // InMemoryKeyStore never fails
         store.grantConsent(config.id, purpose: .drawingData)
         store.selectedEngineID = config.id
         return (store, config)

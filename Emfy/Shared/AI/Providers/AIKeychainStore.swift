@@ -52,18 +52,29 @@ struct KeychainKeyStore: AIKeyStore {
             return
         }
         guard let data = key.data(using: .utf8) else { throw KeychainError(status: errSecParam) }
-        // Replace: delete any existing item — including a pre-S3 copy in the legacy
-        // keychain on macOS — then add a fresh one to the data-protection keychain with
-        // the device-only, after-first-unlock accessibility the brief requires.
-        SecItemDelete(baseQuery(for: providerID) as CFDictionary)
         #if os(macOS)
+        // Clear any pre-S3 legacy-keychain copy so a later read never resolves to a stale
+        // key there (best effort; the data-protection item below is the source of truth).
         SecItemDelete(baseQuery(for: providerID, dataProtection: false) as CFDictionary)
         #endif
-        var add = baseQuery(for: providerID)
+        // Atomic update-or-add (ST6): update the existing data-protection item IN PLACE,
+        // and only add when there is none. The old delete-then-add left a window where a
+        // failed add would wipe the key with nothing written back; an update that fails
+        // leaves the previous key intact and throws, which the UI surfaces (S-7).
+        let query = baseQuery(for: providerID)
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else { throw KeychainError(status: updateStatus) }
+
+        var add = query
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(add as CFDictionary, nil)
-        guard status == errSecSuccess else { throw KeychainError(status: status) }
+        let addStatus = SecItemAdd(add as CFDictionary, nil)
+        guard addStatus == errSecSuccess else { throw KeychainError(status: addStatus) }
     }
 
     func key(for providerID: String) throws -> String? {

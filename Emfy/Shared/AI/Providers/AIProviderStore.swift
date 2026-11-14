@@ -58,30 +58,43 @@ final class AIProviderStore {
     // MARK: Provider CRUD
 
     /// Adds a provider and, if a non-empty key was entered, saves it to the Keychain.
-    /// Selects the new provider when nothing meaningful was selected before.
-    func addProvider(_ config: AIProviderConfig, key: String) {
-        try? keyStore.setKey(key, for: config.id)
+    /// Throws a Keychain failure BEFORE the provider is recorded, so a failed key write
+    /// never leaves a keyless provider the editor claimed was saved (S-7).
+    func addProvider(_ config: AIProviderConfig, key: String) throws {
+        try keyStore.setKey(key, for: config.id)
         providers.append(config)
     }
 
-    /// Replaces a provider's config (name, base URL, model) in place. Consent is bound to
-    /// the (kind, host) the user approved; if either changes, the drawing data and stored
-    /// key would otherwise reach a different host under the old consent, so consent is
-    /// dropped and the user must allow the new host again (S2).
-    func updateProvider(_ config: AIProviderConfig) {
+    /// Replaces a provider's config (name, base URL, model) in place. Consent AND the
+    /// stored key are bound to the (kind, scheme, host, port) the user approved; if any
+    /// of those changes, both the drawing data and the key would otherwise reach a
+    /// different endpoint, so consent is revoked AND the stored key is deleted — the
+    /// user must allow the new endpoint and re-enter its key (S-2). The caller
+    /// re-saves a freshly typed key after this returns.
+    func updateProvider(_ config: AIProviderConfig) throws {
         guard let index = providers.firstIndex(where: { $0.id == config.id }) else { return }
         if !Self.consentSurvivesEdit(from: providers[index], to: config) {
             service.revokeConsent(config.id)
+            try keyStore.setKey("", for: config.id)   // delete the old-endpoint key (S-7)
         }
         providers[index] = config
     }
 
-    /// Whether an edit keeps the existing consent: only when the provider kind and the
-    /// Base URL host are both unchanged (host compared case-insensitively). Pure, so the
-    /// policy is unit-tested and the editor can warn before saving (S2).
+    /// Whether an edit keeps the existing consent and key: only when the provider kind
+    /// and the full endpoint (scheme, host, port, each case-insensitive) are all
+    /// unchanged. Pure, so the policy is unit-tested and the editor can warn before
+    /// saving (S-2).
     nonisolated static func consentSurvivesEdit(from old: AIProviderConfig, to new: AIProviderConfig) -> Bool {
-        old.kind == new.kind
-            && old.baseURL.host?.lowercased() == new.baseURL.host?.lowercased()
+        old.kind == new.kind && sameEndpoint(old.baseURL, new.baseURL)
+    }
+
+    /// Whether two base URLs name the same endpoint: scheme, host (case-insensitive)
+    /// and port all equal. A changed scheme or port re-targets where the key and
+    /// drawing data go just as a changed host does (S-2).
+    nonisolated static func sameEndpoint(_ a: URL, _ b: URL) -> Bool {
+        a.scheme?.lowercased() == b.scheme?.lowercased()
+            && a.host?.lowercased() == b.host?.lowercased()
+            && a.port == b.port
     }
 
     /// Removes a provider entirely: its config, its key AND its consent (core API).
@@ -97,9 +110,10 @@ final class AIProviderStore {
     // MARK: Keys
 
     /// Replaces a provider's stored key (empty deletes it). The value is never read
-    /// back into the UI.
-    func setKey(_ key: String, for providerID: String) {
-        try? keyStore.setKey(key, for: providerID)
+    /// back into the UI. Throws a Keychain failure so the editor never shows "saved"
+    /// when the write failed (S-7).
+    func setKey(_ key: String, for providerID: String) throws {
+        try keyStore.setKey(key, for: providerID)
     }
 
     /// Whether a key is stored for a provider (so the UI can show "Key saved ✓"
@@ -148,11 +162,23 @@ final class AIProviderStore {
 
     // MARK: Network (Settings actions)
 
-    /// Loads the provider's model list for the picker (needs no consent — no drawing
-    /// data). Uses `explicitKey` when given (the editor's typed key, before it is
-    /// saved), else the stored key. Throws a typed `ProviderError` on failure.
+    /// Loads the provider's model list for the picker. A key only ever flows to an
+    /// endpoint it was entered for (S-2): the editor's freshly typed `explicitKey`
+    /// goes to whatever endpoint is shown, but the STORED key is reused only when the
+    /// saved provider still names the SAME endpoint as `config`. Otherwise an empty
+    /// key is sent — which succeeds for a loopback/local host and throws `.missingKey`
+    /// for a host that needs one — so a key saved for the old host never leaks to a
+    /// newly-typed Base URL. Throws a typed `ProviderError` on failure.
     func loadModels(for config: AIProviderConfig, explicitKey: String? = nil) async throws -> [String] {
-        let key = explicitKey ?? (((try? keyStore.key(for: config.id)) ?? nil) ?? "")
+        let key: String
+        if let explicitKey {
+            key = explicitKey
+        } else if let stored = provider(id: config.id),
+                  Self.sameEndpoint(stored.baseURL, config.baseURL) {
+            key = (((try? keyStore.key(for: config.id)) ?? nil) ?? "")
+        } else {
+            key = ""
+        }
         return try await AIModelCatalog.fetch(config: config, key: key, session: sessionFactory())
     }
 

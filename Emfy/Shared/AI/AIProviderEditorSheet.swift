@@ -38,6 +38,8 @@ struct AIProviderEditorSheet: View {
     @State private var committedID: String?
     /// Whether a typed key has already been saved to the Keychain (so it isn't "unsaved").
     @State private var savedKey = false
+    /// A Keychain write failure to surface in the key section (S-7); nil when all good.
+    @State private var keyError: String?
     /// The opening field snapshot, to detect uncommitted edits in Add mode (C5e U4).
     @State private var initialSnapshot: String
     @State private var showDiscardConfirm = false
@@ -189,11 +191,12 @@ struct AIProviderEditorSheet: View {
         } header: {
             Text("Details")
         } footer: {
-            // S2: consent (and the stored key) were approved for a specific host. Warn
-            // before saving that changing it re-targets where drawing data would go and
-            // requires approving the new host again.
-            if isEditing, hostChanged, store.isConsentGranted(providerID) {
-                Text("You’ve pointed this provider at a different server. Emfy will ask your permission again before sending any drawing there.")
+            // S-2: consent AND the stored key were approved for a specific endpoint
+            // (scheme, host, port). Warn before saving that changing it re-targets
+            // where the key and drawing data would go, so Emfy forgets the saved key
+            // and re-asks permission for the new endpoint.
+            if isEditing, hostChanged, store.isConsentGranted(providerID) || store.hasKey(for: providerID) {
+                Text("You’ve pointed this provider at a different server. Emfy will forget the saved key and ask your permission again before sending anything there — re-enter the key for the new address.")
                     .foregroundStyle(.orange)
             }
         }
@@ -217,8 +220,13 @@ struct AIProviderEditorSheet: View {
                 }
                 Button("Replace Key…") { replacingKey = true }
                 Button("Remove Key", role: .destructive) {
-                    store.setKey("", for: providerID)
-                    apiKey = ""
+                    do {
+                        try store.setKey("", for: providerID)
+                        apiKey = ""
+                        keyError = nil
+                    } catch {
+                        keyError = "Emfy couldn’t remove the key from this device’s Keychain. Please try again."
+                    }
                 }
             } else {
                 SecureField("API key", text: $apiKey)
@@ -227,6 +235,12 @@ struct AIProviderEditorSheet: View {
                     #if os(iOS)
                     .textInputAutocapitalization(.never)
                     #endif
+            }
+            if let keyError {
+                Label(keyError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         } header: {
             Text("API key")
@@ -350,28 +364,36 @@ struct AIProviderEditorSheet: View {
         return AIProviderConfig(id: id, kind: kind, displayName: trimmedName, baseURL: baseURL, model: model.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    /// Persists the provider and its key, returning the committed config.
+    /// Persists the provider and its key, returning the committed config, or nil when a
+    /// Keychain write failed (S-7): on failure `keyError` is set, `savedKey` stays false,
+    /// and the caller must NOT dismiss or claim the key was saved.
     @discardableResult
     private func commit() -> AIProviderConfig? {
         guard let draft = draftConfig() else { return nil }
-        if isEditing {
-            store.updateProvider(draft)
-            if replacingKey || !apiKey.isEmpty { store.setKey(apiKey, for: draft.id) }
-        } else if committedID == nil {
-            store.addProvider(draft, key: apiKey)
-            committedID = draft.id
-        } else {
-            store.updateProvider(draft)
-            if !apiKey.isEmpty { store.setKey(apiKey, for: draft.id) }
+        do {
+            if isEditing {
+                try store.updateProvider(draft)
+                if replacingKey || !apiKey.isEmpty { try store.setKey(apiKey, for: draft.id) }
+            } else if committedID == nil {
+                try store.addProvider(draft, key: apiKey)
+                committedID = draft.id
+            } else {
+                try store.updateProvider(draft)
+                if !apiKey.isEmpty { try store.setKey(apiKey, for: draft.id) }
+            }
+        } catch {
+            keyError = "Emfy couldn’t save the API key to this device’s Keychain, so the provider wasn’t saved. Please try again."
+            return nil
         }
+        keyError = nil
         replacingKey = false
         if !apiKey.isEmpty { savedKey = true }
         return store.provider(id: draft.id) ?? draft
     }
 
     private func save() {
-        commit()
-        dismiss()
+        // Only leave the sheet once the provider (and any key) actually persisted (S-7).
+        if commit() != nil { dismiss() }
     }
 
     private func loadModels() async {
