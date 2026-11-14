@@ -50,11 +50,28 @@ final class ToastCenter {
         withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85)) {
             current = toast
         }
+        // An actionable toast (Undo, Show in Finder) must not time out under VoiceOver or
+        // Switch Control — those users can't reach a control that vanishes in 5 s (WCAG
+        // 2.2.1, audit R2A5). It stays until dismissed, or until a newer toast replaces it.
+        if actionTitle != nil, Self.assistiveTechnologyRunning {
+            dismissTask = nil
+            return
+        }
         dismissTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(duration))
             guard !Task.isCancelled else { return }
             self?.dismiss(toast.id)
         }
+    }
+
+    /// True while VoiceOver or Switch Control is running — the assistive technologies that
+    /// need an actionable toast to persist (R2A5).
+    static var assistiveTechnologyRunning: Bool {
+        #if os(macOS)
+        return NSWorkspace.shared.isVoiceOverEnabled || NSWorkspace.shared.isSwitchControlEnabled
+        #else
+        return UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
+        #endif
     }
 
     /// Runs the toast's action and dismisses it.
@@ -104,6 +121,7 @@ struct ToastView: View {
                     .font(.callout.weight(.semibold))
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
+                    .minTouchTarget()
             }
         }
         .padding(.horizontal, 16)
@@ -111,6 +129,14 @@ struct ToastView: View {
         .floatingSurface(in: Capsule())
         .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
         .accessibilityElement(children: .combine)
+        // The toast is one combined element, so its trailing button isn't separately
+        // focusable; an accessibility action gives VoiceOver / Switch Control a route to it
+        // (R2A5), paired with the toast no longer timing out for those users.
+        .accessibilityActions {
+            if let actionTitle = toast.actionTitle {
+                Button(actionTitle, action: onAction)
+            }
+        }
         // The one place a toast announces itself to VoiceOver — queued, not
         // interrupting (H6/A2, A17). The callers no longer post their own.
         .onAppear { announce(toast.message) }
