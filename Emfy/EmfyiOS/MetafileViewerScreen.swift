@@ -1077,21 +1077,9 @@ struct MetafileViewerScreen: View {
                 findHighlights: findHighlightSet
             )
             .ignoresSafeArea()
-            .overlay(alignment: .bottom) { rotationReadout }
+            .overlay(alignment: .bottom) { RotationReadoutLeaf(editorModel: editorModel) }
         } else {
             readOnlyDrawingLayer
-        }
-    }
-
-    /// The live rotation-angle readout while a two-finger rotation is in flight (E2b-6).
-    @ViewBuilder
-    private var rotationReadout: some View {
-        if let readout = editorModel.rotationReadout {
-            Text(readout)
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .floatingSurface(in: Capsule())
-                .padding(.bottom, 80)
         }
     }
 
@@ -2344,6 +2332,23 @@ private struct ZoomPill: View {
             .padding(.vertical, 6)
             .floatingSurface(in: Capsule())
             .accessibilityHidden(true)
+    }
+}
+
+/// The live rotation-angle readout while a two-finger rotation is in flight (E2b-6), as a
+/// leaf view so updating it each rotation frame invalidates only this text — not
+/// `MetafileViewerScreen.body`, which hosts the inspector and publishes `viewerActions` (P2).
+private struct RotationReadoutLeaf: View {
+    let editorModel: EditorModel
+
+    var body: some View {
+        if let readout = editorModel.rotationReadout {
+            Text(readout)
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .floatingSurface(in: Capsule())
+                .padding(.bottom, 80)
+        }
     }
 }
 

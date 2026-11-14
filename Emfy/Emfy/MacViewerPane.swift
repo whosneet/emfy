@@ -1041,21 +1041,9 @@ struct MacViewerPane: View {
                 findHighlights: findHighlightSet
             )
             .ignoresSafeArea()
-            .overlay(alignment: .bottom) { rotationReadout }
+            .overlay(alignment: .bottom) { MacRotationReadoutLeaf(editorModel: editorModel) }
         } else {
             readOnlyContent
-        }
-    }
-
-    /// The live rotation-angle readout while a rotation drag is in flight (E2b-6).
-    @ViewBuilder
-    private var rotationReadout: some View {
-        if let readout = editorModel.rotationReadout {
-            Text(readout)
-                .font(.system(.body, design: .rounded).monospacedDigit())
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .floatingSurface(in: Capsule())   // C5e G2
-                .padding(.bottom, 24)
         }
     }
 
@@ -2187,6 +2175,23 @@ private final class CloseDelegateProxy: NSObject, NSWindowDelegate {
                 }
                 continuation.resume(returning: choice)
             }
+        }
+    }
+}
+
+/// The live rotation-angle readout while a rotation drag is in flight (E2b-6), as a leaf view
+/// so updating it each rotation frame invalidates only this text — not `MacViewerPane.body`,
+/// which hosts the inspector and publishes `viewerActions` (P2).
+private struct MacRotationReadoutLeaf: View {
+    let editorModel: EditorModel
+
+    var body: some View {
+        if let readout = editorModel.rotationReadout {
+            Text(readout)
+                .font(.system(.body, design: .rounded).monospacedDigit())
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .floatingSurface(in: Capsule())   // C5e G2
+                .padding(.bottom, 24)
         }
     }
 }

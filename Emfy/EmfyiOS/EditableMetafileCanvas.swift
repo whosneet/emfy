@@ -703,7 +703,10 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                 state.rotation = g.rotation; drag = state
                 drag?.liveTransform = CGAffineTransform(translationX: centre.x, y: centre.y)
                     .rotated(by: g.rotation).translatedBy(x: -centre.x, y: -centre.y)
-                parent.editorModel.rotationReadout = String(format: "%.0f°", g.rotation * 180 / .pi)
+                // Write the readout only when the displayed integer-degree string changes, so an
+                // unchanged value doesn't fire the observation (P2).
+                let readout = String(format: "%.0f°", g.rotation * 180 / .pi)
+                if parent.editorModel.rotationReadout != readout { parent.editorModel.rotationReadout = readout }
                 overlay.setNeedsDisplay()
             case .ended:
                 commitRotation(radians: g.rotation)

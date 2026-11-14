@@ -247,6 +247,24 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// drag ended (or after a newer drag began) discards its stale raster (P1).
         private var ghostGeneration = 0
 
+        /// The last time the marquee re-ran its O(N) hit test, so a fast mouse-drag doesn't scan
+        /// every element on every event — throttled to ~60 Hz, with a final exact pass on
+        /// mouse-up (P3).
+        private var lastMarqueeHitTime: TimeInterval = 0
+        private static let marqueeHitInterval: TimeInterval = 1.0 / 60
+
+        /// Runs the marquee hit test for `viewRect` and assigns the selection ONLY when the hit
+        /// set actually changed, so dragging over empty space (or within the same elements)
+        /// doesn't rewrite the selection — and re-run the whole viewer body — on every event (P3).
+        private func updateMarqueeSelection(viewRect: CGRect) {
+            let deviceRect = mapping.deviceRect(fromView: viewRect)
+            let hits = EditorHitTest.marquee(in: scene, deviceRect: deviceRect)
+            guard selection.ids != hits else { return }
+            var next = selection
+            next.replace(with: hits)
+            selection = next
+        }
+
         /// Whether anything the selection overlay actually draws changed since the last
         /// `updateView`, so an unrelated update (tile paint, render options, the text popover,
         /// the inspector trailing inset) doesn't force a redraw of the chrome (P8).
@@ -563,12 +581,14 @@ struct MacEditableCanvas: NSViewRepresentable {
             drag = state
             switch state.kind {
             case .marquee:
-                let rect = CGRect(x: min(state.start.x, viewPoint.x), y: min(state.start.y, viewPoint.y),
-                                  width: abs(viewPoint.x - state.start.x), height: abs(viewPoint.y - state.start.y))
-                let deviceRect = mapping.deviceRect(fromView: rect)
-                var next = state.baseSelection
-                next.replace(with: EditorHitTest.marquee(in: scene, deviceRect: deviceRect))
-                selection = next
+                // Throttle the O(N) hit test to ~60 Hz; mouse-up runs a final exact pass (P3).
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - lastMarqueeHitTime >= Self.marqueeHitInterval {
+                    lastMarqueeHitTime = now
+                    let rect = CGRect(x: min(state.start.x, viewPoint.x), y: min(state.start.y, viewPoint.y),
+                                      width: abs(viewPoint.x - state.start.x), height: abs(viewPoint.y - state.start.y))
+                    updateMarqueeSelection(viewRect: rect)
+                }
             case .shape:
                 if let kind = state.shapeKind {
                     drag?.shapePreviewRect = ShapeToolGeometry.sweptRect(
@@ -589,7 +609,11 @@ struct MacEditableCanvas: NSViewRepresentable {
             defer { drag = nil; tiledView?.setHiddenIDs([]); parent.editorModel.rotationReadout = nil; overlay?.needsDisplay = true }
             switch state.kind {
             case .marquee:
-                break   // selection already updated live
+                // A final exact pass so the release reflects the last rect even if the throttle
+                // skipped the last drag event (P3).
+                let rect = CGRect(x: min(state.start.x, viewPoint.x), y: min(state.start.y, viewPoint.y),
+                                  width: abs(viewPoint.x - state.start.x), height: abs(viewPoint.y - state.start.y))
+                updateMarqueeSelection(viewRect: rect)
             case .shape:
                 commitShape(state: state, end: viewPoint, shift: shift, option: option)
             case .pen:
@@ -1063,7 +1087,10 @@ struct MacEditableCanvas: NSViewRepresentable {
             if state.kind == .rotate, let box = state.startViewBounds {
                 let centre = CGPoint(x: box.midX, y: box.midY)
                 let degrees = EditorTransform.rotationDegrees(center: centre, from: state.start, to: state.current)
-                parent.editorModel.rotationReadout = String(format: "%.0f°", degrees)
+                // Write the readout only when the displayed integer-degree string changes, so an
+                // unchanged value doesn't fire the observation (P2).
+                let readout = String(format: "%.0f°", degrees)
+                if parent.editorModel.rotationReadout != readout { parent.editorModel.rotationReadout = readout }
             }
             if state.kind == .move {
                 // Capture the live smart-guide lines for the overlay (E3e).
