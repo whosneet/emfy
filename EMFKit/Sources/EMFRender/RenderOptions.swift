@@ -43,6 +43,9 @@ public struct FontSubstitution: Sendable, Equatable {
 ///   dual); `MetafileRenderer.prepare` only reports `Prepared.hasGDICopy`.
 /// - `useEmbeddedEMF` is a SELECTION option: it changes which content a WMF
 ///   `Prepared` carries, so it is applied in `MetafileRenderer.prepare`.
+/// - `playbackRecordBudget` is a PARSE option: it caps how many records
+///   `MetafileRenderer.prepare` parses and translates, so it is applied there
+///   too (threaded into `EMFFile.parse` / `WMFFile.parse`).
 public struct RenderOptions: Sendable, Equatable {
 
     /// Geometry and text antialiasing.
@@ -85,17 +88,37 @@ public struct RenderOptions: Sendable, Equatable {
     /// plays the WMF records even when a usable embedded EMF reassembles, and
     /// reports `Prepared.EmbeddedEMF.declined`.
     public var useEmbeddedEMF: Bool
+    /// A per-render cap on how many top-level metafile records this call parses,
+    /// translates, and plays — a MEMORY budget for a sandboxed context, NOT a
+    /// drawing option (M1). `nil` (the default) means no budget: every record up
+    /// to the parser's own hard cap (`EMFFile`/`WMFFile.recordCountLimit`,
+    /// 1,000,000) is prepared and played, exactly as before this option existed —
+    /// full fidelity, which the main app uses.
+    ///
+    /// A sandboxed Quick Look preview / thumbnail extension passes a small,
+    /// conservative value. A crafted WMF with millions of tiny records otherwise
+    /// drives `WMFTranslator.translate` to ≈152 bytes PER record (≈356 MiB for a
+    /// 1M-record file), which jetsam-kills the extension. With a budget,
+    /// `MetafileRenderer.prepare` passes it to `WMFFile.parse` / `EMFFile.parse`
+    /// as a per-call record limit (clamped to `recordCountLimit`), so only the
+    /// first N records are materialised and translated; the extension renders
+    /// that best partial output (primer §8 log-and-skip), never a crash or a
+    /// killed process. A crafted EMF is far cheaper (payloads decode lazily), so
+    /// the budget bounds it too but was not the pressing case.
+    public var playbackRecordBudget: Int?
 
     public init(
         antialiasing: Antialiasing = .smooth,
         fontSubstitutions: [FontSubstitution] = [],
         emfPlusArbitration: EMFPlusArbitration = .emfPlus,
-        useEmbeddedEMF: Bool = true
+        useEmbeddedEMF: Bool = true,
+        playbackRecordBudget: Int? = nil
     ) {
         self.antialiasing = antialiasing
         self.fontSubstitutions = fontSubstitutions
         self.emfPlusArbitration = emfPlusArbitration
         self.useEmbeddedEMF = useEmbeddedEMF
+        self.playbackRecordBudget = playbackRecordBudget
     }
 
     /// The options that reproduce every pre-option output exactly.

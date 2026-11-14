@@ -93,7 +93,15 @@ public struct WMFFile: Sendable, Equatable {
     /// an implausible META_HEADER). Once the header validates, this never
     /// throws: malformed records are recorded as diagnostics, the walk stops,
     /// and everything parsed so far is returned.
-    public static func parse(_ data: Data) throws(WMFParseError) -> WMFFile {
+    /// `recordLimit` is a per-call cap on how many records the walk will
+    /// materialise, clamped to the hard `recordCountLimit`. The default
+    /// (`Int.max`) leaves behaviour unchanged. A sandboxed, memory-budgeted
+    /// consumer passes a small value (via `RenderOptions.playbackRecordBudget`) so
+    /// a crafted all-tiny-records WMF materialises only the first N records — which
+    /// also bounds `WMFTranslator.translate`, whose payload array dominates a
+    /// Quick Look extension's footprint. The walk stops with a `recordCountCapped`
+    /// diagnostic, keeping everything parsed so far (§8).
+    public static func parse(_ data: Data, recordLimit: Int = .max) throws(WMFParseError) -> WMFFile {
         let reader = WMFByteReader(data)
         let total = reader.count
 
@@ -131,7 +139,7 @@ public struct WMFFile: Sendable, Equatable {
         let recordsStart = metaOffset + metaHeaderSize
 
         // Walk the generic records after the META_HEADER.
-        let walk = walkRecords(reader: reader, startOffset: recordsStart)
+        let walk = walkRecords(reader: reader, startOffset: recordsStart, recordLimit: recordLimit)
 
         var diagnostics: [WMFDiagnostic] = []
         // A placeable checksum mismatch leads the list, matching where the
@@ -297,9 +305,13 @@ public struct WMFFile: Sendable, Equatable {
     /// records. Stops after META_EOF; reports trailing bytes or a missing EOF.
     private static func walkRecords(
         reader: WMFByteReader,
-        startOffset: Int
+        startOffset: Int,
+        recordLimit: Int = .max
     ) -> WalkResult {
         let total = reader.count
+        // The per-call budget never exceeds the hard cap; a WMF's records array
+        // starts empty, so the floor is 0.
+        let cap = max(0, min(recordLimit, recordCountLimit))
         var records: [WMFRawRecord] = []
         var diagnostics: [WMFDiagnostic] = []
         var offset = startOffset
@@ -308,9 +320,10 @@ public struct WMFFile: Sendable, Equatable {
 
         while offset < total {
             // §8 memory guard: stop before the record array can grow without
-            // bound on a hostile all-tiny-records file.
-            if records.count >= recordCountLimit {
-                diagnostics.append(.recordCountCapped(limit: recordCountLimit))
+            // bound on a hostile all-tiny-records file, or past the caller's
+            // memory budget.
+            if records.count >= cap {
+                diagnostics.append(.recordCountCapped(limit: cap))
                 break
             }
 

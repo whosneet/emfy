@@ -196,21 +196,25 @@ public enum MetafileRenderer {
     /// to the corrupt-file alert / the generic Quick Look icon. Never a silently
     /// blank canvas for a parseable file.
     public static func prepare(_ opened: OpenedMetafile, options: RenderOptions = .default) -> Prepared? {
+        // The sandboxed-extension memory budget (M1): cap how many records are
+        // parsed and translated for this call. `nil` → `Int.max`, which the
+        // parsers clamp to their own `recordCountLimit` — i.e. full fidelity.
+        let recordLimit = options.playbackRecordBudget ?? .max
         switch opened.format {
         case .emf:
-            guard let file = try? EMFFile.parse(opened.data) else { return nil }
+            guard let file = try? EMFFile.parse(opened.data, recordLimit: recordLimit) else { return nil }
             return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .notApplicable,
                             hasGDICopy: isDualEMFPlus(file), recordKinds: emfRecordKinds(file))
 
         case .wmf, .placeableWMF:
-            guard let wmf = try? WMFFile.parse(opened.data) else { return nil }
+            guard let wmf = try? WMFFile.parse(opened.data, recordLimit: recordLimit) else { return nil }
             let embedded = WMFEmbeddedEMF.reassemble(wmf)
             // A complete, consistent, parseable embedded EMF normally supersedes
             // the WMF records (owner decision) — unless the user declined it
             // (option 4, RenderOptions.useEmbeddedEMF == false), in which case the
             // records play but `Prepared` still records that a usable EMF existed.
             if case .reassembled(let bytes) = embedded,
-               let file = try? EMFFile.parse(bytes) {
+               let file = try? EMFFile.parse(bytes, recordLimit: recordLimit) {
                 if options.useEmbeddedEMF {
                     return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .played,
                                     hasGDICopy: isDualEMFPlus(file), recordKinds: emfRecordKinds(file))

@@ -82,7 +82,14 @@ public struct EMFFile: Sendable, Equatable {
     /// invalid header `nSize`). Once the header validates, this never throws:
     /// malformed records are recorded as diagnostics, the walk stops, and
     /// everything parsed so far is returned.
-    public static func parse(_ data: Data) throws(EMFParseError) -> EMFFile {
+    /// `recordLimit` is a per-call cap on how many records the walk will
+    /// materialise, clamped to the hard `recordCountLimit`. The default
+    /// (`Int.max`) leaves behaviour unchanged — every caller but a memory-budgeted
+    /// one gets the full walk. A sandboxed consumer passes a small value (via
+    /// `RenderOptions.playbackRecordBudget`) so a crafted all-tiny-records file
+    /// materialises only the first N records; the walk then stops with a
+    /// `recordCountCapped` diagnostic, keeping everything parsed so far (§8).
+    public static func parse(_ data: Data, recordLimit: Int = .max) throws(EMFParseError) -> EMFFile {
         let reader = ByteReader(data)
         let total = reader.count
 
@@ -141,7 +148,8 @@ public struct EMFFile: Sendable, Equatable {
         let walk = walkRecords(
             reader: reader,
             firstRecord: headerRecord,
-            startOffset: headerSizeInt
+            startOffset: headerSizeInt,
+            recordLimit: recordLimit
         )
 
         var diagnostics = walk.diagnostics
@@ -380,9 +388,13 @@ public struct EMFFile: Sendable, Equatable {
     private static func walkRecords(
         reader: ByteReader,
         firstRecord: EMFRawRecord,
-        startOffset: Int
+        startOffset: Int,
+        recordLimit: Int = .max
     ) -> WalkResult {
         let total = reader.count
+        // The per-call budget never exceeds the hard cap, and is at least 1 so
+        // the already-admitted header record is always kept.
+        let cap = max(1, min(recordLimit, recordCountLimit))
         var records: [EMFRawRecord] = [firstRecord]
         var diagnostics: [EMFDiagnostic] = []
         var offset = startOffset
@@ -390,13 +402,14 @@ public struct EMFFile: Sendable, Equatable {
 
         while offset < total {
             // §8 memory guard: stop before the record array can grow without
-            // bound on a hostile all-tiny-records file. `records` already holds
-            // the header at index 0, so its count is the running total; when it
-            // reaches the cap, keep everything and stop (a `recordCountCapped`
-            // diagnostic here also suppresses the `missingEOF` note below, since
-            // the walk was cut short deliberately, not run off the end).
-            if records.count >= recordCountLimit {
-                diagnostics.append(.recordCountCapped(limit: recordCountLimit))
+            // bound on a hostile all-tiny-records file, or past the caller's
+            // memory budget. `records` already holds the header at index 0, so its
+            // count is the running total; when it reaches the cap, keep everything
+            // and stop (a `recordCountCapped` diagnostic here also suppresses the
+            // `missingEOF` note below, since the walk was cut short deliberately,
+            // not run off the end).
+            if records.count >= cap {
+                diagnostics.append(.recordCountCapped(limit: cap))
                 break
             }
 

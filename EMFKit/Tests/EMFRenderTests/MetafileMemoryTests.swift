@@ -168,4 +168,154 @@ struct MetafileMemoryTests {
         // Sanity ceiling only: a 1M-record WMF must not blow up unboundedly.
         #expect(preparedDelta < 1024 * 1024 * 1024, "preparing a 1M-record WMF allocated implausibly much")
     }
+
+    // MARK: - C5f2: the per-context playback-record budget (M1 residual)
+
+    /// A synthetic WMF whose FIRST record is a full-canvas BLACKNESS PATBLT
+    /// (visible output), followed by `fillerCount` inert META_SAVEDC records, all
+    /// under a placeable header with a 0–1000 bounding box. Any budget that keeps
+    /// at least the first record therefore produces non-empty partial output.
+    private static func syntheticVisibleWMF(fillerCount: Int) -> Data {
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(22 + 18 + 18 + fillerCount * 6 + 6)
+        func u16(_ v: UInt16) { bytes.append(UInt8(v & 0xFF)); bytes.append(UInt8(v >> 8)) }
+        func u32(_ v: UInt32) {
+            bytes.append(UInt8(v & 0xFF)); bytes.append(UInt8((v >> 8) & 0xFF))
+            bytes.append(UInt8((v >> 16) & 0xFF)); bytes.append(UInt8((v >> 24) & 0xFF))
+        }
+        let headerStart = bytes.count
+        u32(0x9AC6_CDD7)                       // Key
+        u16(0)                                 // HWmf
+        u16(0); u16(0); u16(1000); u16(1000)   // BoundingBox
+        u16(1440)                              // Inch
+        u32(0)                                 // Reserved
+        var checksum: UInt16 = 0
+        for i in 0 ..< 10 {
+            checksum ^= UInt16(bytes[headerStart + i * 2]) | (UInt16(bytes[headerStart + i * 2 + 1]) << 8)
+        }
+        u16(checksum)                          // Checksum
+        u16(0x0001); u16(0x0009); u16(0x0300); u16(0); u16(0); u16(0); u32(0); u16(0)
+        // META_PATBLT (0x061D), 9 WORDs: RasterOperation BLACKNESS, Height, Width,
+        // YLeft, XLeft ([MS-WMF] §2.3.1.5). Paints the whole 1000×1000 box black.
+        u32(9); u16(0x061D); u32(0x0000_0042); u16(1000); u16(1000); u16(0); u16(0)
+        for _ in 0 ..< fillerCount { u32(3); u16(0x001E) }   // filler META_SAVEDC
+        u32(3); u16(0x0000)                                  // META_EOF
+        return Data(bytes)
+    }
+
+    /// Counts opaque non-white pixels in a freshly rendered RGBA8 bitmap of
+    /// `prepared` at `side`×`side`, on a white page.
+    private static func nonWhitePixelCount(_ prepared: MetafileRenderer.Prepared, side: Int) -> Int {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil, width: side, height: side, bitsPerComponent: 8,
+                  bytesPerRow: side * 4, space: space,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return 0 }
+        let rect = CGRect(x: 0, y: 0, width: side, height: side)
+        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(rect)
+        _ = MetafileRenderer.render(prepared, into: context, target: rect)
+        guard let raw = context.data else { return 0 }
+        let buf = raw.assumingMemoryBound(to: UInt8.self)
+        var count = 0
+        for i in stride(from: 0, to: side * side * 4, by: 4) where buf[i] < 250 { count += 1 }
+        return count
+    }
+
+    @Test("an extension-budgeted prepare of a 1M-record WMF caps the records and still draws (M1/C5f2)")
+    func wmfBudgetCapsTranslation() throws {
+        let budget = 25_000
+        let fillerCount = 1_000_000          // total records ≫ budget
+        let data = Self.syntheticVisibleWMF(fillerCount: fillerCount)
+
+        let before = Self.physFootprint()
+        let opened = try OpenedMetafile.open(data)
+        let options = RenderOptions(playbackRecordBudget: budget)
+        let prepared = try #require(MetafileRenderer.prepare(opened, options: options))
+        let after = Self.physFootprint()
+        let delta = after > before ? after - before : 0
+        print("[memory][C5f2] 1M-record WMF prepared with budget \(budget): +\(Self.mib(delta)); "
+            + "records used \(prepared.wmfFile?.records.count ?? -1), playback ops \(prepared.estimatedPlaybackOps)")
+
+        #expect(prepared.kind == .wmfRecords)
+
+        // Record count USED: parse stopped at the budget, so the retained WMFFile
+        // holds exactly `budget` records (far below the 1M the file declares) and
+        // logged a cap diagnostic at the budget — the deterministic proof the
+        // per-context cap, not the shared 1M limit, took effect.
+        let used = try #require(prepared.wmfFile?.records.count)
+        #expect(used == budget, "the budget caps how many records are parsed")
+        #expect(prepared.wmfFile?.diagnostics.contains(.recordCountCapped(limit: budget)) == true,
+                "the walk records that the per-context budget stopped it")
+
+        // The translated program is bounded by the same budget (a short synthetic
+        // preamble precedes the per-record payloads), so translate — the ≈152 B/
+        // record allocation that dominated the uncapped footprint — is capped too.
+        #expect(prepared.estimatedPlaybackOps > budget, "the first record translated to at least one op")
+        #expect(prepared.estimatedPlaybackOps < budget + 64, "only the budgeted records (plus preamble) are translated")
+
+        // Partial output is NON-EMPTY: the leading BLACKNESS PATBLT is within the
+        // budget, so the best partial render paints the page (primer §8).
+        #expect(Self.nonWhitePixelCount(prepared, side: 64) > 0, "the budgeted partial render must draw something")
+
+        // Generous ceiling only (phys_footprint is process-wide and noisy): the
+        // uncapped translate measured ≈356 MiB, so a budgeted prepare well under
+        // that proves the cap engaged. The deterministic record/op assertions above
+        // are the real proof.
+        #expect(delta < 128 * 1024 * 1024, "a budgeted 1M-record WMF prepare is implausibly large")
+    }
+
+    @Test("a 1M-record minimal EMF is cheap to prepare; the budget still bounds it (M1/C5f2)")
+    func emfBudgetMeasurement() throws {
+        // 1M EMR_SETMAPMODE records (type 17, 12 bytes) between EMR_HEADER and
+        // EMR_EOF. EMF payloads decode lazily, so unlike WMF this never built a
+        // giant payload array — the measurement that decided EMF needs no urgent
+        // fix, only the same defensive budget.
+        var bytes = [UInt8]()
+        func u32(_ v: UInt32) { for s: UInt32 in [0, 8, 16, 24] { bytes.append(UInt8((v >> s) & 0xFF)) } }
+        let recordCount = 1_000_000
+        let headerSize = 88, recordSize = 12, eofSize = 20
+        let total = headerSize + recordCount * recordSize + eofSize
+        u32(1); u32(UInt32(headerSize))
+        u32(0); u32(0); u32(999); u32(999)          // bounds
+        u32(0); u32(0); u32(999); u32(999)          // frame
+        u32(0x464D_4520); u32(0x0001_0000)          // signature, version
+        u32(UInt32(total)); u32(UInt32(recordCount + 2))
+        while bytes.count < headerSize { u32(0) }
+        bytes.removeLast(bytes.count - headerSize)
+        for _ in 0 ..< recordCount { u32(17); u32(UInt32(recordSize)); u32(1) }
+        u32(14); u32(UInt32(eofSize)); u32(0); u32(0x10); u32(UInt32(eofSize))
+        let data = Data(bytes)
+
+        // Full fidelity: every record parses (cheaply).
+        let full = try #require(MetafileRenderer.prepare(try OpenedMetafile.open(data)))
+        let before = Self.physFootprint()
+        let budget = 25_000
+        let capped = try #require(MetafileRenderer.prepare(
+            try OpenedMetafile.open(data), options: RenderOptions(playbackRecordBudget: budget)))
+        let after = Self.physFootprint()
+        print("[memory][C5f2] 1M-record EMF — full records \(full.recordCount), "
+            + "budgeted(\(budget)) records \(capped.recordCount), budgeted prepare delta +\(Self.mib(after > before ? after - before : 0))")
+
+        #expect(full.kind == .emf)
+        // A 1M-body-record file reaches the shared hard cap (`recordCountLimit`,
+        // header included) at full fidelity — already bounded, but at ~16 MB for
+        // the record array alone and only when something plays it.
+        #expect(full.recordCount == EMFFile.recordCountLimit, "full fidelity parses up to the shared hard cap")
+        // The per-context budget bounds the EMF record array far below that
+        // (header + budget-1 body records = budget), the same mechanism as WMF.
+        #expect(capped.recordCount == budget, "the same per-context budget bounds EMF parsing")
+    }
+}
+
+/// Test-only access to the parsed record count of a prepared metafile.
+private extension MetafileRenderer.Prepared {
+    var recordCount: Int {
+        switch content {
+        case .emf(let file): return file.records.count
+        case .wmfProgram: return wmfFile?.records.count ?? 0
+        }
+    }
 }
