@@ -191,6 +191,25 @@ struct DIBImageCacheTests {
         #expect(cache.count == 1)
     }
 
+    @Test("purge drops every resident entry and frees its cost (M4)")
+    func purgeClearsCache() throws {
+        let cache = DIBImageCache()
+        let img = try image(8, 8)
+        for i in 0 ..< 5 { _ = cache.decodedImage(forKey: key(i)) { self.decoded(img) } }
+        #expect(cache.count == 5)
+        #expect(cache.residentCost > 0)
+
+        cache.purge()
+        #expect(cache.count == 0, "purge must drop every entry")
+        #expect(cache.residentCost == 0, "purge must reset the running cost")
+
+        // The cache is still usable after a purge: a get re-decodes and re-caches.
+        var redecoded = false
+        _ = cache.decodedImage(forKey: key(0)) { redecoded = true; return self.decoded(img) }
+        #expect(redecoded == true)
+        #expect(cache.count == 1)
+    }
+
     /// Renders `file` into a fresh `side`×`side` sRGB bitmap and returns its raw
     /// pixel bytes, optionally through `cache` (a tile render).
     private func renderBytes(_ file: EMFFile, side: Int, cache: DIBImageCache?) throws -> Data {

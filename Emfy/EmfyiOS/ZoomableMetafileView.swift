@@ -531,8 +531,11 @@ private final class TiledMetafileView: UIView {
     private let tileSide: CGFloat
     /// One decoded-DIB cache for this document (P2 performance): the tiled layer
     /// replays the record stream once per tile on concurrent threads, so without
-    /// it every tile re-decodes each DIB from scratch. Thread-safe and shared.
-    private let imageCache = DIBImageCache()
+    /// it every tile re-decodes each DIB from scratch. Thread-safe and shared. A
+    /// smaller iOS budget than the macOS 64 MiB default (M4): iOS Quick Look / the
+    /// app run under a tighter jetsam limit, and DIB entries are footprint-sized so
+    /// 32 MiB still holds a document's DIBs across the zoom levels a viewer walks.
+    private let imageCache = DIBImageCache(memoryBudget: 32 * 1024 * 1024)
     /// The tile paint (page + dark-mode treatment), read on the tiled-layer's
     /// background thread, set on the main thread — behind a lock (S1a-4b).
     private let paintLock = OSAllocatedUnfairLock<TilePaint>(initialState: .plain)
@@ -611,6 +614,22 @@ private final class TiledMetafileView: UIView {
         tiled.shadowOpacity = 0.14
         tiled.shadowRadius = 10
         tiled.shadowOffset = CGSize(width: 0, height: 5)
+
+        // Free the decoded-DIB cache under memory pressure (M4): the next tile
+        // simply re-decodes. The notification is posted on the main thread.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(purgeDecodedImageCache),
+            name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+    }
+
+    /// Drops the decoded-DIB cache on a memory warning (M4), so the tiled layer's
+    /// bitmap decodes are released before the app/extension is jetsam-killed.
+    @objc private func purgeDecodedImageCache() {
+        imageCache.purge()
     }
 
     @available(*, unavailable)

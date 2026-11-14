@@ -184,6 +184,18 @@ public final class DIBImageCache: @unchecked Sendable {
         }
     }
 
+    /// Drops every resident entry, freeing the decoded pixels (M4). An iOS viewer
+    /// calls this on a memory-warning so the tiled layer's DIB decodes are released
+    /// before the extension/app is jetsam-killed; the next tile simply re-decodes.
+    /// An in-flight decode is unaffected — it publishes into the now-empty cache.
+    public func purge() {
+        condition.lock()
+        entries.removeAll(keepingCapacity: false)
+        order.removeAll(keepingCapacity: false)
+        currentCost = 0
+        condition.unlock()
+    }
+
     // MARK: - Introspection (tests)
 
     /// The number of resident entries.
