@@ -375,6 +375,11 @@ struct MetafileViewerScreen: View {
         ) { pending in
             Button("Save Anyway") { Task { await session.confirmPendingWMFSave() } }
             Button("Save a Copy as EMF…") { saveSceneCopyAsEMF() }
+            // Only while leaving edit mode (Done/back): let the user drop the edits and
+            // exit rather than being stuck in the editor on a dirty WMF (U1).
+            if session.isEndingEditing {
+                Button("Don’t Save", role: .destructive) { session.discardEditsAndStopEditing() }
+            }
             Button("Cancel", role: .cancel) { session.cancelPendingWMFSave() }
         } message: { pending in
             Text(WMFLimitationWording.message(for: pending))
@@ -470,6 +475,7 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "new-shapes" { await runNewShapesScript(); return }
         if EditorDebugLaunch.script == "pen-strokes" { await runPenStrokesScript(); return }
         if EditorDebugLaunch.script == "text-image" { await runTextImageScript(); return }
+        if EditorDebugLaunch.script == "wmf-done" { await runWMFDoneScript(); return }
         if EditorDebugLaunch.script == "text-popover" { await runTextPopoverScript(); return }
         if EditorDebugLaunch.script == "layers" { await runLayersScript(); return }
         if EditorDebugLaunch.script == "align-grid" { await runAlignGridScript(); return }
@@ -764,6 +770,20 @@ struct MetafileViewerScreen: View {
         session.debugCancelAutosave()
         try? await Task.sleep(for: .milliseconds(300))
         Self.logScript("ios text-image: textID=\(textID ?? -1) imageID=\(imageID ?? -1) elements=\(session.editingScene?.editableElements.count ?? -1) kinds=\(session.editingScene?.editableElements.map { "\($0.kind)" } ?? []) saveError=\(session.lastSaveError.map { "\($0)" } ?? "nil")")
+    }
+
+    /// U1 proof: open a WMF → edit mode → one edit → tap Done. `endEditing()` runs a
+    /// non-autosave save, which raises the "Save as WMF?" confirmation and KEEPS edit mode
+    /// (no discard), so a simulator screenshot shows the confirmation after Done.
+    @MainActor
+    private func runWMFDoneScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios wmf-done: begin editing failed"); return }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        _ = session.debugInsertText("Edited", originDevice: CGPoint(x: page.width * 0.15, y: page.height * 0.2))
+        try? await Task.sleep(for: .milliseconds(200))
+        await session.endEditing()   // the Done path
+        Self.logScript("ios wmf-done: dirty=\(session.isDirty) wmfPending=\(session.pendingWMFConfirmation != nil) ending=\(session.isEndingEditing) editing=\(session.editing == .editing)")
     }
 
     /// iPad text-popover proof (E3c): blank drawing → edit mode → insert a text element and

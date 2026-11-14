@@ -213,6 +213,11 @@ struct MacViewerPane: View {
             ) { pending in
                 Button("Save Anyway") { Task { await session.confirmPendingWMFSave() } }
                 Button("Save a Copy as EMF…") { saveSceneCopyAsEMF() }
+                // Only while leaving edit mode (Done): let the user drop the edits and
+                // exit rather than being stuck in the editor on a dirty WMF (U1).
+                if session.isEndingEditing {
+                    Button("Don’t Save", role: .destructive) { session.discardEditsAndStopEditing() }
+                }
                 Button("Cancel", role: .cancel) { session.cancelPendingWMFSave() }
             } message: { pending in
                 Text(WMFLimitationWording.message(for: pending))

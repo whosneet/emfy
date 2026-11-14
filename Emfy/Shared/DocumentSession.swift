@@ -169,6 +169,14 @@ final class DocumentSession {
     /// E2a-9).
     private(set) var lastSaveError: DocumentSaveError?
 
+    /// The user asked to leave edit mode (Done, back, file switch) but the save that
+    /// would make it safe hasn't finished: a WMF/WMZ confirmation is pending, or the
+    /// save failed, or the document is still dirty. Edit mode is KEPT so nothing is
+    /// discarded; the viewer surfaces the confirmation (now with a Discard option) or
+    /// the error, and editing ends only once the document saves clean (U1). Cleared by
+    /// Cancel/Discard. Observed, so the viewer can offer "Don't Save" in that state.
+    private(set) var isEndingEditing = false
+
     // MARK: - Injected dependencies
 
     /// Resolves the entry's bytes. The store-bound binding throws
@@ -685,14 +693,32 @@ final class DocumentSession {
         DocumentEditRegistry.shared.register(self)
     }
 
-    /// Leaves edit mode (design call E2b-1): flushes any pending save, then discards the
-    /// in-memory edit state so the viewer falls back to read-only. A no-op when already
-    /// read-only; a file that opened `.unavailable` is reset to `.notEditing` so the Edit
-    /// toggle reads as off and can be retried.
+    /// Leaves edit mode (design call E2b-1). Saves first with a NON-autosave save, so a
+    /// WMF/WMZ first save raises its limitations confirmation and any failure surfaces —
+    /// the old silent flush skipped the WMF confirmation and then discarded the edits,
+    /// losing every WMF/WMZ edit on Done/back/switch (U1). Edit mode is never dropped
+    /// while the document is still dirty, a confirmation is pending, or a save failed:
+    /// `isEndingEditing` is set and the viewer resolves it (Save Anyway → write and exit,
+    /// Don't Save → discard and exit, Cancel → stay). A no-op when already read-only; a
+    /// file that opened `.unavailable` is reset to `.notEditing` so the Edit toggle reads
+    /// as off and can be retried.
     func endEditing() async {
         if editing == .unavailable { editing = .notEditing; return }
         guard editing == .editing else { return }
-        await flushPendingSave()
+        await save()
+        if isDirty || pendingWMFConfirmation != nil || lastSaveError != nil {
+            isEndingEditing = true
+            return
+        }
+        endEditingState()
+    }
+
+    /// Completes a pending Done/leave-editing once the blocking save resolves cleanly
+    /// (U1): called after the WMF confirmation is written. Stays in edit mode if the
+    /// document is still dirty, another confirmation is pending, or a save failed.
+    private func finishEndEditingIfRequested() {
+        guard isEndingEditing, editing == .editing else { return }
+        guard !isDirty, pendingWMFConfirmation == nil, lastSaveError == nil else { return }
         endEditingState()
     }
 
@@ -1108,12 +1134,16 @@ final class DocumentSession {
         wmfSaveConfirmed = true
         pendingWMFConfirmation = nil
         await commitWrite(data: pending.data, warnings: pending.warnings, fileName: fileName, scene: history?.scene, isAutosave: false)
+        // If this confirmation was raised by a Done/leave-editing request, finish the
+        // exit now that the bytes are on disk (U1).
+        finishEndEditingIfRequested()
     }
 
     /// Dismisses the pending WMF/WMZ confirmation without writing (Cancel). The
-    /// document stays dirty.
+    /// document stays dirty and stays in edit mode, cancelling any pending Done (U1).
     func cancelPendingWMFSave() {
         pendingWMFConfirmation = nil
+        isEndingEditing = false
     }
 
     /// Exports the current scene in `format` without writing to disk — for "Save a
@@ -1255,6 +1285,7 @@ final class DocumentSession {
         pendingWMFConfirmation = nil
         pendingSaveNotice = nil
         showsExternalChangeBanner = false
+        isEndingEditing = false
         editVersion &+= 1
         editing = .notEditing
         DocumentEditRegistry.shared.unregister(self)

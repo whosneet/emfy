@@ -474,6 +474,87 @@ private func passthroughOnlyScene() -> Scene {
         #expect(box.count == 1)   // Save Anyway wrote the stashed bytes
     }
 
+    // U1: Done/leave-editing must never silently discard. On an EMF the save completes
+    // and edit mode ends (the autosave-on-Done regression). On a WMF the limitations
+    // confirmation is raised and edit mode is KEPT until the user resolves it.
+
+    @Test func doneSavesAnEMFEditAndEndsEditing() async {
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), writeBox: box)
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        #expect(box.count == 1)                      // the edit reached disk
+        #expect(session.editing == .notEditing)      // and edit mode ended
+        #expect(!session.isDirty)
+    }
+
+    @Test func doneOnAWMFKeepsEditingWithTheConfirmationPending() async {
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: box)
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        #expect(session.pendingWMFConfirmation != nil)   // confirmation surfaced
+        #expect(session.isEndingEditing)                 // a Done is in flight
+        #expect(session.editing == .editing)             // NOT discarded
+        #expect(box.count == 0)                          // nothing written yet
+        #expect(session.isDirty)
+    }
+
+    @Test func confirmingTheWMFDoneSaveWritesAndEndsEditing() async {
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: box)
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        await session.confirmPendingWMFSave()
+        #expect(box.count == 1)                      // Save Anyway wrote the bytes
+        #expect(session.editing == .notEditing)      // and the exit completed
+        #expect(!session.isDirty)
+    }
+
+    @Test func cancellingTheWMFDoneSaveStaysInEditMode() async {
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: WriteBox())
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        session.cancelPendingWMFSave()
+        #expect(session.editing == .editing)             // Cancel keeps editing
+        #expect(session.pendingWMFConfirmation == nil)
+        #expect(!session.isEndingEditing)
+        #expect(session.isDirty)                         // edits still present
+    }
+
+    @Test func discardingTheWMFDoneSaveLeavesEditingWithoutWriting() async {
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: box)
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        session.discardEditsAndStopEditing()             // the "Don't Save" button
+        #expect(session.editing == .notEditing)
+        #expect(!session.isDirty)
+        #expect(box.count == 0)                          // nothing reached disk
+    }
+
+    @Test func doneWithASaveErrorDoesNotDiscard() async {
+        // A write that always throws makes the Done save fail.
+        let session = DocumentSession(
+            entryID: UUID(),
+            resolve: { _ in editableEMF() },
+            writeBytes: { _, _, _ in throw DocumentSaveError.writeFailed("boom") },
+            documentFileName: { "drawing.emf" },
+            autosave: AutosaveController(sleep: nonFiringSleep)
+        )
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        #expect(session.lastSaveError != nil)
+        #expect(session.editing == .editing)             // kept, so the edits survive
+        #expect(session.isDirty)
+    }
+
     @Test func firstSaveSnapshotsOnceAndRevertRestores() async {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("EmfyE2a-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: dir) }
