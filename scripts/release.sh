@@ -234,24 +234,38 @@ codesign --verify --deep --strict --verbose=2 "${STAGED_APP}" \
     || die "codesign --verify --deep --strict failed on ${APP_NAME}"
 info "signature valid and satisfies its Designated Requirement"
 
-# The notary service rejects any binary signed with the debug entitlement
-# com.apple.security.get-task-allow. The macOS Release configs set
-# CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO on the app, both appexes, and the
-# embedded emfy-mcp helper, so none should carry it. Assert that here across
-# EVERY nested Mach-O so a regression (e.g. a config losing that setting, as the
-# helper did before C5) fails the dry run instead of being caught by the notary.
-step "Assert no get-task-allow in any nested binary"
-GTA_OFFENDERS=""
+# The notary service rejects any binary that is not signed with a Developer ID
+# Application certificate, is signed ad-hoc, or carries the debug entitlement
+# com.apple.security.get-task-allow. The macOS Release-DMG configs sign the app,
+# both appexes, and the embedded emfy-mcp helper with Developer ID and set
+# CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO. Assert all three across EVERY nested
+# Mach-O so a regression (e.g. a config reverting to ad-hoc "-" signing or losing
+# that setting, as the helper did before C5) fails the dry run instead of being
+# caught by the notary.
+step "Assert every nested binary is Developer ID signed, not ad-hoc, with no get-task-allow"
+SIGN_OFFENDERS=""
 while IFS= read -r macho; do
-    if codesign -d --entitlements - --xml "${macho}" 2>/dev/null \
-        | grep -q 'com.apple.security.get-task-allow'; then
-        GTA_OFFENDERS="${GTA_OFFENDERS}
-    ${macho#"${STAGED_APP}"/}"
+    rel="${macho#"${STAGED_APP}"/}"
+    desc="$(codesign -dvv "${macho}" 2>&1 || true)"
+    ents="$(codesign -d --entitlements - --xml "${macho}" 2>/dev/null || true)"
+    problems=""
+    if ! printf '%s\n' "${desc}" | grep -q '^Authority=Developer ID Application'; then
+        problems="${problems} not-Developer-ID"
+    fi
+    if printf '%s\n' "${desc}" | grep -Eq '^CodeDirectory .*\bflags=[^ ]*\badhoc\b'; then
+        problems="${problems} adhoc"
+    fi
+    if printf '%s\n' "${ents}" | grep -q 'com.apple.security.get-task-allow'; then
+        problems="${problems} get-task-allow"
+    fi
+    if [[ -n "${problems}" ]]; then
+        SIGN_OFFENDERS="${SIGN_OFFENDERS}
+    ${rel}:${problems}"
     fi
 done < <(find "${STAGED_APP}" -type f -exec sh -c 'file -b "$1" | grep -q "Mach-O" && echo "$1"' _ {} \;)
-[[ -z "${GTA_OFFENDERS}" ]] \
-    || die "get-task-allow present in nested binaries (the notary service would reject this):${GTA_OFFENDERS}"
-info "no get-task-allow in any nested binary"
+[[ -z "${SIGN_OFFENDERS}" ]] \
+    || die "nested binaries fail Developer ID / ad-hoc / get-task-allow checks (the notary service would reject this):${SIGN_OFFENDERS}"
+info "all nested binaries are Developer ID signed, not ad-hoc, free of get-task-allow"
 
 # Gatekeeper assessment. Before notarization this MUST fail with
 # "source=Unnotarized Developer ID" — that is expected, not an error. In a full
