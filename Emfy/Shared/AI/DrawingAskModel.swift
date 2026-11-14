@@ -78,7 +78,14 @@ final class DrawingAskModel {
     }
 
     var canSend: Bool {
-        !isResponding && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !isResponding, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        // Also refuse while the underlying on-device session is still responding (FM-9):
+        // `isResponding` is cleared on our own paths, but a send while the
+        // `LanguageModelSession` itself is mid-generation would throw `concurrentRequests`.
+        if #available(macOS 26, iOS 26, *), let session = sessionBox as? LanguageModelSession, session.isResponding {
+            return false
+        }
+        return true
     }
 
     private var onDeviceAvailable: Bool { EmfySettings.shared.useOnDeviceAI && DrawingAIAvailability.current().isAvailable }
