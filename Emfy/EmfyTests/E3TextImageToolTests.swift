@@ -103,6 +103,53 @@ import UniformTypeIdentifiers
     }
 }
 
+// Audit R2A1: the pure accessibility insert decision. VoiceOver / Switch Control / Voice
+// Control users can't tap the canvas, so an armed tool's insert is driven through this
+// helper at the visible centre, over the SAME command path as a pointer insert.
+@Suite struct AccessibilityToolInsertionTests {
+
+    private func blankScene() throws -> Scene {
+        try SceneImporter.import(data: SceneFactory.blankDocument(pageSizeMillimetres: CGSize(width: 297, height: 210)))
+    }
+
+    @Test func shapeInsertCentresADefaultElement() throws {
+        let scene = try blankScene()
+        let centre = CGPoint(x: scene.pageBoundsDevice.midX, y: scene.pageBoundsDevice.midY)
+        let plan = try #require(AccessibilityToolInsertion.plan(for: .shape(.rect), centreDevice: centre, pen: .default, in: scene))
+        guard case .command(let command, let id) = plan else { Issue.record("expected .command"); return }
+        guard case .insert(let element, _) = command else { Issue.record("expected an insert command"); return }
+        #expect(element.id == id)
+        #expect(element.kind == .rect)
+        // Centred on the requested point, at the default side.
+        let side = AccessibilityToolInsertion.defaultSideDevice(in: scene)
+        let bounds = element.boundsDevice.standardized
+        #expect(abs(bounds.midX - centre.x) < 0.5)
+        #expect(abs(bounds.midY - centre.y) < 0.5)
+        #expect(abs(bounds.width - side) < 0.5)
+    }
+
+    @Test func textInsertPlacesAPlaceholderRunAtTheCentre() throws {
+        let scene = try blankScene()
+        let centre = CGPoint(x: 120, y: 240)
+        let plan = try #require(AccessibilityToolInsertion.plan(for: .text, centreDevice: centre, pen: .default, in: scene))
+        guard case .insertText(let element, let id) = plan else { Issue.record("expected .insertText"); return }
+        #expect(element.id == id)
+        #expect(element.kind == .text)
+        #expect(element.text?.string == TextToolInsertion.placeholder)
+        #expect(element.text?.referenceLogical == centre)
+    }
+
+    @Test func penInsertMakesADefaultStroke() throws {
+        // Freehand can't be driven by AT, so the pen inserts a default straight stroke
+        // (HIG: a working alternative, not a dead end).
+        let scene = try blankScene()
+        let centre = CGPoint(x: scene.pageBoundsDevice.midX, y: scene.pageBoundsDevice.midY)
+        let plan = try #require(AccessibilityToolInsertion.plan(for: .pen, centreDevice: centre, pen: .default, in: scene))
+        guard case .command(_, let id) = plan else { Issue.record("expected .command"); return }
+        #expect(id == SceneFactory.nextElementID(in: scene))
+    }
+}
+
 @MainActor
 @Suite struct EditorToolExclusivityTests {
 

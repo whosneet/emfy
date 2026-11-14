@@ -56,6 +56,12 @@ struct MetafileEditingContainer: View {
                     trailingInset: trailingInset
                 )
                 .ignoresSafeArea()
+                // AT users can't tap the canvas to place a tool, so a container action
+                // inserts the armed tool's default element at the visible centre (R2A1).
+                .accessibilityElement(children: .contain)
+                .accessibilityAction(named: Text("Insert at centre")) {
+                    _ = controller.insertArmedToolAtCentre?()
+                }
             } else {
                 Color(.systemGroupedBackground)
             }
@@ -159,6 +165,11 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         context.coordinator.tiledView = tiled
         context.coordinator.overlay = overlay
         controller.scrollView = scrollView
+        // The SwiftUI container's "Insert at centre" accessibility action routes here, so
+        // it works even on an empty canvas with no child AX elements to focus (R2A1).
+        controller.insertArmedToolAtCentre = { [weak coordinator = context.coordinator] in
+            coordinator?.insertArmedToolAtCentre() ?? false
+        }
 
         scrollView.onLayoutSize = { [weak coordinator = context.coordinator] size in
             coordinator?.configureZoomScales(for: size)
@@ -544,7 +555,67 @@ struct EditableMetafileCanvas: UIViewRepresentable {
             selection = selection.afterClick(hit: id, additive: false)
             overlay?.becomeFirstResponder()
             overlay?.setNeedsDisplay()
-            overlay?.postAccessibilityLayoutChanged()
+            overlay?.postAccessibilityLayoutChanged(focus: id)
+        }
+
+        /// The armed creation tool, if any — the single source of truth for the
+        /// accessibility insert (audit R2A1).
+        private func armedTool() -> AccessibilityToolInsertion.Tool? {
+            if let kind = parent.editorModel.armedShapeTool { return .shape(kind) }
+            if parent.editorModel.armedTextTool { return .text }
+            if parent.editorModel.armedPen { return .pen }
+            return nil
+        }
+
+        /// Whether a creation tool is armed (so the canvas container exposes the
+        /// "Insert at centre" accessibility action, audit R2A1).
+        var hasArmedTool: Bool { armedTool() != nil }
+
+        /// The device-space centre of the clear (non-inspector) viewport, where an
+        /// accessibility insert places its default element.
+        private func visibleCentreDevice() -> CGPoint {
+            guard let scrollView, overlay != nil else {
+                let page = scene.pageBoundsDevice
+                return CGPoint(x: page.midX, y: page.midY)
+            }
+            let b = scrollView.bounds
+            let centreInScroll = CGPoint(x: b.minX + max(0, b.width - parent.trailingInset) / 2, y: b.midY)
+            let inOverlay = scrollView.convert(centreInScroll, to: overlay!)
+            return mapping.devicePoint(fromView: inOverlay)
+        }
+
+        /// Inserts a default-size element for the armed tool at the centre of the visible
+        /// area, through the SAME command path and one undo step as a pointer insert, then
+        /// selects it and posts a layout change focused on it (audit R2A1). The entry point
+        /// for VoiceOver / Switch Control / Voice Control, which can't tap the canvas.
+        @discardableResult
+        func insertArmedToolAtCentre() -> Bool {
+            guard let tool = armedTool() else { return false }
+            let centre = visibleCentreDevice()
+            guard let plan = AccessibilityToolInsertion.plan(
+                for: tool, centreDevice: centre, pen: parent.editorModel.penStyle, in: scene) else { return false }
+            switch plan {
+            case .command(let command, let id):
+                parent.apply(command, nil)
+                selection = selection.afterClick(hit: id, additive: false)
+            case .insertText(let element, let id):
+                parent.beginInsertText(element)
+                selection = selection.afterClick(hit: id, additive: false)
+            }
+            parent.editorModel.disarmTools()
+            overlay?.becomeFirstResponder()
+            overlay?.setNeedsDisplay()
+            overlay?.postAccessibilityLayoutChanged(focus: plan.elementID)
+            overlay?.announceAccessibility("Inserted \(insertName(for: tool))")
+            return true
+        }
+
+        private func insertName(for tool: AccessibilityToolInsertion.Tool) -> String {
+            switch tool {
+            case .shape(let kind): return kind.title.lowercased()
+            case .text: return "text"
+            case .pen: return "stroke"
+            }
         }
 
         /// Performs a custom accessibility action over `id`, routing through the SAME scene
@@ -561,6 +632,8 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                 parent.delete([id])
                 overlay?.setNeedsDisplay()
                 overlay?.announceAccessibility("Deleted")
+                // The deleted element is gone, so re-read the tree without a focus target (R2A2).
+                overlay?.postAccessibilityLayoutChanged(focus: nil)
                 return true
             case .editText:
                 selection = selection.afterClick(hit: id, additive: false)
@@ -571,7 +644,7 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                 if !selection.contains(id) { selection = selection.afterClick(hit: id, additive: false) }
                 parent.apply(command, nil)
                 overlay?.setNeedsDisplay()
-                overlay?.postAccessibilityLayoutChanged()
+                overlay?.postAccessibilityLayoutChanged(focus: id)
                 return true
             }
         }
@@ -1296,25 +1369,53 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
     }
 
     override var accessibilityElements: [Any]? {
-        get { buildAccessibilityElements() }   // rebuilt each read, so frames track zoom/scroll
+        get { buildAccessibilityElements() }   // cached by id, so frames track zoom/scroll
         set { }
     }
 
-    /// One `UIAccessibilityElement` per editable element, driven by the shared model: each
-    /// carries the label, value, Voice Control input labels, selection trait and the custom
-    /// actions, all routing back through the coordinator (the same scene commands as pointer
-    /// edits). Locked elements are announced as static text with no actions.
+    /// The per-id accessibility-element cache (audit R2A2): reused and updated IN PLACE
+    /// across reads instead of rebuilt, so VoiceOver keeps a stable element identity for
+    /// the focused shape across a nudge, resize or selection change, and `argument:`
+    /// layout-changed posts can land focus on a specific element.
+    private var axElementCache: [Int: EditorAXElement] = [:]
+
+    /// The container's own custom actions: "Insert at centre" is offered when a creation
+    /// tool is armed, so VoiceOver / Switch Control / Voice Control users can place a
+    /// default element without a canvas tap (audit R2A1).
+    override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+        get {
+            guard let coordinator, coordinator.hasArmedTool else { return nil }
+            return [UIAccessibilityCustomAction(name: "Insert at centre") { [weak coordinator] _ in
+                MainActor.assumeIsolated { coordinator?.insertArmedToolAtCentre() ?? false }
+            }]
+        }
+        set { }
+    }
+
+    /// One `UIAccessibilityElement` per editable element, driven by the shared model and
+    /// cached by id (audit R2A2): each carries the label, value, Voice Control input
+    /// labels, selection trait and the custom actions, all routing back through the
+    /// coordinator (the same scene commands as pointer edits). Locked elements are
+    /// announced as static text with no actions.
     private func buildAccessibilityElements() -> [Any] {
-        guard let coordinator else { return [] }
-        return coordinator.accessibilityDescriptors().map { descriptor -> UIAccessibilityElement in
+        guard let coordinator else { axElementCache.removeAll(); return [] }
+        let descriptors = coordinator.accessibilityDescriptors()
+        var liveIDs = Set<Int>()
+        let elements: [UIAccessibilityElement] = descriptors.map { descriptor in
             let id = descriptor.id
-            let element = EditorAXElement(accessibilityContainer: self)
-            element.coordinator = coordinator
-            element.elementID = id
+            liveIDs.insert(id)
+            let element = axElementCache[id] ?? {
+                let fresh = EditorAXElement(accessibilityContainer: self)
+                fresh.coordinator = coordinator
+                fresh.elementID = id
+                fresh.accessibilityIdentifier = "editor.element.\(id)"
+                axElementCache[id] = fresh
+                return fresh
+            }()
+            // Update in place so the element identity survives the edit (R2A2).
             element.accessibilityLabel = descriptor.label
             element.accessibilityValue = descriptor.value
             element.accessibilityFrameInContainerSpace = coordinator.accessibilityFrame(forDevice: descriptor.boundsDevice)
-            element.accessibilityIdentifier = "editor.element.\(descriptor.id)"
             element.accessibilityUserInputLabels = descriptor.userInputLabels
             var traits: UIAccessibilityTraits = descriptor.isLocked ? .staticText : .button
             if descriptor.isSelected { traits.insert(.selected) }
@@ -1327,12 +1428,20 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
             }
             return element
         }
+        // Drop elements for deleted ids so the cache doesn't grow unbounded.
+        axElementCache = axElementCache.filter { liveIDs.contains($0.key) }
+        return elements
     }
 
     /// Posts a layout-changed notification so VoiceOver re-reads the editor's elements
-    /// after a selection or edit (traits and values change in place).
-    func postAccessibilityLayoutChanged() {
-        UIAccessibility.post(notification: .layoutChanged, argument: nil)
+    /// after a selection or edit (traits and values change in place). When `focus` names
+    /// a surviving element, VoiceOver lands focus on it (audit R2A2); otherwise it keeps
+    /// its own focus heuristic.
+    func postAccessibilityLayoutChanged(focus id: Int? = nil) {
+        // Rebuild the cache first so the focus target exists for `argument:`.
+        _ = buildAccessibilityElements()
+        let target = id.flatMap { axElementCache[$0] }
+        UIAccessibility.post(notification: .layoutChanged, argument: target)
     }
 
     /// Announces a discrete result (e.g. "Deleted") without moving focus.

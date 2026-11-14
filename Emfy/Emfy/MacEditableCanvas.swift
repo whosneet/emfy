@@ -853,6 +853,57 @@ struct MacEditableCanvas: NSViewRepresentable {
             }
         }
 
+        /// The armed creation tool, if any (audit R2A1).
+        private func armedTool() -> AccessibilityToolInsertion.Tool? {
+            if let kind = parent.editorModel.armedShapeTool { return .shape(kind) }
+            if parent.editorModel.armedTextTool { return .text }
+            if parent.editorModel.armedPen { return .pen }
+            return nil
+        }
+
+        /// Whether a creation tool is armed, so the canvas exposes the "Insert at centre"
+        /// accessibility action (audit R2A1).
+        var hasArmedTool: Bool { armedTool() != nil }
+
+        /// The device-space centre of the visible (unobscured) region, where an
+        /// accessibility insert places its default element.
+        private func visibleCentreDevice() -> CGPoint {
+            guard let overlay else {
+                let page = scene.pageBoundsDevice
+                return CGPoint(x: page.midX, y: page.midY)
+            }
+            let visible = overlay.visibleRect.isEmpty ? overlay.bounds : overlay.visibleRect
+            return mapping.devicePoint(fromView: CGPoint(x: visible.midX, y: visible.midY))
+        }
+
+        /// Inserts a default-size element for the armed tool at the centre of the visible
+        /// area, through the SAME command path and one undo step as a pointer insert, then
+        /// selects it (audit R2A1). The entry point for VoiceOver / Switch Control / Voice
+        /// Control, which can't click the canvas to place a tool.
+        @discardableResult
+        func insertArmedToolAtCentre() -> Bool {
+            guard let tool = armedTool() else { return false }
+            let centre = visibleCentreDevice()
+            guard let plan = AccessibilityToolInsertion.plan(
+                for: tool, centreDevice: centre, pen: parent.editorModel.penStyle, in: scene) else { return false }
+            switch plan {
+            case .command(let command, let id):
+                parent.apply(command, nil)
+                selection.replace(with: id)
+            case .insertText(let element, let id):
+                parent.beginInsertText(element)
+                selection.replace(with: id)
+            }
+            parent.editorModel.disarmTools()
+            overlay?.window?.makeFirstResponder(overlay)
+            overlay?.needsDisplay = true
+            if let overlay {
+                overlay.window?.invalidateCursorRects(for: overlay)
+                NSAccessibility.post(element: overlay, notification: .layoutChanged)
+            }
+            return true
+        }
+
         #if DEBUG
         /// A text dump of the live accessibility tree (label, value, traits, actions).
         func debugAccessibilityDump() -> String {
@@ -1435,19 +1486,41 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
     override func accessibilityLabel() -> String? { "Drawing canvas" }
     override func accessibilityChildren() -> [Any]? { buildAccessibilityChildren() }
 
-    /// One `NSAccessibilityElement` per editable element, driven by the shared model: the
-    /// same labels, values and custom actions as iOS, each routing back through the
-    /// coordinator (the same scene commands as pointer edits). Rebuilt each read so the
-    /// frames track the live zoom and scroll. Locked elements are static text with no
+    /// The container's own custom actions: "Insert at centre" when a creation tool is
+    /// armed, so VoiceOver / Switch Control / Voice Control users can place a default
+    /// element without clicking the canvas (audit R2A1).
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard let coordinator, coordinator.hasArmedTool else { return nil }
+        return [NSAccessibilityCustomAction(name: "Insert at centre") { [weak coordinator] in
+            MainActor.assumeIsolated { coordinator?.insertArmedToolAtCentre() ?? false }
+        }]
+    }
+
+    /// The per-id accessibility-element cache (audit R2A2): reused and updated in place
+    /// across reads instead of rebuilt, so VoiceOver keeps a stable element identity for
+    /// a shape across a nudge, resize or selection change.
+    private var axElementCache: [Int: MacEditorAXElement] = [:]
+
+    /// One `NSAccessibilityElement` per editable element, driven by the shared model and
+    /// cached by id (audit R2A2): the same labels, values and custom actions as iOS, each
+    /// routing back through the coordinator (the same scene commands as pointer edits).
+    /// Frames track the live zoom and scroll. Locked elements are static text with no
     /// actions.
     private func buildAccessibilityChildren() -> [Any] {
-        guard let coordinator else { return [] }
-        return coordinator.accessibilityDescriptors().map { descriptor -> MacEditorAXElement in
+        guard let coordinator else { axElementCache.removeAll(); return [] }
+        let descriptors = coordinator.accessibilityDescriptors()
+        var liveIDs = Set<Int>()
+        let elements: [MacEditorAXElement] = descriptors.map { descriptor in
             let id = descriptor.id
-            let element = MacEditorAXElement()
-            element.coordinator = coordinator
-            element.elementID = id
-            element.setAccessibilityParent(self)
+            liveIDs.insert(id)
+            let element = axElementCache[id] ?? {
+                let fresh = MacEditorAXElement()
+                fresh.coordinator = coordinator
+                fresh.elementID = id
+                fresh.setAccessibilityParent(self)
+                axElementCache[id] = fresh
+                return fresh
+            }()
             element.setAccessibilityRole(descriptor.isLocked ? .staticText : .button)
             element.setAccessibilityLabel(descriptor.label)
             element.setAccessibilityValue(descriptor.value)
@@ -1461,6 +1534,8 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
             })
             return element
         }
+        axElementCache = axElementCache.filter { liveIDs.contains($0.key) }
+        return elements
     }
 
     /// The element's device bounds in SCREEN coordinates, for `NSAccessibilityElement`.

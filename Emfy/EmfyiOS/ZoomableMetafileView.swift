@@ -36,6 +36,10 @@ final class MetafileZoomController {
 
     /// The scroll view is UIKit-owned; the controller only sends it commands.
     @ObservationIgnored weak var scrollView: UIScrollView?
+    /// Set by the editing canvas: inserts the armed tool's default element at the centre
+    /// of the visible area for an accessibility insert (audit R2A1). Returns whether a
+    /// tool was armed and an element inserted. nil when not editing.
+    @ObservationIgnored var insertArmedToolAtCentre: (() -> Bool)?
     @ObservationIgnored private var announceTask: Task<Void, Never>?
 
     private let zoomStep: CGFloat = 1.5
