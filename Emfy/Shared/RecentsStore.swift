@@ -924,7 +924,8 @@ final class RecentsStore {
             }
             return (bookmark, name)
         } catch {
-            log.error("Failed to import a copy: \(error.localizedDescription, privacy: .public)")
+            // .private: a file error's message can carry the file name / path (S10).
+            log.error("Failed to import a copy: \(error.localizedDescription, privacy: .private)")
             return nil
         }
     }
@@ -1196,7 +1197,8 @@ private actor RecentsPersistence {
             let data = try JSONEncoder().encode(entries)
             try data.write(to: locations.storeURL, options: RecentsStore.writeOptions)
         } catch {
-            RecentsStore.log.error("Failed to persist recents: \(error.localizedDescription, privacy: .public)")
+            // .private: a file error's message can carry the file name / path (S10).
+            RecentsStore.log.error("Failed to persist recents: \(error.localizedDescription, privacy: .private)")
         }
     }
 }
