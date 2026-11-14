@@ -149,7 +149,8 @@ public struct EMFFile: Sendable, Equatable {
             reader: reader,
             firstRecord: headerRecord,
             startOffset: headerSizeInt,
-            recordLimit: recordLimit
+            recordLimit: recordLimit,
+            capacityHint: Int(header.records)
         )
 
         var diagnostics = walk.diagnostics
@@ -389,13 +390,18 @@ public struct EMFFile: Sendable, Equatable {
         reader: ByteReader,
         firstRecord: EMFRawRecord,
         startOffset: Int,
-        recordLimit: Int = .max
+        recordLimit: Int = .max,
+        capacityHint: Int = 0
     ) -> WalkResult {
         let total = reader.count
         // The per-call budget never exceeds the hard cap, and is at least 1 so
         // the already-admitted header record is always kept.
         let cap = max(1, min(recordLimit, recordCountLimit))
         var records: [EMFRawRecord] = [firstRecord]
+        // Reserve for the header's advisory record count (P18), clamped to the
+        // cap so a hostile advisory can't drive a huge up-front allocation; the
+        // field is advisory only, so an off-by count just costs a regrow.
+        if capacityHint > 1 { records.reserveCapacity(min(capacityHint, cap)) }
         var diagnostics: [EMFDiagnostic] = []
         var offset = startOffset
         var sawEOF = false

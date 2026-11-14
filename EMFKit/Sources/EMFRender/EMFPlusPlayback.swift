@@ -121,7 +121,8 @@ struct EMFPlusPlayback {
         options: RenderOptions = .default,
         log: inout EMFRenderLog,
         observer: RenderObserver? = nil,
-        drawFilter: Set<Int>? = nil
+        drawFilter: Set<Int>? = nil,
+        byComment: [Int: [(streamIndex: Int, record: EMFPlusRecord)]]? = nil
     ) {
         // Header LogicalDpi drives physical-unit conversion; 0/absent → 96 (§8).
         let rawX = stream.header.map { CGFloat($0.logicalDpiX) } ?? 0
@@ -134,7 +135,7 @@ struct EMFPlusPlayback {
             substitutions: options.fontSubstitutions)
         player.observer = observer
         player.drawFilter = drawFilter
-        player.walk(file: file, stream: stream, dc: &dc, log: &log)
+        player.walk(file: file, stream: stream, dc: &dc, log: &log, byComment: byComment)
     }
 
     // MARK: - File-order walk with GetDC arbitration
@@ -143,7 +144,8 @@ struct EMFPlusPlayback {
         file: EMFFile,
         stream: EMFPlusStream,
         dc: inout DeviceContext,
-        log: inout EMFRenderLog
+        log: inout EMFRenderLog,
+        byComment memoisedByComment: [Int: [(streamIndex: Int, record: EMFPlusRecord)]]? = nil
     ) {
         // The object table can never accumulate more than the whole assembled
         // stream (every continuation chunk draws from it), so cap continued
@@ -153,10 +155,18 @@ struct EMFPlusPlayback {
         // Group the reassembled EMF+ records by the file record (comment) their
         // header starts in, keeping each record's STREAM INDEX (its position in
         // `stream.records`) — the anchor the scene import stamps and the scene
-        // renderer replays by. Records are already in stream order.
-        var byComment: [Int: [(streamIndex: Int, record: EMFPlusRecord)]] = [:]
-        for (streamIndex, record) in stream.records.enumerated() {
-            byComment[record.sourceRecordIndex, default: []].append((streamIndex, record))
+        // renderer replays by. Records are already in stream order. A repeated
+        // per-tile replay passes this index in pre-built, so it is grouped once
+        // for the session rather than once per flush (P9).
+        let byComment: [Int: [(streamIndex: Int, record: EMFPlusRecord)]]
+        if let memoisedByComment {
+            byComment = memoisedByComment
+        } else {
+            var built: [Int: [(streamIndex: Int, record: EMFPlusRecord)]] = [:]
+            for (streamIndex, record) in stream.records.enumerated() {
+                built[record.sourceRecordIndex, default: []].append((streamIndex, record))
+            }
+            byComment = built
         }
 
         // A GetDC opens a window in which subsequent GDI records play, until the

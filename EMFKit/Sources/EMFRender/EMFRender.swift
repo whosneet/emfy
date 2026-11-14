@@ -52,7 +52,9 @@ public enum EMFRenderer {
         options: RenderOptions = .default,
         observer: RenderObserver? = nil,
         emfPlusDrawFilter: Set<Int>? = nil,
-        imageCache: DIBImageCache? = nil
+        imageCache: DIBImageCache? = nil,
+        plusStream: EMFPlusStream? = nil,
+        plusByComment: [Int: [(streamIndex: Int, record: EMFPlusRecord)]]? = nil
     ) -> EMFRenderLog {
         var log = EMFRenderLog()
         let base = deviceToTarget(header: file.header, target: target, log: &log)
@@ -77,7 +79,11 @@ public enum EMFRenderer {
         // inside a GetDC window. A file with no EMF+ drawing records (a pure-GDI
         // file, or an EMF+ shell) takes the unchanged GDI path below, so every
         // existing output stays byte-identical.
-        let plus = file.emfPlusStream()
+        // A caller that renders the same file repeatedly (the tiled editor canvas
+        // replaying per element/tile) passes a memoised stream/index so the
+        // reassembly and comment-grouping run once, not once per call (P9/P17). A
+        // normal render leaves both nil and reassembles here, byte-identically.
+        let plus = plusStream ?? file.emfPlusStream()
         // Surface EMF+ stream reassembly/walk diagnostics REGARDLESS of branch
         // (audit M7): a dual file whose EMF+ stream died still renders its GDI
         // fallback, but the log must say the EMF+ half was broken. A pure-GDI
@@ -100,7 +106,7 @@ public enum EMFRenderer {
             // normal render, so output stays byte-identical.
             dc.observer = observer
             observer?.plusMode = true
-            EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, options: options, log: &log, observer: observer, drawFilter: emfPlusDrawFilter)
+            EMFPlusPlayback.run(file: file, stream: plus, into: context, dc: &dc, base: base, options: options, log: &log, observer: observer, drawFilter: emfPlusDrawFilter, byComment: plusByComment)
             observer?.finalize()
             return log
         }

@@ -243,8 +243,8 @@ enum GzipInflate {
         var output = Data()
         var failure: GzipError?
 
-        reader.bytes.withUnsafeBufferPointer { src in
-            guard let base = src.baseAddress else {
+        reader.bytes.withUnsafeBytes { rawSrc in
+            guard let base = rawSrc.bindMemory(to: UInt8.self).baseAddress else {
                 failure = .inflateFailed
                 return
             }

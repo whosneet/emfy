@@ -13,6 +13,54 @@ import WMFParse
 /// `EMFRenderer` API, byte-for-byte as before.
 public enum MetafileRenderer {
 
+    /// Lazily memoises an EMF content's reassembled EMF+ stream and the derived
+    /// comment→records index, so a tiled editor canvas's repeated per-tile replays
+    /// (and the estimated-ops scan) reassemble and re-walk the stream ONCE for the
+    /// whole session instead of once per tile/flush (P9/P17/S-1). Lock-protected
+    /// and shared by every copy of a `Prepared` value — sound because the stream
+    /// derives solely from the immutable `EMFFile`. `@unchecked Sendable`: every
+    /// field is guarded by `lock`.
+    final class EMFPlusStreamCache: @unchecked Sendable {
+        private let file: EMFFile
+        private let lock = NSLock()
+        private var cachedStream: EMFPlusStream?
+        /// EMF+ records grouped by the file-record (comment) index whose header they
+        /// start in, keeping each record's stream index — the index the renderer's
+        /// per-element replay walk needs. Built once from the memoised stream.
+        private var cachedByComment: [Int: [(streamIndex: Int, record: EMFPlusRecord)]]?
+
+        init(_ file: EMFFile) { self.file = file }
+
+        /// The reassembled EMF+ stream, reassembled at most once.
+        func stream() -> EMFPlusStream {
+            lock.lock(); defer { lock.unlock() }
+            if let cachedStream { return cachedStream }
+            let built = file.emfPlusStream()
+            cachedStream = built
+            return built
+        }
+
+        /// The comment→records index, built at most once from the memoised stream.
+        func byComment() -> [Int: [(streamIndex: Int, record: EMFPlusRecord)]] {
+            lock.lock()
+            if let cachedByComment { lock.unlock(); return cachedByComment }
+            let stream = cachedStream ?? {
+                let built = file.emfPlusStream()
+                cachedStream = built
+                return built
+            }()
+            lock.unlock()
+            var index: [Int: [(streamIndex: Int, record: EMFPlusRecord)]] = [:]
+            for (streamIndex, record) in stream.records.enumerated() {
+                index[record.sourceRecordIndex, default: []].append((streamIndex, record))
+            }
+            lock.lock()
+            cachedByComment = index
+            lock.unlock()
+            return index
+        }
+    }
+
     /// One record-type tally for the diagnostic report: a human-readable record
     /// name and how many records of that kind the metafile carries. Structure
     /// only — a count of record types, never any drawing content, text, or
@@ -104,6 +152,10 @@ public enum MetafileRenderer {
 
         let content: Content
 
+        /// Memoises this EMF content's EMF+ stream / comment index across per-tile
+        /// replays (P9/P17). `nil` for WMF content.
+        let plusCache: EMFPlusStreamCache?
+
         /// The source `WMFFile` for a translated WMF program, retained so the
         /// record-inspector list rows (F5b) and one-line summaries (P3) build ON
         /// DEMAND — the same way EMF content derives its rows from the retained
@@ -142,7 +194,9 @@ public enum MetafileRenderer {
             case .emf(let file):
                 let gdi = file.records.count
                 guard file.emfPlusPresence() == .drawingContent else { return gdi }
-                return Swift.max(gdi, file.emfPlusStream().records.count)
+                // Memoised, so a second access (P18: estimated twice) and every
+                // per-tile replay share the one reassembly.
+                return Swift.max(gdi, (plusCache?.stream() ?? file.emfPlusStream()).records.count)
             case .wmfProgram(let program):
                 return program.payloads.count
             }
@@ -162,6 +216,11 @@ public enum MetafileRenderer {
             self.hasGDICopy = hasGDICopy
             self.recordKinds = recordKinds
             self.wmfFile = wmfFile
+            if case .emf(let file) = content {
+                self.plusCache = EMFPlusStreamCache(file)
+            } else {
+                self.plusCache = nil
+            }
             self.deviceBounds = Prepared.deviceBounds(of: content)
             self.naturalSize = deviceBounds.size
         }
@@ -415,14 +474,16 @@ public enum MetafileRenderer {
         switch prepared.content {
         case .emf(let file):
             // Same EMF+ arbitration as `EMFRenderer.render` ([MS-EMFPLUS]
-            // §1.3.1): if EMF+ drawing records play, the GDI loop never runs.
-            let plus = file.emfPlusStream()
+            // §1.3.1): if EMF+ drawing records play, the GDI loop never runs. Reuse
+            // the memoised stream so observe doesn't reassemble it both here and
+            // again inside the render below (P17).
+            let plus = prepared.plusCache?.stream() ?? file.emfPlusStream()
             let forceGDI = options.emfPlusArbitration == .gdi && (plus.header?.isDual ?? false)
             if !forceGDI, plus.records.contains(where: \.isDrawing) {
                 // EMF+ drives output: render with the observer so each EMF+ drawing
                 // record lifts into `plusEntries` (slice E1a2). The GDI fallback is
                 // not played — the observer records it as `fallback`.
-                _ = EMFRenderer.render(file, into: context, target: target, options: options, observer: observer)
+                _ = EMFRenderer.render(file, into: context, target: target, options: options, observer: observer, plusStream: plus, plusByComment: prepared.plusCache?.byComment())
                 return PlaybackObservation(
                     ops: [],
                     pathConstructionIndices: observer.pathConstructionIndices,
@@ -433,7 +494,7 @@ public enum MetafileRenderer {
                     plusEntries: observer.plusEntries
                 )
             }
-            _ = EMFRenderer.render(file, into: context, target: target, options: options, observer: observer)
+            _ = EMFRenderer.render(file, into: context, target: target, options: options, observer: observer, plusStream: plus, plusByComment: prepared.plusCache?.byComment())
             return PlaybackObservation(
                 ops: observer.draws,
                 pathConstructionIndices: observer.pathConstructionIndices,
@@ -470,7 +531,15 @@ public enum MetafileRenderer {
         options: RenderOptions = .default
     ) {
         guard case .emf(let file) = prepared.content else { return }
-        _ = EMFRenderer.render(file, into: context, target: target, options: options, emfPlusDrawFilter: streamIndices)
+        // Pass the memoised stream and comment index so each per-element flush in a
+        // tiled editor render reuses one reassembly and one grouping instead of
+        // rebuilding them every call (P9/P17).
+        _ = EMFRenderer.render(
+            file, into: context, target: target, options: options,
+            emfPlusDrawFilter: streamIndices,
+            plusStream: prepared.plusCache?.stream(),
+            plusByComment: prepared.plusCache?.byComment()
+        )
     }
 
     /// The EMR type id for a translated WMF unit, used only for passthrough

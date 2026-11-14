@@ -250,6 +250,11 @@ extension EMFFile {
         let streamReader = ByteReader(assembled)
         let count = streamReader.count
         var records: [EMFPlusRecord] = []
+        // Reserve for roughly one record per contributing comment (P18): a good
+        // estimate since most EMF+ records fit a single comment, and bounded by
+        // the comment count (itself bounded by the file's record count), so there
+        // is no hostile over-allocation.
+        if !segments.isEmpty { records.reserveCapacity(min(segments.count, EMFFile.recordCountLimit)) }
         var diagnostics: [EMFPlusDiagnostic] = []
         var offset = 0
         var stoppedEarly = false

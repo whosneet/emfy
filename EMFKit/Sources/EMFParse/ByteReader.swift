@@ -5,19 +5,23 @@ import Foundation
 /// EMF is little-endian throughout ([MS-EMF] §1.3.1). This reader exists to
 /// make the classic Swift binary-parsing bug impossible: a Foundation `Data`
 /// can have a non-zero `startIndex`, so absolute subscripting on a `Data`
-/// slice reads the wrong bytes. We copy the input into a `[UInt8]` up front
-/// (indices always start at 0) and expose only relative-offset reads. Every
-/// read is bounds-checked and returns `nil` on overrun rather than trapping —
-/// nothing here can force-unwrap or overflow.
+/// slice reads the wrong bytes. We keep the input `Data` (sharing the loaded
+/// file's backing rather than copying a multi-megabyte metafile into a fresh
+/// `[UInt8]`, P16) but normalise it to a zero-based buffer so `bytes[0]` is
+/// always the first byte: a whole-file `Data` (`startIndex == 0`, the common
+/// case) is kept as-is with no copy; only a source slice with a non-zero
+/// `startIndex` is rebased, and those slices are small. Every read is
+/// bounds-checked and returns `nil` on overrun rather than trapping — nothing
+/// here can force-unwrap or overflow.
 struct ByteReader: Equatable {
-    /// Normalised backing storage. `bytes[0]` is always the first byte of the
-    /// input regardless of the source `Data`'s `startIndex`.
-    let bytes: [UInt8]
+    /// Normalised, zero-based backing storage. `bytes[0]` is always the first
+    /// byte of the input regardless of the source `Data`'s `startIndex`.
+    let bytes: Data
 
     init(_ data: Data) {
-        // `Array(data)` copies element-by-element from `startIndex`, so the
-        // resulting array is always zero-based and startIndex-safe.
-        self.bytes = Array(data)
+        // Rebase only a non-zero-start slice (so the absolute-from-zero reads
+        // below stay correct); a zero-based `Data` is shared without copying.
+        self.bytes = data.startIndex == 0 ? data : Data(data)
     }
 
     /// Total number of bytes available.
