@@ -135,7 +135,13 @@ enum DrawingAIEvalSuite {
                 runs += 1
                 let answer = await describe(file.bundle)
                 let quoted = quotedStrings(in: answer)
-                let faithful = quoted.allSatisfy { drawingText.localizedCaseInsensitiveContains($0) }
+                // Faithful = every quoted span is actually present in the drawing's text,
+                // using the SAME whitespace-normalised, case-insensitive test the shipping
+                // post-check (DrawingDescribeGrounding) applies, so the gate measures what
+                // ships. The 90% bar is unchanged.
+                let faithful = quoted.allSatisfy {
+                    DrawingDescribeGrounding.isQuoteSupported($0, inDrawingText: file.bundle.toolData.textLines)
+                }
                 let mentionsReal = tokens.contains { answer.localizedCaseInsensitiveContains($0) }
                 if faithful && mentionsReal { passes += 1 }
                 else { notes.append("\(file.name): faithful=\(faithful) mentionsReal=\(mentionsReal) quoted=\(quoted.count)") }
@@ -357,8 +363,9 @@ enum DrawingAIEvalSuite {
     @MainActor
     private static func runGenerate(description: String, preset: GenerationPage.Preset, pageHint: String) async -> (plan: GenerationPlan?, raw: String) {
         let prompt = DrawingAIPrompt.generatePrompt(description: description, pageHint: pageHint)
-        let session = LanguageModelSession(instructions: DrawingAIPrompt.generateInstructions)
-        guard let raw = try? await session.respond(to: prompt).content else { return (nil, "<no reply>") }
+        // The shipping on-device path: guided generation (F3) → the GenerationPlan JSON.
+        guard let raw = try? await DrawingAIGuided.generationPlanJSON(
+            instructions: DrawingAIPrompt.generateInstructions, prompt: prompt) else { return (nil, "<no reply>") }
         guard var plan = try? GenerationPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw)) else { return (nil, raw) }
         plan.page = GenerationPage(preset: preset, coordinateSpace: plan.page.coordinateSpace)
         guard GenerationPlanValidator.validate(plan).isApplicable else { return (nil, raw) }
@@ -472,8 +479,10 @@ enum DrawingAIEvalSuite {
         var lastProblem = ""
         for attempt in 0 ..< 2 {
             let prompt = attempt == 0 ? base : DrawingAITranslateModel.retryPrompt(base: base, problem: lastProblem)
-            let session = LanguageModelSession(instructions: DrawingAIPrompt.translateInstructions(targetLanguage: languageName))
-            guard let raw = try? await session.respond(to: prompt).content else { continue }
+            // The shipping on-device path: guided generation (F3) → the translations JSON.
+            guard let raw = try? await DrawingAIGuided.translationsJSON(
+                instructions: DrawingAIPrompt.translateInstructions(targetLanguage: languageName), prompt: prompt)
+            else { continue }
             lastRaw = raw
             guard let entries = try? TextTranslation.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw)) else {
                 lastProblem = "it was not the required JSON"; continue
@@ -543,8 +552,9 @@ enum DrawingAIEvalSuite {
     private static func runEdit(scene: EMFEdit.Scene, instruction: String) async -> (plan: EditPlan?, raw: String) {
         let block = DrawingAIEditContext.elementsBlock(for: scene)
         let prompt = DrawingAIPrompt.editPrompt(instruction: instruction, elementsBlock: block)
-        let session = LanguageModelSession(instructions: DrawingAIPrompt.editInstructions)
-        guard let raw = try? await session.respond(to: prompt).content else { return (nil, "<no reply>") }
+        // The shipping on-device path: guided generation (F3) → the EditPlan JSON.
+        guard let raw = try? await DrawingAIGuided.editPlanJSON(
+            instructions: DrawingAIPrompt.editInstructions, prompt: prompt) else { return (nil, "<no reply>") }
         guard let plan = try? EditPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw)),
               EditPlanValidator.validate(plan, in: scene).isApplicable else { return (nil, raw) }
         return (plan, raw)
@@ -713,7 +723,10 @@ enum DrawingAIEvalSuite {
     @MainActor
     private static func describe(_ bundle: DrawingAIContextProvider.Bundle) async -> String {
         let session = DrawingAIEngine.makeSession(toolData: bundle.toolData)
-        return (try? await session.respond(to: DrawingAIPrompt.describePrompt(for: bundle.context)).content) ?? ""
+        let raw = (try? await session.respond(to: DrawingAIPrompt.describePrompt(for: bundle.context)).content) ?? ""
+        // Exercise the shipping describe path: sanitiser + the faithfulness quote-grounding.
+        return DrawingDescribeGrounding.groundQuotes(
+            in: DrawingAIOutputSanitiser.sanitise(raw), drawingText: bundle.toolData.textLines)
     }
 
     @available(macOS 26, iOS 26, *)
@@ -734,7 +747,9 @@ enum DrawingAIEvalSuite {
         let usage = DrawingAIToolUsage()
         td.usage = usage
         let session = DrawingAIEngine.makeSession(toolData: td)
-        let answer = (try? await session.respond(to: DrawingAIPrompt.describePrompt(for: bundle.context)).content) ?? ""
+        let raw = (try? await session.respond(to: DrawingAIPrompt.describePrompt(for: bundle.context)).content) ?? ""
+        let answer = DrawingDescribeGrounding.groundQuotes(
+            in: DrawingAIOutputSanitiser.sanitise(raw), drawingText: bundle.toolData.textLines)
         return (answer, usage.callCount())
     }
 
