@@ -362,14 +362,24 @@ enum DrawingAIEvalSuite {
     @available(macOS 26, iOS 26, *)
     @MainActor
     private static func runGenerate(description: String, preset: GenerationPage.Preset, pageHint: String) async -> (plan: GenerationPlan?, raw: String) {
-        let prompt = DrawingAIPrompt.generatePrompt(description: description, pageHint: pageHint)
-        // The shipping on-device path: guided generation (F3) → the GenerationPlan JSON.
-        guard let raw = try? await DrawingAIGuided.generationPlanJSON(
-            instructions: DrawingAIPrompt.generateInstructions, prompt: prompt) else { return (nil, "<no reply>") }
-        guard var plan = try? GenerationPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw)) else { return (nil, raw) }
-        plan.page = GenerationPage(preset: preset, coordinateSpace: plan.page.coordinateSpace)
-        guard GenerationPlanValidator.validate(plan).isApplicable else { return (nil, raw) }
-        return (plan, raw)
+        // The shipping on-device path: guided generation (F3) with the model's ONE bounded
+        // retry on an empty/invalid plan (as DrawingAIGenerateModel.run does).
+        var lastRaw = "<no reply>"
+        for attempt in 0 ..< 2 {
+            let desc = attempt == 0 ? description : DrawingAIGenerateModel.retryDescription(
+                original: description,
+                error: "the reply contained no elements; add shapes and text elements for the description")
+            let prompt = DrawingAIPrompt.generatePrompt(description: desc, pageHint: pageHint)
+            guard let raw = try? await DrawingAIGuided.generationPlanJSON(
+                instructions: DrawingAIPrompt.generateInstructions, prompt: prompt) else { continue }
+            lastRaw = raw
+            guard var plan = try? GenerationPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw)),
+                  !plan.operations.isEmpty else { continue }
+            plan.page = GenerationPage(preset: preset, coordinateSpace: plan.page.coordinateSpace)
+            guard GenerationPlanValidator.validate(plan).isApplicable else { continue }
+            return (plan, raw)
+        }
+        return (nil, lastRaw)
     }
 
     /// Axis-aligned boxes (rectangle / rounded rectangle) as (centreX, centreY, fill).
@@ -551,13 +561,24 @@ enum DrawingAIEvalSuite {
     @MainActor
     private static func runEdit(scene: EMFEdit.Scene, instruction: String) async -> (plan: EditPlan?, raw: String) {
         let block = DrawingAIEditContext.elementsBlock(for: scene)
-        let prompt = DrawingAIPrompt.editPrompt(instruction: instruction, elementsBlock: block)
-        // The shipping on-device path: guided generation (F3) → the EditPlan JSON.
-        guard let raw = try? await DrawingAIGuided.editPlanJSON(
-            instructions: DrawingAIPrompt.editInstructions, prompt: prompt) else { return (nil, "<no reply>") }
-        guard let plan = try? EditPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw)),
-              EditPlanValidator.validate(plan, in: scene).isApplicable else { return (nil, raw) }
-        return (plan, raw)
+        // The shipping on-device path: guided generation (F3) with the model's ONE bounded
+        // retry on an empty/invalid plan (as DrawingAIEditModel.run does, and the translate
+        // case already mirrors). The retry hint is fixed Emfy text, never the model's reply.
+        var lastRaw = "<no reply>"
+        for attempt in 0 ..< 2 {
+            let instr = attempt == 0 ? instruction : DrawingAIEditModel.retryInstruction(
+                original: instruction,
+                hint: "the reply contained no operations; name the element ids listed in the data that should change")
+            let prompt = DrawingAIPrompt.editPrompt(instruction: instr, elementsBlock: block)
+            guard let raw = try? await DrawingAIGuided.editPlanJSON(
+                instructions: DrawingAIPrompt.editInstructions, prompt: prompt) else { continue }
+            lastRaw = raw
+            guard let plan = try? EditPlan.decode(fromJSON: DrawingAIOutputSanitiser.sanitise(raw)),
+                  !plan.operations.isEmpty,
+                  EditPlanValidator.validate(plan, in: scene).isApplicable else { continue }
+            return (plan, raw)
+        }
+        return (nil, lastRaw)
     }
 
     /// True when `color` reads as a dark blue (by name or within ΔE of #1F3A93).
