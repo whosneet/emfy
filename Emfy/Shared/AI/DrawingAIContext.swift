@@ -34,6 +34,10 @@ struct DrawingAIContext: Equatable, Sendable {
     var hasPictures: Bool
     /// Short plain-language lines for records Emfy couldn't fully show, capped.
     var unsupportedSummary: [String]
+    /// The number of separate text runs (lines) in the drawing. A deterministic fact so a
+    /// counting question ("how many lines of text") is answered from this, not by the model
+    /// counting the excerpt itself (which it does unreliably).
+    var textLineCount: Int
 
     struct RecordCount: Equatable, Sendable {
         var name: String
@@ -76,7 +80,8 @@ struct DrawingAIContext: Equatable, Sendable {
             textExcerpt: excerpt,
             textTruncated: truncated,
             hasPictures: hasPictures,
-            unsupportedSummary: Array(unsupportedNotes.prefix(unsupportedLimit))
+            unsupportedSummary: Array(unsupportedNotes.prefix(unsupportedLimit)),
+            textLineCount: textRuns.count
         )
     }
 
@@ -158,6 +163,7 @@ struct DrawingAIContext: Equatable, Sendable {
         if textExcerpt.isEmpty {
             lines.append("The drawing contains no readable text.")
         } else {
+            lines.append("Number of separate text lines: \(textLineCount).")
             lines.append("Drawing text follows\(textTruncated ? " (truncated)" : ""):")
             lines.append(textExcerpt)
         }
@@ -208,6 +214,11 @@ enum DrawingAIPrompt {
     Never state a line number, and never say text is present or absent, unless a tool \
     call just told you so. If the excerpt doesn't contain what the user named, that \
     does not mean it is missing — search with findText first.
+
+    When the user asks HOW MANY lines, items, elements or records the drawing has, use \
+    the exact counts stated in the drawing facts (for example "Number of separate text \
+    lines") — do not count the text yourself, and do not add one for a heading or a \
+    blank line.
     """
 
     /// Instructions for a tool-less structured-output session (title/tags). The same

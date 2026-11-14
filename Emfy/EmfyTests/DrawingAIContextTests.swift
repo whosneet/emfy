@@ -59,6 +59,24 @@ import Testing
         #expect(facts.contains("Hello"))
     }
 
+    // C5f3 (Ask accuracy): a deterministic text-line count is a fact in the block, so a
+    // counting question is answered from it rather than the model counting the excerpt.
+    @Test func factsBlockStatesTheExactTextLineCount() {
+        let context = DrawingAIContext.build(
+            format: "Enhanced Metafile", pageSizeMM: nil, recordKinds: [],
+            textRuns: ["Quarterly budget review", "Marketing spend summary",
+                       "Engineering headcount plan", "Customer retention metrics",
+                       "Regional sales forecast"],
+            hasPictures: false, unsupportedNotes: []
+        )
+        #expect(context.textLineCount == 5)
+        #expect(context.factsBlock().contains("Number of separate text lines: 5"))
+    }
+
+    @Test func instructionsSteerCountingToTheFacts() {
+        #expect(DrawingAIPrompt.instructions.lowercased().contains("do not count the text yourself"))
+    }
+
     @Test func emptyTextReportsNoReadableText() {
         let context = DrawingAIContext.build(
             format: "Windows Metafile", pageSizeMM: nil,
