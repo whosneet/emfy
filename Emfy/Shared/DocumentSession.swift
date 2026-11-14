@@ -177,6 +177,13 @@ final class DocumentSession {
     /// Cancel/Discard. Observed, so the viewer can offer "Don't Save" in that state.
     private(set) var isEndingEditing = false
 
+    /// A one-shot hook the window owner installs when a file switch / back is waiting on
+    /// this session's leave-editing to resolve (U1, L4/N1). Fired with `true` when edit
+    /// mode actually ends (Save Anyway, Don't Save, or a clean save) and `false` when the
+    /// user cancels the leave. The owner then proceeds with — or abandons — the pending
+    /// navigation. `@ObservationIgnored` — a wiring hook, not observable state.
+    @ObservationIgnored var leaveEditingCompletion: ((Bool) -> Void)?
+
     // MARK: - Injected dependencies
 
     /// Resolves the entry's bytes. The store-bound binding throws
@@ -1140,10 +1147,15 @@ final class DocumentSession {
     }
 
     /// Dismisses the pending WMF/WMZ confirmation without writing (Cancel). The
-    /// document stays dirty and stays in edit mode, cancelling any pending Done (U1).
+    /// document stays dirty and stays in edit mode, cancelling any pending Done (U1). A
+    /// window owner waiting to navigate away is told the leave was cancelled, so it
+    /// restores the previous selection.
     func cancelPendingWMFSave() {
         pendingWMFConfirmation = nil
         isEndingEditing = false
+        let completion = leaveEditingCompletion
+        leaveEditingCompletion = nil
+        completion?(false)
     }
 
     /// Exports the current scene in `format` without writing to disk — for "Save a
@@ -1289,6 +1301,11 @@ final class DocumentSession {
         editVersion &+= 1
         editing = .notEditing
         DocumentEditRegistry.shared.unregister(self)
+        // Tell a window owner waiting to navigate away that edit mode has ended, so it can
+        // proceed with the pending file switch / back / deselect (U1, L4/N1).
+        let completion = leaveEditingCompletion
+        leaveEditingCompletion = nil
+        completion?(true)
     }
 
     // MARK: - Editing: external change banner (E2a-8)
