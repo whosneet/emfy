@@ -796,7 +796,24 @@ enum DrawingAIEvalSuite {
 
     private static func corpusURLs(_ corpusDir: String?) -> [URL] {
         guard let corpusDir else { return [] }
-        let dir = URL(fileURLWithPath: corpusDir, isDirectory: true)
+        return metafileURLs(in: URL(fileURLWithPath: corpusDir, isDirectory: true))
+    }
+
+    /// The committed `corpus/` directory, derived from this source file's compile-time
+    /// path (DEBUG-only eval code, built and run on the dev machine), so the Explain
+    /// case finds the self-generated skipped-record fixture without needing
+    /// `EMFY_AI_EVALS_CORPUS` to point at corpus-local (C5h item 6).
+    private static func bundledCorpusURLs() -> [URL] {
+        let corpus = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // AI
+            .deletingLastPathComponent()   // Shared
+            .deletingLastPathComponent()   // Emfy
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("corpus", isDirectory: true)
+        return metafileURLs(in: corpus)
+    }
+
+    private static func metafileURLs(in dir: URL) -> [URL] {
         let exts: Set<String> = ["emf", "wmf", "emz", "wmz"]
         let urls = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         return urls.filter { exts.contains($0.pathExtension.lowercased()) }.sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -823,7 +840,9 @@ enum DrawingAIEvalSuite {
     private struct NamedSkips { let name: String; let items: [String] }
 
     private static func firstCorpusWithNamedSkips(corpusDir: String?) -> NamedSkips? {
-        for url in corpusURLs(corpusDir) {
+        // corpus-local first (richer real-world files), then the committed corpus,
+        // which carries the self-generated skipped-record fixture (C5h item 6).
+        for url in corpusURLs(corpusDir) + bundledCorpusURLs() {
             guard let data = try? Data(contentsOf: url), let loaded = try? MetafileLoader.load(data) else { continue }
             let items = DrawingMissingItems.list(from: loaded.diagnostics)
             if items.contains(where: { $0.contains("EMR_") || $0.contains("EmfPlus") }) {

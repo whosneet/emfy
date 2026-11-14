@@ -143,4 +143,24 @@ import Testing
         let name = prompt.range(of: "EMR_GRADIENTFILL")!
         #expect(name.lowerBound > open.upperBound && name.upperBound < close.lowerBound)
     }
+
+    // MARK: - C5h item 6: the committed Explain fixture
+
+    /// The self-generated corpus fixture (CC0) carries a deliberately-deferred
+    /// EMR_SETLAYOUT record, so the render-log path names it as a skipped record. This
+    /// is what the AI-eval Explain case keys on, verified here deterministically (no
+    /// model). Loads the same committed file the eval now searches.
+    @Test func committedExplainFixtureNamesASkippedRecord() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // EmfyTests
+            .deletingLastPathComponent()   // Emfy
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("corpus/explain-setlayout.emf")
+        let data = try Data(contentsOf: url)
+        let loaded = try MetafileLoader.load(data)
+        let items = DrawingMissingItems.list(from: loaded.diagnostics)
+        let joined = items.joined(separator: "\n")
+        #expect(items.contains { $0.contains("EMR_SETLAYOUT") })
+        #expect(joined.lowercased().contains("layout"))
+    }
 }
