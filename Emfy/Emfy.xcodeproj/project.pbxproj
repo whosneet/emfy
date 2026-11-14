@@ -2925,6 +2925,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 3.0;
+				"OTHER_CODE_SIGN_FLAGS[sdk=macosx*]" = "--timestamp";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.avneetsingh.emfy.mcp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
