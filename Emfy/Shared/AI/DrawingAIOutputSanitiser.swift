@@ -65,3 +65,25 @@ enum DrawingAIOutputSanitiser {
         return result
     }
 }
+
+/// Coalesces streaming UI updates to a modest refresh rate so a fast token stream
+/// doesn't drive one O(n) sanitise/ground + SwiftUI invalidation per token (P14). The
+/// snapshots are cumulative, so skipping an intermediate one loses nothing; the caller
+/// always does a FINAL flush when the stream ends, so the shown text is identical to the
+/// per-token result.
+struct StreamFlushGate {
+    private var last: ContinuousClock.Instant?
+    private let interval: Duration
+
+    /// `hz` flushes per second (default ~15 Hz, imperceptible yet far below a token rate).
+    init(hz: Double = 15) {
+        interval = .milliseconds(Int(1000 / Swift.max(1, hz)))
+    }
+
+    /// True at most once per `interval`; the caller flushes the UI only when it returns true.
+    mutating func shouldFlush(now: ContinuousClock.Instant = .now) -> Bool {
+        if let last, now - last < interval { return false }
+        last = now
+        return true
+    }
+}

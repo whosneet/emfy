@@ -155,15 +155,26 @@ final class DrawingDescribeModel {
         let prompt = DrawingAIPrompt.describePrompt(for: bundle.context)
         phase = .streaming
         do {
-            let drawingText = bundle.toolData.textLines
+            // Build the normalised haystack ONCE for the whole stream (P14) rather than
+            // re-join/re-normalise the drawing text on every token.
+            let haystack = DrawingDescribeGrounding.haystack(for: bundle.toolData.textLines)
             let stream = session.streamResponse(to: prompt)
+            var gate = StreamFlushGate()
+            var latest = ""
             for try await snapshot in stream {
                 if Task.isCancelled { break }
-                // Faithfulness post-check (F3): strip quotation marks from any "quote" that
-                // isn't actually in the drawing's text, so an invented quote never shows.
-                text = DrawingDescribeGrounding.groundQuotes(
-                    in: DrawingAIOutputSanitiser.sanitise(snapshot.content), drawingText: drawingText)
+                latest = snapshot.content
+                // Coalesce UI writes to ~15 Hz (P14): the snapshot is cumulative, so an
+                // intermediate skip loses nothing and the final flush shows the full text.
+                if gate.shouldFlush() {
+                    text = DrawingDescribeGrounding.groundQuotes(
+                        in: DrawingAIOutputSanitiser.sanitise(latest), normalisedHaystack: haystack)
+                }
             }
+            // Final flush: strip quotation marks from any "quote" not actually in the
+            // drawing's text (F3), over the complete text — identical to per-token grounding.
+            text = DrawingDescribeGrounding.groundQuotes(
+                in: DrawingAIOutputSanitiser.sanitise(latest), normalisedHaystack: haystack)
             phase = Task.isCancelled ? (text.isEmpty ? .idle : .done) : .done
         } catch {
             if error is CancellationError { phase = text.isEmpty ? .idle : .done; return }
@@ -178,15 +189,24 @@ final class DrawingDescribeModel {
         }
         phase = .streaming
         let request = AIProviderRequestBuilder.describe(bundle: bundle, model: config.model)
-        let drawingText = bundle.toolData.textLines
+        // One normalised haystack for the whole stream (P14).
+        let haystack = DrawingDescribeGrounding.haystack(for: bundle.toolData.textLines)
+        var gate = StreamFlushGate()
+        var latest = ""
         do {
             let refused = try await DrawingAIProviderRun.stream(
                 service: service, config: config, request: request,
                 onText: { [weak self] value in
+                    // Coalesce UI writes to ~15 Hz (P14); cumulative snapshots make a skip safe.
+                    latest = value
+                    guard gate.shouldFlush() else { return }
                     self?.text = DrawingDescribeGrounding.groundQuotes(
-                        in: DrawingAIOutputSanitiser.sanitise(value), drawingText: drawingText)
+                        in: DrawingAIOutputSanitiser.sanitise(value), normalisedHaystack: haystack)
                 },
                 onTool: { _ in })
+            // Final flush over the complete text — identical to per-token grounding.
+            text = DrawingDescribeGrounding.groundQuotes(
+                in: DrawingAIOutputSanitiser.sanitise(latest), normalisedHaystack: haystack)
             if refused {
                 phase = .failed("The provider declined this request.")
             } else {

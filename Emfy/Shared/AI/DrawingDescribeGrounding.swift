@@ -31,11 +31,22 @@ enum DrawingDescribeGrounding {
         return normalise(lines.joined(separator: " ")).contains(needle)
     }
 
+    /// The normalised search text for `lines` — build it ONCE per stream and pass it to
+    /// `groundQuotes(in:normalisedHaystack:)` so a streamed description doesn't re-join and
+    /// re-normalise the whole drawing text on every token (P14).
+    static func haystack(for lines: [String]) -> String {
+        normalise(lines.joined(separator: " "))
+    }
+
     /// Returns `description` with the quotation marks removed from every double-quoted span
     /// (straight `"…"` or smart `“…”`) whose inner text is not present in `drawingText`.
     /// Supported quotes keep their marks; the words are never changed.
     static func groundQuotes(in description: String, drawingText lines: [String]) -> String {
-        let haystack = normalise(lines.joined(separator: " "))
+        groundQuotes(in: description, normalisedHaystack: haystack(for: lines))
+    }
+
+    /// `groundQuotes` over a pre-normalised haystack (see `haystack(for:)`).
+    static func groundQuotes(in description: String, normalisedHaystack haystack: String) -> String {
         let characters = Array(description)
         var result = ""
         result.reserveCapacity(characters.count)

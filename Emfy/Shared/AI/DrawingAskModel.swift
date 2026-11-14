@@ -220,12 +220,18 @@ final class DrawingAskModel {
         let index = messages.count - 1
         do {
             let stream = session.streamResponse(to: prompt)
+            var gate = StreamFlushGate()
+            var latest = ""
             for try await snapshot in stream {
                 if Task.isCancelled { break }
                 guard messages.indices.contains(index) else { break }
-                messages[index].text = DrawingAIOutputSanitiser.sanitise(snapshot.content)
+                latest = snapshot.content
+                // Coalesce UI writes to ~15 Hz (P14): cumulative snapshots, so a skip is safe
+                // and the final assignment below shows the complete text.
+                if gate.shouldFlush() { messages[index].text = DrawingAIOutputSanitiser.sanitise(latest) }
             }
             if messages.indices.contains(index) {
+                messages[index].text = DrawingAIOutputSanitiser.sanitise(latest)   // final flush
                 messages[index].streaming = false
                 messages[index].toolsUsed = usage?.used() ?? []
                 if messages[index].text.isEmpty && !Task.isCancelled {
@@ -291,16 +297,21 @@ final class DrawingAskModel {
         let index = messages.count - 1
         var tools: [String] = []
         let request = AIProviderRequestBuilder.ask(question: question, bundle: bundle, model: config.model)
+        var gate = StreamFlushGate()
+        var latest = ""
         do {
             let refused = try await DrawingAIProviderRun.stream(
                 service: service, config: config, request: request,
                 onText: { [weak self] text in
-                    guard let self, self.messages.indices.contains(index) else { return }
+                    // Coalesce UI writes to ~15 Hz (P14); cumulative snapshots make a skip safe.
+                    latest = text
+                    guard gate.shouldFlush(), let self, self.messages.indices.contains(index) else { return }
                     self.messages[index].text = DrawingAIOutputSanitiser.sanitise(text)
                 },
                 onTool: { name in if !tools.contains(name) { tools.append(name) } }
             )
             if messages.indices.contains(index) {
+                messages[index].text = DrawingAIOutputSanitiser.sanitise(latest)   // final flush
                 messages[index].streaming = false
                 messages[index].toolsUsed = tools
                 if refused {

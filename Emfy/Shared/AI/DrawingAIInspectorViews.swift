@@ -148,8 +148,14 @@ struct DrawingAskView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onChange(of: model.messages.last?.text) { _, _ in
-                if let last = model.messages.last {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
+                guard let last = model.messages.last else { return }
+                // The streamed text updates many times a second; an animated scroll per
+                // update stacks and janks, so track the bottom WITHOUT animation while
+                // streaming and animate only the settle once the answer completes (P14).
+                if last.streaming || reduceMotion {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                } else {
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
         }
