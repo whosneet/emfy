@@ -164,7 +164,7 @@ final class DrawingAIEditModel {
         var lastDecodeError = ""
         var lastRaw = ""
         for attempt in 0 ..< maxAttempts {
-            let prompt = attempt == 0 ? text : Self.retryInstruction(original: text, error: lastDecodeError)
+            let prompt = attempt == 0 ? text : Self.retryInstruction(original: text, hint: lastDecodeError)
             let raw: String
             do {
                 if let producer {
@@ -186,7 +186,9 @@ final class DrawingAIEditModel {
                 if !decoded.operations.isEmpty { plan = decoded; break }
                 lastDecodeError = "the reply contained no operations; name the element ids listed in the data that should change"
             } catch {
-                lastDecodeError = "\(error)"
+                // A fixed hint — never echo the model's own error/reply text back into the
+                // next prompt's instruction slot, which would be an injection path (S6).
+                lastDecodeError = "the reply wasn’t the required EditPlan JSON"
             }
         }
         lastRawReply = lastRaw   // DEBUG inspection only
@@ -307,13 +309,15 @@ final class DrawingAIEditModel {
         return "Something went wrong preparing the edit. Please try again."
     }
 
-    /// The retry prompt: the original request plus the decode error, so the model fixes its
-    /// JSON. Never loosens the decoder — it just gives the model a second, informed try.
-    static func retryInstruction(original: String, error: String) -> String {
+    /// The retry prompt: the original request plus a FIXED hint, so the model fixes its
+    /// JSON. The hint is always Emfy's own text (never the model's error/reply), so the
+    /// model can't feed instructions back to itself through the retry (S6). Never loosens
+    /// the decoder — it just gives the model a second, informed try.
+    static func retryInstruction(original: String, hint: String) -> String {
         """
         \(original)
 
-        (Your previous reply could not be parsed as the required EditPlan JSON: \(error). \
+        (Your previous reply could not be used — \(hint). \
         Reply with ONLY the JSON object described, and nothing else.)
         """
     }
