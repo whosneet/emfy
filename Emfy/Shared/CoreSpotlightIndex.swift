@@ -59,12 +59,22 @@ struct CoreSpotlightIndex: DrawingSpotlightIndex {
         if #available(macOS 15, iOS 18, *), let entity = DrawingEntityIndexing.entity(forSpotlight: item) {
             attributes.associateAppEntity(entity)
         }
-        return CSSearchableItem(
+        let searchable = CSSearchableItem(
             uniqueIdentifier: item.id,
             domainIdentifier: domainIdentifier,
             attributeSet: attributes
         )
+        // Bound the index entry's lifetime (SI-L): an entry self-expires after the TTL, so a
+        // drawing removed while the app wasn't running (or an abandoned install) can't linger
+        // in Spotlight forever. The launch re-sync refreshes every live entry, pushing the
+        // expiry out, so an active user's results never actually lapse.
+        searchable.expirationDate = Date().addingTimeInterval(expirationInterval)
+        return searchable
     }
+
+    /// How long an indexed entry lives before Spotlight auto-expires it (60 days). The
+    /// per-launch re-sync keeps live entries fresh well within this window.
+    static let expirationInterval: TimeInterval = 60 * 24 * 60 * 60
 }
 
 // MARK: - Opening a Spotlight result

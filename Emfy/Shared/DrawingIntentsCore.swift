@@ -133,7 +133,11 @@ enum AppIntentDrawing {
         if let entity {
             let store = RecentsStore.shared
             await store.loadIfNeeded()
-            guard let entry = store.entry(id: entity.id), !store.isSessionPrivate(entity.id) else {
+            // Private mode hides the whole library from automation (SI-L): re-check it here
+            // too, so a stale entity id handed straight to an intent can't bypass the query's
+            // Private-mode filter. Session-private entries stay hidden even with Private off.
+            guard !store.isPrivate,
+                  let entry = store.entry(id: entity.id), !store.isSessionPrivate(entity.id) else {
                 throw AppIntentDrawingError.notFound
             }
             do {
@@ -288,7 +292,7 @@ struct GetTextFromDrawingIntent: AppIntent {
         Summary("Get text from \(\.$drawing)")
     }
 
-    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
         // Ask Shortcuts to supply a value rather than failing with a generic error (SI-M).
         guard drawing != nil || file != nil else { throw $drawing.needsValueError() }
         let input = try await AppIntentDrawing.bytes(entity: drawing, file: file)
@@ -296,7 +300,12 @@ struct GetTextFromDrawingIntent: AppIntent {
         let text = try await Task.detached(priority: .userInitiated) {
             try await AppIntentDrawing.text(from: input.data, includePictures: includePics)
         }.value
-        return .result(value: text)
+        // A short result dialog (SI-L), so Siri/Shortcuts confirm the outcome without reading
+        // back the whole (possibly long) extracted text — that stays the returned value.
+        let dialog: IntentDialog = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? IntentDialog("No text found in \(input.name).")
+            : IntentDialog("Found \(text.count) characters of text in \(input.name).")
+        return .result(value: text, dialog: dialog)
     }
 }
 

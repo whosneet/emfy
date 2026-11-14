@@ -24,12 +24,13 @@ struct DrawingEntity: AppEntity {
 
     /// The Recents entry's id — the stable handle an intent resolves back to a file.
     let id: UUID
-    /// The file name as shown, with extension ("House sketch.wmf").
-    let name: String
+    /// The file name as shown, with extension ("House sketch.wmf"). Exposed as an entity
+    /// property so Shortcuts can read it with "Get Details" (SI-L).
+    @Property(title: "Name") var name: String
     /// Short format badge ("EMF", "Compressed WMF").
-    let formatLabel: String
+    @Property(title: "Format") var formatLabel: String
     /// The localised file size ("20 KB").
-    let sizeLabel: String
+    @Property(title: "Size") var sizeLabel: String
     /// Absolute path to the cached thumbnail PNG, when one exists. Shown in the
     /// entity's display representation; never decoded in-process beyond what the
     /// framework needs to render the row.
@@ -42,6 +43,30 @@ struct DrawingEntity: AppEntity {
     /// The on-device AI title, when one is stored and AI display is on, so the entity
     /// subtitle is more descriptive (A1b, "if cheap" — no parse). Nil otherwise.
     var aiTitle: String? = nil
+
+    /// Explicit member init: `@Property` makes the synthesised memberwise init expect
+    /// `EntityProperty` values, so this sets the wrapped values from plain ones and keeps
+    /// every call site (the factory, the Spotlight reconstruction) unchanged.
+    init(
+        id: UUID,
+        name: String,
+        formatLabel: String,
+        sizeLabel: String,
+        thumbnailPath: String?,
+        textSummary: String? = nil,
+        aiTitle: String? = nil
+    ) {
+        // The plain stored properties are set before the `@Property`-wrapped ones: assigning
+        // a wrapped property is a setter call, which needs every other stored property already
+        // initialised.
+        self.id = id
+        self.thumbnailPath = thumbnailPath
+        self.textSummary = textSummary
+        self.aiTitle = aiTitle
+        self.name = name
+        self.formatLabel = formatLabel
+        self.sizeLabel = sizeLabel
+    }
 
     var displayRepresentation: DisplayRepresentation {
         let image: DisplayRepresentation.Image
