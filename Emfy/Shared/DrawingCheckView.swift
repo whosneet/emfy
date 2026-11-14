@@ -331,22 +331,35 @@ struct DrawingCheckView: View {
         }
     }
 
+    /// A Check report can hold thousands of runs; the blocks render in a non-lazy stack, so
+    /// each is capped at this many rows with an "and N more" line (C5e L5).
+    private static let reportRowCap = 50
+
+    @ViewBuilder
+    private func moreRow(total: Int) -> some View {
+        if total > Self.reportRowCap {
+            Text("and \(total - Self.reportRowCap) more")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     private func fontsBlock(_ report: ContentReport) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             blockHeader("Fonts")
-            ForEach(Array(report.fonts.enumerated()), id: \.offset) { _, font in
+            ForEach(Array(report.fonts.prefix(Self.reportRowCap).enumerated()), id: \.offset) { _, font in
                 let sizes = font.pointSizes.isEmpty ? "" : " — " + font.pointSizes.map { String(format: "%g pt", $0) }.joined(separator: ", ")
                 Text("\(font.family) (\(font.runCount) run\(font.runCount == 1 ? "" : "s"))\(sizes)")
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            moreRow(total: report.fonts.count)
         }
     }
 
     private func coloursBlock(_ report: ContentReport) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             blockHeader("Colours")
-            ForEach(Array(report.colors.enumerated()), id: \.offset) { _, usage in
+            ForEach(Array(report.colors.prefix(Self.reportRowCap).enumerated()), id: \.offset) { _, usage in
                 HStack(spacing: 8) {
                     swatch(usage.color)
                     Text(usage.color.hexString)
@@ -358,39 +371,43 @@ struct DrawingCheckView: View {
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
+            moreRow(total: report.colors.count)
         }
     }
 
     private func imagesBlock(_ report: ContentReport) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             blockHeader("Images")
-            ForEach(Array(report.images.enumerated()), id: \.offset) { _, image in
+            ForEach(Array(report.images.prefix(Self.reportRowCap).enumerated()), id: \.offset) { _, image in
                 Text("\(image.pixelWidth)×\(image.pixelHeight) \(image.format) ×\(image.count)")
                     .font(.callout)
             }
+            moreRow(total: report.images.count)
         }
     }
 
     private func textBlock(_ report: ContentReport) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             blockHeader("Text")
-            ForEach(Array(report.textRuns.enumerated()), id: \.offset) { _, run in
+            ForEach(Array(report.textRuns.prefix(Self.reportRowCap).enumerated()), id: \.offset) { _, run in
                 let size = run.pointSize.map { String(format: " (%.1f pt)", $0) } ?? ""
                 Text("“\(run.string)”\(size)")
                     .font(.callout)
                     .lineLimit(2)
                     .truncationMode(.tail)
             }
+            moreRow(total: report.textRuns.count)
         }
     }
 
     private func unsupportedBlock(_ report: ContentReport) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             blockHeader("Unsupported records")
-            ForEach(Array(report.unsupported.enumerated()), id: \.offset) { _, group in
+            ForEach(Array(report.unsupported.prefix(Self.reportRowCap).enumerated()), id: \.offset) { _, group in
                 Text("\(group.label) ×\(group.count)")
                     .font(.callout).foregroundStyle(.secondary)
             }
+            moreRow(total: report.unsupported.count)
         }
     }
 

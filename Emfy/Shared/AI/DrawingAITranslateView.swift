@@ -16,6 +16,10 @@ struct DrawingAITranslateView: View {
 
     @Environment(AIProviderStore.self) private var providerStore: AIProviderStore?
 
+    /// Cap the preview change list so a large translation doesn't build hundreds of rows in
+    /// the non-lazy stack (C5e L5).
+    private static let previewRowCap = 50
+
     var body: some View {
         sheetBody
             .onAppear { model.providerStore = providerStore }
@@ -195,8 +199,12 @@ struct DrawingAITranslateView: View {
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(preview.changes) { change in
+                        ForEach(preview.changes.prefix(Self.previewRowCap)) { change in
                             changeRow(change)
+                        }
+                        if preview.changes.count > Self.previewRowCap {
+                            Text("and \(preview.changes.count - Self.previewRowCap) more")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
