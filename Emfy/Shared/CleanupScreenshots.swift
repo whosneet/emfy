@@ -40,6 +40,13 @@ enum CleanupScreenshots {
         dirty.analyse(data: fixtureEMF(), hasUnsavedChanges: true)
         await wait(timeout: .seconds(10)) { dirty.phase == .ready }
         _ = capture(view: view(dirty), size: CGSize(width: 520, height: 640), to: base + "-dirty.png")
+
+        // C5e L2/U2: the iPhone layout at the largest accessibility text size, confirming
+        // the sheet no longer forces a 460 pt minimum width and the content scrolls.
+        let axView = view(model)
+            .environment(\.horizontalSizeClass, .compact)
+            .environment(\.dynamicTypeSize, .accessibility5)
+        _ = capture(view: axView, size: CGSize(width: 393, height: 852), to: base + "-iphone-ax.png")
     }
 
     @MainActor
@@ -154,6 +161,11 @@ extension CleanupScreenshots {
                     try? await Task.sleep(for: .milliseconds(500))
                     _ = capture(view: DrawingCleanupView(model: model, fileName: "diagram.emf", onClose: {}),
                                 size: CGSize(width: 560, height: 700), to: base + "-ipad.png")
+                    // C5e L2/U2: the iPhone layout at the largest accessibility text size.
+                    let axView = DrawingCleanupView(model: model, fileName: "diagram.emf", onClose: {})
+                        .environment(\.horizontalSizeClass, .compact)
+                        .environment(\.dynamicTypeSize, .accessibility5)
+                    _ = capture(view: axView, size: CGSize(width: 393, height: 852), to: base + "-iphone-ax.png")
                     exit(0)
                 }
         }

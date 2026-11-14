@@ -88,6 +88,14 @@ enum CompareScreenshots {
         model.mode = .overlay
         model.onionValue = 0.5
         _ = capture(view: compareView(model), size: CGSize(width: 820, height: 560), to: base + "-overlay.png")
+
+        // C5e L1/U2: the compact iPhone layout (segmented Canvas/Changes switch, menu mode
+        // picker) at the largest accessibility text size. iPhone 17 point size.
+        model.mode = .sideBySide
+        let axView = compareView(model)
+            .environment(\.horizontalSizeClass, .compact)
+            .environment(\.dynamicTypeSize, .accessibility5)
+        _ = capture(view: axView, size: CGSize(width: 393, height: 852), to: base + "-iphone-ax-canvas.png")
     }
 
     @MainActor
@@ -176,6 +184,11 @@ extension CompareScreenshots {
                     try? await Task.sleep(for: .milliseconds(600))
                     _ = capture(view: DrawingCompareView(model: model, onClose: {}),
                                 size: CGSize(width: 760, height: 640), to: base + "-ipad.png")
+                    // C5e L1/U2: the compact iPhone layout at the largest accessibility size.
+                    let axView = DrawingCompareView(model: model, onClose: {})
+                        .environment(\.horizontalSizeClass, .compact)
+                        .environment(\.dynamicTypeSize, .accessibility5)
+                    _ = capture(view: axView, size: CGSize(width: 393, height: 852), to: base + "-iphone-ax-canvas.png")
                     exit(0)
                 }
         }
