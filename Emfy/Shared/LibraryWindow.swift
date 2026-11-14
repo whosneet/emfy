@@ -445,6 +445,23 @@ struct LibraryWindow: View {
         )
         #endif
         #if os(iOS)
+        // Register this scene with the open coordinator (SI1), so the Open Drawing App
+        // Intent — which routes through `OpenCoordinator` — actually selects the drawing
+        // (it did nothing on iOS before, where only Mac windows registered). markFront on
+        // appear makes the most-recently-shown scene the routing target; a cold-launch
+        // intent is held until the scene SwiftUI creates registers and drains it.
+        .onAppear {
+            coordinator.register(windowID: model.windowID) { entryID in
+                model.select(entryID)
+            }
+            coordinator.markFront(windowID: model.windowID)
+            // The app-global Clear Recents runs the front window's save guard before
+            // clearing, so a clear can't throw away an open, dirty WMF's edits (R2U3).
+            coordinator.setClearGuard(windowID: model.windowID) { [model] in await model.guardClear() }
+        }
+        .onDisappear {
+            coordinator.unregister(windowID: model.windowID)
+        }
         // A small resize floor on iPad (the compact layout's size), so a window can't
         // shrink below where the UI works yet still allows the iPadOS 26 half-width and
         // portrait halves (audit L-A). iPad-only; never constrains iPhone.

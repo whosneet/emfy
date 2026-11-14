@@ -262,6 +262,11 @@ private struct RootView: View {
             // (S1a-5). The decision and the once-per-launch guard are shared; the
             // first library window to appear claims the presentation.
             .onAppear {
+                // Let the open coordinator create a window for an App Intent open when
+                // none is open (SI1: "Open Drawing" with every window closed).
+                OpenCoordinator.shared.openNewWindow = { entryID in
+                    openWindow(id: "library", value: LibraryWindowValue(entryID: entryID))
+                }
                 #if DEBUG
                 if EditorDebugLaunch.isActive { return }   // keep the screenshot window alone
                 #endif

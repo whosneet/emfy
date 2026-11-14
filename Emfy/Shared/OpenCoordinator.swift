@@ -32,6 +32,12 @@ final class OpenCoordinator {
     /// (cold launch); drained by the next window to register.
     @ObservationIgnored private var pending: [UUID] = []
 
+    /// Opens a new library window showing an entry, wired by the app from a view that
+    /// holds `openWindow` (macOS). Used when an App Intent routes an open but no window
+    /// is registered to receive it (SI1). `nil` on iOS, where a scene always registers
+    /// (or is created on a cold launch and drains `pending`).
+    @ObservationIgnored var openNewWindow: ((UUID) -> Void)?
+
     private var frontWindowID: UUID? { order.last }
 
     // MARK: - Window registry
@@ -74,12 +80,17 @@ final class OpenCoordinator {
 
     // MARK: - Routing
 
-    /// Selects `entryID` in the front window — the OpenRouting `.frontWindow`
-    /// outcome (v3-plan §9.1). Held for the next window to register when none is
-    /// available yet (cold launch via File ▸ Open).
-    func selectInFront(_ entryID: UUID) {
+    /// Routes an entry opened by an App Intent (SI1): selects it in the front window
+    /// when one exists; else — macOS — opens a new window showing it (so "Open Drawing"
+    /// works with every window closed); else holds it for the next window to register
+    /// (the cold-launch path, which on iOS is the scene SwiftUI creates). Replaces the
+    /// former `selectInFront`, whose queued open was never drained when no iOS scene had
+    /// registered or no Mac window was open — the intent did nothing.
+    func routeFromIntent(_ entryID: UUID) {
         if let id = frontWindowID, let select = selectors[id] {
             select(entryID)
+        } else if let openNewWindow {
+            openNewWindow(entryID)
         } else {
             pending.append(entryID)
         }

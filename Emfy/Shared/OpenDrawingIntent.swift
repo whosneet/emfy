@@ -22,12 +22,13 @@ struct OpenDrawingIntent: OpenIntent {
         return .result()
     }
 
-    /// Loads the recents history (an intent can arrive cold) and selects the entry in
-    /// the front window — or holds it for the next window on a cold launch
-    /// (`OpenCoordinator`). Main-actor isolated so `perform` stays nonisolated.
+    /// Loads the recents history (an intent can arrive cold) and routes the entry
+    /// through the open coordinator (SI1): the front window selects it; with none open,
+    /// macOS opens a new window and iOS holds it for the scene that registers on launch.
+    /// Main-actor isolated so `perform` stays nonisolated.
     @MainActor
     private static func open(_ id: UUID) async {
         await RecentsStore.shared.loadIfNeeded()
-        OpenCoordinator.shared.selectInFront(id)
+        OpenCoordinator.shared.routeFromIntent(id)
     }
 }

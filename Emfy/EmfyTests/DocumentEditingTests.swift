@@ -1276,6 +1276,38 @@ private final class FlakyWrite: @unchecked Sendable {
         let coordinator = OpenCoordinator()
         #expect(await coordinator.frontClearGuard())
     }
+
+    // SI1: an App Intent open with a registered window selects in the front window.
+    @Test func routeFromIntentSelectsInTheFrontWindow() {
+        let coordinator = OpenCoordinator()
+        var selected: UUID?
+        let id = UUID()
+        coordinator.register(windowID: UUID()) { selected = $0 }
+        coordinator.routeFromIntent(id)
+        #expect(selected == id)
+    }
+
+    // SI1: with no window registered, a wired openNewWindow (macOS) opens a window for
+    // the intent rather than silently queueing forever.
+    @Test func routeFromIntentOpensANewWindowWhenNoneIsRegistered() {
+        let coordinator = OpenCoordinator()
+        var opened: UUID?
+        coordinator.openNewWindow = { opened = $0 }
+        let id = UUID()
+        coordinator.routeFromIntent(id)
+        #expect(opened == id)
+    }
+
+    // SI1: with no window and no window opener (the iOS cold-launch path), the open is
+    // held and drained by the next scene to register — so the intent still lands.
+    @Test func routeFromIntentHeldForTheNextWindowToRegister() {
+        let coordinator = OpenCoordinator()
+        let id = UUID()
+        coordinator.routeFromIntent(id)                 // queued (no window, no opener)
+        var selected: UUID?
+        coordinator.register(windowID: UUID()) { selected = $0 }   // registering drains it
+        #expect(selected == id)
+    }
 }
 
 // MARK: - Store pruning + real-file round trip
