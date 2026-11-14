@@ -82,7 +82,19 @@ enum DrawingAIEvalSuite {
         // "generate a drawing" bar can be measured quickly without the slower edit/translate
         // cases.
         let genOnly = env["EMFY_AI_EVALS_GEN_ONLY"] == "1"
+        // A focused mode (EMFY_AI_EVALS_EXPLAIN_ONLY=1) runs ONLY the Explain case, so its
+        // "names the skipped record" bar can be measured live without the slower
+        // describe/ask/edit/generate cases. It uses the committed corpus fixture when no
+        // EMFY_AI_EVALS_CORPUS is set (C5h item 6).
+        let explainOnly = env["EMFY_AI_EVALS_EXPLAIN_ONLY"] == "1"
         var results: [CaseResult] = []
+        if explainOnly {
+            results.append(await caseExplain(corpusDir: corpusDir))
+            let table = renderTable(results)
+            writeReport(results, status: "available", to: outPath)
+            return ("EMFY AI EVALS (on-device, explain-only) — \(status)\n\(table)\n\nnotes: \(results.first?.notes.joined(separator: " | ") ?? "")\n\nJSON: \(outPath)",
+                    (results.first?.rate ?? 0) >= 1.0 ? 0 : 1)
+        }
         if genOnly {
             results.append(await generateCaseFlowchart())
             results.append(await generateCaseRedCircleBlueSquare())
