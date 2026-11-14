@@ -220,6 +220,9 @@ struct EmfyTests {
         #expect(loaded.entries.count == 1)
         #expect(loaded.entries.first?.displayName == "a.emf")
         #expect(!FileManager.default.fileExists(atPath: locations.corruptStoreURL.path))
+        // C1: a dropped (undecodable) entry disables the launch sweep, so its would-be side
+        // files aren't wiped as orphans.
+        #expect(!loaded.maySweep)
     }
 
     @Test func undecodableStoreIsRenamedAside() throws {
@@ -289,6 +292,32 @@ struct EmfyTests {
 
         #expect(store.entries.isEmpty)
         #expect(FileManager.default.fileExists(atPath: kept.path))   // the received copy survived
+    }
+
+    // C1: one undecodable entry alongside good ones must NOT trigger the sweep, so the dropped
+    // entry's would-be files survive.
+    @MainActor
+    @Test func partialDecodeKeepsImportedFilesAcrossLoad() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        try FileManager.default.createDirectory(at: store.locations.importedDirectory, withIntermediateDirectories: true)
+        let orphanish = store.locations.importedDirectory.appendingPathComponent("would-be.emf")
+        try Data([9]).write(to: orphanish)
+
+        try FileManager.default.createDirectory(at: store.locations.supportDirectory, withIntermediateDirectories: true)
+        let good = RecentEntry(
+            id: UUID(), displayName: "a.emf", formatLabel: "EMF", fullFormatName: "Enhanced Metafile",
+            byteCount: 10, openedAt: Date(), bookmark: Data([1, 2, 3]), thumbnailFileName: nil,
+            fileIdentity: "/x/a.emf", importedFileName: nil, reloadToken: UUID()
+        )
+        let goodObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(good))
+        let array: [Any] = [goodObject, ["nonsense": true]]
+        try JSONSerialization.data(withJSONObject: array).write(to: store.locations.storeURL)
+
+        await store.loadIfNeeded()
+
+        #expect(store.entries.count == 1)
+        #expect(FileManager.default.fileExists(atPath: orphanish.path))   // sweep skipped (C1)
     }
 
     // ST1: a normal, fully-decoded load still sweeps genuine orphans.

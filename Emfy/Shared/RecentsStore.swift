@@ -1102,7 +1102,18 @@ final class RecentsStore {
         }
         // Decode entry by entry: a single bad element is skipped, not fatal.
         if let wrappers = try? JSONDecoder().decode([FailableEntry].self, from: data) {
-            return LoadResult(entries: wrappers.compactMap(\.entry), maySweep: true)
+            let entries = wrappers.compactMap(\.entry)
+            let dropped = wrappers.filter { $0.entry == nil }
+            guard dropped.isEmpty else {
+                // Some entries failed to decode (C1). Their side files would look orphaned, so
+                // skip the sweep this launch rather than delete files a would-be entry needs.
+                for bad in dropped {
+                    // .private: a decode error can echo field values / paths (S10).
+                    log.error("Dropped an undecodable recents entry; skipping the launch sweep: \(bad.decodeError ?? "unknown", privacy: .private)")
+                }
+                return LoadResult(entries: entries, maySweep: false)
+            }
+            return LoadResult(entries: entries, maySweep: true)
         }
         // The whole file is undecodable (not even an array): set it aside and start empty, but
         // NEVER sweep — the files it referenced must survive until the user reopens them (ST1).
@@ -1113,11 +1124,18 @@ final class RecentsStore {
     }
 
     /// Decodes a `RecentEntry` or, on failure, nothing — so a malformed element
-    /// doesn't fail the whole array.
+    /// doesn't fail the whole array. Captures the decode error so the drop can be logged (C1).
     private struct FailableEntry: Decodable {
         let entry: RecentEntry?
+        let decodeError: String?
         init(from decoder: Decoder) throws {
-            entry = try? decoder.singleValueContainer().decode(RecentEntry.self)
+            do {
+                entry = try decoder.singleValueContainer().decode(RecentEntry.self)
+                decodeError = nil
+            } catch {
+                entry = nil
+                decodeError = String(describing: error)
+            }
         }
     }
 
