@@ -138,12 +138,16 @@ final class RecentsStore {
         let loaded = await Task.detached(priority: .userInitiated) {
             Self.loadEntries(from: locations)
         }.value
-        entries = loaded.sorted { $0.openedAt > $1.openedAt }
+        entries = loaded.entries.sorted { $0.openedAt > $1.openedAt }
         // Complete the launch sweep before signalling the store is loaded, so a
         // cold-launch open (which awaits `loadIfNeeded` before importing its
         // copy) can't have that freshly written copy or thumbnail deleted by a
-        // still-running sweep (the C2 race).
-        await runLaunchSweep()
+        // still-running sweep (the C2 race). Skip the sweep entirely when the load was
+        // unreadable or partial, so a transient read failure or one bad entry can't wipe every
+        // imported/received/New/AI drawing (ST1/C1).
+        if loaded.maySweep {
+            await runLaunchSweep()
+        }
         didLoad = true
     }
 
@@ -1062,26 +1066,50 @@ final class RecentsStore {
     #endif
 
     #if os(iOS)
-    /// Protect the store and imported copies at rest on iOS; `.atomic` on both.
-    nonisolated static let writeOptions: Data.WritingOptions = [.atomic, .completeFileProtection]
+    /// Protect the store and imported copies at rest on iOS, but keep them readable after the
+    /// first unlock so a Shortcuts/App Intent run on a still-locked device doesn't hit a read
+    /// failure — which would read as an unreadable store (ST1). `.atomic` on both.
+    nonisolated static let writeOptions: Data.WritingOptions = [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
     #else
     nonisolated static let writeOptions: Data.WritingOptions = [.atomic]
     #endif
 
     // MARK: - Tolerant decode (§d)
 
-    nonisolated static func loadEntries(from locations: Locations) -> [RecentEntry] {
-        guard let data = try? Data(contentsOf: locations.storeURL) else { return [] }
+    /// The tri-state outcome of a load (ST1). `maySweep` gates the launch sweep: the sweep
+    /// deletes every file in Imported/ and EmfyThumbnails/ that no loaded entry references, so
+    /// it must run ONLY when the load is complete and trustworthy. A missing store (clean first
+    /// launch) and a fully-decoded store are safe; a read failure, an undecodable file, or ANY
+    /// dropped entry (C1) leaves it `false`, so a transient failure or a single bad element can
+    /// never wipe every received, New and AI-generated drawing.
+    struct LoadResult: Sendable {
+        let entries: [RecentEntry]
+        let maySweep: Bool
+    }
+
+    nonisolated static func loadEntries(from locations: Locations) -> LoadResult {
+        // A missing store is a clean first launch: nothing is referenced and nothing should be
+        // orphaned, so the sweep is safe.
+        guard FileManager.default.fileExists(atPath: locations.storeURL.path) else {
+            return LoadResult(entries: [], maySweep: true)
+        }
+        // The file exists but can't be read — a locked device before first unlock, a transient
+        // I/O error. We don't know what it references, so NEVER sweep: that would delete every
+        // imported/received/New/AI drawing (ST1).
+        guard let data = try? Data(contentsOf: locations.storeURL) else {
+            log.error("recents.json exists but could not be read; skipping the launch sweep")
+            return LoadResult(entries: [], maySweep: false)
+        }
         // Decode entry by entry: a single bad element is skipped, not fatal.
         if let wrappers = try? JSONDecoder().decode([FailableEntry].self, from: data) {
-            return wrappers.compactMap(\.entry)
+            return LoadResult(entries: wrappers.compactMap(\.entry), maySweep: true)
         }
-        // The whole file is undecodable (not even an array): set it aside and
-        // start empty, rather than discard it silently or crash.
+        // The whole file is undecodable (not even an array): set it aside and start empty, but
+        // NEVER sweep — the files it referenced must survive until the user reopens them (ST1).
         try? FileManager.default.removeItem(at: locations.corruptStoreURL)
         try? FileManager.default.moveItem(at: locations.storeURL, to: locations.corruptStoreURL)
-        log.error("recents.json was undecodable; renamed to recents.corrupt.json")
-        return []
+        log.error("recents.json was undecodable; renamed to recents.corrupt.json and skipping the launch sweep")
+        return LoadResult(entries: [], maySweep: false)
     }
 
     /// Decodes a `RecentEntry` or, on failure, nothing — so a malformed element

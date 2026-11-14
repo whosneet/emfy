@@ -217,8 +217,8 @@ struct EmfyTests {
         try JSONSerialization.data(withJSONObject: array).write(to: locations.storeURL)
 
         let loaded = RecentsStore.loadEntries(from: locations)
-        #expect(loaded.count == 1)
-        #expect(loaded.first?.displayName == "a.emf")
+        #expect(loaded.entries.count == 1)
+        #expect(loaded.entries.first?.displayName == "a.emf")
         #expect(!FileManager.default.fileExists(atPath: locations.corruptStoreURL.path))
     }
 
@@ -232,9 +232,12 @@ struct EmfyTests {
         try Data("this is not json {".utf8).write(to: locations.storeURL)
 
         let loaded = RecentsStore.loadEntries(from: locations)
-        #expect(loaded.isEmpty)
+        #expect(loaded.entries.isEmpty)
         #expect(FileManager.default.fileExists(atPath: locations.corruptStoreURL.path))
         #expect(!FileManager.default.fileExists(atPath: locations.storeURL.path))
+        // ST1: an undecodable store disables the launch sweep, so no imported/received file is
+        // wiped before the user can reopen it.
+        #expect(!loaded.maySweep)
     }
 
     @Test func missingStoreStartsEmptyWithoutCorruptFile() {
@@ -243,8 +246,64 @@ struct EmfyTests {
             supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
             cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
         )
-        #expect(RecentsStore.loadEntries(from: locations).isEmpty)
+        let loaded = RecentsStore.loadEntries(from: locations)
+        #expect(loaded.entries.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: locations.corruptStoreURL.path))
+        // A clean first launch (no store) is safe to sweep.
+        #expect(loaded.maySweep)
+    }
+
+    // ST1: a load that reads cleanly and decodes every entry may sweep orphans.
+    @Test func fullyDecodedStoreMaySweep() throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let locations = RecentsStore.Locations(
+            supportDirectory: dir.appendingPathComponent("Support", isDirectory: true),
+            cachesDirectory: dir.appendingPathComponent("Caches", isDirectory: true)
+        )
+        try FileManager.default.createDirectory(at: locations.supportDirectory, withIntermediateDirectories: true)
+        let good = RecentEntry(
+            id: UUID(), displayName: "a.emf", formatLabel: "EMF", fullFormatName: "Enhanced Metafile",
+            byteCount: 10, openedAt: Date(), bookmark: Data([1, 2, 3]), thumbnailFileName: nil,
+            fileIdentity: "/x/a.emf", importedFileName: nil, reloadToken: UUID()
+        )
+        try JSONEncoder().encode([good]).write(to: locations.storeURL)
+        let loaded = RecentsStore.loadEntries(from: locations)
+        #expect(loaded.entries.count == 1)
+        #expect(loaded.maySweep)
+    }
+
+    // ST1: an undecodable recents.json must NOT trigger the sweep, so the Imported copies it
+    // referenced survive the launch (a transient corruption can't wipe every received drawing).
+    @MainActor
+    @Test func corruptStoreKeepsImportedFilesAcrossLoad() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        try FileManager.default.createDirectory(at: store.locations.importedDirectory, withIntermediateDirectories: true)
+        let kept = store.locations.importedDirectory.appendingPathComponent("received.emf")
+        try Data([1, 2, 3]).write(to: kept)
+        // A corrupt store that loses every entry reference.
+        try FileManager.default.createDirectory(at: store.locations.supportDirectory, withIntermediateDirectories: true)
+        try Data("not json {".utf8).write(to: store.locations.storeURL)
+
+        await store.loadIfNeeded()
+
+        #expect(store.entries.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: kept.path))   // the received copy survived
+    }
+
+    // ST1: a normal, fully-decoded load still sweeps genuine orphans.
+    @MainActor
+    @Test func normalLoadStillSweepsOrphans() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        try FileManager.default.createDirectory(at: store.locations.importedDirectory, withIntermediateDirectories: true)
+        let orphan = store.locations.importedDirectory.appendingPathComponent("orphan.emf")
+        try Data([0]).write(to: orphan)
+        // No store file ⇒ a clean, sweep-eligible load with nothing referenced.
+
+        await store.loadIfNeeded()
+
+        #expect(!FileManager.default.fileExists(atPath: orphan.path))   // the orphan was swept
     }
 
     // MARK: - §e Launch sweep of orphans + export temp
