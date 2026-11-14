@@ -17,7 +17,7 @@ enum Changelog {
     static let entries: [ChangelogEntry] = [
         ChangelogEntry(
             version: "3.0",
-            build: "7",
+            build: "8",
             date: "November 2026",
             changes: version3Changes
         ),

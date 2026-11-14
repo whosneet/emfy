@@ -64,7 +64,7 @@ import Testing
     @Test func latestChangelogEntryIsThreePointZero() {
         let latest = Changelog.latest
         #expect(latest.version == "3.0")
-        #expect(latest.build == "7")
+        #expect(latest.build == "8")
     }
 
     @Test func latestChangelogHasFiveToEightHeadlineBullets() {
