@@ -235,14 +235,14 @@ codesign --verify --deep --strict --verbose=2 "${STAGED_APP}" \
 info "signature valid and satisfies its Designated Requirement"
 
 # The notary service rejects any binary that is not signed with a Developer ID
-# Application certificate, is signed ad-hoc, or carries the debug entitlement
-# com.apple.security.get-task-allow. The macOS Release-DMG configs sign the app,
-# both appexes, and the embedded emfy-mcp helper with Developer ID and set
-# CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO. Assert all three across EVERY nested
-# Mach-O so a regression (e.g. a config reverting to ad-hoc "-" signing or losing
-# that setting, as the helper did before C5) fails the dry run instead of being
-# caught by the notary.
-step "Assert every nested binary is Developer ID signed, not ad-hoc, with no get-task-allow"
+# Application certificate, is signed ad-hoc, lacks a secure timestamp, or carries
+# the debug entitlement com.apple.security.get-task-allow. The macOS Release-DMG
+# configs sign the app, both appexes, and the embedded emfy-mcp helper with
+# Developer ID, set CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO, and pass --timestamp.
+# Assert all four across EVERY nested Mach-O so a regression (e.g. a config
+# reverting to ad-hoc "-" signing or dropping a flag, as the helper did before C5)
+# fails the dry run instead of being caught by the notary.
+step "Assert every nested binary is Developer ID signed, not ad-hoc, secure-timestamped, with no get-task-allow"
 SIGN_OFFENDERS=""
 while IFS= read -r macho; do
     rel="${macho#"${STAGED_APP}"/}"
@@ -255,6 +255,12 @@ while IFS= read -r macho; do
     if printf '%s\n' "${desc}" | grep -Eq '^CodeDirectory .*\bflags=[^ ]*\badhoc\b'; then
         problems="${problems} adhoc"
     fi
+    # A secure (RFC 3161) timestamp shows as "Timestamp=<date>"; the local
+    # "Signed Time=" line is NOT one, and the notary rejects signatures without a
+    # secure timestamp (as the helper's did before C5).
+    if ! printf '%s\n' "${desc}" | grep -q '^Timestamp='; then
+        problems="${problems} no-secure-timestamp"
+    fi
     if printf '%s\n' "${ents}" | grep -q 'com.apple.security.get-task-allow'; then
         problems="${problems} get-task-allow"
     fi
@@ -264,8 +270,8 @@ while IFS= read -r macho; do
     fi
 done < <(find "${STAGED_APP}" -type f -exec sh -c 'file -b "$1" | grep -q "Mach-O" && echo "$1"' _ {} \;)
 [[ -z "${SIGN_OFFENDERS}" ]] \
-    || die "nested binaries fail Developer ID / ad-hoc / get-task-allow checks (the notary service would reject this):${SIGN_OFFENDERS}"
-info "all nested binaries are Developer ID signed, not ad-hoc, free of get-task-allow"
+    || die "nested binaries fail Developer ID / ad-hoc / secure-timestamp / get-task-allow checks (the notary service would reject this):${SIGN_OFFENDERS}"
+info "all nested binaries are Developer ID signed, not ad-hoc, secure-timestamped, free of get-task-allow"
 
 # Gatekeeper assessment. Before notarization this MUST fail with
 # "source=Unnotarized Developer ID" — that is expected, not an error. In a full
