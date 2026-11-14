@@ -109,7 +109,9 @@ enum EditorAccessibility {
                 out.append(ElementDescriptor(
                     id: element.id,
                     kind: element.kind,
-                    label: label(for: element),
+                    // Locked elements are announced as locked, so a VoiceOver / Switch
+                    // Control user knows the element can't be moved (audit R2A6).
+                    label: locked ? label(for: element) + ", locked" : label(for: element),
                     value: value(for: element),
                     boundsDevice: bounds,
                     isSelected: selection.contains(element.id),

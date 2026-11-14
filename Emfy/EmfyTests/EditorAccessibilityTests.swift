@@ -88,6 +88,7 @@ private func passthroughElement(id: Int, rect: CGRect) -> Element {
         let descriptor = EditorAccessibility.descriptors(in: scene, selection: EditorSelection([1])).first
         #expect(descriptor?.isLocked == true)
         #expect(descriptor?.actions.isEmpty == true)   // no actions on a locked element
+        #expect(descriptor?.label.hasSuffix(", locked") == true)   // announced as locked (R2A6)
     }
 
     @Test func elementsOnALockedLayerAreLocked() {
