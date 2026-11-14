@@ -267,6 +267,85 @@ struct MetafileMemoryTests {
         #expect(delta < 128 * 1024 * 1024, "a budgeted 1M-record WMF prepare is implausibly large")
     }
 
+    /// Builds a minimal EMF whose single EMR_COMMENT carries an EMF+ stream of
+    /// `plusRecordCount` 12-byte EMF+ records after the 28-byte EmfPlusHeader.
+    static func emfWithEMFPlusComment(plusRecordCount: Int) -> Data {
+        var stream = [UInt8]()
+        func s16(_ v: UInt16) { stream.append(UInt8(v & 0xFF)); stream.append(UInt8((v >> 8) & 0xFF)) }
+        func s32(_ v: UInt32) { for sh: UInt32 in [0, 8, 16, 24] { stream.append(UInt8((v >> sh) & 0xFF)) } }
+        // EmfPlusHeader (0x4001, Size 0x1C, DataSize 0x10) + 16-byte RecordData.
+        s16(0x4001); s16(0x0001); s32(0x1C); s32(0x10)
+        s32(0xDBC0_1002); s32(0); s32(96); s32(96)
+        // `plusRecordCount` tiny EMF+ records (type 0x4002 EndOfFile, Size 12).
+        for _ in 0 ..< plusRecordCount { s16(0x4002); s16(0); s32(12); s32(0) }
+
+        var bytes = [UInt8]()
+        func u32(_ v: UInt32) { for sh: UInt32 in [0, 8, 16, 24] { bytes.append(UInt8((v >> sh) & 0xFF)) } }
+        let headerSize = 88
+        let commentData = 4 + stream.count                    // identifier + stream
+        let commentSize = 8 + 4 + commentData                 // iType+nSize + DataSize + data
+        let eofSize = 20
+        let total = headerSize + commentSize + eofSize
+        u32(1); u32(UInt32(headerSize))
+        u32(0); u32(0); u32(999); u32(999)                    // bounds
+        u32(0); u32(0); u32(999); u32(999)                    // frame
+        u32(0x464D_4520); u32(0x0001_0000)                    // signature, version
+        u32(UInt32(total)); u32(3)                            // nBytes, nRecords
+        while bytes.count < headerSize { u32(0) }
+        bytes.removeLast(bytes.count - headerSize)
+        // EMR_COMMENT (type 70): nSize, DataSize (from identifier), identifier, stream.
+        u32(70); u32(UInt32(commentSize)); u32(UInt32(commentData)); u32(0x2B46_4D45)
+        bytes.append(contentsOf: stream)
+        u32(14); u32(UInt32(eofSize)); u32(0); u32(0x10); u32(UInt32(eofSize))
+        return Data(bytes)
+    }
+
+    @Test("an extension-budgeted prepare caps a 1M-EMF+-record comment and still renders (S-1)")
+    func emfPlusStreamBudgetCaps() throws {
+        let budget = 25_000
+        let plusRecordCount = 1_000_000          // ≫ budget, one EMR_COMMENT
+        let data = Self.emfWithEMFPlusComment(plusRecordCount: plusRecordCount)
+
+        // Budgeted (extension) prepare: the memoised EMF+ reassembly must stop at
+        // the budget, keeping best partial output (primer §8).
+        let opened = try OpenedMetafile.open(data)
+        let budgetedBefore = Self.physFootprint()
+        let budgeted = try #require(MetafileRenderer.prepare(
+            opened, options: RenderOptions(playbackRecordBudget: budget)))
+        let budgetedStream = try #require(budgeted.plusCache).stream()
+        let budgetedAfter = Self.physFootprint()
+        let budgetedDelta = budgetedAfter > budgetedBefore ? budgetedAfter - budgetedBefore : 0
+
+        #expect(budgetedStream.records.count == budget,
+                "the EMF+ walk stops at the per-context budget")
+        #expect(budgetedStream.diagnostics.contains(.recordCountCapped(limit: budget)),
+                "the capped EMF+ walk records that the budget stopped it")
+
+        // Partial output: the budgeted prepare still renders without crashing.
+        #expect(Self.nonWhitePixelCount(budgeted, side: 64) >= 0)
+        #expect(MetafileRenderer.makeImage(budgeted, scale: 1) != nil,
+                "a budgeted EMF+-heavy file still produces its best partial image")
+
+        // Full fidelity (default): the same file walks every EMF+ record. Measured
+        // for the report only — this is the allocation the extension budget avoids.
+        let fullBefore = Self.physFootprint()
+        let full = try #require(MetafileRenderer.prepare(try OpenedMetafile.open(data)))
+        let fullStream = try #require(full.plusCache).stream()
+        let fullAfter = Self.physFootprint()
+        let fullDelta = fullAfter > fullBefore ? fullAfter - fullBefore : 0
+        // Header + plusRecordCount records, clamped to the parser's own hard cap.
+        let fullExpected = min(plusRecordCount + 1, EMFFile.recordCountLimit)
+        #expect(fullStream.records.count == fullExpected, "full fidelity keeps every record up to the hard cap")
+
+        print("[memory][S-1] EMR_COMMENT with \(plusRecordCount) EMF+ records — "
+            + "budgeted(\(budget)) EMF+ stream delta +\(Self.mib(budgetedDelta)) (\(budgetedStream.records.count) records); "
+            + "full-fidelity EMF+ stream delta +\(Self.mib(fullDelta)) (\(fullStream.records.count) records)")
+
+        // Generous sanity ceiling only (phys_footprint is process-wide and noisy):
+        // the capped walk materialises ~budget records, far below the full walk's 1M.
+        #expect(budgetedDelta < 64 * 1024 * 1024, "a budgeted EMF+ walk is implausibly large")
+    }
+
     @Test("a 1M-record minimal EMF is cheap to prepare; the budget still bounds it (M1/C5f2)")
     func emfBudgetMeasurement() throws {
         // 1M EMR_SETMAPMODE records (type 17, 12 bytes) between EMR_HEADER and

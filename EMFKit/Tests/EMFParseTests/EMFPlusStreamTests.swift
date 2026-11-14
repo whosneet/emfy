@@ -253,6 +253,40 @@ struct EMFPlusStreamTests {
         ))
     }
 
+    // MARK: - 5b. Record budget (S-1)
+
+    @Test("recordLimit caps the walk: one comment of many tiny records stops at the budget")
+    func recordLimitCapsWalk() throws {
+        // One EMR_COMMENT carrying a header + many 12-byte EMF+ records. With a
+        // small budget the walk stops at the cap, keeps best partial output, and
+        // raises recordCountCapped — the extension memory guard (S-1).
+        var stream = emfPlusHeaderRecord()
+        for _ in 0 ..< 5_000 { stream += emfPlusRecord(type: 0x4002) }
+        let file = try parseFile(records: [emfPlusComment(stream: stream)])
+
+        let budgeted = file.emfPlusStream(recordLimit: 100)
+        #expect(budgeted.records.count == 100)
+        #expect(budgeted.diagnostics.contains(.recordCountCapped(limit: 100)))
+
+        // Full fidelity (default .max) walks every record, no cap diagnostic.
+        let full = file.emfPlusStream()
+        #expect(full.records.count == 5_001)
+        #expect(!full.diagnostics.contains(where: {
+            if case .recordCountCapped = $0 { return true }
+            return false
+        }))
+    }
+
+    @Test("recordLimit is clamped to at least 1")
+    func recordLimitClampedToOne() throws {
+        var stream = emfPlusHeaderRecord()
+        stream += emfPlusRecord(type: 0x4002)
+        let file = try parseFile(records: [emfPlusComment(stream: stream)])
+        let s = file.emfPlusStream(recordLimit: 0)
+        #expect(s.records.count == 1)
+        #expect(s.diagnostics.contains(.recordCountCapped(limit: 1)))
+    }
+
     // MARK: - 6. Interleaved non-EMF+ comments and GDI records
 
     @Test("GDI records and a non-EMF+ comment interleaved are ignored; order preserved")

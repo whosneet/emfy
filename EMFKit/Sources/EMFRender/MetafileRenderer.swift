@@ -22,6 +22,12 @@ public enum MetafileRenderer {
     /// field is guarded by `lock`.
     final class EMFPlusStreamCache: @unchecked Sendable {
         private let file: EMFFile
+        /// The sandboxed-extension record budget (S-1), from
+        /// `RenderOptions.playbackRecordBudget`. `.max` means full fidelity. The
+        /// EMF+ reassembly is bounded by the SAME budget as the GDI/WMF parse, so a
+        /// 12 MB EMR_COMMENT carrying ~1M tiny EMF+ records can't kill a Quick Look
+        /// / thumbnail extension (it stops at the budget with best partial output).
+        private let recordLimit: Int
         private let lock = NSLock()
         private var cachedStream: EMFPlusStream?
         /// EMF+ records grouped by the file-record (comment) index whose header they
@@ -29,13 +35,16 @@ public enum MetafileRenderer {
         /// per-element replay walk needs. Built once from the memoised stream.
         private var cachedByComment: [Int: [(streamIndex: Int, record: EMFPlusRecord)]]?
 
-        init(_ file: EMFFile) { self.file = file }
+        init(_ file: EMFFile, recordLimit: Int = .max) {
+            self.file = file
+            self.recordLimit = recordLimit
+        }
 
         /// The reassembled EMF+ stream, reassembled at most once.
         func stream() -> EMFPlusStream {
             lock.lock(); defer { lock.unlock() }
             if let cachedStream { return cachedStream }
-            let built = file.emfPlusStream()
+            let built = file.emfPlusStream(recordLimit: recordLimit)
             cachedStream = built
             return built
         }
@@ -45,7 +54,7 @@ public enum MetafileRenderer {
             lock.lock()
             if let cachedByComment { lock.unlock(); return cachedByComment }
             let stream = cachedStream ?? {
-                let built = file.emfPlusStream()
+                let built = file.emfPlusStream(recordLimit: recordLimit)
                 cachedStream = built
                 return built
             }()
@@ -208,7 +217,8 @@ public enum MetafileRenderer {
             embeddedEMF: EmbeddedEMF,
             hasGDICopy: Bool,
             recordKinds: [RecordKindCount],
-            wmfFile: WMFFile? = nil
+            wmfFile: WMFFile? = nil,
+            recordLimit: Int = .max
         ) {
             self.content = content
             self.kind = kind
@@ -217,7 +227,10 @@ public enum MetafileRenderer {
             self.recordKinds = recordKinds
             self.wmfFile = wmfFile
             if case .emf(let file) = content {
-                self.plusCache = EMFPlusStreamCache(file)
+                // Bound the memoised EMF+ reassembly by the SAME budget the GDI/WMF
+                // parse used (S-1), so the extension's playback budget covers the
+                // EMF+ stream too, not only the top-level records.
+                self.plusCache = EMFPlusStreamCache(file, recordLimit: recordLimit)
             } else {
                 self.plusCache = nil
             }
@@ -263,7 +276,8 @@ public enum MetafileRenderer {
         case .emf:
             guard let file = try? EMFFile.parse(opened.data, recordLimit: recordLimit) else { return nil }
             return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .notApplicable,
-                            hasGDICopy: isDualEMFPlus(file), recordKinds: emfRecordKinds(file))
+                            hasGDICopy: isDualEMFPlus(file), recordKinds: emfRecordKinds(file),
+                            recordLimit: recordLimit)
 
         case .wmf, .placeableWMF:
             guard let wmf = try? WMFFile.parse(opened.data, recordLimit: recordLimit) else { return nil }
@@ -276,7 +290,8 @@ public enum MetafileRenderer {
                let file = try? EMFFile.parse(bytes, recordLimit: recordLimit) {
                 if options.useEmbeddedEMF {
                     return Prepared(content: .emf(file), kind: .emf, embeddedEMF: .played,
-                                    hasGDICopy: isDualEMFPlus(file), recordKinds: emfRecordKinds(file))
+                                    hasGDICopy: isDualEMFPlus(file), recordKinds: emfRecordKinds(file),
+                                    recordLimit: recordLimit)
                 }
                 return Prepared(content: .wmfProgram(WMFTranslator.translate(wmf)), kind: .wmfRecords,
                                 embeddedEMF: .declined, hasGDICopy: false, recordKinds: wmfRecordKinds(wmf),

@@ -142,9 +142,17 @@ extension EMFFile {
     /// and never affects `parse(_:)`: all reads go through the bounds-checked
     /// `RecordSlice`/`ByteReader`, and any malformed EMF+ record stops the walk
     /// while keeping everything already produced (primer §8, log-and-skip).
-    public func emfPlusStream() -> EMFPlusStream {
+    ///
+    /// `recordLimit` caps how many EMF+ records the walk materialises — the
+    /// sandboxed-extension memory budget (S-1), driven by
+    /// `RenderOptions.playbackRecordBudget`. It is clamped to the parser's own
+    /// hard `recordCountLimit`; `.max` (the default) means full fidelity, exactly
+    /// as before this parameter existed. A crafted EMR_COMMENT carrying ~1M tiny
+    /// EMF+ records then stops at the budget, keeping its best partial output and
+    /// a `recordCountCapped` diagnostic instead of growing the array without bound.
+    public func emfPlusStream(recordLimit: Int = .max) -> EMFPlusStream {
         let assembly = assembleEMFPlusStream()
-        let walk = Self.walkAssembledStream(assembly.buffer, segments: assembly.segments)
+        let walk = Self.walkAssembledStream(assembly.buffer, segments: assembly.segments, recordLimit: recordLimit)
         let header = Self.decodeHeaderInfo(
             from: walk.records,
             sawEMFPlusComment: assembly.sawEMFPlusComment
@@ -242,30 +250,35 @@ extension EMFFile {
     /// stamped on `EMFPlusRecord.sourceRecordIndex`.
     private static func walkAssembledStream(
         _ assembled: Data,
-        segments: [(streamStart: Int, recordIndex: Int)]
+        segments: [(streamStart: Int, recordIndex: Int)],
+        recordLimit: Int = .max
     ) -> (records: [EMFPlusRecord], diagnostics: [EMFPlusDiagnostic], consumed: Int) {
         // Read scalars through a start-index-safe reader; slice `assembled` (a
         // freshly built, zero-based Data) for record bodies so each `data` is a
         // no-copy slice sharing the one assembled buffer.
         let streamReader = ByteReader(assembled)
         let count = streamReader.count
+        // The effective cap: the caller's budget (S-1) clamped to the parser's own
+        // hard record cap, floored at 1. `.max` (the default) collapses to
+        // `recordCountLimit` — full fidelity, exactly as before the budget existed.
+        let cap = max(1, min(recordLimit, EMFFile.recordCountLimit))
         var records: [EMFPlusRecord] = []
         // Reserve for roughly one record per contributing comment (P18): a good
         // estimate since most EMF+ records fit a single comment, and bounded by
-        // the comment count (itself bounded by the file's record count), so there
-        // is no hostile over-allocation.
-        if !segments.isEmpty { records.reserveCapacity(min(segments.count, EMFFile.recordCountLimit)) }
+        // the comment count (itself bounded by the file's record count) AND the
+        // cap, so there is no hostile over-allocation even under a small budget.
+        if !segments.isEmpty { records.reserveCapacity(min(segments.count, cap)) }
         var diagnostics: [EMFPlusDiagnostic] = []
         var offset = 0
         var stoppedEarly = false
 
         while offset + Self.emfPlusRecordHeaderSize <= count {
-            // §8 memory guard (audit M2): mirror the GDI walker's record-count cap
-            // (EMFFile.recordCountLimit — one constant, both walkers) so a hostile
-            // all-12-byte-records stream can't grow the record array without bound.
-            // Keep everything walked so far and stop.
-            if records.count >= EMFFile.recordCountLimit {
-                diagnostics.append(.recordCountCapped(limit: EMFFile.recordCountLimit))
+            // §8 memory guard (audit M2/S-1): mirror the GDI walker's record-count
+            // cap and apply the per-call budget so a hostile all-12-byte-records
+            // stream can't grow the record array without bound. Keep everything
+            // walked so far and stop.
+            if records.count >= cap {
+                diagnostics.append(.recordCountCapped(limit: cap))
                 stoppedEarly = true
                 break
             }

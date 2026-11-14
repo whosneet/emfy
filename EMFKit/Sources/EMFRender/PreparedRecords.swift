@@ -79,10 +79,10 @@ extension MetafileRenderer.Prepared {
         switch content {
         case .emf(let file):
             // Per-carrier EMF+ counts, so a carrier row can read "EMF+ (n records)".
-            // `emfPlusStream()` is the bounded reassembly walk; it returns empty for
-            // a pure-GDI file. Counting is O(records) with a small dictionary.
+            // The memoised, budget-bounded reassembly (S-1) returns empty for a
+            // pure-GDI file. Counting is O(records) with a small dictionary.
             var carrierCounts: [Int: Int] = [:]
-            for record in file.emfPlusStream().records {
+            for record in (plusCache?.stream() ?? file.emfPlusStream()).records {
                 carrierCounts[record.sourceRecordIndex, default: 0] += 1
             }
             return file.records.enumerated().map { index, record in
