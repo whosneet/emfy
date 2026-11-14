@@ -161,6 +161,14 @@ struct MetafileViewerScreen: View {
     /// double-counted the inspector column and left a white gap beside it.
     private var reservedInspectorWidth: CGFloat {
         guard showInspector, isRegularWidth, session.editing != .editing else { return 0 }
+        // The overlay inspector that needs a reserved trailing strip is an iPadOS 26+
+        // behaviour. On iPadOS 17/18 `.inspector` presents as a width-reducing trailing
+        // COLUMN (Apple: "inspector(isPresented:content:)", developer.apple.com — the
+        // inspector shows as a distinct trailing section/column), so the detail area already
+        // shrinks and reserving extra space would double-count it and leave a white gap
+        // (C5e L6). No iOS 17/18 runtime is installed here to screenshot, so this gates on
+        // the documented behaviour (verified: only iOS 27.2 runtimes present, 14 Nov 2026).
+        guard #available(iOS 26.0, *) else { return 0 }
         return inspectorWidth
     }
 
