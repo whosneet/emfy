@@ -173,6 +173,13 @@ struct MacEditableCanvas: NSViewRepresentable {
         overlay.sceneUndoManager = sceneUndoManager
         // Accept dragged image files (Finder) and image data (other apps) onto the canvas.
         overlay.registerForDraggedTypes([.fileURL, .tiff, .png])
+        // A touch-only pan recogniser (buttonMask 0, direct touches) drives editing from a
+        // ONE-finger touch, so a single touch edits instead of scrolling the scroll view,
+        // which still scrolls on two fingers (audit R2T1/R2T3). The mouse path is untouched.
+        let touchPan = NSPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTouchPan(_:)))
+        touchPan.buttonMask = 0
+        touchPan.allowedTouchTypes = [.direct]
+        overlay.addGestureRecognizer(touchPan)
         paper.addSubview(overlay)
 
         scrollView.documentView = paper
@@ -464,7 +471,9 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// or nil.
         func handle(at viewPoint: CGPoint) -> ResizeHandle? {
             guard let box = selectionViewBounds() else { return nil }
-            let hit = Self.handleHitRadius / magnification
+            // Touch input needs a larger hit radius than a precise pointer (audit R2T2).
+            let radius = isTouchInteracting ? Self.touchHandleHitRadius : Self.handleHitRadius
+            let hit = radius / magnification
             for handle in ResizeHandle.allCases {
                 if hypot(viewPoint.x - handle.point(in: box).x, viewPoint.y - handle.point(in: box).y) <= hit {
                     return handle
@@ -474,7 +483,42 @@ struct MacEditableCanvas: NSViewRepresentable {
         }
 
         static let handleHitRadius: CGFloat = 11
+        /// A larger handle hit radius for direct-touch input (audit R2T2).
+        static let touchHandleHitRadius: CGFloat = 18
         static let handleDrawSize: CGFloat = 9
+
+        /// True while a direct-touch pan (not a mouse drag) is driving the canvas, so the
+        /// handle hit test uses the larger touch radius (R2T1/R2T2).
+        fileprivate var isTouchInteracting = false
+
+        /// The touch-only pan recogniser's action: maps its location into the overlay and
+        /// drives the same begin/move/end path as the mouse (R2T1).
+        @objc func handleTouchPan(_ gesture: NSPanGestureRecognizer) {
+            guard let overlay else { return }
+            let point = gesture.location(in: overlay)
+            touchPan(state: gesture.state, at: point)
+        }
+
+        /// Routes a direct-touch pan through the SAME begin/move/end path as the mouse
+        /// (R2T1). `.cancelled` reverts the in-flight drag so a two-finger scroll that
+        /// supersedes the pan never commits a stray edit.
+        func touchPan(state: NSGestureRecognizer.State, at viewPoint: CGPoint) {
+            switch state {
+            case .began:
+                isTouchInteracting = true
+                mouseDown(at: viewPoint, shift: false, command: false)
+            case .changed:
+                mouseDragged(to: viewPoint, shift: false, option: false)
+            case .ended:
+                mouseUp(at: viewPoint, shift: false, option: false)
+                isTouchInteracting = false
+            case .cancelled, .failed:
+                cancelDrag()
+                isTouchInteracting = false
+            default:
+                break
+            }
+        }
 
         // MARK: Pointer
 
