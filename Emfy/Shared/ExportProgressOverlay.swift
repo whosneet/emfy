@@ -127,6 +127,21 @@ extension View {
         #endif
     }
 
+    #if os(iOS)
+    /// Pins an action bar to the bottom of a sheet (audit G-A), the one shared version of
+    /// the pattern `AIConsentSheet` used: Liquid Glass via `safeAreaBar` on iOS 26, and the
+    /// `safeAreaInset` + `.bar` background fallback on iOS 17–25. The caller supplies the
+    /// already-padded bar content; this only chooses the treatment.
+    @ViewBuilder
+    func pinnedActionBar<Bar: View>(@ViewBuilder _ bar: () -> Bar) -> some View {
+        if #available(iOS 26.0, *) {
+            self.safeAreaBar(edge: .bottom) { bar() }
+        } else {
+            self.safeAreaInset(edge: .bottom) { bar().background(.bar) }
+        }
+    }
+    #endif
+
     /// A minimum frame that applies on macOS only (C5e L1/L2). The metafile sheets size a
     /// window there; on iOS the same minimum would force the content wider than an iPhone
     /// and clip, so it is dropped and the sheet tracks its presentation detent instead.

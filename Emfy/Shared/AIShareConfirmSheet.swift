@@ -28,11 +28,10 @@ struct AIShareConfirmSheet: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .safeAreaInset(edge: .bottom) {
+        .pinnedActionBar {
             actions
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
-                .background(.bar)
         }
         #endif
     }

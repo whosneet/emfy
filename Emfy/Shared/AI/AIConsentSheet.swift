@@ -111,17 +111,12 @@ struct AIConsentSheet: View {
 
     private var iosBody: some View {
         NavigationStack {
-            Group {
-                // iOS 26's safeAreaBar supplies the glass bar treatment; older systems keep
-                // the safeAreaInset path with an explicit .bar background (C5e G4).
-                if #available(iOS 26.0, *) {
-                    iosScrollBody.safeAreaBar(edge: .bottom) { bottomButtons }
-                } else {
-                    iosScrollBody.safeAreaInset(edge: .bottom) { bottomButtons.background(.bar) }
-                }
-            }
-            .navigationTitle("Allow sending?")
-            .navigationBarTitleDisplayMode(.inline)
+            // The one shared pinned-action-bar treatment (audit G-A): glass via safeAreaBar
+            // on 26, safeAreaInset + .bar below. bottomButtons already carries its padding.
+            iosScrollBody
+                .pinnedActionBar { bottomButtons }
+                .navigationTitle("Allow sending?")
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 

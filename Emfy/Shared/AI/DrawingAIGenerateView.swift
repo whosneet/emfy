@@ -80,11 +80,10 @@ struct DrawingAIGenerateView: View {
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .safeAreaInset(edge: .bottom) {
+        .pinnedActionBar {
             phaseActions
                 .padding(.horizontal, 22)
                 .padding(.vertical, 12)
-                .background(.bar)
         }
     }
     #endif
