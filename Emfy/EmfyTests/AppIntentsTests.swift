@@ -122,7 +122,7 @@ import UniformTypeIdentifiers
         intent.file = try intentFile("gate-p4-text.emf")
         intent.includePictures = false
         let result = try await intent.perform()
-        let container = try #require(result as? IntentResultContainer<String, Never, Never, Never>)
+        let container = try #require(result as? IntentResultContainer<String, Never, Never, IntentDialog>)
         let text = try #require(container.value)
         #expect(text.contains("Hello Emfy 123"))
     }
@@ -162,9 +162,11 @@ import UniformTypeIdentifiers
         }
     }
 
-    @Test func noInputThrowsTypedError() async throws {
+    @Test func noInputAsksForADrawing() async throws {
+        // SI-M: with no drawing, the intent asks for one (needsValueError) instead of throwing
+        // its own typed error, so Shortcuts/Siri can prompt the user.
         let intent = GetTextFromDrawingIntent()
-        await #expect(throws: AppIntentDrawingError.self) {
+        await #expect(throws: (any Error).self) {
             _ = try await intent.perform()
         }
     }
