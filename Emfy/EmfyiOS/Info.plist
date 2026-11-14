@@ -46,12 +46,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<!-- Multiple windows (v3-plan §9.1): iPad and iPhone Duo can open more than
-	     one library window via "Open in New Window", each owning its selection.
-	     `openWindow(id:value:)` needs this key; the system's ActivationAction and
-	     `supportsMultipleWindows` hide the affordance where a second window can't
-	     be created (the Duo outer display). An incoming file still lands in the
-	     active scene via onOpenURL. -->
+	<!-- Multiple windows (v3-plan §9.1): iPad (and the iPhone Duo inner display in a
+	     Split View half) can open more than one library window via "Open in New
+	     Window", each owning its selection. `openWindow(id:value:)` needs this key;
+	     the system's ActivationAction shows the "Open" alternate (opening in the
+	     current window) where a second window can't be created — the iPhone and the
+	     iPhone Duo OUTER display. An incoming file still lands in the active scene via
+	     onOpenURL. -->
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
