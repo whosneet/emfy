@@ -19,6 +19,14 @@ enum ExportTemp {
     /// written at/after `startedAt`, so a share sheet staged during a reload isn't
     /// reclaimed out from under it (the C2 sweep race).
     static func sweep(startedAt: Date = Date()) {
+        sweepPrefixed(prefix, startedAt: startedAt)
+    }
+
+    /// Deletes every directory under the temporary directory whose name starts with
+    /// `prefix` (one Emfy staging family — exports, or `EmfyNewDrawing-*` import
+    /// stages — ST5), skipping any written at/after `startedAt` so a stage still in
+    /// use isn't reclaimed (the C2 sweep race). Shared by the recents launch sweep.
+    static func sweepPrefixed(_ prefix: String, startedAt: Date = Date()) {
         let tmp = FileManager.default.temporaryDirectory
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: tmp.path) else { return }
         for name in names where name.hasPrefix(prefix) {

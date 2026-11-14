@@ -46,6 +46,12 @@ enum NewDrawing {
     static let baseName = "Untitled Drawing"
     static let fileExtension = "emf"
 
+    /// The prefix of the per-call temporary staging directory a New/AI drawing is
+    /// written to before the store imports its copy. The recents launch sweep reclaims
+    /// any `EmfyNewDrawing-*` straggler left by a crash or a kill between the write and
+    /// the import (ST5). One owner for the prefix, so the writer and sweeper never drift.
+    static let tempDirectoryPrefix = "EmfyNewDrawing-"
+
     /// Entry ids that should enter edit mode the moment their viewer finishes
     /// loading (a freshly-created drawing opens straight into the editor, design
     /// call 4). The signal lives here — not in per-window state — so it works the
@@ -103,7 +109,7 @@ enum NewDrawing {
         // A unique per-call temporary directory, so two quick "New Drawing"s never
         // collide on the same path and each imports its own copy.
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("EmfyNewDrawing-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(tempDirectoryPrefix + UUID().uuidString, isDirectory: true)
         let url = dir.appendingPathComponent(fileName)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

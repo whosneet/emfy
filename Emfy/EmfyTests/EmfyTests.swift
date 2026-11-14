@@ -320,6 +320,39 @@ struct EmfyTests {
         #expect(FileManager.default.fileExists(atPath: orphanish.path))   // sweep skipped (C1)
     }
 
+    // ST4: Clear Recents purges the derived caches and the whole revert-snapshot tree,
+    // so no recognised text or opened-version snapshot survives a clear.
+    @MainActor
+    @Test func clearPurgesSnapshotsAndDerivedCaches() async throws {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        var purged = false
+        store.onPurgeDerivedCaches = { purged = true }
+        // A stray snapshot folder (as an edited drawing would leave).
+        let snap = store.locations.snapshotsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: snap, withIntermediateDirectories: true)
+        try Data([1]).write(to: snap.appendingPathComponent("opened.bin"))
+
+        store.clear()
+
+        #expect(purged)
+        #expect(!FileManager.default.fileExists(atPath: store.locations.snapshotsDirectory.path))
+    }
+
+    // ST4: leaving Private mode purges the derived (OCR) caches, so text recognised
+    // from a privately-opened drawing leaves no on-disk trace.
+    @MainActor
+    @Test func leavingPrivateModePurgesDerivedCaches() {
+        let dir = makeTempDir(); defer { cleanup(dir) }
+        let store = makeStore(in: dir)
+        var purgeCount = 0
+        store.onPurgeDerivedCaches = { purgeCount += 1 }
+        store.setPrivate(true)
+        #expect(purgeCount == 0)        // entering Private doesn't purge
+        store.setPrivate(false)
+        #expect(purgeCount == 1)        // leaving Private purges once
+    }
+
     // ST1: a normal, fully-decoded load still sweeps genuine orphans.
     @MainActor
     @Test func normalLoadStillSweepsOrphans() async throws {
@@ -411,6 +444,26 @@ struct EmfyTests {
 
         #expect(!FileManager.default.fileExists(atPath: export.path))
         #expect(FileManager.default.fileExists(atPath: other.path))
+    }
+
+    // ST5: the launch sweep reclaims a stale `EmfyNewDrawing-*` import stage (left by a
+    // crash between the write and the store's import), but never a fresher one.
+    @Test func launchSweepReclaimsNewDrawingTempStages() throws {
+        let tmp = FileManager.default.temporaryDirectory
+        let stale = tmp.appendingPathComponent(NewDrawing.tempDirectoryPrefix + UUID().uuidString, isDirectory: true)
+        let fresh = tmp.appendingPathComponent(NewDrawing.tempDirectoryPrefix + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: fresh, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fresh); try? FileManager.default.removeItem(at: stale) }
+
+        let cutoff = Date()
+        try FileManager.default.setAttributes([.modificationDate: cutoff.addingTimeInterval(-3600)], ofItemAtPath: stale.path)
+        try FileManager.default.setAttributes([.modificationDate: cutoff.addingTimeInterval(3600)], ofItemAtPath: fresh.path)
+
+        ExportTemp.sweepPrefixed(NewDrawing.tempDirectoryPrefix, startedAt: cutoff)
+
+        #expect(!FileManager.default.fileExists(atPath: stale.path))   // pre-cutoff stage reclaimed
+        #expect(FileManager.default.fileExists(atPath: fresh.path))    // post-cutoff stage kept (sweep race)
     }
 
     // MARK: - §f/§g Thumbnail cache eviction

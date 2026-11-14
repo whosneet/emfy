@@ -129,6 +129,15 @@ struct OCRDiskCache: Sendable {
         enforceCap()
     }
 
+    /// Deletes every cached file (ST4): a privacy purge used on Clear Recents and
+    /// when leaving Private mode, so text recognised from a drawing — including one
+    /// opened privately — leaves no on-disk trace. The directory itself is kept.
+    func purgeAll() {
+        let fm = FileManager.default
+        guard let urls = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        for url in urls { try? fm.removeItem(at: url) }
+    }
+
     /// Deletes the oldest entries until the directory is within `maxBytes`.
     func enforceCap() {
         let fm = FileManager.default

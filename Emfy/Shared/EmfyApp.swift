@@ -45,6 +45,12 @@ struct EmfyApp: App {
         // (A1b); the launch sweep of existing recents runs from the library window's
         // `.task`, one at a time at low priority.
         DrawingTitleTagService.shared.activate(store: RecentsStore.shared, settings: settings, providerStore: AIProviderStore.shared)
+        // Purge the recognised-text caches on Clear Recents and when leaving Private
+        // mode (ST4), so text recognised from a drawing — including one opened
+        // privately — leaves no on-disk trace.
+        RecentsStore.shared.onPurgeDerivedCaches = {
+            Task.detached(priority: .utility) { await DrawingOCRService.shared.purgeAllCaches() }
+        }
     }
 
     var body: some Scene {
@@ -158,6 +164,12 @@ final class EmfyAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = MacConvertService.shared
         NSUpdateDynamicServices()
+        #if EMFY_DMG
+        // Reclaim a stale staged update and leftover swap-helper scripts from a prior
+        // session (ST5). Off the main thread; the in-flight install stages and swaps
+        // within a single run, so a leftover on a fresh launch is never it.
+        Task.detached(priority: .utility) { UpdateStaging.cleanupStaleStaging() }
+        #endif
         #if DEBUG
         MacConvertService.runDebugHookIfNeeded()
         DrawingAIEvalSuite.runIfNeeded()

@@ -181,6 +181,13 @@ actor DrawingOCRService {
     /// Empties the in-memory cache (the Settings toggle turning OCR off).
     func clearMemoryCache() { memory.clear() }
 
+    /// Empties both cache tiers (ST4): used on Clear Recents and when leaving Private
+    /// mode, so recognised text leaves no in-memory or on-disk trace.
+    func purgeAllCaches() {
+        memory.clear()
+        disk?.purgeAll()
+    }
+
     /// The combined cache key: content hash plus the OCR settings version.
     static func cacheKey(contentHash: String, settingsVersion: Int) -> String {
         "\(contentHash)-v\(settingsVersion)"

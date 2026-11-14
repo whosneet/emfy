@@ -168,6 +168,18 @@ enum UpdateStaging {
         try baseDirectory().appendingPathComponent("staged", isDirectory: true)
     }
 
+    /// Removes a stale staged bundle and any leftover swap-helper scripts at launch
+    /// (ST5). Staging and the swap-on-quit install both belong to a single session:
+    /// anything left under `Updates/staged` or `Updates/helper` on a fresh launch is
+    /// from a prior session that already installed or abandoned the update, so it is
+    /// never the in-flight install (which is staged and swapped within one run). Safe
+    /// to call off the main thread; best-effort.
+    static func cleanupStaleStaging() {
+        guard let base = try? baseDirectory() else { return }
+        try? FileManager.default.removeItem(at: base.appendingPathComponent("staged", isDirectory: true))
+        try? FileManager.default.removeItem(at: base.appendingPathComponent("helper", isDirectory: true))
+    }
+
     /// The private directory the swap helper script is written into, created 0700 so
     /// no other user can read or replace the script between write and launch.
     static func helperDirectory() throws -> URL {
