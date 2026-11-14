@@ -721,6 +721,64 @@ struct MacEditableCanvas: NSViewRepresentable {
             parent.delete(selection.ids)
         }
 
+        // MARK: Accessibility (C5g / audit A1)
+
+        /// The editable elements exposed to VoiceOver / Switch Control, in reading order.
+        func accessibilityDescriptors() -> [EditorAccessibility.ElementDescriptor] {
+            EditorAccessibility.descriptors(in: scene, selection: selection)
+        }
+
+        /// Cycles the selection through the unlocked elements in reading order (Tab /
+        /// Shift-Tab keyboard selection, C5g). Returns whether it was handled.
+        @discardableResult
+        func cycleSelection(forward: Bool) -> Bool {
+            guard let id = EditorAccessibility.cycleSelection(from: selection.ids, forward: forward, in: scene) else { return false }
+            selection.replace(with: id)
+            if let overlay {
+                overlay.needsDisplay = true
+                overlay.window?.invalidateCursorRects(for: overlay)
+                NSAccessibility.post(element: overlay, notification: .selectedChildrenChanged)
+            }
+            return true
+        }
+
+        /// Performs a custom accessibility action over `id`, routing through the SAME scene
+        /// commands and undo as a pointer edit. Returns whether it was handled.
+        @discardableResult
+        func accessibilityPerform(_ action: EditorAccessibility.Action, on id: Int) -> Bool {
+            switch action {
+            case .select:
+                selection.replace(with: id)
+                overlay?.window?.makeFirstResponder(overlay)
+                overlay?.needsDisplay = true
+                if let overlay { NSAccessibility.post(element: overlay, notification: .selectedChildrenChanged) }
+                return true
+            case .delete:
+                if !selection.contains(id) { selection.replace(with: id) }
+                parent.delete([id])
+                overlay?.needsDisplay = true
+                return true
+            case .editText:
+                selection.replace(with: id)
+                presentTextEdit(for: id)
+                return true
+            default:
+                guard let command = EditorAccessibility.command(for: action, elementID: id, in: scene) else { return false }
+                if !selection.contains(id) { selection.replace(with: id) }
+                parent.apply(command, nil)
+                overlay?.needsDisplay = true
+                if let overlay { NSAccessibility.post(element: overlay, notification: .layoutChanged) }
+                return true
+            }
+        }
+
+        #if DEBUG
+        /// A text dump of the live accessibility tree (label, value, traits, actions).
+        func debugAccessibilityDump() -> String {
+            EditorAccessibility.debugDump(in: scene, selection: selection)
+        }
+        #endif
+
         // MARK: Context menu (E3d) — Arrange + Move Selection to Layer
 
         /// The right-click menu for a non-empty selection: Arrange (reorder within the
@@ -976,6 +1034,9 @@ struct MacEditableCanvas: NSViewRepresentable {
             if event.keyCode == 51 || event.keyCode == 117 {   // Delete (⌫) or forward Delete
                 if !selection.isEmpty { deleteSelection(); return true }
                 return false
+            }
+            if event.keyCode == 48 {   // Tab / Shift-Tab cycles the selection (keyboard a11y, C5g)
+                return cycleSelection(forward: !event.modifierFlags.contains(.shift))
             }
             let large = event.modifierFlags.contains(.shift)
             // Arrow direction in VIEW space, then into device via the mapping.
@@ -1244,6 +1305,58 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
     }
 
     private var magnification: CGFloat { coordinator?.magnification ?? 1 }
+
+    // MARK: Accessibility (C5g / audit A1)
+
+    override func isAccessibilityElement() -> Bool { false }   // a container of per-element elements
+    override func accessibilityRole() -> NSAccessibility.Role? { .group }
+    override func accessibilityLabel() -> String? { "Drawing canvas" }
+    override func accessibilityChildren() -> [Any]? { buildAccessibilityChildren() }
+
+    /// One `NSAccessibilityElement` per editable element, driven by the shared model: the
+    /// same labels, values and custom actions as iOS, each routing back through the
+    /// coordinator (the same scene commands as pointer edits). Rebuilt each read so the
+    /// frames track the live zoom and scroll. Locked elements are static text with no
+    /// actions.
+    private func buildAccessibilityChildren() -> [Any] {
+        guard let coordinator else { return [] }
+        return coordinator.accessibilityDescriptors().map { descriptor -> MacEditorAXElement in
+            let id = descriptor.id
+            let element = MacEditorAXElement()
+            element.coordinator = coordinator
+            element.elementID = id
+            element.setAccessibilityParent(self)
+            element.setAccessibilityRole(descriptor.isLocked ? .staticText : .button)
+            element.setAccessibilityLabel(descriptor.label)
+            element.setAccessibilityValue(descriptor.value)
+            element.setAccessibilityFrame(screenFrame(forDevice: descriptor.boundsDevice))
+            element.setAccessibilitySelected(descriptor.isSelected)
+            element.setAccessibilityCustomActions(descriptor.actions.map { action in
+                NSAccessibilityCustomAction(name: action.name) { [weak coordinator] in
+                    // VoiceOver invokes this on the main thread; the coordinator is @MainActor.
+                    MainActor.assumeIsolated { coordinator?.accessibilityPerform(action, on: id) ?? false }
+                }
+            })
+            return element
+        }
+    }
+
+    /// The element's device bounds in SCREEN coordinates, for `NSAccessibilityElement`.
+    /// The overlay is scaled by the scroll view magnification, which `convert(_:to:nil)`
+    /// folds in, so the frame stays correct at any zoom.
+    private func screenFrame(forDevice bounds: CGRect) -> NSRect {
+        guard let coordinator, let window else { return .zero }
+        let viewRect = coordinator.mapping.viewRect(fromDevice: bounds)
+        return window.convertToScreen(convert(viewRect, to: nil))
+    }
+
+    #if DEBUG
+    /// A text dump of the live accessibility tree (label, value, traits, actions) — the
+    /// DEBUG evidence hook.
+    func debugAccessibilityDump() -> String {
+        coordinator?.debugAccessibilityDump() ?? "no coordinator"
+    }
+    #endif
 
     // MARK: Drawing
 
@@ -1569,6 +1682,25 @@ private final class EditorOverlayView: NSView, NSMenuItemValidation {
         case .left, .right: return .resizeLeftRight
         case .top, .bottom: return .resizeUpDown
         default: return .crosshair
+        }
+    }
+}
+
+// MARK: - Accessibility element (C5g / audit A1)
+
+/// An `NSAccessibilityElement` for one editable scene element, so VoiceOver / Full
+/// Keyboard Access / Switch Control can select it (press) and reach its custom actions —
+/// the same operations the pointer and keyboard drive.
+private final class MacEditorAXElement: NSAccessibilityElement {
+    weak var coordinator: MacEditableCanvas.Coordinator?
+    var elementID: Int = -1
+
+    override func accessibilityPerformPress() -> Bool {
+        let coordinator = self.coordinator
+        let id = self.elementID
+        return MainActor.assumeIsolated {
+            guard let coordinator else { return false }
+            return coordinator.accessibilityPerform(.select, on: id)
         }
     }
 }
