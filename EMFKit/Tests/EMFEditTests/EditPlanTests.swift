@@ -255,6 +255,22 @@ private func standardScene() -> Scene {
     #expect(v.problems.isEmpty)
 }
 
+// S7: when a selection scope is given, a plan targeting an id outside it is rejected;
+// without a scope (nil), the whole drawing is in scope and the same plan is fine.
+@Test func validatorRejectsOperationsOutsideTheSelectionScope() {
+    let scene = standardScene()
+    // Scope limited to element 1; a recolour of 3 (a valid, editable element) is out of scope.
+    let plan = EditPlan(operations: [.recolorFill(ids: [1, 3], color: PlanColor(hex: "#1F3A93"))])
+    let scoped = EditPlanValidator.validate(plan, in: scene, allowedIDs: [1])
+    #expect(!scoped.isApplicable)
+    #expect(scoped.problems.contains(.outOfScope(op: 0, id: 3)))
+    #expect(!scoped.problems.contains(.outOfScope(op: 0, id: 1)))   // id 1 is in scope
+
+    // The same plan with no scope (nil) is applicable.
+    let unscoped = EditPlanValidator.validate(plan, in: scene, allowedIDs: nil)
+    #expect(unscoped.isApplicable)
+}
+
 @Test func validatorWarnsOnDeletingEntireDrawing() {
     let plan = EditPlan(operations: [.delete(ids: [1, 2, 3, 4])])
     let v = EditPlanValidator.validate(plan, in: standardScene())

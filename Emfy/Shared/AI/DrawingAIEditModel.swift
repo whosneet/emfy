@@ -199,7 +199,9 @@ final class DrawingAIEditModel {
                 : "The edit couldn’t be understood. Try rephrasing your request.")
             return
         }
-        let validation = EditPlanValidator.validate(plan, in: scene)
+        // Enforce the selection scope: when the user limited the edit to a selection, the
+        // model's plan may only touch those elements (S7).
+        let validation = EditPlanValidator.validate(plan, in: scene, allowedIDs: editableScope.isEmpty ? nil : editableScope)
         guard validation.isApplicable else {
             phase = .failed(Self.problemMessage(validation.problems))
             return
@@ -333,6 +335,8 @@ final class DrawingAIEditModel {
             return "That request is too large to apply at once. Try a smaller change."
         case .elementNotFound, .elementNotEditable:
             return "The edit referred to something that can’t be changed here."
+        case .outOfScope:
+            return "The edit tried to change something outside your selection."
         case .notTextElement:
             return "A text change was aimed at something that isn’t text."
         case .invalidColor:

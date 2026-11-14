@@ -237,7 +237,8 @@ final class DrawingAITranslateModel {
             return
         }
         let plan = EditPlan(operations: ops)
-        let validation = EditPlanValidator.validate(plan, in: scene)
+        // Keep the translation within the selection scope too (S7).
+        let validation = EditPlanValidator.validate(plan, in: scene, allowedIDs: scope.isEmpty ? nil : scope)
         guard validation.isApplicable else { phase = .failed(DrawingAIEditModel.problemMessage(validation.problems)); return }
         let commands = plan.commands(in: scene)
         guard !commands.isEmpty else { phase = .failed("That translation didn’t map to any change I can make."); return }

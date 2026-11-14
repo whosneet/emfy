@@ -41,6 +41,8 @@ public enum EditPlanProblem: Sendable, Equatable {
     case lineWidthOutOfRange(op: Int, points: Double)
     /// A replacement string exceeds the length cap.
     case textTooLong(op: Int, length: Int, limit: Int)
+    /// A targeted id is outside the selection scope the edit was limited to (S7).
+    case outOfScope(op: Int, id: Int)
 }
 
 /// A non-fatal note the preview must surface prominently.
@@ -97,8 +99,13 @@ public enum EditPlanValidator {
     }
 
     /// Validates `plan` against `scene`. Returns every problem found (so the UI can list
-    /// them) plus any warnings.
-    public static func validate(_ plan: EditPlan, in scene: Scene, limits: Limits = Limits()) -> EditPlanValidation {
+    /// them) plus any warnings. When `allowedIDs` is given (a non-nil set), every targeted
+    /// id must be within it, so a scoped edit (one limited to the current selection) can't
+    /// touch elements the user didn't select — a crafted plan naming other ids is rejected
+    /// (S7). `nil` (the default) means the whole drawing is in scope.
+    public static func validate(
+        _ plan: EditPlan, in scene: Scene, allowedIDs: Set<Int>? = nil, limits: Limits = Limits()
+    ) -> EditPlanValidation {
         var problems: [EditPlanProblem] = []
         var warnings: [EditPlanWarning] = []
 
@@ -115,21 +122,21 @@ public enum EditPlanValidator {
         for (index, operation) in plan.operations.enumerated() {
             switch operation {
             case .recolorFill(let ids, let color):
-                checkTargets(ids, op: index, kind: .any, scene: scene, into: &problems)
+                checkTargets(ids, op: index, kind: .any, scene: scene, allowedIDs: allowedIDs, into: &problems)
                 if color.color == nil { problems.append(.invalidColor(op: index, hex: color.hex)) }
 
             case .recolorStroke(let ids, let color):
-                checkTargets(ids, op: index, kind: .any, scene: scene, into: &problems)
+                checkTargets(ids, op: index, kind: .any, scene: scene, allowedIDs: allowedIDs, into: &problems)
                 if color.color == nil { problems.append(.invalidColor(op: index, hex: color.hex)) }
 
             case .setText(let id, let text):
-                checkTargets([id], op: index, kind: .text, scene: scene, into: &problems)
+                checkTargets([id], op: index, kind: .text, scene: scene, allowedIDs: allowedIDs, into: &problems)
                 if text.count > limits.maxTextLength {
                     problems.append(.textTooLong(op: index, length: text.count, limit: limits.maxTextLength))
                 }
 
             case .setFontSize(let id, let points):
-                checkTargets([id], op: index, kind: .text, scene: scene, into: &problems)
+                checkTargets([id], op: index, kind: .text, scene: scene, allowedIDs: allowedIDs, into: &problems)
                 if !points.isFinite {
                     problems.append(.numberNotFinite(op: index))
                 } else if points < limits.minFontPoints || points > limits.maxFontPoints {
@@ -137,10 +144,10 @@ public enum EditPlanValidator {
                 }
 
             case .setFontFamily(let id, _):
-                checkTargets([id], op: index, kind: .text, scene: scene, into: &problems)
+                checkTargets([id], op: index, kind: .text, scene: scene, allowedIDs: allowedIDs, into: &problems)
 
             case .move(let ids, let dx, let dy):
-                checkTargets(ids, op: index, kind: .any, scene: scene, into: &problems)
+                checkTargets(ids, op: index, kind: .any, scene: scene, allowedIDs: allowedIDs, into: &problems)
                 if !dx.isFinite || !dy.isFinite {
                     problems.append(.numberNotFinite(op: index))
                 } else if abs(dx) > moveCap || abs(dy) > moveCap {
@@ -148,7 +155,7 @@ public enum EditPlanValidator {
                 }
 
             case .scale(let ids, let factor):
-                checkTargets(ids, op: index, kind: .any, scene: scene, into: &problems)
+                checkTargets(ids, op: index, kind: .any, scene: scene, allowedIDs: allowedIDs, into: &problems)
                 if !factor.isFinite {
                     problems.append(.numberNotFinite(op: index))
                 } else if factor <= 0 || factor > limits.maxScaleFactor {
@@ -156,7 +163,7 @@ public enum EditPlanValidator {
                 }
 
             case .setLineWidth(let ids, let points):
-                checkTargets(ids, op: index, kind: .any, scene: scene, into: &problems)
+                checkTargets(ids, op: index, kind: .any, scene: scene, allowedIDs: allowedIDs, into: &problems)
                 if !points.isFinite {
                     problems.append(.numberNotFinite(op: index))
                 } else if points <= 0 || points > limits.maxLineWidthPoints {
@@ -164,13 +171,13 @@ public enum EditPlanValidator {
                 }
 
             case .align(let ids, _):
-                checkTargets(ids, op: index, kind: .any, scene: scene, into: &problems, requireNonEmpty: true)
+                checkTargets(ids, op: index, kind: .any, scene: scene, allowedIDs: allowedIDs, into: &problems, requireNonEmpty: true)
 
             case .distribute(let ids, _):
-                checkTargets(ids, op: index, kind: .any, scene: scene, into: &problems, requireNonEmpty: true)
+                checkTargets(ids, op: index, kind: .any, scene: scene, allowedIDs: allowedIDs, into: &problems, requireNonEmpty: true)
 
             case .delete(let ids):
-                checkTargets(ids, op: index, kind: .any, scene: scene, into: &problems, requireNonEmpty: true)
+                checkTargets(ids, op: index, kind: .any, scene: scene, allowedIDs: allowedIDs, into: &problems, requireNonEmpty: true)
                 for id in ids where scene.element(id: id) != nil { deletedIDs.insert(id) }
             }
         }
@@ -186,10 +193,11 @@ public enum EditPlanValidator {
 
     private enum TargetKind { case any, text }
 
-    /// Appends a problem for each bad id: missing, locked/passthrough, or (for text ops)
-    /// not a text run. An empty id list is a problem only when `requireNonEmpty`.
+    /// Appends a problem for each bad id: missing, locked/passthrough, out of scope, or
+    /// (for text ops) not a text run. An empty id list is a problem only when
+    /// `requireNonEmpty`. When `allowedIDs` is non-nil, an id outside it is rejected (S7).
     private static func checkTargets(
-        _ ids: [Int], op: Int, kind: TargetKind, scene: Scene,
+        _ ids: [Int], op: Int, kind: TargetKind, scene: Scene, allowedIDs: Set<Int>?,
         into problems: inout [EditPlanProblem], requireNonEmpty: Bool = true
     ) {
         if ids.isEmpty {
@@ -197,6 +205,10 @@ public enum EditPlanValidator {
             return
         }
         for id in ids {
+            if let allowedIDs, !allowedIDs.contains(id) {
+                problems.append(.outOfScope(op: op, id: id))
+                continue
+            }
             guard let element = scene.element(id: id) else {
                 problems.append(.elementNotFound(op: op, id: id))
                 continue
