@@ -497,11 +497,13 @@ struct LayersSection: View {
                 Image(systemName: "plus")
             }
             .accessibilityLabel("Add Layer")
+            .minTouchTarget()
             Button { deleteActiveLayer(scene: scene) } label: {
                 Image(systemName: "minus")
             }
             .accessibilityLabel("Delete Layer")
             .disabled(scene.layers.count <= 1)
+            .minTouchTarget()
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 14)

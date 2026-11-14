@@ -123,6 +123,7 @@ struct DrawingRecolourView: View {
                 .buttonStyle(.borderless)
                 .disabled(model.brandHex.count >= 8)
                 .accessibilityLabel("Add brand colour")
+                .minTouchTarget()
             }
             .accessibilityIdentifier("brandColours")
         }
