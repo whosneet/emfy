@@ -234,6 +234,25 @@ codesign --verify --deep --strict --verbose=2 "${STAGED_APP}" \
     || die "codesign --verify --deep --strict failed on ${APP_NAME}"
 info "signature valid and satisfies its Designated Requirement"
 
+# The notary service rejects any binary signed with the debug entitlement
+# com.apple.security.get-task-allow. The macOS Release configs set
+# CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO on the app, both appexes, and the
+# embedded emfy-mcp helper, so none should carry it. Assert that here across
+# EVERY nested Mach-O so a regression (e.g. a config losing that setting, as the
+# helper did before C5) fails the dry run instead of being caught by the notary.
+step "Assert no get-task-allow in any nested binary"
+GTA_OFFENDERS=""
+while IFS= read -r macho; do
+    if codesign -d --entitlements - --xml "${macho}" 2>/dev/null \
+        | grep -q 'com.apple.security.get-task-allow'; then
+        GTA_OFFENDERS="${GTA_OFFENDERS}
+    ${macho#"${STAGED_APP}"/}"
+    fi
+done < <(find "${STAGED_APP}" -type f -exec sh -c 'file -b "$1" | grep -q "Mach-O" && echo "$1"' _ {} \;)
+[[ -z "${GTA_OFFENDERS}" ]] \
+    || die "get-task-allow present in nested binaries (the notary service would reject this):${GTA_OFFENDERS}"
+info "no get-task-allow in any nested binary"
+
 # Gatekeeper assessment. Before notarization this MUST fail with
 # "source=Unnotarized Developer ID" — that is expected, not an error. In a full
 # run the meaningful spctl assessment happens AFTER stapling (step 5); here we
