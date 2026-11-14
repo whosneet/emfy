@@ -669,7 +669,7 @@ struct MacViewerPane: View {
         guard session.editing == .editing else { Self.logScript("text-image: begin editing failed"); exit(2) }
         let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
         let textID = session.debugInsertText("Hello Emfy", originDevice: CGPoint(x: page.width * 0.12, y: page.height * 0.2))
-        let imageID = session.debugInsertImage(Self.debugGradientPNG(), centreDevice: CGPoint(x: page.width * 0.5, y: page.height * 0.6))
+        let imageID = await session.debugInsertImage(Self.debugGradientPNG(), centreDevice: CGPoint(x: page.width * 0.5, y: page.height * 0.6))
         if let imageID { editorModel.selection.replace(with: imageID) }
         session.debugCancelAutosave()
         try? await Task.sleep(for: .milliseconds(1000))
@@ -1425,15 +1425,19 @@ struct MacViewerPane: View {
     /// capped, metadata-stripping image path, selecting the new element.
     private func insertImage(from url: URL) {
         let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else {
+        let data = try? Data(contentsOf: url)
+        if scoped { url.stopAccessingSecurityScopedResource() }
+        guard let data else {
             toast.show("This image couldn’t be added", systemImage: "photo.badge.exclamationmark")
             return
         }
-        if let id = session.insertImage(data: data) {
-            editorModel.selection.replace(with: id)
-        } else {
-            toast.show("This image couldn’t be added", systemImage: "photo.badge.exclamationmark")
+        // The decode/re-encode happens off the main thread inside insertImage (P7).
+        Task { @MainActor in
+            if let id = await session.insertImage(data: data) {
+                editorModel.selection.replace(with: id)
+            } else {
+                toast.show("This image couldn’t be added", systemImage: "photo.badge.exclamationmark")
+            }
         }
     }
 

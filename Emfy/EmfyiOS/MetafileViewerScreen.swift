@@ -834,7 +834,7 @@ struct MetafileViewerScreen: View {
         guard session.editing == .editing else { Self.logScript("ios text-image: begin editing failed"); return }
         let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
         let textID = session.debugInsertText("Hello Emfy", originDevice: CGPoint(x: page.width * 0.12, y: page.height * 0.2))
-        let imageID = session.debugInsertImage(Self.debugGradientPNG(), centreDevice: CGPoint(x: page.width * 0.5, y: page.height * 0.6))
+        let imageID = await session.debugInsertImage(Self.debugGradientPNG(), centreDevice: CGPoint(x: page.width * 0.5, y: page.height * 0.6))
         if let imageID { editorModel.selection.replace(with: imageID) }
         try? await Task.sleep(for: .milliseconds(400))
         await session.save()
@@ -1413,8 +1413,11 @@ struct MetafileViewerScreen: View {
     /// Inserts decoded image bytes centred on the page and selects the new element; a
     /// decode/cap failure sets `imageInsertFailed`, which the body observer toasts.
     private func insertImageData(_ data: Data) {
-        if let id = session.insertImage(data: data) {
-            editorModel.selection.replace(with: id)
+        // The decode/re-encode happens off the main thread inside insertImage (P7).
+        Task { @MainActor in
+            if let id = await session.insertImage(data: data) {
+                editorModel.selection.replace(with: id)
+            }
         }
     }
 

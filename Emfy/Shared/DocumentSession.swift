@@ -608,8 +608,8 @@ final class DocumentSession {
     /// Ingests image bytes and inserts them through the SAME path the image tool uses
     /// (`insertImage` → ingest/cap/strip → `apply(.insert)`), returning the id, for the
     /// E3c `text-image` script.
-    func debugInsertImage(_ data: Data, centreDevice: CGPoint?) -> Int? {
-        insertImage(data: data, centreDevice: centreDevice)
+    func debugInsertImage(_ data: Data, centreDevice: CGPoint?) async -> Int? {
+        await insertImage(data: data, centreDevice: centreDevice)
     }
 
     /// The id of the layer named `name`, for the E3d `layers` script.
@@ -914,15 +914,31 @@ final class DocumentSession {
     /// `centreDevice` for a drop, returning the new element's id so the caller selects it
     /// (design call 2). Untrusted input is decoded with the §8 caps and re-encoded pixels-
     /// only; a typed failure sets `imageInsertFailed` for a toast and returns nil.
-    func insertImage(data: Data, centreDevice: CGPoint? = nil) -> Int? {
+    func insertImage(data: Data, centreDevice: CGPoint? = nil) async -> Int? {
         guard editing == .editing, let scene = editingScene else { return nil }
-        switch ImageInsertTool.element(imageData: data, pageBoundsDevice: scene.pageBoundsDevice, centreDevice: centreDevice, in: scene) {
+        let page = scene.pageBoundsDevice
+        // Decode, cap and re-encode the image OFF the main thread (P7): a large photo's
+        // decode + re-encode froze the UI for 0.5–2 s. The scene is a snapshot; the actual
+        // insert commits on the main actor below after re-checking the edit state.
+        let outcome = await Task.detached(priority: .userInitiated) {
+            ImageInsertTool.element(imageData: data, pageBoundsDevice: page, centreDevice: centreDevice, in: scene)
+        }.value
+        guard editing == .editing, let current = editingScene else { return nil }
+        switch outcome {
         case .failure:
             imageInsertFailed = true
             return nil
         case .success(let inserted):
-            apply(.insert(element: inserted.element, at: scene.layers.first?.elements.count ?? 0))
-            return inserted.id
+            var element = inserted.element
+            var id = inserted.id
+            // A concurrent insert may have taken this id while the image decoded — give it a
+            // fresh one against the live scene so `.insert` never collides.
+            if current.element(id: id) != nil {
+                id = SceneFactory.nextElementID(in: current)
+                element.id = id
+            }
+            apply(.insert(element: element, at: current.layers.first?.elements.count ?? 0))
+            return id
         }
     }
 
@@ -1163,14 +1179,22 @@ final class DocumentSession {
         guard let fileName = documentFileName() else { lastSaveError = .noDestination; return }
         let format = EditingSaveFormat.format(fileName: fileName, source: current.scene.source.format)
 
-        let result: ExportResult
-        do {
-            // `SceneExporter.export` is a typed throw of `SceneExportError`.
-            result = try SceneExporter.export(current.scene, as: format)
-        } catch {
-            lastSaveError = .exportFailed(String(describing: error))
-            return
-        }
+        // Serialise the scene OFF the main thread (P6): exporting a large edited scene (EMF
+        // record synthesis + object table) blocked the main actor on every autosave. Snapshot
+        // the scene, export on a detached task, then commit on the main actor after re-checking
+        // state. `version` guards an autosave whose scene was superseded while it serialised —
+        // a newer autosave is already scheduled, so the stale write is skipped.
+        let scene = current.scene
+        let version = editVersion
+        let outcome = await Task.detached(priority: .userInitiated) { () -> (result: ExportResult?, error: String?) in
+            do { return (try SceneExporter.export(scene, as: format), nil) }
+            catch { return (nil, String(describing: error)) }
+        }.value
+        guard editing == .editing, isDirty else { return }
+        // An autosave superseded by a newer edit while it serialised: let the newer autosave win.
+        if isAutosave, editVersion != version { return }
+        if let message = outcome.error { lastSaveError = .exportFailed(message); return }
+        guard let result = outcome.result else { return }
 
         if EditingSaveFormat.isWMFFamily(format), !wmfSaveConfirmed {
             if isAutosave { return }   // never confirm from a silent autosave
@@ -1183,7 +1207,7 @@ final class DocumentSession {
             return
         }
 
-        await commitWrite(data: result.data, warnings: result.warnings, fileName: fileName, scene: current.scene, isAutosave: isAutosave)
+        await commitWrite(data: result.data, warnings: result.warnings, fileName: fileName, scene: scene, isAutosave: isAutosave)
     }
 
     /// Called synchronously by a WMF-dialog button (Save Anyway / Save a Copy / Don't Save) the

@@ -41,8 +41,10 @@ struct MacEditingContainer: View {
                     beginInsertText: { element in session.beginInsertText(element) },
                     // A drag-and-dropped image inserts centred at the drop point (E3c).
                     insertImageData: { data, centreDevice in
-                        if let id = session.insertImage(data: data, centreDevice: centreDevice) {
-                            editorModel.selection.replace(with: id)
+                        Task { @MainActor in
+                            if let id = await session.insertImage(data: data, centreDevice: centreDevice) {
+                                editorModel.selection.replace(with: id)
+                            }
                         }
                     },
                     align: { ids, alignment in session.alignSelection(ids, alignment) },
