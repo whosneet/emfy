@@ -150,6 +150,7 @@ struct RecordsInspectorPanel: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Clear filter")
+                    .minTouchTarget()
             }
         }
         .padding(.horizontal, 12)
@@ -261,15 +262,19 @@ struct RecordsInspectorPanel: View {
             HStack(spacing: 14) {
                 Button { model.home() } label: { Image(systemName: "backward.end.fill") }
                     .accessibilityLabel("First record")
+                    .minTouchTarget()
                 Button { model.step(by: -1) } label: { Image(systemName: "chevron.left") }
                     .accessibilityLabel("Previous record")
+                    .minTouchTarget()
                 Text(model.positionText)
                     .font(.callout.monospacedDigit())
                     .frame(minWidth: 76)
                 Button { model.step(by: 1) } label: { Image(systemName: "chevron.right") }
                     .accessibilityLabel("Next record")
+                    .minTouchTarget()
                 Button { model.end() } label: { Image(systemName: "forward.end.fill") }
                     .accessibilityLabel("Last record")
+                    .minTouchTarget()
             }
             .buttonStyle(.borderless)
             .disabled(!model.canStep)
@@ -348,13 +353,17 @@ struct RecordsInspectorPanel: View {
 private struct RecordScrollFollower: View {
     let model: RecordInspectorModel
     let proxy: ScrollViewProxy
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
             .onChange(of: model.selectedIndex) { _, index in
-                withAnimation(.easeInOut(duration: 0.15)) { proxy.scrollTo(index, anchor: .center) }
+                // Honour Reduce Motion — jump without the scroll animation (audit R2A7).
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) {
+                    proxy.scrollTo(index, anchor: .center)
+                }
             }
     }
 }
