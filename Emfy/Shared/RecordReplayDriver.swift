@@ -150,8 +150,11 @@ final class RecordReplayDriver {
     /// The record index the latest render was requested for, so a repeated request for
     /// the same index is a no-op (just the outline) rather than a fresh render.
     @ObservationIgnored private var requestedIndex: Int?
-    /// Median step time (ms) and first→last span (ms), for the WS-A perf log.
+    #if DEBUG
+    /// Per-step times (ms) for the WS-A perf log. DEBUG-only and growth is bounded to the last
+    /// 4096 entries, so a long scrubbing session can't accumulate an unbounded array (P18).
     @ObservationIgnored private var stepTimesMS: [Double] = []
+    #endif
 
     /// Configures the driver for a loaded drawing, populating `model` off-main and
     /// then rendering the initial (full-drawing) step. A re-configure for the same
@@ -175,7 +178,9 @@ final class RecordReplayDriver {
         deviceBounds = prepared.deviceBounds
         image = nil
         requestedIndex = nil
+        #if DEBUG
         stepTimesMS = []
+        #endif
         Task { [weak self, weak model] in
             let data = await engine.prepareData()
             guard let self, self.contentID == contentID else { return }
@@ -223,12 +228,17 @@ final class RecordReplayDriver {
         generation &+= 1
         let token = generation
         Task { [weak self, weak model] in
+            #if DEBUG
             let start = ContinuousClock.now
+            #endif
             let result = await engine.step(through: index)
             guard let self, token == self.generation else { return }
+            #if DEBUG
             let components = start.duration(to: .now).components
             let elapsed = Double(components.seconds) * 1000 + Double(components.attoseconds) / 1e15   // ms
             self.stepTimesMS.append(elapsed)
+            if self.stepTimesMS.count > 4096 { self.stepTimesMS.removeFirst(self.stepTimesMS.count - 4096) }
+            #endif
             self.image = result.image
             self.contentToken &+= 1
             model?.setState(result.state)

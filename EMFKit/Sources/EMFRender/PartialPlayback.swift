@@ -347,25 +347,41 @@ public final class MetafilePartialPlayer {
         let index: Int
         let image: CGImage
         let dc: DeviceContext.Checkpoint
+        /// Bytes this checkpoint's raster occupies, for the LRU byte budget (P10).
+        let cost: Int
+        /// Last-use tick, bumped when this checkpoint resumes a step, so the LRU eviction
+        /// keeps the checkpoints a scrubbing session actually revisits.
+        var lastUsed: Int
     }
     /// Cached checkpoints, kept sorted by ascending record index.
     private var checkpoints: [CachedCheckpoint] = []
+    /// Total bytes of the cached checkpoint rasters, bounded by `memoryBudget` (P10): each
+    /// checkpoint holds a FULL-canvas image, so at a 64-record stride a large file could cache
+    /// thousands of multi-MB rasters — gigabytes. The byte budget caps that, evicting the
+    /// least-recently-used checkpoint; eviction only slows a step (it re-renders from an earlier
+    /// checkpoint), never changes a pixel.
+    private var currentCost = 0
+    private var useTick = 0
+    private let memoryBudget: Int
 
     /// - Parameters:
     ///   - checkpointStride: cache a checkpoint every this-many records (at a
     ///     clean path boundary). Smaller strides cost memory for faster steps.
+    ///   - checkpointMemoryBudget: the cap on total cached checkpoint bytes (P10).
     public init(
         file: EMFFile,
         scale: CGFloat = 1,
         background: RenderBackground = .white,
         options: RenderOptions = .default,
-        checkpointStride: Int = 64
+        checkpointStride: Int = 64,
+        checkpointMemoryBudget: Int = 128 * 1024 * 1024
     ) {
         self.file = file
         self.options = options
         self.background = background
         self.scale = scale
         self.stride = max(1, checkpointStride)
+        self.memoryBudget = max(1, checkpointMemoryBudget)
         self.recordCount = file.records.count
 
         let bounds = file.header.bounds
@@ -430,20 +446,40 @@ public final class MetafilePartialPlayer {
     }
 
     private func nearestCheckpoint(atOrBefore index: Int) -> CachedCheckpoint? {
-        var best: CachedCheckpoint?
-        for checkpoint in checkpoints where checkpoint.index <= index {
-            best = checkpoint
+        var bestPos: Int?
+        for (pos, checkpoint) in checkpoints.enumerated() where checkpoint.index <= index {
+            bestPos = pos
         }
-        return best
+        guard let bestPos else { return nil }
+        useTick &+= 1
+        checkpoints[bestPos].lastUsed = useTick
+        return checkpoints[bestPos]
     }
 
     /// Caches a checkpoint at `index` when it lands on a stride boundary, at a
-    /// clean path boundary, with a valid image, and is not already cached.
+    /// clean path boundary, with a valid image, and is not already cached — then evicts the
+    /// least-recently-used checkpoints until the total raster bytes fit the budget (P10).
     private func cacheCheckpointIfDue(at index: Int, image: CGImage?, dc: DeviceContext) {
         guard let image, index >= stride, index % stride == 0, dc.isAtCleanPathBoundary,
               !checkpoints.contains(where: { $0.index == index })
         else { return }
-        checkpoints.append(CachedCheckpoint(index: index, image: image, dc: dc.checkpoint()))
+        let cost = max(1, image.bytesPerRow * image.height)
+        guard cost <= memoryBudget else { return }   // one checkpoint over the whole budget: skip
+        useTick &+= 1
+        checkpoints.append(CachedCheckpoint(index: index, image: image, dc: dc.checkpoint(), cost: cost, lastUsed: useTick))
+        currentCost += cost
         checkpoints.sort { $0.index < $1.index }
+        evictUntilWithinBudget()
+    }
+
+    /// Drops the least-recently-used checkpoints until the resident raster bytes are within
+    /// the budget. A step that lands past an evicted checkpoint simply re-renders from an
+    /// earlier one — identical pixels, a little more work.
+    private func evictUntilWithinBudget() {
+        while currentCost > memoryBudget, checkpoints.count > 1,
+              let lru = checkpoints.indices.min(by: { checkpoints[$0].lastUsed < checkpoints[$1].lastUsed }) {
+            currentCost -= checkpoints[lru].cost
+            checkpoints.remove(at: lru)
+        }
     }
 }

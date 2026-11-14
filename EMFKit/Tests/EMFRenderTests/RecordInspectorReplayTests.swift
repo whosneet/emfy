@@ -120,6 +120,24 @@ struct RecordInspectorReplayTests {
         #expect(Self.pixelsEqual(viaCheckpoint, fromStart))
     }
 
+    // P10: a tiny checkpoint byte budget must still render every step pixel-exact — eviction
+    // only forces a re-render from an earlier checkpoint, never a wrong pixel.
+    @Test("A tight checkpoint memory budget keeps every step pixel-identical")
+    func tightBudgetStaysCorrect() throws {
+        let file = try Self.gridFile(cells: 12).parsed()
+        // A 1-byte budget caps the cache so at most one small checkpoint can ever be resident;
+        // every full-canvas checkpoint is over budget and is dropped.
+        let player = MetafilePartialPlayer(file: file, checkpointStride: 4, checkpointMemoryBudget: 1)
+        for boundary in stride(from: 4, through: file.records.count - 1, by: 4) {
+            _ = player.step(throughRecordIndex: boundary)
+        }
+        for index in [8, 15, 23, 30, 12, 4] {
+            let viaPlayer = try #require(player.step(throughRecordIndex: index).image)
+            let fromStart = try #require(EMFRenderer.makeImage(file, throughRecordIndex: index)?.0)
+            #expect(Self.pixelsEqual(viaPlayer, fromStart), "mismatch at index \(index)")
+        }
+    }
+
     @Test("Stepping backwards through a checkpoint stays correct")
     func steppingBackwards() throws {
         let file = try Self.gridFile(cells: 10).parsed()
