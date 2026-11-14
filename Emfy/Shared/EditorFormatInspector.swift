@@ -423,6 +423,8 @@ struct LayersSection: View {
 
     @State private var editingLayerID: Int?
     @State private var editingName: String = ""
+    /// Drives committing a layer rename on focus loss (TK-2), not only on Return.
+    @FocusState private var renameFocused: Bool
     @State private var pendingDelete: PendingLayerDelete?
 
     /// A non-empty layer the "−" button is asking to delete.
@@ -537,7 +539,11 @@ struct LayersSection: View {
             if editingLayerID == layer.id {
                 TextField("Layer name", text: $editingName)
                     .textFieldStyle(.roundedBorder)
+                    .focused($renameFocused)
                     .onSubmit { commitRename() }
+                    // Commit the rename when focus leaves the field, not only on Return
+                    // (TK-2), so tapping elsewhere doesn't discard it. Escape still cancels.
+                    .onChange(of: renameFocused) { _, focused in if !focused && editingLayerID == layer.id { commitRename() } }
                     #if os(macOS)
                     .onExitCommand { editingLayerID = nil }
                     #endif
@@ -600,6 +606,7 @@ struct LayersSection: View {
         editingName = layer.name
         editingLayerID = layer.id
         editorModel.activeLayerID = layer.id
+        renameFocused = true
     }
 
     private func commitRename() {

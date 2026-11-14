@@ -41,12 +41,17 @@ struct TextSectionRows: View {
 
     @State private var liveContent: String = ""
     @State private var liveSize: Double = 12
+    /// So the Text field commits when focus leaves it, not only on Return (TK-2):
+    /// tapping another control or dismissing the keyboard must not discard the edit.
+    @FocusState private var textFocused: Bool
 
     var body: some View {
         Group {
             TextField("Text", text: $liveContent, axis: .vertical)
                 .lineLimit(1...4)
+                .focused($textFocused)
                 .onSubmit { commitText() }
+                .onChange(of: textFocused) { _, focused in if !focused { commitText() } }
 
             FontFamilyField(family: text.family) { picked in
                 apply(family: picked)
@@ -90,7 +95,11 @@ struct TextSectionRows: View {
     }
 
     private func commitText() {
-        session.apply(.setText(id: text.id, TextSanitizer.sanitize(liveContent)))
+        // Apply only a real change, so committing again on focus loss after a Return
+        // (or vice versa) doesn't add a redundant undo step (TK-2).
+        let sanitized = TextSanitizer.sanitize(liveContent)
+        guard sanitized != text.content else { return }
+        session.apply(.setText(id: text.id, sanitized))
     }
 
     private func apply(family: String) {
