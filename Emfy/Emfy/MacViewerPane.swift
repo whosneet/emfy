@@ -484,6 +484,7 @@ struct MacViewerPane: View {
         case "text-popover": await runTextPopoverScript(base: base)
         case "layers": await runLayersScript(base: base)
         case "align-grid": await runAlignGridScript(base: base)
+        case "a11y-dump": await runAccessibilityDumpScript(base: base)
         default: Self.logScript("unknown script \(script)"); exit(1)
         }
     }
@@ -795,6 +796,44 @@ struct MacViewerPane: View {
             _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-b.png")
         }
         Self.logScript("align-grid: guideShown=\(guideShown)")
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(200))
+        exit(0)
+    }
+
+    /// C5g (audit A1): edit mode → insert a few shapes and a text run → select one element
+    /// THROUGH THE ACCESSIBILITY ACTION PATH (the canvas coordinator's Select custom action)
+    /// → dump the live accessibility tree (label, value, traits, actions) to `<base>-a11y.txt`
+    /// and stderr → screenshot the window → exit. The DEBUG evidence hook for the Mac
+    /// edit-mode accessibility baseline.
+    @MainActor
+    private func runAccessibilityDumpScript(base: String) async {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { !($0 is NSPanel) && ($0.contentView?.bounds.height ?? 0) > 200 }) {
+            window.setContentSize(NSSize(width: 1400, height: 900))
+            window.makeKeyAndOrderFront(nil)
+        }
+        controller.fit()
+        try? await Task.sleep(for: .milliseconds(400))
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("a11y-dump: begin editing failed"); exit(2) }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        let w = page.width * 0.22, h = page.height * 0.16
+        _ = session.debugInsertShape(.rect, rectDevice: CGRect(x: page.width * 0.10, y: page.height * 0.14, width: w, height: h))
+        _ = session.debugInsertShape(.ellipse, rectDevice: CGRect(x: page.width * 0.60, y: page.height * 0.16, width: w, height: h))
+        _ = session.debugInsertText("Quarterly Results", originDevice: CGPoint(x: page.width * 0.12, y: page.height * 0.48))
+        let firstID = session.editingScene?.editableElements.first?.id
+        session.debugCancelAutosave()
+        try? await Task.sleep(for: .milliseconds(400))
+        // Select via the ACCESSIBILITY path (the Select custom action), not a direct set.
+        if let firstID { _ = MacEditableCanvas.Coordinator.debugActive?.accessibilityPerform(.select, on: firstID) }
+        try? await Task.sleep(for: .milliseconds(400))
+        let dump = MacEditableCanvas.Coordinator.debugActive?.debugAccessibilityDump() ?? "no coordinator"
+        try? dump.write(toFile: base + "-a11y.txt", atomically: true, encoding: .utf8)
+        if !EditorDebugScreenshot.captureLibraryWindow(to: base + "-a11y.png") {
+            _ = EditorDebugScreenshot.captureLargestWindowOffscreen(to: base + "-a11y.png")
+        }
+        Self.logScript("mac a11y-dump BEGIN\n\(dump)\nmac a11y-dump END")
         session.debugCancelAutosave()
         try? await Task.sleep(for: .milliseconds(200))
         exit(0)

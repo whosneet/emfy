@@ -496,6 +496,7 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "text-popover" { await runTextPopoverScript(); return }
         if EditorDebugLaunch.script == "layers" { await runLayersScript(); return }
         if EditorDebugLaunch.script == "align-grid" { await runAlignGridScript(); return }
+        if EditorDebugLaunch.script == "a11y-dump" { await runAccessibilityDumpScript(); return }
         if EditorDebugLaunch.script == "iphone-light" { await runIPhoneLightScript(stage: .select); return }
         if EditorDebugLaunch.script == "iphone-light-color" { await runIPhoneLightScript(stage: .colour); return }
         if EditorDebugLaunch.script == "iphone-light-edited" { await runIPhoneLightScript(stage: .edited); return }
@@ -623,6 +624,42 @@ struct MetafileViewerScreen: View {
         session.debugCancelAutosave()
         let tops = ids.compactMap { id in session.editingScene?.elements.first { $0.id == id }?.selectionBoundsDevice.minY }
         Self.logScript("ios align-grid: tops=\(tops.map { Int($0) }) grid=\(editorModel.showGrid)")
+    }
+
+    /// C5g (audit A1): blank drawing → edit mode → insert a few shapes and a text run →
+    /// select one element THROUGH THE ACCESSIBILITY ACTION PATH (the canvas coordinator's
+    /// Select custom action, not a direct selection set) → dump the live UIKit accessibility
+    /// tree (label, value, traits, Voice Control labels, actions) to Documents and stderr →
+    /// stay on screen so `simctl io screenshot` captures the selected element. This is the
+    /// DEBUG evidence hook for the edit-mode accessibility baseline.
+    @MainActor
+    private func runAccessibilityDumpScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios a11y-dump: begin editing failed"); return }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        let w = page.width * 0.22, h = page.height * 0.16
+        _ = session.debugInsertShape(.rect, rectDevice: CGRect(x: page.width * 0.10, y: page.height * 0.14, width: w, height: h))
+        _ = session.debugInsertShape(.ellipse, rectDevice: CGRect(x: page.width * 0.60, y: page.height * 0.16, width: w, height: h))
+        _ = session.debugInsertText("Quarterly Results", originDevice: CGPoint(x: page.width * 0.12, y: page.height * 0.48))
+        let firstID = session.editingScene?.editableElements.first?.id
+        session.debugCancelAutosave()
+        // Wait for the canvas coordinator to come up, then select via the ACCESSIBILITY path.
+        var coordinator: EditableMetafileCanvas.Coordinator?
+        for _ in 0..<40 {
+            coordinator = EditableMetafileCanvas.Coordinator.debugActive
+            if coordinator != nil { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        if let coordinator, let firstID {
+            _ = coordinator.accessibilityPerform(.select, on: firstID)   // the Select custom action
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        let dump = coordinator?.debugAccessibilityDump() ?? "no coordinator"
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        try? dump.write(to: docs.appendingPathComponent("c5g-a11y-ios.txt"), atomically: true, encoding: .utf8)
+        _ = Self.captureKeyWindow(to: docs.appendingPathComponent("c5g-a11y-ios.png").path)
+        Self.logScript("ios a11y-dump BEGIN\n\(dump)\nios a11y-dump END")
+        session.debugCancelAutosave()
     }
 
     /// F3b: opens the find bar and searches `EditorDebugLaunch.findQuery` (in edit mode too
