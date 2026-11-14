@@ -1169,36 +1169,49 @@ struct MetafileViewerScreen: View {
     @ToolbarContentBuilder
     private var shapesToolbar: some ToolbarContent {
         if isFullEditing {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    ForEach(ShapeToolKind.allCases) { kind in
-                        Button {
-                            editorModel.armShape(kind)
-                        } label: {
-                            Label(kind.title, systemImage: kind.systemImage)
-                        }
+            if isRegularWidth {
+                ToolbarItem(placement: .topBarLeading) { shapesMenu }
+                ToolbarItem(placement: .topBarLeading) { penMenu }
+                ToolbarItem(placement: .topBarLeading) { textButton }
+                ToolbarItem(placement: .topBarLeading) { imageMenu }
+                ToolbarItem(placement: .topBarLeading) { gridMenu }
+                ToolbarItem(placement: .topBarLeading) { aiEditMenu }
+            } else {
+                // A narrow full-editor window (iPad Slide Over / a slim Stage Manager
+                // window) can't fit six leading tool buttons, so they fold into one Tools
+                // menu with each tool as a submenu (C5e L7).
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        shapesMenu
+                        penMenu
+                        textButton
+                        imageMenu
+                        gridMenu
+                        aiEditMenu
+                    } label: {
+                        Label("Tools", systemImage: "pencil.and.outline")
                     }
-                } label: {
-                    Label("Shapes", systemImage: "square.on.circle")
+                    .accessibilityIdentifier("viewerTools")
                 }
-                .accessibilityIdentifier("viewerShapes")
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                penMenu
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                textButton
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                imageMenu
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                gridMenu
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                aiEditMenu
             }
         }
+    }
+
+    /// The Shapes menu, reused both as its own toolbar item (regular width) and as a
+    /// submenu of the folded Tools menu (compact width).
+    private var shapesMenu: some View {
+        Menu {
+            ForEach(ShapeToolKind.allCases) { kind in
+                Button {
+                    editorModel.armShape(kind)
+                } label: {
+                    Label(kind.title, systemImage: kind.systemImage)
+                }
+            }
+        } label: {
+            Label("Shapes", systemImage: "square.on.circle")
+        }
+        .accessibilityIdentifier("viewerShapes")
     }
 
     /// The grid + snapping menu in edit mode (E3e design call 2/3): iPad (regular width).
