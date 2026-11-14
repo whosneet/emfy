@@ -160,17 +160,26 @@ struct MetafileViewerScreen: View {
     /// edge. In edit mode the editable canvas fills the width and re-fits when the
     /// inspector opens/closes (E2c item 4), so no reserved strip — reserving it there
     /// double-counted the inspector column and left a white gap beside it.
-    private var reservedInspectorWidth: CGFloat {
-        guard showInspector, isRegularWidth, session.editing != .editing else { return 0 }
-        // The overlay inspector that needs a reserved trailing strip is an iPadOS 26+
-        // behaviour. On iPadOS 17/18 `.inspector` presents as a width-reducing trailing
-        // COLUMN (Apple: "inspector(isPresented:content:)", developer.apple.com — the
-        // inspector shows as a distinct trailing section/column), so the detail area already
-        // shrinks and reserving extra space would double-count it and leave a white gap
-        // (C5e L6). No iOS 17/18 runtime is installed here to screenshot, so this gates on
-        // the documented behaviour (verified: only iOS 27.2 runtimes present, 14 Nov 2026).
+    /// The trailing width the floating inspector overlay occupies at regular width on
+    /// iPadOS 26+ — the one helper both the read-only viewer's reserved strip and the
+    /// editor canvas's trailing inset use (audit L-D). On iPadOS 17/18 `.inspector`
+    /// presents as a width-reducing trailing COLUMN (Apple: "inspector(isPresented:content:)",
+    /// developer.apple.com — a distinct trailing section/column), so the detail area already
+    /// shrinks and reserving extra space would double-count it and leave a white gap (C5e
+    /// L6). No iOS 17/18 runtime is installed here to screenshot, so this gates on the
+    /// documented behaviour (verified: only iOS 27.2 runtimes present, 14 Nov 2026).
+    private var inspectorOverlayInset: CGFloat {
+        guard showInspector, isRegularWidth else { return 0 }
         guard #available(iOS 26.0, *) else { return 0 }
         return inspectorWidth
+    }
+
+    /// Trailing space to keep clear for the inspector overlay in READ-ONLY viewing. In
+    /// edit mode the editable canvas fills the width and re-fits when the inspector
+    /// opens/closes (E2c item 4), so no reserved strip there — the editor uses
+    /// `inspectorOverlayInset` directly for its own trailing inset.
+    private var reservedInspectorWidth: CGFloat {
+        session.editing != .editing ? inspectorOverlayInset : 0
     }
 
     /// The leading inset of the inspector's floating translucent PANEL inside its
@@ -1067,8 +1076,9 @@ struct MetafileViewerScreen: View {
                 ),
                 options: settings.renderOptions,
                 // The editable canvas fills the full width (E2c item 4); the drawing is
-                // fitted and centred into the region the inspector overlay leaves clear.
-                trailingInset: (showInspector && isRegularWidth) ? inspectorWidth : 0,
+                // fitted and centred into the region the inspector overlay leaves clear —
+                // gated to iPadOS 26 via the shared helper, so 17/18 isn't double-counted (L-D).
+                trailingInset: inspectorOverlayInset,
                 // Light mode (E4): selection outline only, drag moves only — no handles.
                 lightMode: editorMode == .light,
                 findHighlights: findHighlightSet
@@ -1200,10 +1210,20 @@ struct MetafileViewerScreen: View {
     /// selection and flushes any pending save.
     @ToolbarContentBuilder
     private var editToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Button(session.editing == .editing ? "Done" : "Edit") { toggleEditMode() }
-                .disabled(loaded == nil)
-                .accessibilityIdentifier("viewerEdit")
+        if session.editing == .editing {
+            // Done confirms the edit session, so it belongs in `.confirmationAction` (audit
+            // G-E) — leading-bold, and placed by the system as the confirming action.
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { toggleEditMode() }
+                    .disabled(loaded == nil)
+                    .accessibilityIdentifier("viewerEdit")
+            }
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Edit") { toggleEditMode() }
+                    .disabled(loaded == nil)
+                    .accessibilityIdentifier("viewerEdit")
+            }
         }
     }
 
@@ -1269,12 +1289,23 @@ struct MetafileViewerScreen: View {
             } else {
                 // A narrow full-editor window (iPad Slide Over / a slim Stage Manager
                 // window) can't fit six leading tool buttons, so they fold into one Tools
-                // menu with each tool as a submenu (C5e L7).
+                // menu (C5e L7). The Pen and Text tools use Toggles (plus a Pen Colour &
+                // Width submenu) so they can be armed AND show their armed state inside the
+                // menu, which a plain submenu label lost (audit L-E).
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
                         shapesMenu
-                        penMenu
-                        textButton
+                        Toggle("Pen", isOn: Binding(
+                            get: { editorModel.armedPen },
+                            set: { $0 ? editorModel.armPen() : (editorModel.armedPen = false) }))
+                        Menu {
+                            penPaletteMenuContent
+                        } label: {
+                            Label("Pen Colour & Width", systemImage: "paintpalette")
+                        }
+                        Toggle("Text", isOn: Binding(
+                            get: { editorModel.armedTextTool },
+                            set: { $0 ? editorModel.armText() : editorModel.disarmTools() }))
                         imageMenu
                         gridMenu
                         aiEditMenu
@@ -1447,16 +1478,33 @@ struct MetafileViewerScreen: View {
     private var bottomBar: some ToolbarContent {
         if isLightEditing {
             // The light editor's system bottom toolbar (E4 design call 2): Markup,
-            // Colour, Text (edit the selected run), Delete, Undo and Redo.
-            ToolbarItemGroup(placement: .bottomBar) {
-                markupMenu
-                colourButton
-                aiEditMenu
-                lightTextButton
-                deleteButton
-                Spacer()
-                lightUndoButton
-                lightRedoButton
+            // Colour, Text (edit the selected run), Delete, Undo and Redo. On 26 a
+            // `ToolbarSpacer(.flexible)` splits the editing tools from Undo/Redo into two
+            // glass groups instead of one long pill (audit G-C); a plain Spacer below.
+            if #available(iOS 26.0, *) {
+                ToolbarItemGroup(placement: .bottomBar) {
+                    markupMenu
+                    colourButton
+                    aiEditMenu
+                    lightTextButton
+                    deleteButton
+                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItemGroup(placement: .bottomBar) {
+                    lightUndoButton
+                    lightRedoButton
+                }
+            } else {
+                ToolbarItemGroup(placement: .bottomBar) {
+                    markupMenu
+                    colourButton
+                    aiEditMenu
+                    lightTextButton
+                    deleteButton
+                    Spacer()
+                    lightUndoButton
+                    lightRedoButton
+                }
             }
         } else if #available(iOS 27.0, *) {
             ToolbarItemGroup(placement: .bottomBar) {
