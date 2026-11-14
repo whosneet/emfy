@@ -31,7 +31,10 @@ struct LibraryWindow: View {
     let initialSelection: UUID?
 
     @State private var model = LibraryWindowModel()
-    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    /// The split-view column visibility, persisted per scene across relaunch (N2).
+    /// `NavigationSplitViewVisibility` isn't `RawRepresentable`, so a string backs it in
+    /// `@SceneStorage` and `columnVisibility` maps the two.
+    @SceneStorage("library.columns") private var columnVisibilityRaw = "automatic"
     /// Drives the New Drawing presets sheet (E3a): the Mac File ▸ New Drawing… command
     /// sets it through the focused action; the iPad "+" presents its own copy.
     @State private var showNewDrawing = false
@@ -86,7 +89,7 @@ struct LibraryWindow: View {
     /// The navigation split view with its environment, importer and "couldn't open" alert.
     private var splitLayer: some View {
         @Bindable var model = model
-        return NavigationSplitView(columnVisibility: $columnVisibility) {
+        return NavigationSplitView(columnVisibility: columnVisibility) {
             // Inject the window's observable environment INSIDE each column, not as a
             // modifier on the whole split view. `NavigationSplitView` hosts its columns
             // in separate UIKit containers; the app-switcher snapshot re-lays those
@@ -517,6 +520,27 @@ struct LibraryWindow: View {
             stored: storedID
         ), store.entry(id: id) != nil else { return }
         model.select(id)
+    }
+
+    /// A binding over the scene-stored column visibility, mapping the persisted string
+    /// to `NavigationSplitViewVisibility` (which isn't `RawRepresentable`) (N2).
+    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: {
+                switch columnVisibilityRaw {
+                case "all": return .all
+                case "doubleColumn": return .doubleColumn
+                case "detailOnly": return .detailOnly
+                default: return .automatic
+                }
+            },
+            set: { newValue in
+                if newValue == .all { columnVisibilityRaw = "all" }
+                else if newValue == .doubleColumn { columnVisibilityRaw = "doubleColumn" }
+                else if newValue == .detailOnly { columnVisibilityRaw = "detailOnly" }
+                else { columnVisibilityRaw = "automatic" }
+            }
+        )
     }
 
     /// A guarded two-way binding over the model's selection: reads the committed value and

@@ -12,7 +12,8 @@ import SwiftUI
 
 /// Which panel the read-only viewer inspector shows. `ask` appears only when
 /// on-device AI is available (A1a); `check` is always offered (X1a).
-enum ViewerInspectorTab: Hashable { case info, records, check, ask }
+// String-backed so it persists in `@SceneStorage` across relaunch (N2).
+enum ViewerInspectorTab: String, Hashable { case info, records, check, ask }
 
 /// The read-only viewer inspector: an Info | Records (| Ask) segmented control over
 /// the caller's Info view, the Records inspector, or the Ask chat. Mirrors

@@ -31,9 +31,10 @@ struct MacViewerPane: View {
     @State private var exporter = MacViewerExporter()
     @State private var editorModel = EditorModel()
     @State private var findModel = DrawingFindModel()
-    @State private var showInspector = false
+    // Inspector open state and tab persist per scene across relaunch (N2).
+    @SceneStorage("viewer.inspector.open") private var showInspector = false
     // Records inspector + step-through replay (F5c).
-    @State private var viewerInspectorTab: ViewerInspectorTab = .info
+    @SceneStorage("viewer.inspector.tab") private var viewerInspectorTab: ViewerInspectorTab = .info
     @State private var recordModel = RecordInspectorModel()
     @State private var replayDriver = RecordReplayDriver()
     // On-device AI (A1a): Describe + alt text + Ask.
