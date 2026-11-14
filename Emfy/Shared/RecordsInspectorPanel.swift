@@ -80,7 +80,7 @@ struct ViewerInspectorPanel<Info: View>: View {
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.secondary)
                 .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+                .minTouchTarget()
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close inspector")

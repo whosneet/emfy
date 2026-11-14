@@ -2241,7 +2241,7 @@ private struct PenPaletteSheet: View {
         NavigationStack {
             Form {
                 Section("Colour") {
-                    HStack(spacing: 16) {
+                    HStack(spacing: 8) {
                         ForEach(PenPalette.colors.indices, id: \.self) { i in
                             let swatch = PenPalette.colors[i]
                             Button {
@@ -2253,6 +2253,9 @@ private struct PenPaletteSheet: View {
                                     .overlay(
                                         Circle().strokeBorder(.primary, lineWidth: editorModel.penStyle.color == swatch.color ? 2.5 : 0)
                                     )
+                                    // A 44 pt-tall full-width hit area; the swatch glyph stays 34 pt (C5e A5).
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(swatch.name)

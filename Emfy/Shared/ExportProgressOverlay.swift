@@ -92,6 +92,18 @@ extension View {
         }
     }
 
+    /// Guarantees at least a 44×44 pt hit area on iOS (the HIG touch-target minimum) without
+    /// changing the glyph size; on macOS it only sets the content shape, where a pointer
+    /// handles the existing smaller controls (C5e A5).
+    @ViewBuilder
+    func minTouchTarget() -> some View {
+        #if os(iOS)
+        self.frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+        #else
+        self.contentShape(Rectangle())
+        #endif
+    }
+
     /// A minimum frame that applies on macOS only (C5e L1/L2). The metafile sheets size a
     /// window there; on iOS the same minimum would force the content wider than an iPhone
     /// and clip, so it is dropped and the sheet tracks its presentation detent instead.

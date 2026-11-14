@@ -62,7 +62,7 @@ struct EditorInspectorPanel<Info: View>: View {
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.secondary)
                 .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
+                .minTouchTarget()
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close inspector")
@@ -354,7 +354,8 @@ struct FormatSections: View {
                 // Explicit accent glyph: the inspector card forces labelColor, which is WHITE
                 // in the Mac dark inspector and vanishes on a white .bordered button (E3e review).
                 .foregroundStyle(enabled ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
-                .frame(width: 26, height: 22)
+                .frame(width: glyphWidth, height: glyphHeight)
+                .frame(maxWidth: isTouch ? .infinity : nil)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
@@ -362,6 +363,18 @@ struct FormatSections: View {
         .help(label)
         .accessibilityLabel(label)
     }
+
+    // Touch gets a full-width, 44 pt-tall align button so six fit the row without clipping;
+    // a pointer keeps the compact 26×22 glyph button (C5e A5).
+    #if os(iOS)
+    private var isTouch: Bool { true }
+    private var glyphWidth: CGFloat? { nil }
+    private var glyphHeight: CGFloat { 44 }
+    #else
+    private var isTouch: Bool { false }
+    private var glyphWidth: CGFloat? { 26 }
+    private var glyphHeight: CGFloat { 22 }
+    #endif
 
     // MARK: Opacity
 
@@ -489,6 +502,7 @@ struct LayersSection: View {
                 Image(systemName: layer.hidden ? "eye.slash" : "eye")
                     .foregroundStyle(layer.hidden ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                     .frame(width: 20)
+                    .minTouchTarget()
             }
             .buttonStyle(.borderless)
             .accessibilityLabel(layer.hidden ? "Show Layer" : "Hide Layer")
@@ -497,6 +511,7 @@ struct LayersSection: View {
                 Image(systemName: layer.locked ? "lock.fill" : "lock.open")
                     .foregroundStyle(layer.locked ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     .frame(width: 20)
+                    .minTouchTarget()
             }
             .buttonStyle(.borderless)
             .accessibilityLabel(layer.locked ? "Unlock Layer" : "Lock Layer")
