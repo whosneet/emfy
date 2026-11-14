@@ -91,11 +91,15 @@ struct FormatSections: View {
     @State private var liveStrokeWidth: Double = 1
 
     private var model: FormatInspectorModel {
-        guard session.editing == .editing, let scene = session.editingScene else {
+        guard session.editing == .editing, session.editingScene != nil else {
             return FormatInspectorModel(selected: [])
         }
+        // Resolve the selection through the per-editVersion id→element index (P12),
+        // so the panel doesn't re-flatten and re-filter `scene.elements` on every
+        // body pass. The model's derivations are order-independent.
         let ids = editorModel.selection.ids
-        return FormatInspectorModel(selected: scene.elements.filter { ids.contains($0.id) })
+        let selected = ids.compactMap { session.editingElement(id: $0) }
+        return FormatInspectorModel(selected: selected)
     }
 
     var body: some View {
@@ -198,7 +202,8 @@ struct FormatSections: View {
     #endif
 
     private func transform(of id: Int) -> CGAffineTransform {
-        session.editingScene?.elements.first { $0.id == id }?.transform ?? .identity
+        // The same per-editVersion index the model uses — no second O(N) scan (P12).
+        session.editingElement(id: id)?.transform ?? .identity
     }
 
     /// Pulls the live slider/field values from the model when the selection changes, so

@@ -512,6 +512,27 @@ final class DocumentSession {
         return history?.scene
     }
 
+    /// Version the cached id→element index was built for (−1 ⇒ none yet).
+    @ObservationIgnored private var elementIndexVersion = -1
+    /// Cached id→element index of the editing scene.
+    @ObservationIgnored private var elementIndexCache: [Int: Element] = [:]
+
+    /// The editing element with `id`, resolved through an id→element index rebuilt at
+    /// most once per `editVersion` (P12): the format inspector reads a selected
+    /// element's transform (and resolves the selection) without re-flattening and
+    /// re-scanning `scene.elements` on every body pass. Reading `editVersion` here
+    /// keeps callers observing edits. `nil` when read-only or the id is unknown.
+    func editingElement(id: Int) -> Element? {
+        let version = editVersion
+        if elementIndexVersion != version {
+            var map: [Int: Element] = [:]
+            editingScene?.forEachElement { map[$0.id] = $0 }
+            elementIndexCache = map
+            elementIndexVersion = version
+        }
+        return elementIndexCache[id]
+    }
+
     /// The first `n` editable element ids in z-order — the DEBUG screenshot hook's
     /// pre-selection (design call E2b-8).
     func firstEditableIDs(_ count: Int) -> Set<Int> {
