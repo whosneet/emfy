@@ -155,10 +155,14 @@ final class DrawingDescribeModel {
         let prompt = DrawingAIPrompt.describePrompt(for: bundle.context)
         phase = .streaming
         do {
+            let drawingText = bundle.toolData.textLines
             let stream = session.streamResponse(to: prompt)
             for try await snapshot in stream {
                 if Task.isCancelled { break }
-                text = DrawingAIOutputSanitiser.sanitise(snapshot.content)
+                // Faithfulness post-check (F3): strip quotation marks from any "quote" that
+                // isn't actually in the drawing's text, so an invented quote never shows.
+                text = DrawingDescribeGrounding.groundQuotes(
+                    in: DrawingAIOutputSanitiser.sanitise(snapshot.content), drawingText: drawingText)
             }
             phase = Task.isCancelled ? (text.isEmpty ? .idle : .done) : .done
         } catch {
@@ -174,10 +178,14 @@ final class DrawingDescribeModel {
         }
         phase = .streaming
         let request = AIProviderRequestBuilder.describe(bundle: bundle, model: config.model)
+        let drawingText = bundle.toolData.textLines
         do {
             let refused = try await DrawingAIProviderRun.stream(
                 service: service, config: config, request: request,
-                onText: { [weak self] value in self?.text = DrawingAIOutputSanitiser.sanitise(value) },
+                onText: { [weak self] value in
+                    self?.text = DrawingDescribeGrounding.groundQuotes(
+                        in: DrawingAIOutputSanitiser.sanitise(value), drawingText: drawingText)
+                },
                 onTool: { _ in })
             if refused {
                 phase = .failed("The provider declined this request.")
