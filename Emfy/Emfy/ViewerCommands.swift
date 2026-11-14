@@ -335,10 +335,23 @@ enum MacRecentsConfirmation {
         if plan.offersSaveCopy {
             switch response {
             case .alertFirstButtonReturn: saveCopiesThenClear(store: store)
-            case .alertSecondButtonReturn: store.clear()
+            case .alertSecondButtonReturn: guardedClear(store: store)
             default: break
             }
         } else if response == .alertFirstButtonReturn {
+            guardedClear(store: store)
+        }
+    }
+
+    /// Clears Recents, but first runs the front library window's save guard so an open, dirty
+    /// WMF/WMZ's edits aren't thrown away: a clean EMF autosaves and the clear proceeds; a
+    /// dirty WMF/WMZ (or a save error) raises its dialog on the document and aborts the clear
+    /// until the user decides (item 0 / R2U3). This NSAlert path bypasses the per-window
+    /// `RemovalCoordinator`, so it consults the shared `OpenCoordinator`'s front-window guard.
+    @MainActor
+    private static func guardedClear(store: RecentsStore) {
+        Task { @MainActor in
+            guard await OpenCoordinator.shared.frontClearGuard() else { return }
             store.clear()
         }
     }
@@ -364,7 +377,7 @@ enum MacRecentsConfirmation {
                 let destination = uniqueDestination(in: directory, name: entry.displayName)
                 if (try? data.write(to: destination)) != nil { savedAny = true }
             }
-            if savedAny { store.clear() }
+            if savedAny { guardedClear(store: store) }
         }
     }
 

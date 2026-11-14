@@ -429,6 +429,10 @@ struct LibraryWindow: View {
             coordinator.register(windowID: model.windowID) { entryID in
                 model.select(entryID)
             }
+            // The app-global Clear Menu / Settings Clear Recents run the front window's save
+            // guard before clearing, so a clear can't throw away an open, dirty WMF's edits
+            // (item 0 / R2U3).
+            coordinator.setClearGuard(windowID: model.windowID) { [model] in await model.guardClear() }
         }
         .onDisappear {
             coordinator.unregister(windowID: model.windowID)

@@ -21,6 +21,11 @@ final class OpenCoordinator {
 
     /// Each window's "select this entry" closure, keyed by the window's id.
     @ObservationIgnored private var selectors: [UUID: (UUID) -> Void] = [:]
+    /// Each window's Clear-Recents save guard, keyed by the window's id. The menu-bar
+    /// Clear Menu and the Settings Clear Recents are app-global and bypass the per-window
+    /// `RemovalCoordinator`; they run the FRONT window's guard here before clearing, so an
+    /// open, dirty WMF/WMZ isn't silently thrown away by a clear (item 0 / R2U3).
+    @ObservationIgnored private var clearGuards: [UUID: () async -> Bool] = [:]
     /// Window ids in activation order; the last is the front (key) window.
     @ObservationIgnored private var order: [UUID] = []
     /// Entries awaiting a window — populated only when none is registered yet
@@ -42,7 +47,22 @@ final class OpenCoordinator {
 
     func unregister(windowID: UUID) {
         selectors[windowID] = nil
+        clearGuards[windowID] = nil
         order.removeAll { $0 == windowID }
+    }
+
+    /// A window installs its Clear-Recents save guard (its `LibraryWindowModel.guardClear`).
+    /// Removed by `unregister` when the window closes.
+    func setClearGuard(windowID: UUID, _ guardClear: @escaping () async -> Bool) {
+        clearGuards[windowID] = guardClear
+    }
+
+    /// Runs the front window's Clear-Recents save guard, returning whether the clear may
+    /// proceed. With no window (or none with a guard installed) the clear proceeds — there
+    /// is no open document whose edits a clear could lose (item 0 / R2U3).
+    func frontClearGuard() async -> Bool {
+        guard let id = frontWindowID, let guardClear = clearGuards[id] else { return true }
+        return await guardClear()
     }
 
     /// Marks a window front when it becomes key, so external opens route to it.

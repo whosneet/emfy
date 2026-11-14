@@ -1254,6 +1254,28 @@ private final class FlakyWrite: @unchecked Sendable {
         let model = LibraryWindowModel()
         #expect(await model.guardClear())           // nothing selected ⇒ nothing to lose
     }
+
+    // The app-global Clear Menu / Settings Clear Recents route through the FRONT window's
+    // guard (item 0 / R2U3): a front window holding a dirty WMF aborts the clear.
+    @Test func frontClearGuardRunsTheFrontWindowsGuard() async {
+        let coordinator = OpenCoordinator()
+        let a = UUID(), b = UUID()
+        coordinator.register(windowID: a) { _ in }
+        coordinator.setClearGuard(windowID: a) { false }   // a: a dirty WMF holds the clear
+        coordinator.register(windowID: b) { _ in }         // registering b makes it front
+        coordinator.setClearGuard(windowID: b) { true }    // b: clean ⇒ permits
+        #expect(await coordinator.frontClearGuard())        // front is b ⇒ permitted
+        coordinator.markFront(windowID: a)                  // a becomes front
+        #expect(await coordinator.frontClearGuard() == false) // front is a ⇒ aborted
+        coordinator.unregister(windowID: a)                 // a closes; b is front again
+        #expect(await coordinator.frontClearGuard())        // permitted
+    }
+
+    // No window installed ⇒ the clear proceeds (nothing open to lose).
+    @Test func frontClearGuardPermitsWithNoWindow() async {
+        let coordinator = OpenCoordinator()
+        #expect(await coordinator.frontClearGuard())
+    }
 }
 
 // MARK: - Store pruning + real-file round trip
