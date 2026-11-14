@@ -55,9 +55,14 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
         // Anything past a valid header renders best-effort. A broken gzip
         // wrapper, an unrecognised format, or a header-less input yields the
         // plain message below instead of a crash or a silent blank canvas.
+        // A sandboxed extension caps how many records it parses and translates
+        // (M1 / C5f2): a crafted metafile with millions of records renders its
+        // best partial output rather than jetsam-killing the process.
+        let prepareOptions = RenderOptions(
+            playbackRecordBudget: SharedRenderSettings.extensionPlaybackRecordBudget)
         guard let data = try? Data(contentsOf: request.fileURL, options: .mappedIfSafe),
               let opened = try? OpenedMetafile.open(data),
-              let prepared = MetafileRenderer.prepare(opened) else {
+              let prepared = MetafileRenderer.prepare(opened, options: prepareOptions) else {
             return Self.unreadableReply()
         }
 

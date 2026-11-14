@@ -23,7 +23,12 @@ final class ThumbnailProvider: QLThumbnailProvider {
         do {
             let data = try Data(contentsOf: request.fileURL, options: .mappedIfSafe)
             let opened = try OpenedMetafile.open(data)
-            guard let result = MetafileRenderer.prepare(opened) else {
+            // A sandboxed extension caps how many records it parses and translates
+            // (M1 / C5f2): a crafted metafile renders its best partial output
+            // rather than jetsam-killing the process.
+            let prepareOptions = RenderOptions(
+                playbackRecordBudget: SharedRenderSettings.extensionPlaybackRecordBudget)
+            guard let result = MetafileRenderer.prepare(opened, options: prepareOptions) else {
                 throw CocoaError(.fileReadCorruptFile)
             }
             prepared = result

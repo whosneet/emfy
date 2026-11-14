@@ -52,6 +52,29 @@ struct SharedRenderSettings: Sendable, Equatable {
         self.previewSharpness = previewSharpness
     }
 
+    /// The per-render record budget a sandboxed Quick Look preview / thumbnail
+    /// extension passes as `RenderOptions.playbackRecordBudget` (M1 / C5f2). A
+    /// crafted metafile with millions of tiny records otherwise drives
+    /// `WMFTranslator.translate` (≈152 bytes per record, ≈356 MiB for a 1M-record
+    /// WMF) to a jetsam-killing footprint; with a budget the extension parses and
+    /// translates only the first N records and renders that best partial output
+    /// (primer §8), never a crash or a killed process.
+    ///
+    /// Measured (EMFKit MetafileMemoryTests): a 1M-record WMF prepared at 25,000
+    /// costs ≈3 MiB resident (translate ≈152 B × N plus a ~0.4 MB record array),
+    /// versus ≈356 MiB uncapped — ample room under the extension ceiling beside the
+    /// ≤19 MB iOS preview bitmap. iOS extensions are jetsam-killed far below the
+    /// Mac's budget, so iOS takes the smaller value; the Mac, with far more
+    /// headroom, keeps higher fidelity for genuinely large (not crafted) files. A
+    /// real metafile carries hundreds to low-thousands of records, so neither
+    /// budget degrades a real file — only a pathological one renders partially.
+    /// The main app passes no budget (`nil`) and keeps full fidelity.
+    #if os(iOS)
+    static let extensionPlaybackRecordBudget = 25_000
+    #else
+    static let extensionPlaybackRecordBudget = 200_000
+    #endif
+
     /// Reads the shared suite once. A `nil` suite (unentitled, or the container
     /// couldn't resolve) yields the built-in defaults.
     static func load(from defaults: UserDefaults?) -> SharedRenderSettings {

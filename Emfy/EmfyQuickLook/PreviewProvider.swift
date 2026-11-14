@@ -37,7 +37,12 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
         // header-less input — Quick Look then shows the generic icon. Anything
         // past a valid header renders.
         let opened = try OpenedMetafile.open(data)
-        guard let prepared = MetafileRenderer.prepare(opened) else {
+        // A sandboxed extension caps how many records it parses and translates
+        // (M1 / C5f2): a crafted metafile renders its best partial output rather
+        // than jetsam-killing the process.
+        let prepareOptions = RenderOptions(
+            playbackRecordBudget: SharedRenderSettings.extensionPlaybackRecordBudget)
+        guard let prepared = MetafileRenderer.prepare(opened, options: prepareOptions) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         // The user's Rendering + Quick Look choices from the App Group, read once
