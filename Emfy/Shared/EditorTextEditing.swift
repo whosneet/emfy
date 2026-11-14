@@ -147,6 +147,11 @@ struct FontFamilyField: View {
                     .buttonStyle(.plain)
                 }
                 .searchable(text: $query, placement: .automatic, prompt: "Fonts")
+                .overlay {
+                    if filteredFamilies.isEmpty {
+                        ContentUnavailableView.search(text: query)   // C5e U5
+                    }
+                }
                 .navigationTitle("Font")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
