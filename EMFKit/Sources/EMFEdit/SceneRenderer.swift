@@ -50,6 +50,15 @@ public enum SceneRenderer {
         /// page bounds), so editing twenty scattered elements synthesises each at most
         /// once per edit rather than once per tile.
         let synthesisCache = SynthesisCache()
+
+        /// Drops the resident decoded-image memory of both image caches (M-2): the
+        /// iOS editor canvas calls this on a memory warning so the inserted-image and
+        /// imported-DIB pixels are released before the app/extension is jetsam-killed.
+        /// The next tile simply re-decodes; the parsed source and synthesis cache stay.
+        public func purgeImageCaches() {
+            imageCache.purge()
+            dibCache.purge()
+        }
     }
 
     /// A thread-safe, LRU-bounded cache of the parsed throwaway `EMFFile` an edited or
@@ -130,11 +139,33 @@ public enum SceneRenderer {
             let id: Int
             let budgetW: Int
             let budgetH: Int
+            /// A fingerprint of the image CONTENT (M-1). An element id is reused after
+            /// an undo — insert image A at id 5, undo, insert image B, which takes id 5
+            /// again — so a key of (id, budget) alone would return A's stale pixels for
+            /// B (A shown on screen, B saved to the file). Folding a cheap hash of the
+            /// image's defining bytes into the key makes a different image a different
+            /// key, so a reused id never resolves to the wrong pixels.
+            let content: Int
+
+            init(id: Int, budgetW: Int, budgetH: Int, content: Int = 0) {
+                self.id = id
+                self.budgetW = budgetW
+                self.budgetH = budgetH
+                self.content = content
+            }
         }
 
         private struct Entry {
             let image: CGImage
             let cost: Int
+        }
+
+        /// A just-finished decode result that was NOT cached (nil, or over the memory
+        /// budget), held only long enough to hand to the waiters parked on this key when
+        /// it finished (M-3), so none of them re-runs the same failing/over-budget decode.
+        private struct Pending {
+            let image: CGImage?
+            var remaining: Int
         }
 
         /// The per-session memory budget, matching `DIBImageCache.defaultMemoryBudget`.
@@ -145,6 +176,11 @@ public enum SceneRenderer {
         private var order: [Key] = []
         private var currentCost = 0
         private var inFlight: Set<Key> = []
+        /// How many callers are currently parked in `condition.wait()` for each key, so
+        /// a finishing decoder knows how many waiters to hand a non-cached result to (M-3).
+        private var waiters: [Key: Int] = [:]
+        /// Non-cached results waiting to be consumed by the parked waiters (M-3).
+        private var pending: [Key: Pending] = [:]
         private let memoryBudget: Int
 
         init(memoryBudget: Int = ImageDecodeCache.defaultMemoryBudget) {
@@ -152,18 +188,20 @@ public enum SceneRenderer {
         }
 
         /// The decoded `CGImage` for `element`, downsampled to `budget` (the
-        /// destination footprint), decoded once per (id, budget) and memoised; nil
-        /// when the element carries no decodable image.
+        /// destination footprint), decoded once per (id, budget, content) and memoised;
+        /// nil when the element carries no decodable image.
         func image(for element: Element, budget: (w: Int, h: Int)?) -> CGImage? {
-            let key = Key(id: element.id, budgetW: budget?.w ?? 0, budgetH: budget?.h ?? 0)
+            let key = Key(id: element.id, budgetW: budget?.w ?? 0, budgetH: budget?.h ?? 0,
+                          content: ImageDecodeCache.contentFingerprint(of: element))
             return cached(forKey: key) { ImageDecodeCache.decode(element, budget: budget) }
         }
 
         /// The caching core (also the test seam): returns the cached image for `key`
         /// or runs `decode` exactly once. The decode runs with the lock RELEASED;
-        /// concurrent callers for the same key wait and share the one decode. An
-        /// over-budget result is returned uncached, leaving the resident set intact
-        /// (same contract as `DIBImageCache`).
+        /// concurrent callers for the same key wait and share the one decode — including
+        /// a nil or over-budget result, which is handed to the parked waiters rather than
+        /// re-decoded by each (M-3). An over-budget result is returned uncached, leaving
+        /// the resident set intact (same contract as `DIBImageCache`).
         func cached(forKey key: Key, decode: () -> CGImage?) -> CGImage? {
             condition.lock()
             while true {
@@ -172,8 +210,20 @@ public enum SceneRenderer {
                     condition.unlock()
                     return entry.image
                 }
+                // A waiter woke to a non-cached result the decoder posted for it (M-3):
+                // take it, decrement the hand-out count, and never re-decode.
+                if var waiting = pending[key] {
+                    waiting.remaining -= 1
+                    let image = waiting.image
+                    if waiting.remaining <= 0 { pending[key] = nil } else { pending[key] = waiting }
+                    condition.unlock()
+                    return image
+                }
                 if inFlight.contains(key) {
+                    waiters[key, default: 0] += 1
                     condition.wait()
+                    waiters[key, default: 1] -= 1
+                    if (waiters[key] ?? 0) <= 0 { waiters[key] = nil }
                     continue
                 }
                 inFlight.insert(key)
@@ -185,13 +235,79 @@ public enum SceneRenderer {
 
             condition.lock()
             inFlight.remove(key)
+            var didCache = false
             if let decoded {
                 let cost = max(1, decoded.bytesPerRow * decoded.height)
-                if cost <= memoryBudget { insert(key, Entry(image: decoded, cost: cost)) }
+                if cost <= memoryBudget { insert(key, Entry(image: decoded, cost: cost)); didCache = true }
+            }
+            // Not cached (nil or over-budget): hand it to the waiters parked on this key
+            // right now, so none of them repeats the decode (M-3). With no waiters there
+            // is nothing to post — the next fresh caller decodes again, as before.
+            if !didCache, let parked = waiters[key], parked > 0 {
+                pending[key] = Pending(image: decoded, remaining: parked)
             }
             condition.broadcast()
             condition.unlock()
             return decoded
+        }
+
+        /// Drops every cached image and pending hand-out (M-2), freeing the resident
+        /// decode memory — called by the iOS editor canvas on a memory warning. In-flight
+        /// decodes are left to finish; only the resident set is released.
+        func purge() {
+            condition.lock()
+            entries.removeAll()
+            order.removeAll()
+            pending.removeAll()
+            currentCost = 0
+            condition.unlock()
+        }
+
+        /// A cheap, session-stable fingerprint of an element's image CONTENT (M-1):
+        /// dimensions, byte count and a bounded sample of the defining bytes. Bounded so
+        /// a large inserted photo fingerprints in O(1) — the key is recomputed on every
+        /// cache lookup, so it must not hash megabytes. Two genuinely different user
+        /// images effectively always differ in the count or a sampled byte.
+        static func contentFingerprint(of element: Element) -> Int {
+            var hasher = Hasher()
+            if let dib = element.image?.sourceDIB {
+                hasher.combine(0 as UInt8)
+                hasher.combine(dib.width); hasher.combine(dib.height); hasher.combine(dib.bitCount)
+                if case .pixels(let bytes, let stride, let palette) = dib.content {
+                    hasher.combine(stride); hasher.combine(palette.count)
+                    sample(bytes, into: &hasher)
+                }
+            } else if let plus = element.image?.emfPlusImage {
+                hasher.combine(1 as UInt8)
+                switch plus.content {
+                case .bitmap(let header, let data):
+                    hasher.combine(header.width); hasher.combine(header.height)
+                    hasher.combine(header.pixelFormat); hasher.combine(header.bitmapDataType)
+                    sample(data, into: &hasher)
+                case .metafile(let header, let data):
+                    hasher.combine(header.metafileType)
+                    sample(data, into: &hasher)
+                }
+            } else {
+                hasher.combine(2 as UInt8)
+                hasher.combine(Int((element.image?.destRectDevice.width ?? 0).rounded()))
+                hasher.combine(Int((element.image?.destRectDevice.height ?? 0).rounded()))
+            }
+            return hasher.finalize()
+        }
+
+        /// Folds the byte count and up to `maxSamples` strided bytes of `data` into
+        /// `hasher` — a bounded, O(1) content sample.
+        private static func sample(_ data: Data, into hasher: inout Hasher) {
+            hasher.combine(data.count)
+            guard !data.isEmpty else { return }
+            let maxSamples = 256
+            let step = Swift.max(1, data.count / maxSamples)
+            var offset = 0
+            while offset < data.count {
+                hasher.combine(data[data.index(data.startIndex, offsetBy: offset)])
+                offset += step
+            }
         }
 
         /// Decodes `element`'s image, downsampled to `budget` when the native pixels

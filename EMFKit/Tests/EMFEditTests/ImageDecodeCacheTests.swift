@@ -119,6 +119,96 @@ struct ImageDecodeCacheTests {
         #expect(cache.count == 1)
     }
 
+    @Test("a reused element id with different content returns the new pixels, not the old (M-1)")
+    func reusedIDDifferentContentNotStale() throws {
+        let cache = SceneRenderer.ImageDecodeCache()
+        // Insert image A at id 0, then (after an undo) a DIFFERENT image B at the SAME
+        // id 0 — the id is reused. With content in the key, B must decode to B's pixels,
+        // never A's stale cached pixels.
+        let elementA = try makeImageElement(image(10, 10), id: 0)
+        let elementB = try makeImageElement(image(20, 30), id: 0)   // different content + size
+
+        let a = try #require(cache.image(for: elementA, budget: nil))
+        let b = try #require(cache.image(for: elementB, budget: nil))
+        #expect(a.width == 10 && a.height == 10)
+        #expect(b.width == 20 && b.height == 30, "the reused id must return B's pixels, not A's")
+        #expect(cache.count == 2, "A and B are distinct keys despite sharing an id")
+
+        // The fingerprints themselves differ, and match within the same content.
+        let fa = SceneRenderer.ImageDecodeCache.contentFingerprint(of: elementA)
+        let fb = SceneRenderer.ImageDecodeCache.contentFingerprint(of: elementB)
+        #expect(fa != fb)
+        #expect(fa == SceneRenderer.ImageDecodeCache.contentFingerprint(of: try makeImageElement(image(10, 10), id: 7)),
+                "the same content fingerprints equal regardless of id")
+    }
+
+    @Test("purge drops the resident set (M-2)")
+    func purgeClearsResidentSet() throws {
+        let cache = SceneRenderer.ImageDecodeCache()
+        let img = try image(8, 8)
+        _ = cache.cached(forKey: key(0)) { img }
+        _ = cache.cached(forKey: key(1)) { img }
+        #expect(cache.count == 2)
+        #expect(cache.residentCost > 0)
+        cache.purge()
+        #expect(cache.count == 0)
+        #expect(cache.residentCost == 0)
+    }
+
+    /// Runs `decoded` (nil or over-budget) through many concurrent `cached` calls that
+    /// all park as waiters on ONE in-flight decode, and asserts the decode runs exactly
+    /// once — the result is handed to every parked waiter, not re-run by each (M-3). A
+    /// latch holds the single decode open until every other thread has parked, so the
+    /// sharing is deterministic rather than pool-schedule dependent.
+    private func assertNonCachedSharedWithWaiters(
+        cache: SceneRenderer.ImageDecodeCache, decoded: CGImage?
+    ) {
+        let threads = 32
+        let decodeCount = Counter()
+        let started = DispatchSemaphore(value: 0)   // the one decoder has entered
+        let release = DispatchSemaphore(value: 0)    // held until all others have parked
+        let group = DispatchGroup()
+        for _ in 0 ..< threads {
+            group.enter()
+            DispatchQueue.global().async {
+                _ = cache.cached(forKey: self.key(0)) {
+                    decodeCount.increment()
+                    started.signal()
+                    release.wait()        // keep this decode in-flight so the rest park
+                    return decoded
+                }
+                group.leave()
+            }
+        }
+        started.wait()                    // the single decoder is now in-flight
+        Thread.sleep(forTimeInterval: 0.2) // let the other 31 threads reach condition.wait()
+        release.signal()                  // let the one decode finish and fan out to waiters
+        #expect(group.wait(timeout: .now() + 5) == .success)
+        #expect(decodeCount.value == 1, "the non-cached decode must be handed to the parked waiters, not re-run by each (M-3)")
+        #expect(cache.count == 0, "a nil / over-budget result is never cached")
+    }
+
+    @Test("concurrent waiters on a NIL-decode key share the one decode (M-3)")
+    func concurrentNilDecodeSharedWithWaiters() {
+        assertNonCachedSharedWithWaiters(cache: SceneRenderer.ImageDecodeCache(), decoded: nil)
+    }
+
+    @Test("concurrent waiters on an OVER-BUDGET key share the one decode (M-3)")
+    func concurrentOverBudgetSharedWithWaiters() throws {
+        let big = try image(32, 32)   // 4096 bytes, far over the 512-byte budget
+        assertNonCachedSharedWithWaiters(cache: SceneRenderer.ImageDecodeCache(memoryBudget: 512), decoded: big)
+    }
+
+    /// An `.image` element at `id` holding `cg` as an inserted (compressed-PNG) image.
+    private func makeImageElement(_ cg: CGImage, id: Int) throws -> Element {
+        let plus = try #require(SceneImageCoding.compressedPNGImage(fromCGImage: cg))
+        let image = SceneImage(emfPlusImage: plus,
+                               destRectDevice: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        return Element(id: id, kind: .image, geometryDevice: ScenePath(), transform: .identity,
+                       style: SceneStyle(), image: image,
+                       provenance: Provenance(sourceRecordIndices: [], edited: false))
+    }
+
     @Test("decode downsamples a large image to its budget, never upsampling")
     func decodeDownsamplesToBudget() throws {
         // A 400×300 inserted image shown at a 100×75 footprint decodes to ≤ the budget.
