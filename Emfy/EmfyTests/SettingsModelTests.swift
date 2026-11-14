@@ -667,12 +667,10 @@ struct SettingsModelTests {
         let (dir, store, settings, suite, cap) = try await seededCapScenario(count: 12)
         defer { try? FileManager.default.removeItem(at: dir); UserDefaults.standard.removePersistentDomain(forName: suite) }
 
-        // Lowering 50 → 10 over 12 owned copies: no confirmation, no exporter, applied
-        // at once — and every owned drawing survives (ST3).
+        // Lowering 50 → 10 over 12 owned copies: applied at once (the old confirmation and
+        // exporter were removed under ST3) — and every owned drawing survives.
         cap.handleChange(from: .fifty, to: .ten, store: store)
         await store.waitForPersistenceForTesting()
-        #expect(cap.pending == nil)
-        #expect(cap.isExporting == false)
         #expect(store.entries.count == 12)        // owned copies never evicted
     }
 

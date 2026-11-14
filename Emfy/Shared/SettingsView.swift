@@ -574,7 +574,6 @@ private struct MacGeneralTab: View {
         .onChange(of: settings.showDrawingsInSpotlight) { _, _ in
             SpotlightService.shared.settingsChanged()
         }
-        .capReduction(cap, store: store, settings: settings)
     }
 }
 
@@ -1022,7 +1021,6 @@ private struct IOSSettingsForm: View {
         .onChange(of: settings.showDrawingsInSpotlight) { _, _ in
             SpotlightService.shared.settingsChanged()
         }
-        .capReduction(cap, store: store, settings: settings)
         #if DEBUG
         // The `iphone-settings` screenshot script scrolls to the Editing section so the
         // capture shows the Full-editor toggle and its footer (E4 verification d).
