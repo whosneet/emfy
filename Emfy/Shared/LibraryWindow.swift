@@ -410,6 +410,10 @@ struct LibraryWindow: View {
             .environment(settings)
             .environment(toastCenter)
             .environment(removal)
+            // The AI provider store is read as a non-optional @Environment by the AI
+            // settings and inspector views; inject it on every column/pushed-viewer path
+            // too (falling back to the shared instance) so a read can't trap (U3).
+            .environment(aiProviders ?? AIProviderStore.shared)
     }
 
     // MARK: - Detail column

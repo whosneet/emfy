@@ -117,7 +117,10 @@ private struct AIProvidersList: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .sheet(item: $editing) { intent in
+            // A sheet is a separate hosting view; re-inject the provider store so the
+            // editor's non-optional @Environment read can't trap (U3).
             AIProviderEditorSheet(config: intent.config)
+                .environment(providers)
         }
     }
 }

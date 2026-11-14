@@ -74,6 +74,10 @@ extension View {
                 SettingsView()
                     .environment(store)
                     .environment(settings)
+                    // The AI providers section reads AIProviderStore as a non-optional
+                    // environment value; a sheet is a separate hosting view, so inject it
+                    // here too or that read traps (U3).
+                    .environment(AIProviderStore.shared)
             }
         }
     }
