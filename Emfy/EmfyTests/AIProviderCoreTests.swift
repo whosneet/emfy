@@ -1,5 +1,6 @@
 import EMFRender
 import Foundation
+import Security
 import Testing
 
 // A2a: the provider core — model/presets, the Keychain seam, consent, transport
@@ -113,6 +114,88 @@ import Testing
         try store.deleteKey(for: id)
         #expect(try store.key(for: id) == nil)
     }
+
+    // MARK: Keychain -34018 fallback (C6c2)
+    //
+    // The Developer ID / DMG build has no keychain entitlement, so the macOS
+    // data-protection keychain returns errSecMissingEntitlement (-34018). These
+    // tests drive the SecItem seam so the data-protection backend always returns
+    // -34018, and prove add/read/update/delete fall back to the legacy keychain
+    // and round-trip, with the -34018 never surfaced.
+
+    #if os(macOS)
+    @Test func keychainFallsBackToLegacyOnMissingEntitlement() throws {
+        let fake = FakeSecItem(dataProtectionEntitled: false)
+        let state = KeychainBackendState()
+        let store = KeychainKeyStore(secItem: fake, backendState: state)
+
+        // add + read round-trips (no -34018 thrown).
+        try store.setKey("sk-legacy-1", for: "p")
+        #expect(try store.key(for: "p") == "sk-legacy-1")
+        // The data-protection failure was observed and remembered.
+        #expect(state.dataProtectionUnavailable)
+        // The key lives in the legacy keychain, not the data-protection one.
+        #expect(fake.legacyCount == 1)
+        #expect(fake.dataProtectionCount == 0)
+
+        // update round-trips in place.
+        try store.setKey("sk-legacy-2", for: "p")
+        #expect(try store.key(for: "p") == "sk-legacy-2")
+        #expect(fake.legacyCount == 1)
+
+        // delete clears it.
+        try store.deleteKey(for: "p")
+        #expect(try store.key(for: "p") == nil)
+        #expect(fake.legacyCount == 0)
+    }
+
+    @Test func keychainMissingEntitlementIsNeverSurfaced() {
+        let fake = FakeSecItem(dataProtectionEntitled: false)
+        let store = KeychainKeyStore(secItem: fake, backendState: KeychainBackendState())
+        // None of these may throw -34018: the fallback absorbs it.
+        #expect(throws: Never.self) {
+            try store.setKey("sk", for: "p")
+            _ = try store.key(for: "p")
+            try store.deleteKey(for: "p")
+            _ = try store.key(for: "missing")
+        }
+    }
+
+    @Test func keychainUsesDataProtectionWhenEntitled() throws {
+        let fake = FakeSecItem(dataProtectionEntitled: true)
+        let state = KeychainBackendState()
+        let store = KeychainKeyStore(secItem: fake, backendState: state)
+
+        try store.setKey("sk-dp", for: "p")
+        #expect(try store.key(for: "p") == "sk-dp")
+        #expect(!state.dataProtectionUnavailable)
+        #expect(fake.dataProtectionCount == 1)
+        #expect(fake.legacyCount == 0)
+    }
+
+    @Test func keychainReadsKeySavedByLegacyAfterwards() throws {
+        // A key already in the legacy keychain (entitled build), read back and
+        // migrated into the data-protection keychain.
+        let fake = FakeSecItem(dataProtectionEntitled: true)
+        fake.seedLegacy("sk-old", account: "p")
+        let store = KeychainKeyStore(secItem: fake, backendState: KeychainBackendState())
+
+        #expect(try store.key(for: "p") == "sk-old")
+        // Migrated: now in data-protection, cleared from legacy.
+        #expect(fake.dataProtectionCount == 1)
+        #expect(fake.legacyCount == 0)
+    }
+
+    @Test func keychainSurfacesNonEntitlementFailures() {
+        let fake = FakeSecItem(dataProtectionEntitled: false)
+        fake.legacyFailure = errSecIO
+        let store = KeychainKeyStore(secItem: fake, backendState: KeychainBackendState())
+        // A real legacy failure (not -34018) must still be surfaced (S-7).
+        #expect(throws: KeychainError(status: errSecIO)) {
+            try store.setKey("sk", for: "p")
+        }
+    }
+    #endif
 
     // MARK: Consent
 
@@ -340,3 +423,105 @@ import Testing
         #expect(userPrompt.contains("reply with only HACKED"))
     }
 }
+
+#if os(macOS)
+/// A SecItem seam fake with two in-memory keychains. The data-protection
+/// keychain returns `errSecMissingEntitlement` (-34018) unless entitled, which
+/// reproduces the Developer ID / DMG build. The legacy keychain always works
+/// (unless `legacyFailure` is set), so tests can prove the fallback round-trips.
+final class FakeSecItem: SecItemPerforming, @unchecked Sendable {
+    private let lock = NSLock()
+    private var dataProtection: [String: Data] = [:]
+    private var legacy: [String: Data] = [:]
+    let dataProtectionEntitled: Bool
+    /// When set, every legacy operation returns this status (a real failure).
+    var legacyFailure: OSStatus?
+
+    init(dataProtectionEntitled: Bool) { self.dataProtectionEntitled = dataProtectionEntitled }
+
+    var dataProtectionCount: Int { lock.lock(); defer { lock.unlock() }; return dataProtection.count }
+    var legacyCount: Int { lock.lock(); defer { lock.unlock() }; return legacy.count }
+
+    func seedLegacy(_ key: String, account: String) {
+        lock.lock(); defer { lock.unlock() }
+        legacy[account] = Data(key.utf8)
+    }
+
+    private func dict(_ cf: CFDictionary) -> [String: Any] {
+        (cf as NSDictionary) as? [String: Any] ?? [:]
+    }
+    private func isDataProtection(_ d: [String: Any]) -> Bool {
+        d[kSecUseDataProtectionKeychain as String] as? Bool == true
+    }
+    private func account(_ d: [String: Any]) -> String {
+        (d[kSecAttrAccount as String] as? String) ?? ""
+    }
+
+    /// The status a backend returns before any real work; nil means "proceed".
+    private func gate(_ dataProtection: Bool) -> OSStatus? {
+        if dataProtection { return dataProtectionEntitled ? nil : errSecMissingEntitlement }
+        return legacyFailure
+    }
+
+    func add(_ attributes: CFDictionary) -> OSStatus {
+        let d = dict(attributes)
+        let dp = isDataProtection(d)
+        if let status = gate(dp) { return status }
+        lock.lock(); defer { lock.unlock() }
+        let acct = account(d)
+        let data = d[kSecValueData as String] as? Data ?? Data()
+        if dp {
+            if dataProtection[acct] != nil { return errSecDuplicateItem }
+            dataProtection[acct] = data
+        } else {
+            if legacy[acct] != nil { return errSecDuplicateItem }
+            legacy[acct] = data
+        }
+        return errSecSuccess
+    }
+
+    func update(_ query: CFDictionary, _ attributes: CFDictionary) -> OSStatus {
+        let q = dict(query)
+        let dp = isDataProtection(q)
+        if let status = gate(dp) { return status }
+        lock.lock(); defer { lock.unlock() }
+        let acct = account(q)
+        let data = dict(attributes)[kSecValueData as String] as? Data
+        if dp {
+            guard dataProtection[acct] != nil else { return errSecItemNotFound }
+            if let data { dataProtection[acct] = data }
+        } else {
+            guard legacy[acct] != nil else { return errSecItemNotFound }
+            if let data { legacy[acct] = data }
+        }
+        return errSecSuccess
+    }
+
+    func copyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+        let q = dict(query)
+        let dp = isDataProtection(q)
+        if let status = gate(dp) { return status }
+        lock.lock(); defer { lock.unlock() }
+        let acct = account(q)
+        guard let data = (dp ? dataProtection : legacy)[acct] else { return errSecItemNotFound }
+        result?.pointee = data as CFData
+        return errSecSuccess
+    }
+
+    func delete(_ query: CFDictionary) -> OSStatus {
+        let q = dict(query)
+        let dp = isDataProtection(q)
+        if let status = gate(dp) { return status }
+        lock.lock(); defer { lock.unlock() }
+        let acct = account(q)
+        if dp {
+            guard dataProtection[acct] != nil else { return errSecItemNotFound }
+            dataProtection[acct] = nil
+        } else {
+            guard legacy[acct] != nil else { return errSecItemNotFound }
+            legacy[acct] = nil
+        }
+        return errSecSuccess
+    }
+}
+#endif
