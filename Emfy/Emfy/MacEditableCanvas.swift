@@ -728,8 +728,9 @@ struct MacEditableCanvas: NSViewRepresentable {
             EditorAccessibility.descriptors(in: scene, selection: selection)
         }
 
-        /// Cycles the selection through the unlocked elements in reading order (Tab /
-        /// Shift-Tab keyboard selection, C5g). Returns whether it was handled.
+        /// Cycles the selection through the unlocked elements in reading order (Option-Tab /
+        /// Option-Shift-Tab keyboard selection, C5g; plain Tab stays with the focus loop).
+        /// Returns whether it was handled.
         @discardableResult
         func cycleSelection(forward: Bool) -> Bool {
             guard let id = EditorAccessibility.cycleSelection(from: selection.ids, forward: forward, in: scene) else { return false }
@@ -1035,8 +1036,13 @@ struct MacEditableCanvas: NSViewRepresentable {
                 if !selection.isEmpty { deleteSelection(); return true }
                 return false
             }
-            if event.keyCode == 48 {   // Tab / Shift-Tab cycles the selection (keyboard a11y, C5g)
-                return cycleSelection(forward: !event.modifierFlags.contains(.shift))
+            // ⌥Tab / ⌥⇧Tab cycle the selection (keyboard a11y, C5g). Plain Tab is left to
+            // the normal focus loop so the canvas is never a keyboard trap (WCAG 2.1.2).
+            if let forward = EditorAccessibility.selectionCycleDirection(
+                keyCode: event.keyCode,
+                optionDown: event.modifierFlags.contains(.option),
+                shiftDown: event.modifierFlags.contains(.shift)) {
+                return cycleSelection(forward: forward)
             }
             let large = event.modifierFlags.contains(.shift)
             // Arrow direction in VIEW space, then into device via the mapping.

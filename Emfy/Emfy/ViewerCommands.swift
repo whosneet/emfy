@@ -175,6 +175,15 @@ struct EditMenuCommands: Commands {
             Button("Deselect All") { actions?.deselectElements?() }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
                 .disabled(actions?.deselectElements == nil)
+            // Keyboard selection cycling (C5g / audit A1): ⌥Tab / ⌥⇧Tab step the selection
+            // through the elements in reading order. Plain Tab is deliberately NOT used —
+            // it stays with the focus loop so the canvas is not a keyboard trap (WCAG 2.1.2).
+            Button("Select Next Element") { actions?.selectNextElement?() }
+                .keyboardShortcut(.tab, modifiers: .option)
+                .disabled(actions?.selectNextElement == nil)
+            Button("Select Previous Element") { actions?.selectPreviousElement?() }
+                .keyboardShortcut(.tab, modifiers: [.option, .shift])
+                .disabled(actions?.selectPreviousElement == nil)
             Divider()
             // Insert ▸ Image… (E3c). ⇧⌘I is free; it opens an images-only NSOpenPanel.
             Button("Insert Image…") { actions?.insertImage?() }

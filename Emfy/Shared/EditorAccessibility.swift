@@ -302,10 +302,19 @@ enum EditorAccessibility {
 
     // MARK: - Selection cycling (keyboard)
 
-    /// The element id to select when cycling the selection with Tab / Shift-Tab through
-    /// the unlocked elements in reading order (macOS keyboard selection). `forward`
-    /// advances and wraps; the first/last element is chosen when nothing is selected
-    /// yet. `nil` when there is nothing selectable.
+    /// The selection-cycle direction for a key event, or `nil` when the key is NOT the
+    /// cycle shortcut — so plain Tab falls straight through to the normal focus loop and
+    /// the canvas is never a keyboard trap (WCAG 2.1.2). The shortcut is Option-Tab
+    /// (forward) / Option-Shift-Tab (backward); `keyCode` 48 is Tab.
+    static func selectionCycleDirection(keyCode: UInt16, optionDown: Bool, shiftDown: Bool) -> Bool? {
+        guard keyCode == 48, optionDown else { return nil }
+        return !shiftDown
+    }
+
+    /// The element id to select when cycling the selection with Option-Tab /
+    /// Option-Shift-Tab through the unlocked elements in reading order (macOS keyboard
+    /// selection). `forward` advances and wraps; the first/last element is chosen when
+    /// nothing is selected yet. `nil` when there is nothing selectable.
     static func cycleSelection(from current: Set<Int>, forward: Bool, in scene: Scene) -> Int? {
         let order = descriptors(in: scene, selection: EditorSelection(current))
             .filter { !$0.isLocked }

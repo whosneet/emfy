@@ -304,4 +304,21 @@ private func passthroughElement(id: Int, rect: CGRect) -> Element {
         let scene = makeScene([rectElement(id: 1, rect: CGRect(x: 10, y: 10, width: 10, height: 10), locked: true)])
         #expect(EditorAccessibility.cycleSelection(from: [], forward: true, in: scene) == nil)
     }
+
+    // The cycle shortcut is Option-Tab / Option-Shift-Tab; plain Tab must NOT be consumed
+    // (keyCode 48 is Tab), so the canvas is never a keyboard trap (WCAG 2.1.2).
+    @Test func plainTabIsNotTheCycleShortcut() {
+        #expect(EditorAccessibility.selectionCycleDirection(keyCode: 48, optionDown: false, shiftDown: false) == nil)
+        #expect(EditorAccessibility.selectionCycleDirection(keyCode: 48, optionDown: false, shiftDown: true) == nil)
+    }
+
+    @Test func optionTabCyclesForwardAndOptionShiftTabBackward() {
+        #expect(EditorAccessibility.selectionCycleDirection(keyCode: 48, optionDown: true, shiftDown: false) == true)
+        #expect(EditorAccessibility.selectionCycleDirection(keyCode: 48, optionDown: true, shiftDown: true) == false)
+    }
+
+    @Test func nonTabKeysAreNotTheCycleShortcut() {
+        #expect(EditorAccessibility.selectionCycleDirection(keyCode: 36, optionDown: true, shiftDown: false) == nil)   // Return
+        #expect(EditorAccessibility.selectionCycleDirection(keyCode: 53, optionDown: true, shiftDown: false) == nil)   // Esc
+    }
 }

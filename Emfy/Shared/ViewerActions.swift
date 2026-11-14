@@ -70,6 +70,12 @@ struct ViewerActions {
     var selectAllElements: (() -> Void)? = nil
     var deselectElements: (() -> Void)? = nil
 
+    // Editing (C5g / audit A1): Edit ▸ Select Next / Previous Element — keyboard selection
+    // cycling in reading order (⌥Tab / ⌥⇧Tab). `nil` unless in edit mode. Discoverable in
+    // the menu; plain Tab is left to the focus loop so the canvas is not a keyboard trap.
+    var selectNextElement: (() -> Void)? = nil
+    var selectPreviousElement: (() -> Void)? = nil
+
     // Editing (E2c): Edit ▸ Delete, present only while editing with a selection
     // (`nil` disables the menu item).
     var deleteSelection: (() -> Void)? = nil

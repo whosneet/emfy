@@ -1802,6 +1802,8 @@ struct MacViewerPane: View {
             revertToOpenedVersion: (session.canRevertToOpenedVersion && settings.keepOpenedVersionForRevert) ? { showRevertConfirm = true } : nil,
             selectAllElements: session.editing == .editing ? { selectAllElements() } : nil,
             deselectElements: (session.editing == .editing && !editorModel.selection.isEmpty) ? { editorModel.selection.clear() } : nil,
+            selectNextElement: session.editing == .editing ? { cycleElementSelection(forward: true) } : nil,
+            selectPreviousElement: session.editing == .editing ? { cycleElementSelection(forward: false) } : nil,
             deleteSelection: (session.editing == .editing && !editorModel.selection.isEmpty) ? { session.deleteSelection(editorModel.selection.ids) } : nil,
             insertImage: session.editing == .editing ? { presentImagePanel() } : nil,
             bringToFront: arrangeEnabled ? { session.bringSelectionToFront(editorModel.selection.ids) } : nil,
@@ -1852,6 +1854,14 @@ struct MacViewerPane: View {
     /// ⌘A: select every editable element (design call E2b-4).
     private func selectAllElements() {
         editorModel.selection.replace(with: session.allEditableIDs())
+    }
+
+    /// ⌥Tab / ⌥⇧Tab (Edit ▸ Select Next/Previous Element): cycle the selection through the
+    /// unlocked elements in reading order — keyboard accessibility (C5g / audit A1).
+    private func cycleElementSelection(forward: Bool) {
+        guard let scene = session.editingScene,
+              let id = EditorAccessibility.cycleSelection(from: editorModel.selection.ids, forward: forward, in: scene) else { return }
+        editorModel.selection.replace(with: id)
     }
 
     private var entry: RecentEntry? {
