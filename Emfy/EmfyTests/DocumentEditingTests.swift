@@ -688,6 +688,136 @@ private func passthroughOnlyScene() -> Scene {
         #expect(box.count >= 1)
         #expect(!session.isDirty)
     }
+
+    // MARK: - R2U1: the dismiss setter must not pre-empt a button resolution
+
+    // The SwiftUI confirmationDialog fires its dismiss setter synchronously the instant a button
+    // is tapped — BEFORE the button's async "Save Anyway" work runs. Reproduce that exact
+    // ordering and prove the WMF edit still reaches disk.
+    @Test func saveAnywayResolvesDespiteTheDismissSetterFiringFirst() async {
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: box)
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()                       // raises the WMF confirmation + a Done
+        #expect(session.pendingWMFConfirmation != nil)
+
+        session.beginResolvingWMFConfirmation()          // the button's synchronous part
+        let work = Task { await session.confirmPendingWMFSave() }   // the button's async part
+        session.dismissPendingWMFConfirmation()          // the dialog's dismiss setter fires first
+        await work.value                                 // …then the scheduled work runs
+
+        #expect(box.count == 1)                          // the WMF edit WAS written (R2U1)
+        #expect(session.editing == .notEditing)          // and the Done completed
+    }
+
+    // The underlying hazard: an unguarded dismiss (a plain cancel) BEFORE the confirm runs —
+    // exactly what the dialog setter used to do — writes nothing.
+    @Test func anUnguardedDismissBeforeConfirmWritesNothing() async {
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: box)
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        #expect(session.pendingWMFConfirmation != nil)
+        session.cancelPendingWMFSave()                   // models the OLD dismiss setter firing first
+        await session.confirmPendingWMFSave()            // the scheduled work finds nothing to write
+        #expect(box.count == 0)
+    }
+
+    // A genuine dismissal (swipe / Escape, no button) still cancels and keeps editing.
+    @Test func dismissingWithoutAButtonCancels() async {
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: WriteBox())
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        session.dismissPendingWMFConfirmation()          // no button resolved first
+        #expect(session.pendingWMFConfirmation == nil)
+        #expect(session.editing == .editing)             // cancel keeps editing
+    }
+
+    // MARK: - R2U2: a save failure during a leave is actionable, not a trap
+
+    @Test func saveFailureBlocksTheLeaveWithAnActionableState() async {
+        let session = DocumentSession(
+            entryID: UUID(),
+            resolve: { _ in editableEMF() },
+            writeBytes: { _, _, _ in throw DocumentSaveError.writeFailed("boom") },
+            documentFileName: { "drawing.emf" },
+            autosave: AutosaveController(sleep: nonFiringSleep)
+        )
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        #expect(session.isLeaveBlockedBySaveError)        // the R2U2 alert's trigger
+        #expect(session.editing == .editing)
+
+        session.discardEditsAndStopEditing()              // Don't Save
+        #expect(session.editing == .notEditing)
+        #expect(!session.isLeaveBlockedBySaveError)
+    }
+
+    @Test func tryAgainAfterASaveFailureRetriesAndLeaves() async {
+        let flaky = FlakyWrite(failFirst: true)
+        let session = DocumentSession(
+            entryID: UUID(),
+            resolve: { _ in editableEMF() },
+            writeBytes: { _, _, _ in try flaky.write() },
+            documentFileName: { "drawing.emf" },
+            autosave: AutosaveController(sleep: nonFiringSleep)
+        )
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()                        // first save fails → blocked
+        #expect(session.isLeaveBlockedBySaveError)
+        await session.retryEndEditing()                   // second save succeeds
+        #expect(session.editing == .notEditing)
+        #expect(flaky.successCount == 1)
+    }
+
+    @Test func cancellingAfterASaveFailureStaysInEditMode() async {
+        let session = DocumentSession(
+            entryID: UUID(),
+            resolve: { _ in editableEMF() },
+            writeBytes: { _, _, _ in throw DocumentSaveError.writeFailed("boom") },
+            documentFileName: { "drawing.emf" },
+            autosave: AutosaveController(sleep: nonFiringSleep)
+        )
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.endEditing()
+        session.cancelEndEditingAfterSaveError()          // Cancel
+        #expect(session.editing == .editing)
+        #expect(session.lastSaveError == nil)
+        #expect(!session.isLeaveBlockedBySaveError)
+        #expect(session.isDirty)                          // edits intact
+    }
+
+    // MARK: - R2U5: the Mac close-flow hook fires only on a confirmed write
+
+    @Test func pendingWMFSaveCommittedHookFiresAfterConfirm() async {
+        let box = WriteBox()
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: box)
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.save()                              // close-flow "Save" raises the WMF dialog
+        let fired = FireFlag()
+        session.onPendingWMFSaveCommitted = { fired.bump() }
+        await session.confirmPendingWMFSave()             // Save Anyway
+        #expect(box.count == 1)
+        #expect(fired.value == 1)                         // the window closes (R2U5)
+    }
+
+    @Test func pendingWMFSaveCommittedHookDoesNotFireOnCancel() async {
+        let session = makeEditingSession(bytes: editableEMF(), fileName: "drawing.wmf", writeBox: WriteBox())
+        await session.beginEditing()
+        session.apply(redFill())
+        await session.save()
+        let fired = FireFlag()
+        session.onPendingWMFSaveCommitted = { fired.bump() }
+        session.cancelPendingWMFSave()                    // Cancel leaves the window open
+        #expect(fired.value == 0)
+    }
 }
 
 // MARK: - Window-level session ownership + navigation guard (C5d: U1 / L4 / N1)
@@ -709,6 +839,32 @@ private final class OrderLog: @unchecked Sendable {
     private let lock = NSLock()
     private(set) var entries: [String] = []
     func append(_ s: String) { lock.lock(); entries.append(s); lock.unlock() }
+}
+
+/// Counts resolves per entry id, so the coalescing tests can assert only the latest target
+/// loaded (C-2).
+private final class LoadLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [UUID: Int] = [:]
+    func append(_ id: UUID) { lock.lock(); counts[id, default: 0] += 1; lock.unlock() }
+    func count(_ id: UUID) -> Int { lock.lock(); defer { lock.unlock() }; return counts[id] ?? 0 }
+}
+
+/// A one-shot fire counter for the R2U5 close-flow hook tests.
+private final class FireFlag: @unchecked Sendable {
+    private(set) var value = 0
+    func bump() { value += 1 }
+}
+
+/// A write that fails its first attempt then succeeds, for the R2U2 Try-Again retry test.
+private final class FlakyWrite: @unchecked Sendable {
+    var failNext: Bool
+    private(set) var successCount = 0
+    init(failFirst: Bool) { failNext = failFirst }
+    func write() throws {
+        if failNext { failNext = false; throw DocumentSaveError.writeFailed("boom") }
+        successCount += 1
+    }
 }
 
 @MainActor
@@ -878,6 +1034,186 @@ private final class OrderLog: @unchecked Sendable {
         await model.commitSelection(to: b)         // flush A, then load B
         #expect(log.entries == ["flush-A", "load-B"])
         #expect(model.session?.entryID == b)
+    }
+
+    // MARK: - C-2: rapid selects coalesce to the latest target
+
+    @Test func rapidSelectsLoadOnlyTheLatest() async {
+        let loads = LoadLog()
+        let model = LibraryWindowModel()
+        model.sessionFactory = { id in
+            DocumentSession(
+                entryID: id,
+                resolve: { rid in loads.append(rid); return editableEMF() },
+                documentFileName: { "drawing.emf" },
+                autosave: AutosaveController(sleep: nonFiringSleep)
+            )
+        }
+        var ids: [UUID] = []
+        for _ in 0..<10 { let id = UUID(); ids.append(id); model.select(id) }
+        await settle { model.selection == ids.last }
+        #expect(loads.count(ids.last!) == 1)
+        for id in ids.dropLast() { #expect(loads.count(id) == 0) }   // none of the others loaded
+    }
+
+    // MARK: - A-A: a select before the factory is set is not stranded
+
+    @Test func selectBeforeFactoryDefersThenCommits() async {
+        let model = LibraryWindowModel()
+        let a = UUID()
+        model.select(a)                             // no factory yet
+        #expect(model.selection == nil)             // not stranded with no session
+        #expect(model.session == nil)
+        let boxes = WriteBoxes()
+        model.sessionFactory = { id in
+            let box = boxes.box(for: id)
+            return DocumentSession(
+                entryID: id,
+                resolve: { _ in editableEMF() },
+                writeBytes: { d, _, _ in box.data = d; box.count += 1 },
+                documentFileName: { "drawing.emf" },
+                autosave: AutosaveController(sleep: nonFiringSleep)
+            )
+        }
+        await settle { model.selection == a }       // the deferred request replayed
+        #expect(model.session?.entryID == a)
+    }
+
+    // MARK: - A-B: the displayed selection is optimistic, rolling back on cancel
+
+    @Test func optimisticSelectionMovesImmediatelyWhenNoGuard() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.emf" })
+        let a = UUID(); let b = UUID()
+        model.select(a)
+        await settle { model.selection == a }
+        model.select(b)
+        #expect(model.displayedSelection == b)      // optimistic, synchronously (no flicker)
+        await settle { model.selection == b }
+    }
+
+    @Test func optimisticSelectionRollsBackWhenAGuardedSwitchIsCancelled() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.wmf" })
+        let a = UUID(); let b = UUID()
+        model.select(a)
+        await settle { model.selection == a }
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        model.select(b)
+        await settle { model.pendingNavigation != nil }
+        #expect(model.displayedSelection == a)      // rolled back behind the dialog
+        session.cancelPendingWMFSave()
+        await settle { model.pendingNavigation == nil }
+        #expect(model.displayedSelection == a)
+        #expect(model.selection == a)
+    }
+
+    // MARK: - R2U4: an open during a held navigation proceeds to the latest target
+
+    @Test func openDuringAHeldNavigationProceedsToTheLatestTarget() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.wmf" })
+        let a = UUID(); let b = UUID(); let c = UUID()
+        model.select(a)
+        await settle { model.selection == a && model.session?.loaded != nil }
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+
+        model.select(b)
+        await settle { model.pendingNavigation != nil }
+        #expect(model.selection == a)
+        model.select(c)                             // a newer open/select during the hold
+        await settle { model.pendingNavigation != nil }
+
+        await session.confirmPendingWMFSave()       // Save Anyway resolves to the LATEST target
+        await settle { model.selection == c }
+        #expect(model.session?.entryID == c)
+        #expect(model.pendingNavigation == nil)
+        #expect(boxes.box(for: a).count == 1)       // the WMF edit was saved
+    }
+
+    // MARK: - R2U2 at the model: a failing switch-save holds, then Don't Save proceeds
+
+    @Test func switchingWithAFailingEMFSaveHoldsThenDontSaveProceeds() async {
+        let a = UUID(); let b = UUID()
+        let model = LibraryWindowModel()
+        model.sessionFactory = { id in
+            DocumentSession(
+                entryID: id,
+                resolve: { _ in editableEMF() },
+                writeBytes: { _, _, _ in throw DocumentSaveError.writeFailed("boom") },
+                documentFileName: { "drawing.emf" },
+                autosave: AutosaveController(sleep: nonFiringSleep)
+            )
+        }
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+
+        await model.resolveSelection(to: b)
+        #expect(model.pendingNavigation == LibraryWindowModel.PendingNavigation(target: b))
+        #expect(session.lastSaveError != nil)
+        #expect(model.selection == a)
+
+        session.discardEditsAndStopEditing()        // the alert's Don't Save
+        await settle { model.selection == b }
+        #expect(model.session?.entryID == b)
+    }
+
+    // MARK: - R2U3: removing the open, dirty document is guarded
+
+    @Test func removalGuardSavesAnEMFThenPermits() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.emf" })
+        let a = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        #expect(model.removalNeedsGuard(a))
+        let permitted = await model.guardRemoval(of: a)
+        #expect(permitted)                          // the edit saved first ⇒ remove proceeds
+        #expect(boxes.box(for: a).count == 1)
+        #expect(session.editing == .notEditing)
+    }
+
+    @Test func removalGuardHoldsADirtyWMF() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.wmf" })
+        let a = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        let permitted = await model.guardRemoval(of: a)
+        #expect(!permitted)                         // removal aborted; the user resolves the save
+        #expect(session.pendingWMFConfirmation != nil)
+        #expect(boxes.box(for: a).count == 0)
+    }
+
+    @Test func removalOfANonSelectedEntryNeedsNoGuard() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.emf" })
+        let a = UUID(); let b = UUID()
+        await model.commitSelection(to: a)
+        await model.session?.beginEditing()
+        model.session?.apply(redFill())
+        #expect(!model.removalNeedsGuard(b))
+        #expect(await model.guardRemoval(of: b))    // a different entry ⇒ permitted
+    }
+
+    // R2U3: a clean editing document isn't guarded (nothing to lose).
+    @Test func removalOfACleanDocumentNeedsNoGuard() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.emf" })
+        let a = UUID()
+        await model.commitSelection(to: a)
+        await model.session?.beginEditing()         // editing but not dirty
+        #expect(!model.removalNeedsGuard(a))
     }
 }
 
