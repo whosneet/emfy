@@ -508,28 +508,57 @@ struct LayersSection: View {
                     #if os(macOS)
                     .onExitCommand { editingLayerID = nil }
                     #endif
+                Spacer(minLength: 6)
+                layerCount(layer)
             } else {
-                Text(layer.name)
-                    .lineLimit(1)
-                    .foregroundStyle(.primary)
+                selectButton(layer, isActive: isActive)
             }
-
-            Spacer(minLength: 6)
-            Text("\(layer.elements.count)")
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .listRowBackground(isActive ? Color.accentColor.opacity(0.18) : Color.clear)
-        #if os(macOS)
-        .onTapGesture(count: 2) { beginRename(layer) }
-        #endif
-        .onTapGesture { editorModel.activeLayerID = layer.id }
         .contextMenu {
             Button("Rename") { beginRename(layer) }
         }
+    }
+
+    /// The layer's selectable name/count. A Button so selection carries the `.isSelected`
+    /// trait to VoiceOver, with a non-colour active marker (a leading checkmark plus a
+    /// semibold name) alongside the row's accent background (C5e A4). macOS keeps its
+    /// double-click-to-rename.
+    private func selectButton(_ layer: EMFEdit.Layer, isActive: Bool) -> some View {
+        Button {
+            editorModel.activeLayerID = layer.id
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tint)
+                    .opacity(isActive ? 1 : 0)
+                    .accessibilityHidden(true)
+                Text(layer.name)
+                    .lineLimit(1)
+                    .fontWeight(isActive ? .semibold : .regular)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 6)
+                layerCount(layer)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(layer.name)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+        #if os(macOS)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(layer) })
+        #endif
+    }
+
+    private func layerCount(_ layer: EMFEdit.Layer) -> some View {
+        Text("\(layer.elements.count)")
+            .font(.caption)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("\(layer.elements.count) elements")
     }
 
     // MARK: Actions
