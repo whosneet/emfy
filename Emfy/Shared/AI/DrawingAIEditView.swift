@@ -17,31 +17,73 @@ struct DrawingAIEditView: View {
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        @Bindable var model = model
+        sheetBody
+            .onAppear { model.providerStore = providerStore; fieldFocused = true }
+            .aiConsentSheet(
+                provider: model.pendingConsent,
+                purpose: .drawingData,
+                store: providerStore,
+                onAllow: { model.consentAllowed() },
+                onDeny: { model.consentDeclined() })
+    }
+
+    #if os(macOS)
+    private var sheetBody: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            switch model.phase {
-            case .idle, .applied:
-                inputForm
-            case .thinking:
-                thinking
-            case .preview:
-                if let preview = model.preview { previewContent(preview) } else { inputForm }
-            case .failed(let message):
-                failure(message)
-            }
+            phaseContent
+            phaseActions
         }
         .padding(22)
-        #if os(macOS)
         .frame(width: 520)
-        #endif
-        .onAppear { model.providerStore = providerStore; fieldFocused = true }
-        .aiConsentSheet(
-            provider: model.pendingConsent,
-            purpose: .drawingData,
-            store: providerStore,
-            onAllow: { model.consentAllowed() },
-            onDeny: { model.consentDeclined() })
+    }
+    #else
+    // Scroll the phase content and pin the actions so Apply/Propose stay reachable at large
+    // accessibility sizes and in landscape (C5e A3).
+    private var sheetBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                phaseContent
+            }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .safeAreaInset(edge: .bottom) {
+            phaseActions
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+                .background(.bar)
+        }
+    }
+    #endif
+
+    @ViewBuilder
+    private var phaseContent: some View {
+        switch model.phase {
+        case .idle, .applied:
+            inputForm
+        case .thinking:
+            thinking
+        case .preview:
+            if let preview = model.preview { previewContent(preview) } else { inputForm }
+        case .failed(let message):
+            failure(message)
+        }
+    }
+
+    @ViewBuilder
+    private var phaseActions: some View {
+        switch model.phase {
+        case .idle, .applied:
+            inputActions
+        case .thinking:
+            thinkingActions
+        case .preview:
+            if model.preview != nil { previewActions } else { inputActions }
+        case .failed:
+            failureActions
+        }
     }
 
     private var header: some View {
@@ -75,32 +117,36 @@ struct DrawingAIEditView: View {
             if !model.engineLabel.isEmpty {
                 Text(model.engineLabel).font(.caption2).foregroundStyle(.secondary)
             }
-            HStack {
-                Button("Cancel") { onClose() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Propose Edit") { model.submit() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("aiEditSubmit")
-            }
+        }
+    }
+
+    private var inputActions: some View {
+        @Bindable var model = model
+        return HStack {
+            Button("Cancel") { onClose() }
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Propose Edit") { model.submit() }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(model.instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("aiEditSubmit")
         }
     }
 
     private var thinking: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text("Preparing your edit…").foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            HStack {
-                Spacer()
-                Button(role: .cancel) { model.cancel() } label: { Text("Stop") }
-            }
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text("Preparing your edit…").foregroundStyle(.secondary)
         }
-        .frame(minHeight: 80)
+        .frame(maxWidth: .infinity, minHeight: 60)
+    }
+
+    private var thinkingActions: some View {
+        HStack {
+            Spacer()
+            Button(role: .cancel) { model.cancel() } label: { Text("Stop") }
+        }
     }
 
     private func previewContent(_ preview: DrawingAIEditModel.Preview) -> some View {
@@ -129,16 +175,18 @@ struct DrawingAIEditView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+    }
 
-            HStack {
-                Button("Cancel") { model.cancelPreview(); onClose() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Apply") { model.apply(); onClose() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("aiEditApply")
-            }
+    private var previewActions: some View {
+        HStack {
+            Button("Cancel") { model.cancelPreview(); onClose() }
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Apply") { model.apply(); onClose() }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("aiEditApply")
         }
     }
 
@@ -156,17 +204,19 @@ struct DrawingAIEditView: View {
     }
 
     private func failure(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label(message, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Close") { onClose() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Try Again") { model.reset() }
-                    .buttonStyle(.borderedProminent)
-            }
+        Label(message, systemImage: "exclamationmark.triangle")
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var failureActions: some View {
+        HStack {
+            Button("Close") { onClose() }
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Try Again") { model.reset() }
+                .buttonStyle(.borderedProminent)
         }
     }
 }

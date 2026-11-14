@@ -12,30 +12,61 @@ struct DrawingRecolourView: View {
     let model: DrawingRecolourModel
     let onClose: () -> Void
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    private var isCompact: Bool { horizontalSizeClass == .compact }
+
     var body: some View {
-        @Bindable var model = model
+        #if os(macOS)
         VStack(alignment: .leading, spacing: 16) {
-            header
-            Picker("Palette", selection: $model.mode) {
-                ForEach(DrawingRecolourModel.Mode.allCases, id: \.self) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .accessibilityIdentifier("recolourMode")
-
-            if model.mode == .brand { brandEntry }
-
-            previewRow
-            mappingList
-
+            fields
             buttons
         }
         .padding(22)
-        #if os(macOS)
         .frame(width: 520)
+        #else
+        // Scroll the fields and pin the actions so Apply stays reachable at large
+        // accessibility text sizes and in landscape (C5e A3).
+        ScrollView {
+            fields
+                .padding(22)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .safeAreaInset(edge: .bottom) {
+            buttons
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+                .background(.bar)
+        }
         #endif
+    }
+
+    private var fields: some View {
+        @Bindable var model = model
+        return VStack(alignment: .leading, spacing: 16) {
+            header
+            palettePicker
+            if model.mode == .brand { brandEntry }
+            previewRow
+            mappingList
+        }
+    }
+
+    // A segmented control truncates "Colour-blind safe" / "Brand colours" on iPhone, so it
+    // falls back to a menu picker at compact width (C5e A3).
+    @ViewBuilder
+    private var palettePicker: some View {
+        @Bindable var model = model
+        let picker = Picker("Palette", selection: $model.mode) {
+            ForEach(DrawingRecolourModel.Mode.allCases, id: \.self) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .accessibilityIdentifier("recolourMode")
+        if isCompact {
+            picker.pickerStyle(.menu)
+        } else {
+            picker.pickerStyle(.segmented).labelsHidden()
+        }
     }
 
     private var header: some View {

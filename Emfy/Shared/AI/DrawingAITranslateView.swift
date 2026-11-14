@@ -17,31 +17,73 @@ struct DrawingAITranslateView: View {
     @Environment(AIProviderStore.self) private var providerStore: AIProviderStore?
 
     var body: some View {
-        @Bindable var model = model
+        sheetBody
+            .onAppear { model.providerStore = providerStore }
+            .aiConsentSheet(
+                provider: model.pendingConsent,
+                purpose: .drawingData,
+                store: providerStore,
+                onAllow: { model.consentAllowed() },
+                onDeny: { model.consentDeclined() })
+    }
+
+    #if os(macOS)
+    private var sheetBody: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            switch model.phase {
-            case .idle, .applied:
-                if model.hasText { inputForm } else { noText }
-            case .thinking:
-                thinking
-            case .preview:
-                if let preview = model.preview { previewContent(preview) } else { inputForm }
-            case .failed(let message):
-                failure(message)
-            }
+            phaseContent
+            phaseActions
         }
         .padding(22)
-        #if os(macOS)
         .frame(width: 520)
-        #endif
-        .onAppear { model.providerStore = providerStore }
-        .aiConsentSheet(
-            provider: model.pendingConsent,
-            purpose: .drawingData,
-            store: providerStore,
-            onAllow: { model.consentAllowed() },
-            onDeny: { model.consentDeclined() })
+    }
+    #else
+    // Scroll the phase content and pin the actions so Apply/Translate stay reachable at
+    // large accessibility sizes and in landscape (C5e A3).
+    private var sheetBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                phaseContent
+            }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .safeAreaInset(edge: .bottom) {
+            phaseActions
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+                .background(.bar)
+        }
+    }
+    #endif
+
+    @ViewBuilder
+    private var phaseContent: some View {
+        switch model.phase {
+        case .idle, .applied:
+            if model.hasText { inputForm } else { noText }
+        case .thinking:
+            thinking
+        case .preview:
+            if let preview = model.preview { previewContent(preview) } else { inputForm }
+        case .failed(let message):
+            failure(message)
+        }
+    }
+
+    @ViewBuilder
+    private var phaseActions: some View {
+        switch model.phase {
+        case .idle, .applied:
+            if model.hasText { inputActions } else { noTextActions }
+        case .thinking:
+            thinkingActions
+        case .preview:
+            if model.preview != nil { previewActions } else { inputActions }
+        case .failed:
+            failureActions
+        }
     }
 
     private var header: some View {
@@ -60,14 +102,16 @@ struct DrawingAITranslateView: View {
     }
 
     private var noText: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("There’s no text to translate here.", systemImage: "text.badge.xmark")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Spacer()
-                Button("Close") { onClose() }.keyboardShortcut(.cancelAction)
-            }
+        Label("There’s no text to translate here.", systemImage: "text.badge.xmark")
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var noTextActions: some View {
+        HStack {
+            Spacer()
+            Button("Close") { onClose() }.keyboardShortcut(.cancelAction)
         }
     }
 
@@ -87,31 +131,34 @@ struct DrawingAITranslateView: View {
             if !model.engineLabel.isEmpty {
                 Text(model.engineLabel).font(.caption2).foregroundStyle(.secondary)
             }
-            HStack {
-                Button("Cancel") { onClose() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Translate") { model.submit() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("translateSubmit")
-            }
+        }
+    }
+
+    private var inputActions: some View {
+        HStack {
+            Button("Cancel") { onClose() }
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Translate") { model.submit() }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("translateSubmit")
         }
     }
 
     private var thinking: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text("Translating…").foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            HStack {
-                Spacer()
-                Button(role: .cancel) { model.cancel() } label: { Text("Stop") }
-            }
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text("Translating…").foregroundStyle(.secondary)
         }
-        .frame(minHeight: 80)
+        .frame(maxWidth: .infinity, minHeight: 60)
+    }
+
+    private var thinkingActions: some View {
+        HStack {
+            Spacer()
+            Button(role: .cancel) { model.cancel() } label: { Text("Stop") }
+        }
     }
 
     private func previewContent(_ preview: DrawingAITranslateModel.Preview) -> some View {
@@ -142,16 +189,18 @@ struct DrawingAITranslateView: View {
                 }
                 .frame(maxHeight: 160)
             }
+        }
+    }
 
-            HStack {
-                Button("Cancel") { model.cancelPreview(); onClose() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Apply") { model.apply(); onClose() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("translateApply")
-            }
+    private var previewActions: some View {
+        HStack {
+            Button("Cancel") { model.cancelPreview(); onClose() }
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Apply") { model.apply(); onClose() }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("translateApply")
         }
     }
 
@@ -187,17 +236,19 @@ struct DrawingAITranslateView: View {
     }
 
     private func failure(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label(message, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Close") { onClose() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Try Again") { model.reset() }
-                    .buttonStyle(.borderedProminent)
-            }
+        Label(message, systemImage: "exclamationmark.triangle")
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var failureActions: some View {
+        HStack {
+            Button("Close") { onClose() }
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Try Again") { model.reset() }
+                .buttonStyle(.borderedProminent)
         }
     }
 
