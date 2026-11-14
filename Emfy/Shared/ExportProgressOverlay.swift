@@ -76,6 +76,15 @@ struct ExportProgressOverlay: View {
     }
 }
 
+/// Posts a VoiceOver announcement on both platforms (C5e A6). AI results and failures are
+/// otherwise silent to VoiceOver, which only tracks focus changes.
+enum VoiceOverAnnouncement {
+    static func post(_ message: String) {
+        guard !message.isEmpty else { return }
+        AccessibilityNotification.Announcement(message).post()
+    }
+}
+
 extension View {
     /// The one floating-surface background shared by the zoom pill, the
     /// partial-support banner, the toast, and the export card (C4b G1): Liquid Glass

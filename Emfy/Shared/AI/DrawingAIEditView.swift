@@ -19,6 +19,17 @@ struct DrawingAIEditView: View {
     var body: some View {
         sheetBody
             .onAppear { model.providerStore = providerStore; fieldFocused = true }
+            // Announce the proposed edit (or failure) to VoiceOver (C5e A6).
+            .onChange(of: model.phase) { _, phase in
+                switch phase {
+                case .preview where model.preview != nil:
+                    VoiceOverAnnouncement.post("Preview ready. Review the proposed edit and apply.")
+                case .failed(let message):
+                    VoiceOverAnnouncement.post(message)
+                default:
+                    break
+                }
+            }
             .aiConsentSheet(
                 provider: model.pendingConsent,
                 purpose: .drawingData,

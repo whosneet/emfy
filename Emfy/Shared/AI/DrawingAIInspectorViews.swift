@@ -118,6 +118,12 @@ struct DrawingAskView: View {
                 unsupportedNotes: inputs.unsupportedNotes
             )
         }
+        // Announce the finished answer (or failure) to VoiceOver, which otherwise only
+        // tracks focus and misses the streamed reply (C5e A6).
+        .onChange(of: model.isResponding) { wasResponding, responding in
+            guard wasResponding, !responding, let last = model.messages.last, last.role == .assistant else { return }
+            VoiceOverAnnouncement.post(last.failed ? last.text : "Answer ready.")
+        }
         .aiConsentSheet(
             provider: model.pendingConsent,
             purpose: .drawingData,
