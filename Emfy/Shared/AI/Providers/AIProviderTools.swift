@@ -51,7 +51,8 @@ enum AIProviderTools {
                 let body = slice.enumerated()
                     .map { "line \(start + $0.offset + 1): \($0.element)" }
                     .joined(separator: "\n")
-                return .ok(String(body.prefix(DrawingAIToolData.maxOutputCharacters)))
+                // Fence the result: it carries the drawing's untrusted text (S5).
+                return .ok(DrawingAIPrompt.toolResultBlock(String(body.prefix(DrawingAIToolData.maxOutputCharacters))))
             }
         )
     }
@@ -93,7 +94,8 @@ enum AIProviderTools {
                 }
                 let header = "Found \(matches.count) match\(matches.count == 1 ? "" : "es") on \(lines.count) line\(lines.count == 1 ? "" : "s"):"
                 let body = ([header] + lines).joined(separator: "\n")
-                return .ok(String(body.prefix(DrawingAIToolData.maxOutputCharacters)))
+                // Fence the result: it carries the drawing's untrusted matched lines (S5).
+                return .ok(DrawingAIPrompt.toolResultBlock(String(body.prefix(DrawingAIToolData.maxOutputCharacters))))
             }
         )
     }
