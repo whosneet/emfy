@@ -124,11 +124,17 @@ struct DrawingAIContext: Equatable, Sendable {
         return neutraliseFenceMarkers(String(scalars)).trimmingCharacters(in: .whitespaces)
     }
 
-    /// Replaces any literal data-fence marker in untrusted text with a harmless token,
-    /// so untrusted content cannot forge the boundary of the data region.
+    /// Replaces any data-fence marker in untrusted text with a harmless token, so
+    /// untrusted content cannot forge the boundary of the data region. Matched
+    /// case-insensitively and tolerant of whitespace and attributes, so a crafted
+    /// `< / Drawing-Content >` or `<drawing-content x>` can't slip a real fence through
+    /// an exact-string check (S4).
     static func neutraliseFenceMarkers(_ raw: String) -> String {
-        raw.replacingOccurrences(of: DrawingAIPrompt.openMarker, with: "[fence]")
-            .replacingOccurrences(of: DrawingAIPrompt.closeMarker, with: "[fence]")
+        raw.replacingOccurrences(
+            of: #"<\s*/?\s*drawing-content[^>]*>"#,
+            with: "[fence]",
+            options: [.regularExpression, .caseInsensitive]
+        )
     }
 
     // MARK: Facts block

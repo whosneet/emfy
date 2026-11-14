@@ -120,6 +120,23 @@ import Testing
         #expect(payload.lowerBound > open.upperBound && payload.upperBound < close.lowerBound)
     }
 
+    // S4: the fence neutraliser is case- and whitespace-insensitive, so obfuscated close
+    // markers (mixed case, spaces around the slash, trailing attributes) are neutralised
+    // too — not just the exact literal.
+    @Test func fenceNeutraliserCatchesObfuscatedMarkers() {
+        let variants = [
+            "</DRAWING-CONTENT>",
+            "< / drawing-content >",
+            "</drawing-content x=\"1\">",
+            "<Drawing-Content>",
+        ]
+        for variant in variants {
+            let out = DrawingAIContext.neutraliseFenceMarkers("before \(variant) after")
+            #expect(!out.lowercased().contains("drawing-content"))
+            #expect(out.contains("[fence]"))
+        }
+    }
+
     @Test func askPromptSanitisesTheQuestionAndFencesContext() {
         let context = DrawingAIContext.build(
             format: "Enhanced Metafile", pageSizeMM: nil,
