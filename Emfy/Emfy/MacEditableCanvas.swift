@@ -465,7 +465,7 @@ struct MacEditableCanvas: NSViewRepresentable {
                 state.penPoints = [viewPoint]
                 drag = state
                 lastPenPoint = viewPoint
-                penHoldSeq += 1
+                penHoldWorkItem?.cancel(); penHoldWorkItem = nil
                 overlay?.needsDisplay = true
                 return
             }
@@ -546,6 +546,7 @@ struct MacEditableCanvas: NSViewRepresentable {
             case .shape:
                 commitShape(state: state, end: viewPoint, shift: shift, option: option)
             case .pen:
+                penHoldWorkItem?.cancel(); penHoldWorkItem = nil
                 commitPenStroke(state: state)
             case .move, .resize, .rotate:
                 if let (command, key) = committedCommand(state: state, end: viewPoint, shift: shift, option: option) {
@@ -595,8 +596,10 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Whether the freehand pen is armed.
         var isPenArmed: Bool { parent.editorModel.armedPen }
 
-        /// Monotonic counter: a hold check only fires if no newer real move superseded it.
-        private var penHoldSeq = 0
+        /// The single outstanding pen-hold wake-up, re-armed on each qualifying move instead of
+        /// scheduling a fresh `asyncAfter` per point (P18) — so a long stroke leaves at most one
+        /// timer pending rather than hundreds that each fire and early-return.
+        private var penHoldWorkItem: DispatchWorkItem?
         private var lastPenPoint: CGPoint = .zero
         private static let penHoldDelay: TimeInterval = 0.5
 
@@ -618,32 +621,33 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Appends a freehand sample, tracks the end-of-stroke hold, and schedules the
         /// 0.5 s snap check after motion settles (design call 4).
         private func appendPenPoint(_ p: CGPoint) {
-            guard var state = drag, state.kind == .pen else { return }
-            state.penPoints.append(p)
-            // A real move resets the hold: clear any snap preview and re-arm the timer so the
-            // check fires 0.5 s after the pointer last moved.
+            guard drag?.kind == .pen else { return }
+            // Append through the stored property so the array mutates in place — the old
+            // `var copy = drag; copy.penPoints.append; drag = copy` kept two live references to
+            // the buffer, forcing a copy-on-write of the whole point array on every move (O(n²)
+            // over a stroke) (P5).
+            drag?.penPoints.append(p)
+            // A real move resets the hold: clear any snap preview and re-arm the single timer so
+            // the check fires 0.5 s after the pointer last moved (P18).
             if hypot(p.x - lastPenPoint.x, p.y - lastPenPoint.y) > 2 / magnification {
                 lastPenPoint = p
-                state.penHoldElapsed = false
-                state.penSnapPreview = nil
-                penHoldSeq += 1
-                let seq = penHoldSeq
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.penHoldDelay) { [weak self] in
-                    self?.evaluatePenHold(seq: seq)
-                }
+                drag?.penHoldElapsed = false
+                drag?.penSnapPreview = nil
+                penHoldWorkItem?.cancel()
+                let item = DispatchWorkItem { [weak self] in self?.evaluatePenHold() }
+                penHoldWorkItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.penHoldDelay, execute: item)
             }
-            drag = state
             overlay?.needsDisplay = true
         }
 
         /// After the pointer settles for 0.5 s mid-stroke: mark the hold and, if the stroke
         /// so far recognises as a shape, show that shape live (it commits on release).
-        private func evaluatePenHold(seq: Int) {
-            guard penHoldSeq == seq, var state = drag, state.kind == .pen else { return }
-            state.penHoldElapsed = true
-            let devicePoints = state.penPoints.map { mapping.devicePoint(fromView: $0) }
-            state.penSnapPreview = ShapeRecognizer.recognize(points: devicePoints, rdpTolerance: penRdpToleranceDevice)
-            drag = state
+        private func evaluatePenHold() {
+            guard drag?.kind == .pen, let points = drag?.penPoints else { return }
+            drag?.penHoldElapsed = true
+            let devicePoints = points.map { mapping.devicePoint(fromView: $0) }
+            drag?.penSnapPreview = ShapeRecognizer.recognize(points: devicePoints, rdpTolerance: penRdpToleranceDevice)
             overlay?.needsDisplay = true
         }
 
@@ -671,6 +675,7 @@ struct MacEditableCanvas: NSViewRepresentable {
         /// Esc cancels an in-progress drag with no commit, restoring the live scene.
         func cancelDrag() {
             guard drag != nil else { return }
+            penHoldWorkItem?.cancel(); penHoldWorkItem = nil
             drag = nil
             tiledView?.setHiddenIDs([])
             parent.editorModel.rotationReadout = nil

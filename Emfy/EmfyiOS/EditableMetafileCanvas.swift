@@ -726,7 +726,10 @@ struct EditableMetafileCanvas: UIViewRepresentable {
 
         // MARK: Pen (E3b)
 
-        private var penHoldSeq = 0
+        /// The single outstanding pen-hold wake-up, re-armed on each qualifying move instead
+        /// of scheduling a fresh `asyncAfter` per point (P18) — so a long stroke leaves at most
+        /// one timer pending rather than hundreds that each fire and early-return.
+        private var penHoldWorkItem: DispatchWorkItem?
         private var lastPenPoint: CGPoint = .zero
         private static let penHoldDelay: TimeInterval = 0.5
 
@@ -756,16 +759,18 @@ struct EditableMetafileCanvas: UIViewRepresentable {
                 state.penPoints = [p]
                 drag = state
                 lastPenPoint = p
-                penHoldSeq += 1
+                penHoldWorkItem?.cancel(); penHoldWorkItem = nil
                 overlay.setNeedsDisplay()
             case .changed:
                 appendPenPoint(p, overlay: overlay)
             case .ended:
+                penHoldWorkItem?.cancel(); penHoldWorkItem = nil
                 if let state = drag, state.kind == .pen { commitPenStroke(state: state) }
                 drag = nil
                 scrollView.isScrollEnabled = true
                 overlay.setNeedsDisplay()
             default:
+                penHoldWorkItem?.cancel(); penHoldWorkItem = nil
                 drag = nil
                 scrollView.isScrollEnabled = true
                 overlay.setNeedsDisplay()
@@ -773,28 +778,31 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         }
 
         private func appendPenPoint(_ p: CGPoint, overlay: IOSEditorOverlayView) {
-            guard var state = drag, state.kind == .pen else { return }
-            state.penPoints.append(p)
+            guard drag?.kind == .pen else { return }
+            // Append through the stored property so the array mutates in place — the old
+            // `var copy = drag; copy.penPoints.append; drag = copy` kept two live references to
+            // the buffer, forcing a copy-on-write of the whole point array on every move (O(n²)
+            // over a stroke) (P5).
+            drag?.penPoints.append(p)
             if hypot(p.x - lastPenPoint.x, p.y - lastPenPoint.y) > 2 / max(zoom, 0.0001) {
                 lastPenPoint = p
-                state.penHoldElapsed = false
-                state.penSnapPreview = nil
-                penHoldSeq += 1
-                let seq = penHoldSeq
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.penHoldDelay) { [weak self] in
-                    self?.evaluatePenHold(seq: seq)
-                }
+                drag?.penHoldElapsed = false
+                drag?.penSnapPreview = nil
+                // Re-arm the single pen-hold wake-up (P18): cancel the previous and schedule one,
+                // so only the last qualifying move's timer survives.
+                penHoldWorkItem?.cancel()
+                let item = DispatchWorkItem { [weak self] in self?.evaluatePenHold() }
+                penHoldWorkItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.penHoldDelay, execute: item)
             }
-            drag = state
             overlay.setNeedsDisplay()
         }
 
-        private func evaluatePenHold(seq: Int) {
-            guard penHoldSeq == seq, var state = drag, state.kind == .pen else { return }
-            state.penHoldElapsed = true
-            let devicePoints = state.penPoints.map { mapping.devicePoint(fromView: $0) }
-            state.penSnapPreview = ShapeRecognizer.recognize(points: devicePoints, rdpTolerance: penRdpToleranceDevice)
-            drag = state
+        private func evaluatePenHold() {
+            guard drag?.kind == .pen, let points = drag?.penPoints else { return }
+            drag?.penHoldElapsed = true
+            let devicePoints = points.map { mapping.devicePoint(fromView: $0) }
+            drag?.penSnapPreview = ShapeRecognizer.recognize(points: devicePoints, rdpTolerance: penRdpToleranceDevice)
             overlay?.setNeedsDisplay()
         }
 
