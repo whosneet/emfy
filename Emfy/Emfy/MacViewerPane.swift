@@ -1692,20 +1692,29 @@ struct MacViewerPane: View {
     }
 
     /// Changes whenever the drawing the find model should search over changes: the edit
-    /// state, the edit version (edit-mode text edits), and the loaded content id.
+    /// state and the loaded content id, plus — only while the find bar is OPEN — the edit
+    /// version. A closed bar therefore does not re-extract text on every edit (P13); the
+    /// bar re-keys and extracts lazily on open, and tracks edits while open.
     private var findRunsKey: String {
-        "\(session.editing == .editing)-\(session.editVersion)-\(session.loadedContentID)"
+        let version = findModel.isPresented ? session.editVersion : 0
+        return "\(findModel.isPresented)-\(session.editing == .editing)-\(version)-\(session.loadedContentID)"
     }
 
     /// Recomputes the find model's runs for the current drawing (F3b): the edited scene in
-    /// edit mode (cheap), the renderer observation in viewer mode (off the main actor). The
-    /// model keeps the open query and re-matches against the new runs.
+    /// edit mode, the renderer observation in viewer mode — BOTH off the main actor (P13), so
+    /// a large drawing's text extraction never blocks an edit or a load. Embedded-picture
+    /// enumeration (and the Vision OCR pass it feeds) runs only while the find bar is open,
+    /// since its results only ever surface in find; it is skipped entirely for a closed bar.
     private func refreshFindRuns() async {
         let contentID = findRunsKey.hashValue
-        let ocrEnabled = settings.recognizeTextInPictures
+        let wantOCR = settings.recognizeTextInPictures && findModel.isPresented
         if session.editing == .editing, let scene = session.editedScene {
-            findModel.setRuns(DrawingTextExtractor.extract(from: scene), contentID: contentID)
-            startPictureOCR(ocrEnabled ? DrawingPictureEnumerator.pictures(from: scene) : [], contentID: contentID)
+            let (runs, pictures) = await Task.detached(priority: .userInitiated) {
+                (DrawingTextExtractor.extract(from: scene),
+                 wantOCR ? DrawingPictureEnumerator.pictures(from: scene) : [])
+            }.value
+            findModel.setRuns(runs, contentID: contentID)
+            startPictureOCR(pictures, contentID: contentID)
             return
         }
         guard let loaded else {
@@ -1717,7 +1726,7 @@ struct MacViewerPane: View {
         let (runs, pictures) = await Task.detached(priority: .userInitiated) {
             let observation = MetafileRenderer.observe(prepared, options: options)
             let runs = DrawingTextExtractor.extract(from: observation)
-            let pictures = ocrEnabled ? DrawingPictureEnumerator.pictures(from: observation) : []
+            let pictures = wantOCR ? DrawingPictureEnumerator.pictures(from: observation) : []
             return (runs, pictures)
         }.value
         findModel.setRuns(runs, contentID: contentID)
