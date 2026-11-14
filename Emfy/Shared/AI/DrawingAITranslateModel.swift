@@ -305,8 +305,9 @@ final class DrawingAITranslateModel {
             guard #available(macOS 26, iOS 26, *), DrawingAIEngine.isModelAvailable else {
                 throw ProviderError.other("On-device AI isn’t available right now.")
             }
-            let session = LanguageModelSession(instructions: instructions)
-            return try await session.respond(to: prompt).content
+            // Guided generation (F3): constrained decoding guarantees the {id,text} shape,
+            // re-emitted as the SAME translations JSON the provider path produces.
+            return try await DrawingAIGuided.translationsJSON(instructions: instructions, prompt: prompt)
         case .provider(let config):
             guard let service = providerStore?.service else {
                 throw ProviderError.other("No provider is configured for AI translation.")

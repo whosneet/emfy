@@ -259,9 +259,10 @@ final class DrawingAIEditModel {
             guard #available(macOS 26, iOS 26, *), DrawingAIEngine.isModelAvailable else {
                 throw ProviderError.other("On-device AI isn’t available right now.")
             }
-            let session = LanguageModelSession(instructions: DrawingAIPrompt.editInstructions)
-            let response = try await session.respond(to: prompt)
-            return response.content
+            // Guided generation (F3): constrained decoding guarantees a structurally valid
+            // EditPlan, re-emitted as the SAME JSON the provider path produces, so the one
+            // downstream sanitiser → decode → validator → preview pipeline is unchanged.
+            return try await DrawingAIGuided.editPlanJSON(instructions: DrawingAIPrompt.editInstructions, prompt: prompt)
         case .provider(let config):
             guard let service = providerStore?.service else {
                 throw ProviderError.other("No provider is configured for AI editing.")
