@@ -690,6 +690,197 @@ private func passthroughOnlyScene() -> Scene {
     }
 }
 
+// MARK: - Window-level session ownership + navigation guard (C5d: U1 / L4 / N1)
+
+/// Holds one `WriteBox` per entry id, so a factory-built session's writes are observable
+/// per file in the navigation tests.
+@MainActor
+private final class WriteBoxes {
+    private var boxes: [UUID: WriteBox] = [:]
+    func box(for id: UUID) -> WriteBox {
+        if let existing = boxes[id] { return existing }
+        let box = WriteBox(); boxes[id] = box; return box
+    }
+}
+
+/// An ordered action log shared across a navigation, so the flush-before-load ordering is
+/// asserted directly.
+private final class OrderLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var entries: [String] = []
+    func append(_ s: String) { lock.lock(); entries.append(s); lock.unlock() }
+}
+
+@MainActor
+@Suite struct LibraryWindowNavigationTests {
+
+    /// A model whose factory vends a fresh editing-capable session per id. `fileName`
+    /// chooses the save container (an `.emf` autosaves on leave; a `.wmf` raises the
+    /// limitations confirmation).
+    private func makeModel(boxes: WriteBoxes, fileName: @escaping (UUID) -> String) -> LibraryWindowModel {
+        let model = LibraryWindowModel()
+        model.sessionFactory = { id in
+            let box = boxes.box(for: id)
+            return DocumentSession(
+                entryID: id,
+                resolve: { _ in editableEMF() },
+                writeBytes: { data, _, _ in box.data = data; box.count += 1 },
+                documentFileName: { fileName(id) },
+                autosave: AutosaveController(sleep: nonFiringSleep)
+            )
+        }
+        return model
+    }
+
+    /// Spins the main actor until `condition` holds (the dialog-driven completions hop
+    /// through a `Task`), or a bounded number of yields elapses.
+    private func settle(until condition: () -> Bool) async {
+        for _ in 0..<1000 where !condition() { await Task.yield() }
+    }
+
+    // L4/N1: the model owns ONE session per selection. Re-requesting the same entry (what a
+    // size-class flip reduces to — both the compact push and the regular detail read
+    // `model.session`) never rebuilds it, so the edit mode and undo stack survive.
+    @Test func sameSelectionKeepsTheSessionInstanceEditModeAndUndo() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.emf" })
+        let a = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        #expect(session.editing == .editing)
+        #expect(session.undoManager.canUndo)
+
+        // The same entry is requested again (the flip): no rebuild, same instance, edits intact.
+        await model.resolveSelection(to: a)
+        #expect(model.session === session)
+        #expect(session.editing == .editing)
+        #expect(session.undoManager.canUndo)
+        #expect(session.isDirty)
+    }
+
+    // U1: switching files with an EMF still editing autosaves the edit and proceeds.
+    @Test func switchingWithAnEMFAutosavesAndProceeds() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.emf" })
+        let a = UUID(); let b = UUID()
+        await model.commitSelection(to: a)
+        await model.session?.beginEditing()
+        model.session?.apply(redFill())
+
+        await model.resolveSelection(to: b)
+        #expect(model.selection == b)
+        #expect(model.session?.entryID == b)
+        #expect(model.pendingNavigation == nil)
+        #expect(boxes.box(for: a).count == 1)   // the edit reached disk on the way out
+    }
+
+    // U1: a selection change while a WMF is dirty is HELD pending the decision; the current
+    // document and its edits are untouched while the dialog is up.
+    @Test func switchingWithADirtyWMFHoldsPending() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.wmf" })
+        let a = UUID(); let b = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+
+        await model.resolveSelection(to: b)
+        #expect(model.pendingNavigation == LibraryWindowModel.PendingNavigation(target: b))
+        #expect(model.selection == a)              // still on the document
+        #expect(model.session === session)
+        #expect(session.editing == .editing)
+        #expect(session.isDirty)
+        #expect(session.pendingWMFConfirmation != nil)
+        #expect(boxes.box(for: a).count == 0)      // nothing written yet
+    }
+
+    // U1: Cancel keeps the user on the document with the edits intact.
+    @Test func cancellingTheHeldSwitchRestoresTheSelection() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.wmf" })
+        let a = UUID(); let b = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        await model.resolveSelection(to: b)
+
+        session.cancelPendingWMFSave()             // the dialog's Cancel
+        await settle { model.pendingNavigation == nil }
+        #expect(model.selection == a)
+        #expect(model.session === session)
+        #expect(session.editing == .editing)
+        #expect(session.isDirty)                   // edits intact
+    }
+
+    // U1: Don't Save proceeds and discards — nothing is written.
+    @Test func dontSaveProceedsAndDiscards() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.wmf" })
+        let a = UUID(); let b = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        await model.resolveSelection(to: b)
+
+        session.discardEditsAndStopEditing()       // the dialog's "Don't Save"
+        await settle { model.selection == b }
+        #expect(model.session?.entryID == b)
+        #expect(model.pendingNavigation == nil)
+        #expect(boxes.box(for: a).count == 0)      // discarded: nothing on disk
+    }
+
+    // U1: Save Anyway writes, then proceeds.
+    @Test func saveAnywayWritesThenProceeds() async {
+        let boxes = WriteBoxes()
+        let model = makeModel(boxes: boxes, fileName: { _ in "drawing.wmf" })
+        let a = UUID(); let b = UUID()
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())
+        await model.resolveSelection(to: b)
+
+        await session.confirmPendingWMFSave()      // the dialog's "Save Anyway"
+        await settle { model.selection == b }
+        #expect(model.session?.entryID == b)
+        #expect(model.pendingNavigation == nil)
+        #expect(boxes.box(for: a).count == 1)      // the WMF edit was written
+    }
+
+    // L4/N1: an outgoing session's flush completes BEFORE the next session loads — no
+    // background flush racing the new load (the old onDisappear bug).
+    @Test func flushCompletesBeforeTheNextSessionLoads() async {
+        let log = OrderLog()
+        let a = UUID(); let b = UUID()
+        let model = LibraryWindowModel()
+        model.sessionFactory = { id in
+            DocumentSession(
+                entryID: id,
+                resolve: { rid in
+                    if rid == b { log.append("load-B") }
+                    return editableEMF()
+                },
+                writeBytes: { _, _, _ in log.append("flush-A") },
+                documentFileName: { "drawing.emf" },
+                autosave: AutosaveController(sleep: nonFiringSleep)
+            )
+        }
+        await model.commitSelection(to: a)
+        let session = try! #require(model.session)
+        await session.beginEditing()
+        session.apply(redFill())                   // A is now editing + dirty
+
+        await model.commitSelection(to: b)         // flush A, then load B
+        #expect(log.entries == ["flush-A", "load-B"])
+        #expect(model.session?.entryID == b)
+    }
+}
+
 // MARK: - Store pruning + real-file round trip
 
 @MainActor
