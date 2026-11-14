@@ -52,20 +52,37 @@ struct DrawingRecolourView: View {
     }
 
     // A segmented control truncates "Colour-blind safe" / "Brand colours" on iPhone, so it
-    // falls back to a menu picker at compact width (C5e A3).
+    // falls back to a menu at compact width (C5e A3). The compact label is hand-built so the
+    // mode name wraps instead of clipping top and bottom at large AX sizes (L1 review).
     @ViewBuilder
     private var palettePicker: some View {
         @Bindable var model = model
-        let picker = Picker("Palette", selection: $model.mode) {
-            ForEach(DrawingRecolourModel.Mode.allCases, id: \.self) { mode in
-                Text(mode.title).tag(mode)
-            }
-        }
-        .accessibilityIdentifier("recolourMode")
         if isCompact {
-            picker.pickerStyle(.menu)
+            Menu {
+                Picker("Palette", selection: $model.mode) {
+                    ForEach(DrawingRecolourModel.Mode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Palette").foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(model.mode.title)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption)
+                }
+            }
+            .accessibilityIdentifier("recolourMode")
         } else {
-            picker.pickerStyle(.segmented).labelsHidden()
+            Picker("Palette", selection: $model.mode) {
+                ForEach(DrawingRecolourModel.Mode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            .accessibilityIdentifier("recolourMode")
         }
     }
 
