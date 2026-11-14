@@ -163,4 +163,51 @@ struct SceneRenderSourceTests {
         #expect(upright.differingFraction < 0.25,
                 "SceneRasterize upright mismatch \(String(format: "%.1f%%", upright.differingFraction * 100)) too high")
     }
+
+    // MARK: - Synthesis cache (P9)
+
+    /// Rendering an edited scene through ONE prepared source repeatedly — as a tiled
+    /// canvas repaints every tile — is byte-identical to the first render, and the
+    /// edited element's throwaway document is synthesised once and memoised rather than
+    /// rebuilt per render.
+    @Test func repeatedSourceRenderIsStableAndCachesTheSynthesis() throws {
+        let data = try Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("handmade-emfplus-shapes.emf"))
+        var scene = try SceneImporter.import(data: data)
+        let id = try #require(scene.editableElements.first { !$0.boundsDevice.isNull }?.id)
+        try scene.translate([id], dx: 7, dy: 5)
+        let src = try #require(SceneRenderer.prepare(scene))
+        let w = Int(scene.pageSizeDevice.width), h = Int(scene.pageSizeDevice.height)
+        let target = CGRect(x: 0, y: 0, width: w, height: h)
+
+        let first = bitmap(w, h); SceneRenderer.render(scene, into: first, target: target, source: src)
+        let ia = try #require(first.makeImage())
+        for _ in 0 ..< 3 {
+            let ctx = bitmap(w, h); SceneRenderer.render(scene, into: ctx, target: target, source: src)
+            let ib = try #require(ctx.makeImage())
+            #expect(compareImages(ia, ib, tolerance: 0).maxChannelDelta == 0, "a repeated per-tile render diverged")
+        }
+        #expect(src.synthesisCache.count >= 1, "the edited element should be synthesised and cached")
+    }
+
+    /// The synthesis cache rebuilds only when the element VALUE or the page bounds
+    /// change (a tile subscene / ghost renders the same source at a different page
+    /// bounds), and reuses the memoised document otherwise.
+    @Test func synthesisCacheRevalidatesOnValueAndPageBounds() throws {
+        let data = try Data(contentsOf: EditTestPaths.corpusDirectory.appendingPathComponent("gate-p4-image.emf"))
+        let file = try EMFFile.parse(data)
+        let cache = SceneRenderer.SynthesisCache()
+        var builds = 0
+        func build() -> EMFFile? { builds += 1; return file }
+        let el = Element(id: 1, kind: .rect, geometryDevice: ScenePath(segments: []), transform: .identity,
+                         provenance: Provenance(sourceRecordIndices: [], edited: true))
+        let page = CGRect(x: 0, y: 0, width: 100, height: 100)
+        _ = cache.file(for: el, pageBounds: page, build: build)
+        _ = cache.file(for: el, pageBounds: page, build: build)        // hit
+        #expect(builds == 1)
+        var moved = el; moved.transform = CGAffineTransform(translationX: 5, y: 0)
+        _ = cache.file(for: moved, pageBounds: page, build: build)     // value changed → rebuild
+        #expect(builds == 2)
+        _ = cache.file(for: moved, pageBounds: CGRect(x: 0, y: 0, width: 50, height: 50), build: build) // page changed → rebuild
+        #expect(builds == 3)
+    }
 }

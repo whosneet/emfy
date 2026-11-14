@@ -42,6 +42,73 @@ public enum SceneRenderer {
         /// drag frame while an imported image is moved or resized. Thread-safe and
         /// built once per session, like `imageCache`.
         let dibCache = DIBImageCache()
+        /// Parsed throwaway documents for EDITED/new elements, keyed by element id and
+        /// re-validated by the element's value and the page bounds (P9): without this a
+        /// tiled canvas re-synthesises → re-serialises → re-parses each edited element's
+        /// one-element EMF/EMF+ on every tile and every repaint — the dominant per-tile
+        /// cost of editing an EMF+ scene. Thread-safe and built once per (element value,
+        /// page bounds), so editing twenty scattered elements synthesises each at most
+        /// once per edit rather than once per tile.
+        let synthesisCache = SynthesisCache()
+    }
+
+    /// A thread-safe, LRU-bounded cache of the parsed throwaway `EMFFile` an edited or
+    /// new element synthesises to (`renderSynthesized`/`renderSynthesizedPlus`). Keyed by
+    /// element id and re-validated by the element's VALUE and the page bounds, since the
+    /// synthesised document depends on both (a tile subscene or selection ghost renders
+    /// the same source at a different page bounds). A changed element value or page bounds
+    /// rebuilds; an unchanged one is reused by every tile and repaint. `@unchecked
+    /// Sendable`: every field is guarded by `lock`.
+    final class SynthesisCache: @unchecked Sendable {
+        private struct Entry {
+            let element: Element
+            let pageBounds: CGRect
+            let file: EMFFile
+        }
+
+        /// Plenty for any real edit session (edited elements number in the dozens);
+        /// caps the resident set so a pathological script can't grow it without bound.
+        static let defaultLimit = 512
+
+        private let lock = NSLock()
+        private var entries: [Int: Entry] = [:]
+        private var order: [Int] = []
+        private let limit: Int
+
+        init(limit: Int = SynthesisCache.defaultLimit) { self.limit = max(1, limit) }
+
+        /// The parsed document for `element` at `pageBounds`: the cached one when the
+        /// element value and page bounds match, else `build()` run once (with the lock
+        /// released) and memoised. `build` returning nil is not cached.
+        func file(for element: Element, pageBounds: CGRect, build: () -> EMFFile?) -> EMFFile? {
+            lock.lock()
+            if let entry = entries[element.id], entry.element == element, entry.pageBounds == pageBounds {
+                touch(element.id)
+                lock.unlock()
+                return entry.file
+            }
+            lock.unlock()
+
+            guard let file = build() else { return nil }
+
+            lock.lock()
+            entries[element.id] = Entry(element: element, pageBounds: pageBounds, file: file)
+            touch(element.id)
+            while entries.count > limit, let oldest = order.first {
+                order.removeFirst()
+                entries[oldest] = nil
+            }
+            lock.unlock()
+            return file
+        }
+
+        /// Moves `id` to the most-recently-used end (caller holds `lock`).
+        private func touch(_ id: Int) {
+            if let position = order.firstIndex(of: id) { order.remove(at: position) }
+            order.append(id)
+        }
+
+        var count: Int { lock.lock(); defer { lock.unlock() }; return entries.count }
     }
 
     /// A thread-safe, cost-bounded cache of decoded image pixels for edited/new
@@ -285,11 +352,11 @@ public enum SceneRenderer {
                 if let cg = decodedImage(element, source: source, base: base) {
                     drawImageDirect(element, cg, into: context, base: base)
                 } else {
-                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base, source: source)
                 }
             case .text, .image:
                 if isEdit {
-                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base, source: source)
                 } else {
                     let key = element.provenance.sourceRecordIndices.max() ?? -1
                     if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base, imageCache: source?.dibCache) }
@@ -299,7 +366,7 @@ public enum SceneRenderer {
                 if let op = replayOps[key] { EMFRenderer.replay(op, into: context, deviceToTarget: base, imageCache: source?.dibCache) }
             default:
                 if isEdit {
-                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                    renderEdited(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base, source: source)
                 } else {
                     drawGeometry(element, into: context, base: base)
                 }
@@ -312,11 +379,11 @@ public enum SceneRenderer {
     /// or a gradient) is drawn as EMF+ (the dual-upgrade output, slice E1b2b);
     /// everything else is drawn as a GDI block. So the on-screen edit matches the
     /// exported file whether it stayed a flat GDI EMF or upgraded to a dual EMF+.
-    private static func renderEdited(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform) {
+    private static func renderEdited(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform, source: SceneRenderSource?) {
         if SceneExporter.elementNeedsEMFPlus(element) {
-            renderSynthesizedPlus(element, into: context, pageBounds: pageBounds, target: target, base: base)
+            renderSynthesizedPlus(element, into: context, pageBounds: pageBounds, target: target, base: base, source: source)
         } else {
-            renderSynthesized(element, into: context, pageBounds: pageBounds, target: target, base: base)
+            renderSynthesized(element, into: context, pageBounds: pageBounds, target: target, base: base, source: source)
         }
     }
 
@@ -326,23 +393,41 @@ public enum SceneRenderer {
     /// matches the exported file. The element's clip is applied around it (the
     /// exporter instead relies on the overlay's inherited clip, which the import
     /// captured as this element's clip). A no-op if the element draws nothing.
-    private static func renderSynthesized(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform) {
+    private static func renderSynthesized(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform, source: SceneRenderSource?) {
+        guard let file = cachedSynthesis(element, pageBounds: pageBounds, source: source, build: {
+            buildSynthesizedEMF(element, pageBounds: pageBounds)
+        }) else { return }
+        context.saveGState()
+        applyClip(element.clipDevice, base: base, into: context)
+        _ = EMFRenderer.render(file, into: context, target: target)
+        context.restoreGState()
+    }
+
+    /// Synthesises `element`'s device-space EMR block into a throwaway one-element
+    /// EMF and parses it, or nil when the element draws nothing or the document
+    /// fails to build/parse. The expensive synthesise→serialise→parse the
+    /// per-session cache memoises.
+    private static func buildSynthesizedEMF(_ element: Element, pageBounds: CGRect) -> EMFFile? {
         var warnings: [ExportWarning] = []
         let payloads = SceneSynthesis.emfBlock(for: element, baseHandle: 1, warnings: &warnings)
-        guard !payloads.isEmpty else { return }
+        guard !payloads.isEmpty else { return nil }
         let bounds = pageRectL(pageBounds)
         let builder = EMFDocumentBuilder(bounds: bounds, frame: bounds, device: SizeL(cx: 0, cy: 0), millimeters: SizeL(cx: 0, cy: 0))
         do {
             for payload in payloads { try builder.append(payload) }
             let data = try builder.finish()
-            guard let file = try? EMFFile.parse(data) else { return }
-            context.saveGState()
-            applyClip(element.clipDevice, base: base, into: context)
-            _ = EMFRenderer.render(file, into: context, target: target)
-            context.restoreGState()
+            return try? EMFFile.parse(data)
         } catch {
-            return
+            return nil
         }
+    }
+
+    /// Returns the cached parsed synthesis for `element` when a prepared `source` is
+    /// present (a tiled canvas), else runs `build` once (a one-off `makeImage`/test,
+    /// where one build per call is fine).
+    private static func cachedSynthesis(_ element: Element, pageBounds: CGRect, source: SceneRenderSource?, build: () -> EMFFile?) -> EMFFile? {
+        if let source { return source.synthesisCache.file(for: element, pageBounds: pageBounds, build: build) }
+        return build()
     }
 
     /// Renders an EMF+ scene. An UNEDITED element replays its original playback:
@@ -393,9 +478,9 @@ public enum SceneRenderer {
                 // re-emits as EMF+. Both use the exporter's synthesis, so the render
                 // matches the exported file.
                 if element.id >= 0, element.id < entries.count, case .gdi = entries[element.id] {
-                    renderSynthesized(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                    renderSynthesized(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base, source: source)
                 } else {
-                    renderSynthesizedPlus(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base)
+                    renderSynthesizedPlus(element, into: context, pageBounds: scene.pageBoundsDevice, target: target, base: base, source: source)
                 }
                 continue
             }
@@ -415,12 +500,25 @@ public enum SceneRenderer {
     /// single-element EMF+ file with the exporter's block (identity world, 1:1-pixel
     /// page) and playing it under the element's captured clip — the EMF+ twin of
     /// `renderSynthesized`, so the on-screen edit matches the exported EMF+ file.
-    private static func renderSynthesizedPlus(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform) {
+    private static func renderSynthesizedPlus(_ element: Element, into context: CGContext, pageBounds: CGRect, target: CGRect, base: CGAffineTransform, source: SceneRenderSource?) {
+        guard let file = cachedSynthesis(element, pageBounds: pageBounds, source: source, build: {
+            buildSynthesizedPlusEMF(element, pageBounds: pageBounds)
+        }) else { return }
+        context.saveGState()
+        applyClip(element.clipDevice, base: base, into: context)
+        _ = EMFRenderer.render(file, into: context, target: target)
+        context.restoreGState()
+    }
+
+    /// Synthesises `element` into a throwaway one-element EMF+ (dual) document and
+    /// parses it, or nil when it emits nothing or fails to build/parse — the EMF+
+    /// twin of `buildSynthesizedEMF`, memoised by the same per-session cache.
+    private static func buildSynthesizedPlusEMF(_ element: Element, pageBounds: CGRect) -> EMFFile? {
         var warnings: [ExportWarning] = []
         var nextSlot: UInt8 = 0
         func allocate() -> UInt8? { guard nextSlot < 64 else { return nil }; let s = nextSlot; nextSlot += 1; return s }
         guard let emits = SceneEMFPlusSynthesis.block(for: element, saveIndex: 0x7F00_0000, allocate: allocate, warnings: &warnings),
-              !emits.isEmpty else { return }
+              !emits.isEmpty else { return nil }
         let bounds = pageRectL(pageBounds)
         let builder = EMFPlusDualDocumentBuilder(bounds: bounds, frame: bounds, device: SizeL(cx: 0, cy: 0), millimeters: SizeL(cx: 0, cy: 0))
         do {
@@ -431,13 +529,9 @@ public enum SceneRenderer {
                 }
             }
             let data = try builder.finish()
-            guard let file = try? EMFFile.parse(data) else { return }
-            context.saveGState()
-            applyClip(element.clipDevice, base: base, into: context)
-            _ = EMFRenderer.render(file, into: context, target: target)
-            context.restoreGState()
+            return try? EMFFile.parse(data)
         } catch {
-            return
+            return nil
         }
     }
 
