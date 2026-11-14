@@ -656,6 +656,14 @@ final class DocumentSession {
     /// Cancels any armed autosave, so a DEBUG capture run never writes on its way out.
     func debugCancelAutosave() { autosave.cancel() }
 
+    /// A cheap hex checksum of the CURRENT on-disk bytes (via the same resolve the loader uses),
+    /// for the C6a WMF Save-Anyway screenshot script: it logs this before and after Save Anyway
+    /// to prove the bytes actually changed on disk (R2U1).
+    func debugResolvedChecksum() async -> String {
+        guard let data = try? await resolve(entryID) else { return "unresolved" }
+        return String(format: "%016llx", UInt64(bitPattern: Int64(Self.fingerprint(of: data))))
+    }
+
     /// When set, the next save is failed before any bytes reach disk, so the close-sheet
     /// DEBUG script can reproduce a failed-save window close deterministically (E2d).
     /// `#if DEBUG` only, proven absent from Release.

@@ -513,6 +513,8 @@ struct MetafileViewerScreen: View {
         if EditorDebugLaunch.script == "text-image" { await runTextImageScript(); return }
         if EditorDebugLaunch.script == "wmf-done" { await runWMFDoneScript(); return }
         if EditorDebugLaunch.script == "wmf-leave" { await runWMFLeaveScript(); return }
+        if EditorDebugLaunch.script == "wmf-save-anyway" { await runWMFSaveAnywayScript(); return }
+        if EditorDebugLaunch.script == "save-fail-alert" { await runSaveFailAlertScript(); return }
         if EditorDebugLaunch.script == "text-popover" { await runTextPopoverScript(); return }
         if EditorDebugLaunch.script == "layers" { await runLayersScript(); return }
         if EditorDebugLaunch.script == "align-grid" { await runAlignGridScript(); return }
@@ -874,6 +876,52 @@ struct MetafileViewerScreen: View {
         onBack()   // the guarded leave: window model raises the WMF choice and holds the nav
         try? await Task.sleep(for: .milliseconds(600))
         Self.logScript("ios wmf-leave: wmfPending=\(session.pendingWMFConfirmation != nil) ending=\(session.isEndingEditing) editing=\(session.editing == .editing)")
+    }
+
+    /// C6a R2U1 write-proof: open a WMF → edit mode → one edit → tap Done (raises the "Save as
+    /// WMF?" dialog) → drive the REAL button ordering (mark the resolution, the dismiss setter
+    /// fires, then the async write). Logs the on-disk checksum before and after to prove the WMF
+    /// bytes actually changed (the old bug wrote nothing), and captures the document shown after
+    /// the successful Save Anyway (no dialog, back in the viewer). Writes the PNG into Documents.
+    @MainActor
+    private func runWMFSaveAnywayScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios wmf-save-anyway: begin editing failed"); return }
+        let before = await session.debugResolvedChecksum()
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        _ = session.debugInsertText("Edited via Save Anyway", originDevice: CGPoint(x: page.width * 0.12, y: page.height * 0.18))
+        try? await Task.sleep(for: .milliseconds(150))
+        await session.endEditing()                       // Done → "Save as WMF?" dialog
+        // The REAL button sequence, in SwiftUI's order: the dismiss setter fires before the
+        // button's async write runs. Without the R2U1 fix this wrote nothing.
+        session.beginResolvingWMFConfirmation()
+        let work = Task { await session.confirmPendingWMFSave() }
+        session.dismissPendingWMFConfirmation()
+        await work.value
+        let after = await session.debugResolvedChecksum()
+        try? await Task.sleep(for: .milliseconds(300))
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let wrote = Self.captureKeyWindow(to: docs.appendingPathComponent("c6a-ipad-wmf-saveanyway.png").path)
+        Self.logScript("ios wmf-save-anyway: before=\(before) after=\(after) changed=\(before != after) editing=\(session.editing == .editing) screenshot=\(wrote) path=Documents/c6a-ipad-wmf-saveanyway.png")
+    }
+
+    /// C6a R2U2 proof: open an EMF → edit mode → one edit → force the next save to fail → tap
+    /// Done. The failed Done raises the save-failure alert (Try Again / Save a Copy / Don't Save
+    /// / Cancel) instead of trapping the user with a toast. Captures the alert; logs the blocked
+    /// state. Writes the PNG into Documents.
+    @MainActor
+    private func runSaveFailAlertScript() async {
+        await session.beginEditing()
+        guard session.editing == .editing else { Self.logScript("ios save-fail-alert: begin editing failed"); return }
+        let page = session.editingScene?.pageSizeDevice ?? CGSize(width: 1122, height: 793)
+        _ = session.debugInsertText("Edited", originDevice: CGPoint(x: page.width * 0.15, y: page.height * 0.2))
+        try? await Task.sleep(for: .milliseconds(150))
+        session.debugInjectWriteFailure = true           // the next save fails before any bytes land
+        await session.endEditing()                       // Done → failed save → R2U2 alert
+        try? await Task.sleep(for: .milliseconds(600))
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let wrote = Self.captureKeyWindow(to: docs.appendingPathComponent("c6a-iphone-savefail-alert.png").path)
+        Self.logScript("ios save-fail-alert: blocked=\(session.isLeaveBlockedBySaveError) editing=\(session.editing == .editing) screenshot=\(wrote) path=Documents/c6a-iphone-savefail-alert.png")
     }
 
     /// iPad text-popover proof (E3c): blank drawing → edit mode → insert a text element and
