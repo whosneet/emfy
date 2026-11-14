@@ -50,9 +50,11 @@ enum AppIntentDrawingError: Error, CustomLocalizedStringResourceConvertible {
 /// that core type to App Intents, so the Quick Look extensions never link
 /// AppIntents.
 enum DrawingExportFormat: String, AppEnum {
-    case png
-    case pdf
-    case svg
+    // Explicit raw values (SI-M): the raw string is the stable identifier persisted in
+    // a saved shortcut, so it must not drift if a case is ever renamed in code.
+    case png = "png"
+    case pdf = "pdf"
+    case svg = "svg"
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Export Format"
     static let caseDisplayRepresentations: [DrawingExportFormat: DisplayRepresentation] = [
