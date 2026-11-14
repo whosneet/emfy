@@ -21,6 +21,13 @@ final class DrawingAIToolUsage: @unchecked Sendable {
     private let lock = NSLock()
     private var names: [String] = []
     private var total = 0
+    private var outputChars = 0
+
+    /// The per-turn TOTAL tool-output budget, in characters (FM-1): the sum of every
+    /// tool result in one answer is capped, on top of each tool's own per-call limit,
+    /// so a model that calls tools repeatedly — or a "dump everything" injection — can't
+    /// flood and overflow the context window with tool output.
+    static let maxTotalOutputCharacters = 12_000
 
     /// Records `name` once for display (first-use order preserved), and counts every
     /// call including repeats (so a "call findText 1000 times" injection is detectable).
@@ -45,12 +52,27 @@ final class DrawingAIToolUsage: @unchecked Sendable {
         return total
     }
 
+    /// Applies a tool result's own `perCallLimit`, then the per-turn TOTAL output budget,
+    /// recording what it consumed (FM-1). Once the turn's budget is spent it returns a
+    /// short note, so the model gets a clear signal instead of silently truncated data.
+    func takeOutputBudget(_ body: String, perCallLimit: Int) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        let remaining = Self.maxTotalOutputCharacters - outputChars
+        guard remaining > 0 else { return "(Tool output limit for this answer reached; no more can be returned.)" }
+        let perCall = String(body.prefix(perCallLimit))
+        let allowed = String(perCall.prefix(remaining))
+        outputChars += allowed.count
+        return allowed
+    }
+
     /// Clears the record before a new answer.
     func reset() {
         lock.lock()
         defer { lock.unlock() }
         names.removeAll(keepingCapacity: true)
         total = 0
+        outputChars = 0
     }
 }
 
@@ -135,8 +157,9 @@ struct GetDrawingTextTool: Tool {
         let body = slice.enumerated()
             .map { "line \(start + $0.offset + 1): \($0.element)" }
             .joined(separator: "\n")
-        // Fence the result: it carries the drawing's untrusted text (S5).
-        return DrawingAIPrompt.toolResultBlock(String(body.prefix(DrawingAIToolData.maxOutputCharacters)))
+        // Fence the result: it carries the drawing's untrusted text (S5). The per-call
+        // limit and the per-turn total budget both apply (FM-1).
+        return DrawingAIPrompt.toolResultBlock(data.usage.takeOutputBudget(body, perCallLimit: DrawingAIToolData.maxOutputCharacters))
     }
 }
 
@@ -172,8 +195,9 @@ struct FindTextTool: Tool {
         }
         let header = "Found \(matches.count) match\(matches.count == 1 ? "" : "es") on \(lines.count) line\(lines.count == 1 ? "" : "s"):"
         let body = ([header] + lines).joined(separator: "\n")
-        // Fence the result: it carries the drawing's untrusted matched lines (S5).
-        return DrawingAIPrompt.toolResultBlock(String(body.prefix(DrawingAIToolData.maxOutputCharacters)))
+        // Fence the result: it carries the drawing's untrusted matched lines (S5). The
+        // per-call limit and the per-turn total budget both apply (FM-1).
+        return DrawingAIPrompt.toolResultBlock(data.usage.takeOutputBudget(body, perCallLimit: DrawingAIToolData.maxOutputCharacters))
     }
 }
 
@@ -189,7 +213,7 @@ struct GetDrawingInfoTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         data.usage.record(DrawingAIToolName.getDrawingInfo)
-        return data.info.summary
+        return data.usage.takeOutputBudget(data.info.summary, perCallLimit: DrawingAIToolData.maxOutputCharacters)
     }
 }
 
@@ -207,7 +231,7 @@ struct ListRecordTypesTool: Tool {
         data.usage.record(DrawingAIToolName.listRecordTypes)
         guard !data.recordCounts.isEmpty else { return "No record information is available for this drawing." }
         let body = data.recordCounts.map { "\($0.name): \($0.count)" }.joined(separator: "\n")
-        return String(("Records by kind:\n" + body).prefix(DrawingAIToolData.maxOutputCharacters))
+        return data.usage.takeOutputBudget("Records by kind:\n" + body, perCallLimit: DrawingAIToolData.maxOutputCharacters)
     }
 }
 

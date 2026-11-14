@@ -67,9 +67,15 @@ final class DrawingAskModel {
     /// re-grounds in a fresh session, bounding the context the model must hold.
     nonisolated static let maxGroundedTurns = 12
 
-    /// Shown when the on-device model overflows its context window: the session is
-    /// dropped and the next question re-reads the drawing from scratch (F2).
+    /// Shown when the on-device model overflows its context window on a CONTINUING turn:
+    /// the transcript grew too long, so the session is dropped and the next question
+    /// re-reads the drawing from scratch (F2).
     nonisolated static let contextResetNotice = "This conversation got too long for the on-device model, so Emfy started fresh. Ask your question again and it’ll re-read the drawing."
+
+    /// Shown when the overflow happens on a JUST-GROUNDED turn (FM-1): the drawing
+    /// itself has more text than the on-device model can read at once, so re-grounding
+    /// and asking again would only overflow again. Feature-neutral wording.
+    nonisolated static let drawingTooLargeNotice = "This drawing has too much text for the on-device model to read at once. Try a smaller drawing."
 
     /// Whether the next on-device question must (re-)ground in a fresh session: when
     /// there is no session yet, or the transcript has reached the turn cap (F2).
@@ -263,7 +269,10 @@ final class DrawingAskModel {
                 groundedTurns = 0
                 if messages.indices.contains(index) {
                     messages[index].streaming = false
-                    messages[index].text = Self.contextResetNotice
+                    // A just-grounded turn that overflowed means the drawing itself is too
+                    // big for the on-device context — re-grounding won't help, so say that
+                    // rather than invite the user to ask again (FM-1).
+                    messages[index].text = mustGround ? Self.drawingTooLargeNotice : Self.contextResetNotice
                     messages[index].failed = true
                 }
                 isResponding = false

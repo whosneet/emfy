@@ -31,6 +31,25 @@ import Testing
         #expect(!td.recordCounts.isEmpty)
     }
 
+    // FM-1: the per-turn total output budget caps the SUM of tool results in one answer,
+    // on top of each tool's per-call limit, so repeated calls can't flood the context.
+    @Test func toolUsageCapsTotalOutputPerTurn() {
+        let usage = DrawingAIToolUsage()
+        let chunk = String(repeating: "x", count: 5000)
+        // Each call is limited to 4000 by the per-call limit; the per-turn total is 12000.
+        let a = usage.takeOutputBudget(chunk, perCallLimit: 4000)
+        let b = usage.takeOutputBudget(chunk, perCallLimit: 4000)
+        let c = usage.takeOutputBudget(chunk, perCallLimit: 4000)
+        let d = usage.takeOutputBudget(chunk, perCallLimit: 4000)
+        #expect(a.count == 4000)
+        #expect(b.count == 4000)
+        #expect(c.count == 4000)            // 12000 total reached exactly here
+        #expect(d.contains("limit"))        // budget spent ⇒ a note, not data
+        // reset() restores the budget for the next answer.
+        usage.reset()
+        #expect(usage.takeOutputBudget(chunk, perCallLimit: 4000).count == 4000)
+    }
+
     @Test func exposedToolSetIsExactlyTheFourReadOnlyTools() throws {
         guard #available(macOS 26, iOS 26, *) else { return }
         let td = try toolData(for: "gate-p4-text.emf")
