@@ -162,6 +162,14 @@ final class DocumentSession {
     private(set) var pendingWMFConfirmation: WMFSaveConfirmation?
     @ObservationIgnored private var wmfSaveConfirmed = false
 
+    /// Set synchronously by a WMF-dialog button the instant it is tapped, so the dialog's
+    /// dismiss setter — which SwiftUI fires synchronously when a button is chosen, BEFORE the
+    /// button's own (often async) action runs — does not cancel the resolution the user picked.
+    /// "Save Anyway" only schedules a `Task`; without this flag the setter cancelled the pending
+    /// confirmation first, the Task then found nothing to write, and the WMF edit was silently
+    /// lost while the leave reported cancelled (R2U1). Cleared when the resolution completes.
+    @ObservationIgnored private var isResolvingWMFConfirmation = false
+
     /// Whether the one-time revert snapshot has been taken this session.
     @ObservationIgnored private var snapshotTaken = false
 
@@ -183,6 +191,12 @@ final class DocumentSession {
     /// user cancels the leave. The owner then proceeds with — or abandons — the pending
     /// navigation. `@ObservationIgnored` — a wiring hook, not observable state.
     @ObservationIgnored var leaveEditingCompletion: ((Bool) -> Void)?
+
+    /// A one-shot hook the Mac window-close flow installs when its "Save…" raised a WMF/WMZ
+    /// confirmation instead of writing (R2U5): fired once the user confirms and the bytes reach
+    /// disk, so the window finally closes. Cleared when fired or when the confirmation is
+    /// cancelled. `@MainActor` because it drives an `NSWindow`.
+    @ObservationIgnored var onPendingWMFSaveCommitted: (@MainActor () -> Void)?
 
     // MARK: - Injected dependencies
 
@@ -720,6 +734,36 @@ final class DocumentSession {
         endEditingState()
     }
 
+    /// Whether a leave (Done / back / file switch) is blocked by a SAVE FAILURE rather than a
+    /// WMF confirmation (R2U2): the user asked to leave, the save failed, and no WMF dialog is
+    /// up. The viewer shows the Try Again / Save a Copy / Don't Save / Cancel alert for this,
+    /// instead of leaving the user trapped in edit mode with only a transient toast.
+    var isLeaveBlockedBySaveError: Bool {
+        isEndingEditing && lastSaveError != nil && pendingWMFConfirmation == nil
+    }
+
+    /// "Try Again" from the save-failure leave alert (R2U2): clears the error and re-runs the
+    /// leave save. A clean save then ends editing (and fires any held navigation); another
+    /// failure re-raises the alert.
+    func retryEndEditing() async {
+        guard isEndingEditing else { return }
+        lastSaveError = nil
+        await save()
+        if isDirty || pendingWMFConfirmation != nil || lastSaveError != nil { return }
+        endEditingState()
+    }
+
+    /// "Cancel" from the save-failure leave alert (R2U2): stay in edit mode on the document,
+    /// abandon the pending Done/switch, and clear the error so the alert dismisses. A held
+    /// navigation is told the leave was cancelled.
+    func cancelEndEditingAfterSaveError() {
+        lastSaveError = nil
+        isEndingEditing = false
+        let completion = leaveEditingCompletion
+        leaveEditingCompletion = nil
+        completion?(false)
+    }
+
     /// Completes a pending Done/leave-editing once the blocking save resolves cleanly
     /// (U1): called after the WMF confirmation is written. Stays in edit mode if the
     /// document is still dirty, another confirmation is pending, or a save failed.
@@ -1134,16 +1178,41 @@ final class DocumentSession {
         await commitWrite(data: result.data, warnings: result.warnings, fileName: fileName, scene: current.scene, isAutosave: isAutosave)
     }
 
+    /// Called synchronously by a WMF-dialog button (Save Anyway / Save a Copy / Don't Save) the
+    /// instant it is tapped — before its async work runs — so the dialog's dismiss setter
+    /// becomes a no-op and can't pre-empt the chosen resolution (R2U1).
+    func beginResolvingWMFConfirmation() {
+        isResolvingWMFConfirmation = true
+    }
+
+    /// The WMF confirmation dialog's dismiss setter. Cancels the pending save ONLY for a genuine
+    /// user dismissal (swipe, Escape, tap-outside) — never while a dialog button is resolving,
+    /// so the chosen action's async work isn't pre-empted (R2U1).
+    func dismissPendingWMFConfirmation() {
+        guard !isResolvingWMFConfirmation else { return }
+        cancelPendingWMFSave()
+    }
+
     /// Confirms the pending WMF/WMZ save ("Save Anyway"): writes the stashed bytes and
     /// marks the session confirmed, so later saves in this session write without asking.
     func confirmPendingWMFSave() async {
-        guard let pending = pendingWMFConfirmation, let fileName = documentFileName() else { return }
+        guard let pending = pendingWMFConfirmation, let fileName = documentFileName() else {
+            isResolvingWMFConfirmation = false
+            return
+        }
         wmfSaveConfirmed = true
         pendingWMFConfirmation = nil
         await commitWrite(data: pending.data, warnings: pending.warnings, fileName: fileName, scene: history?.scene, isAutosave: false)
+        isResolvingWMFConfirmation = false
         // If this confirmation was raised by a Done/leave-editing request, finish the
         // exit now that the bytes are on disk (U1).
         finishEndEditingIfRequested()
+        // If the Mac close flow is waiting on this confirmation, close the window now that the
+        // bytes are on disk — but only on a clean write (R2U5).
+        if lastSaveError == nil, let hook = onPendingWMFSaveCommitted {
+            onPendingWMFSaveCommitted = nil
+            hook()
+        }
     }
 
     /// Dismisses the pending WMF/WMZ confirmation without writing (Cancel). The
@@ -1151,8 +1220,10 @@ final class DocumentSession {
     /// window owner waiting to navigate away is told the leave was cancelled, so it
     /// restores the previous selection.
     func cancelPendingWMFSave() {
+        isResolvingWMFConfirmation = false
         pendingWMFConfirmation = nil
         isEndingEditing = false
+        onPendingWMFSaveCommitted = nil   // a cancelled close-flow save leaves the window open (R2U5)
         let completion = leaveEditingCompletion
         leaveEditingCompletion = nil
         completion?(false)
@@ -1298,6 +1369,7 @@ final class DocumentSession {
         pendingSaveNotice = nil
         showsExternalChangeBanner = false
         isEndingEditing = false
+        isResolvingWMFConfirmation = false
         editVersion &+= 1
         editing = .notEditing
         DocumentEditRegistry.shared.unregister(self)

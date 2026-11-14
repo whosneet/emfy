@@ -386,20 +386,38 @@ struct MetafileViewerScreen: View {
         }
         .confirmationDialog(
             "Save as WMF?",
-            isPresented: Binding(get: { session.pendingWMFConfirmation != nil }, set: { if !$0 { session.cancelPendingWMFSave() } }),
+            // The dismiss setter cancels ONLY a genuine dismissal, never while a button is
+            // resolving (R2U1): a tapped "Save Anyway" marks the resolution synchronously, so
+            // this setter — fired before the button's async write runs — no longer pre-empts it.
+            isPresented: Binding(get: { session.pendingWMFConfirmation != nil }, set: { if !$0 { session.dismissPendingWMFConfirmation() } }),
             titleVisibility: .visible,
             presenting: session.pendingWMFConfirmation
         ) { pending in
-            Button("Save Anyway") { Task { await session.confirmPendingWMFSave() } }
-            Button("Save a Copy as EMF…") { saveSceneCopyAsEMF() }
+            Button("Save Anyway") { session.beginResolvingWMFConfirmation(); Task { await session.confirmPendingWMFSave() } }
+            Button("Save a Copy as EMF…") { session.beginResolvingWMFConfirmation(); saveSceneCopyAsEMF() }
             // Only while leaving edit mode (Done/back): let the user drop the edits and
             // exit rather than being stuck in the editor on a dirty WMF (U1).
             if session.isEndingEditing {
-                Button("Don’t Save", role: .destructive) { session.discardEditsAndStopEditing() }
+                Button("Don’t Save", role: .destructive) { session.beginResolvingWMFConfirmation(); session.discardEditsAndStopEditing() }
             }
             Button("Cancel", role: .cancel) { session.cancelPendingWMFSave() }
         } message: { pending in
             Text(WMFLimitationWording.message(for: pending))
+        }
+        // A save that fails while leaving edit mode (Done / back / switch) used to trap the user
+        // in the editor with only a transient toast (R2U2). Offer a real way out, wired to the
+        // same leave-completion hook as the WMF dialog.
+        .alert(
+            "Couldn’t Save",
+            isPresented: Binding(get: { session.isLeaveBlockedBySaveError }, set: { _ in }),
+            presenting: session.lastSaveError
+        ) { _ in
+            Button("Try Again") { Task { await session.retryEndEditing() } }
+            Button("Save a Copy as EMF…") { session.cancelEndEditingAfterSaveError(); saveSceneCopyAsEMF() }
+            Button("Don’t Save", role: .destructive) { session.discardEditsAndStopEditing() }
+            Button("Cancel", role: .cancel) { session.cancelEndEditingAfterSaveError() }
+        } message: { error in
+            Text(error.message)
         }
         .overlay(alignment: .top) {
             if session.showsExternalChangeBanner {
@@ -451,9 +469,10 @@ struct MetafileViewerScreen: View {
         .onChange(of: settings.renderOptions) { _, new in
             session.applyRenderOptions(new)
         }
-        // Typed save-failure and saved-with-limitations toasts (E2a-9 / E2a-5, review #6).
+        // Typed save-failure and saved-with-limitations toasts (E2a-9 / E2a-5, review #6). A
+        // failure that blocks a leave is handled by the R2U2 alert, not a transient toast.
         .onChange(of: session.lastSaveError != nil) { _, hasError in
-            if hasError, let error = session.lastSaveError {
+            if hasError, let error = session.lastSaveError, !session.isEndingEditing {
                 toast.show(error.message, systemImage: "exclamationmark.triangle")
                 session.clearSaveError()
             }

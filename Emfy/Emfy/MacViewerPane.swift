@@ -206,23 +206,41 @@ struct MacViewerPane: View {
             }
             .confirmationDialog(
                 "Save as WMF?",
+                // The dismiss setter cancels ONLY a genuine dismissal, never while a button is
+                // resolving (R2U1): a tapped "Save Anyway" marks the resolution synchronously, so
+                // this setter no longer pre-empts its async write.
                 isPresented: Binding(
                     get: { session.pendingWMFConfirmation != nil },
-                    set: { if !$0 { session.cancelPendingWMFSave() } }
+                    set: { if !$0 { session.dismissPendingWMFConfirmation() } }
                 ),
                 titleVisibility: .visible,
                 presenting: session.pendingWMFConfirmation
             ) { pending in
-                Button("Save Anyway") { Task { await session.confirmPendingWMFSave() } }
-                Button("Save a Copy as EMF…") { saveSceneCopyAsEMF() }
+                Button("Save Anyway") { session.beginResolvingWMFConfirmation(); Task { await session.confirmPendingWMFSave() } }
+                Button("Save a Copy as EMF…") { session.beginResolvingWMFConfirmation(); saveSceneCopyAsEMF() }
                 // Only while leaving edit mode (Done): let the user drop the edits and
                 // exit rather than being stuck in the editor on a dirty WMF (U1).
                 if session.isEndingEditing {
-                    Button("Don’t Save", role: .destructive) { session.discardEditsAndStopEditing() }
+                    Button("Don’t Save", role: .destructive) { session.beginResolvingWMFConfirmation(); session.discardEditsAndStopEditing() }
                 }
                 Button("Cancel", role: .cancel) { session.cancelPendingWMFSave() }
             } message: { pending in
                 Text(WMFLimitationWording.message(for: pending))
+            }
+            // A save that fails while leaving edit mode (Done / switch) used to trap the user in
+            // the editor with only a transient toast (R2U2). Offer a real way out, wired to the
+            // same leave-completion hook as the WMF dialog.
+            .alert(
+                "Couldn’t Save",
+                isPresented: Binding(get: { session.isLeaveBlockedBySaveError }, set: { _ in }),
+                presenting: session.lastSaveError
+            ) { _ in
+                Button("Try Again") { Task { await session.retryEndEditing() } }
+                Button("Save a Copy as EMF…") { session.cancelEndEditingAfterSaveError(); saveSceneCopyAsEMF() }
+                Button("Don’t Save", role: .destructive) { session.discardEditsAndStopEditing() }
+                Button("Cancel", role: .cancel) { session.cancelEndEditingAfterSaveError() }
+            } message: { error in
+                Text(error.message)
             }
             .fileExporter(
                 isPresented: $exporter.isExportingSceneEMF,
@@ -236,7 +254,8 @@ struct MacViewerPane: View {
                 }
             }
             .onChange(of: session.lastSaveError != nil) { _, hasError in
-                if hasError, let error = session.lastSaveError {
+                // A failure that blocks a leave is handled by the R2U2 alert, not a toast.
+                if hasError, let error = session.lastSaveError, !session.isEndingEditing {
                     toast.show(error.message, systemImage: "exclamationmark.triangle")
                     session.clearSaveError()
                 }
@@ -2131,6 +2150,10 @@ private final class CloseDelegateProxy: NSObject, NSWindowDelegate {
             // window open, where the existing SwiftUI dialog / error toast takes over.
             if WindowCloseDecision.outcome(choice: .save, stillNeedsPromptAfterSave: still) == .closeNow {
                 close(window)
+            } else if session.pendingWMFConfirmation != nil {
+                // The save raised the WMF limitations dialog instead of writing. Hand off to the
+                // SwiftUI dialog and close the window once the user confirms the write (R2U5).
+                session.onPendingWMFSaveCommitted = { [weak self] in self?.close(window) }
             }
         }
     }
