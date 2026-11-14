@@ -796,6 +796,11 @@ final class DocumentSession {
     /// and the undo stack untouched. AI edits will route through here too.
     func apply(_ command: SceneCommand, coalescing key: SceneCoalescingKey? = nil) {
         guard editing == .editing, var updated = history else { return }
+        // Drop the stored reference so `updated` is the sole owner: `updated.apply` then mutates
+        // the history's scene + undo stack IN PLACE instead of copy-on-writing the whole scene
+        // on every edit (P15). `history` is `@ObservationIgnored`, so the transient nil fires no
+        // observation; the UI re-renders from `editVersion` in `afterMutation`.
+        history = nil
         // Route a freshly-built creation `.insert` into the active layer (E3d). Every other
         // command — and every `.insert` that undo/redo replays internally (those never reach
         // here) — passes through unchanged; with one layer the target is layer 0, so E3a–c
@@ -805,7 +810,8 @@ final class DocumentSession {
         do {
             try updated.apply(command, coalescing: key)
         } catch {
-            return   // SceneEditError: nothing changed
+            history = updated   // SceneEditError: nothing changed; restore
+            return
         }
         history = updated
         // A merge (coalescing into the top step) adds no new UndoManager entry — the
