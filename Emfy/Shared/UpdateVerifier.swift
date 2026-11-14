@@ -16,16 +16,16 @@ protocol UpdateVerifying: Sendable {
         expectedSHA256 hex: String,
         expectedBundleID: String,
         current: AppVersion
-    ) throws -> VerifiedUpdate
+    ) async throws -> VerifiedUpdate
 
     /// Re-verifies an already-STAGED bundle (not in a mount): signature + designated
     /// requirement + Gatekeeper + bundle-ID + newer-version. Run right after staging
-    /// and again immediately before the swap, so a tampered staged copy never installs
-    /// (TOCTOU). Throws on any failure.
-    func verifyStagedBundle(appURL: URL, expectedBundleID: String, current: AppVersion) throws
+    /// and again before quit (C-3), so a tampered staged copy never installs (TOCTOU).
+    /// Throws on any failure.
+    func verifyStagedBundle(appURL: URL, expectedBundleID: String, current: AppVersion) async throws
 
     /// Detaches a mount opened by `verify`.
-    func detach(mountPoint: URL)
+    func detach(mountPoint: URL) async
 }
 
 /// The result of a successful verification: where the verified app lives (inside the
@@ -59,11 +59,23 @@ struct SecurityUpdateVerifier: UpdateVerifying {
 
     // MARK: Code signature (step c)
 
-    /// Checks that `appURL` is validly signed and satisfies the designated
-    /// requirement `anchor apple generic and certificate leaf[subject.OU] = "<team>"`,
-    /// with strict, all-architecture, nested-code validation. Throws
-    /// `.signatureInvalid` on any failure. Pure enough to unit-test against an
-    /// unsigned bundle (which must fail here).
+    /// The Developer ID designated requirement the update must satisfy (S-9): Apple
+    /// anchored, the Developer ID intermediate CA marker OID
+    /// (1.2.840.113635.100.6.2.6) on cert 1, the Developer ID Application leaf marker
+    /// OID (1.2.840.113635.100.6.1.13) on the leaf, AND the Emfy team OU. The marker
+    /// OIDs are what distinguish a Developer ID Application certificate from an Apple
+    /// Development certificate — the old DR (`anchor apple generic and certificate
+    /// leaf[subject.OU] = "<team>"`) accepted a Development-signed build.
+    static let developerIDRequirement =
+        "anchor apple generic"
+        + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+        + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+        + " and certificate leaf[subject.OU] = \"\(emfyTeamOU)\""
+
+    /// Checks that `appURL` is validly signed and satisfies the Developer ID
+    /// designated requirement (`developerIDRequirement`), with strict,
+    /// all-architecture, nested-code validation. Throws `.signatureInvalid` on any
+    /// failure. Pure enough to unit-test against an unsigned bundle (which must fail here).
     static func checkCodeSignature(appURL: URL) throws {
         var staticCode: SecStaticCode?
         let createStatus = SecStaticCodeCreateWithPath(appURL as CFURL, [], &staticCode)
@@ -72,7 +84,7 @@ struct SecurityUpdateVerifier: UpdateVerifying {
         }
 
         var requirement: SecRequirement?
-        let dr = "anchor apple generic and certificate leaf[subject.OU] = \"\(emfyTeamOU)\""
+        let dr = developerIDRequirement
         let reqStatus = SecRequirementCreateWithString(dr as CFString, [], &requirement)
         guard reqStatus == errSecSuccess, let req = requirement else {
             throw UpdateError.signatureInvalid("SecRequirementCreateWithString: \(reqStatus)")
@@ -96,8 +108,8 @@ struct SecurityUpdateVerifier: UpdateVerifying {
     /// so this uses `spctl --assess --type execute` via `Process`
     /// (Apple TN3147 "Migrating to the latest notarization tool" documents spctl as
     /// the supported assessment command). A non-zero exit → `.notNotarized`.
-    static func checkGatekeeper(appURL: URL) throws {
-        let result = try run("/usr/sbin/spctl", ["--assess", "--type", "execute", "-vv", appURL.path])
+    static func checkGatekeeper(appURL: URL) async throws {
+        let result = try await run("/usr/sbin/spctl", ["--assess", "--type", "execute", "-vv", appURL.path])
         guard result.exitCode == 0 else {
             throw UpdateError.notNotarized
         }
@@ -129,11 +141,11 @@ struct SecurityUpdateVerifier: UpdateVerifying {
 
     /// Mounts `dmg` read-only, nobrowse, at a fresh private temp mount point and
     /// returns the mount point plus the located `Emfy.app`.
-    static func mount(dmg: URL) throws -> (mountPoint: URL, appURL: URL) {
+    static func mount(dmg: URL) async throws -> (mountPoint: URL, appURL: URL) {
         let mountPoint = FileManager.default.temporaryDirectory
             .appendingPathComponent("EmfyUpdateMount-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
-        let result = try run("/usr/bin/hdiutil",
+        let result = try await run("/usr/bin/hdiutil",
                              ["attach", dmg.path, "-nobrowse", "-readonly", "-noverify",
                               "-mountpoint", mountPoint.path])
         guard result.exitCode == 0 else {
@@ -142,14 +154,14 @@ struct SecurityUpdateVerifier: UpdateVerifying {
         }
         let appURL = mountPoint.appendingPathComponent("Emfy.app", isDirectory: true)
         guard FileManager.default.fileExists(atPath: appURL.path) else {
-            detachMount(mountPoint)
+            await detachMount(mountPoint)
             throw UpdateError.appNotFoundInImage
         }
         return (mountPoint, appURL)
     }
 
-    static func detachMount(_ mountPoint: URL) {
-        _ = try? run("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force"])
+    static func detachMount(_ mountPoint: URL) async {
+        _ = try? await run("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force"])
         try? FileManager.default.removeItem(at: mountPoint)
     }
 
@@ -160,44 +172,44 @@ struct SecurityUpdateVerifier: UpdateVerifying {
         expectedSHA256 hex: String,
         expectedBundleID: String,
         current: AppVersion
-    ) throws -> VerifiedUpdate {
+    ) async throws -> VerifiedUpdate {
         // (a) digest first — cheap and decisive.
         guard UpdateDigest.validHex(hex) else { throw UpdateError.digestUnavailable }
         let actual = try Self.sha256Hex(ofFileAt: dmg)
         guard actual.lowercased() == hex.lowercased() else { throw UpdateError.digestMismatch }
 
         // (b) mount read-only / nobrowse and locate the app.
-        let (mountPoint, appURL) = try Self.mount(dmg: dmg)
+        let (mountPoint, appURL) = try await Self.mount(dmg: dmg)
         do {
             // (c) code signature + designated requirement.
             try Self.checkCodeSignature(appURL: appURL)
             // (d) Gatekeeper / notarisation.
-            try Self.checkGatekeeper(appURL: appURL)
+            try await Self.checkGatekeeper(appURL: appURL)
             // (e) bundle id + newer version.
             let version = try Self.checkIdentityAndVersion(
                 appURL: appURL, expectedBundleID: expectedBundleID, current: current)
             return VerifiedUpdate(appURL: appURL, mountPoint: mountPoint, version: version)
         } catch {
-            Self.detachMount(mountPoint)
+            await Self.detachMount(mountPoint)
             throw error
         }
     }
 
     /// Re-verifies a staged bundle in place (TOCTOU guard). No digest, no mount — the
     /// staged copy is on a user-writable path, so its signature is the source of truth.
-    func verifyStagedBundle(appURL: URL, expectedBundleID: String, current: AppVersion) throws {
+    func verifyStagedBundle(appURL: URL, expectedBundleID: String, current: AppVersion) async throws {
         try Self.checkCodeSignature(appURL: appURL)
-        try Self.checkGatekeeper(appURL: appURL)
+        try await Self.checkGatekeeper(appURL: appURL)
         _ = try Self.checkIdentityAndVersion(
             appURL: appURL, expectedBundleID: expectedBundleID, current: current)
     }
 
-    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 120) throws -> UpdateProcess.Result {
-        try UpdateProcess.run(path, args, timeout: timeout)
+    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 120) async throws -> UpdateProcess.Result {
+        try await UpdateProcess.run(path, args, timeout: timeout)
     }
 
-    func detach(mountPoint: URL) {
-        Self.detachMount(mountPoint)
+    func detach(mountPoint: URL) async {
+        await Self.detachMount(mountPoint)
     }
 }
 
@@ -208,7 +220,7 @@ struct SecurityUpdateVerifier: UpdateVerifying {
 enum UpdateProcess {
     struct Result { let exitCode: Int32; let stdout: String; let stderr: String }
 
-    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 120) throws -> Result {
+    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 120) async throws -> Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
@@ -231,33 +243,101 @@ enum UpdateProcess {
             }
         }
 
-        let done = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in done.signal() }
-        try process.run()
-        drainPipe(out, isOut: true)
-        drainPipe(err, isOut: false)
-
-        if done.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            _ = done.wait(timeout: .now() + 3)
-            _ = drain.wait(timeout: .now() + 3)
-            throw UpdateError.verificationTimedOut
+        // Await the child's exit via a continuation resumed from `terminationHandler`
+        // (C-5), NOT a DispatchSemaphore blocking a cooperative-pool thread. The timeout
+        // is scheduled on the concurrent queue; a single-resume box makes the
+        // exit/timeout/launch-failure race safe, and the thrown timeout terminates the
+        // child first (spctl can stall on an online revocation check).
+        let resumer = ContinuationBox()
+        do {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                resumer.set(cont)
+                process.terminationHandler = { _ in resumer.resume(returning: ()) }
+                do {
+                    try process.run()
+                } catch {
+                    resumer.resume(throwing: error)
+                    return
+                }
+                drainPipe(out, isOut: true)
+                drainPipe(err, isOut: false)
+                queue.asyncAfter(deadline: .now() + timeout) {
+                    if resumer.resume(throwing: UpdateError.verificationTimedOut) {
+                        process.terminate()
+                    }
+                }
+            }
+        } catch {
+            // Timeout or launch failure: bound the drain so the read handles close, then
+            // rethrow the typed error. Nothing is returned. The blocking join runs OFF
+            // the async context (`DispatchGroup.wait` is unavailable there).
+            await Self.joinDrain(drain, out: out, err: err, timeout: 3)
+            throw error
         }
         // The process has exited, but a surviving grandchild can still hold the
         // inherited pipe fds (hdiutil's diskimages helpers do this), so a plain
         // `drain.wait()` could block forever on the NORMAL path too. Bound it; on
         // timeout close the read handles — which unblocks the drain reads — and keep
         // whatever was collected. The exit code is already known.
-        if drain.wait(timeout: .now() + 10) == .timedOut {
-            try? out.fileHandleForReading.close()
-            try? err.fileHandleForReading.close()
-            _ = drain.wait(timeout: .now() + 2)
-        }
+        await Self.joinDrain(drain, out: out, err: err, timeout: 10)
         let (o, e) = collected.snapshot()
         return Result(
             exitCode: process.terminationStatus,
             stdout: String(decoding: o, as: UTF8.self),
             stderr: String(decoding: e, as: UTF8.self))
+    }
+
+    /// Waits (bounded) for the pipe-drain tasks to finish, OFF the async context — a
+    /// `DispatchGroup.wait` is unavailable from an async function, so the blocking join
+    /// runs in a dispatch closure and resumes the continuation when done. On the
+    /// bounded timeout it closes the read handles (which unblocks a drain read a
+    /// surviving grandchild is holding) and waits a moment more.
+    private static func joinDrain(_ group: DispatchGroup, out: Pipe, err: Pipe, timeout: TimeInterval) async {
+        let outHandle = out.fileHandleForReading
+        let errHandle = err.fileHandleForReading
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                if group.wait(timeout: .now() + timeout) == .timedOut {
+                    try? outHandle.close()
+                    try? errHandle.close()
+                    _ = group.wait(timeout: .now() + 2)
+                }
+                continuation.resume()
+            }
+        }
+    }
+
+    /// A lock-guarded single-resume wrapper around a `CheckedContinuation` (C-5): the
+    /// child's exit, the timeout, and a launch failure can each try to resume, but only
+    /// the first wins. `resume(throwing:)` returns whether it was the one that resumed,
+    /// so the timeout path only terminates the child when it actually won the race.
+    private final class ContinuationBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cont: CheckedContinuation<Void, Error>?
+        private var resumed = false
+
+        func set(_ c: CheckedContinuation<Void, Error>) {
+            lock.lock(); defer { lock.unlock() }
+            cont = c
+        }
+
+        @discardableResult
+        func resume(returning value: Void) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard !resumed, let c = cont else { return false }
+            resumed = true; cont = nil
+            c.resume(returning: ())
+            return true
+        }
+
+        @discardableResult
+        func resume(throwing error: Error) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard !resumed, let c = cont else { return false }
+            resumed = true; cont = nil
+            c.resume(throwing: error)
+            return true
+        }
     }
 
     /// A lock-guarded, Sendable box for the stdout/stderr bytes the concurrent drain

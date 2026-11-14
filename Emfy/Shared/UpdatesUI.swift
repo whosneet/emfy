@@ -212,7 +212,9 @@ struct CheckForUpdatesCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
+            // Disabled while a check/download/verify is already in flight (C-4).
             Button("Check for Updates…") { controller.checkNow() }
+                .disabled(controller.isBusy)
         }
     }
 }

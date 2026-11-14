@@ -55,14 +55,46 @@ struct URLSessionUpdateTransport: UpdateFeedProviding, UpdateAssetFetching {
 
     func downloadAsset(_ url: URL, maxBytes: Int) async throws -> URL {
         try requireAllowed(url)
-        let (temp, response) = try await session.download(from: url)
-        try? checkContentLength(response, cap: maxBytes)
+        // A DEDICATED ephemeral session with a resource timeout (N-1): never the shared
+        // session, so a stalled or runaway multi-hundred-MB download can't wedge the
+        // app's shared connections and is bounded in total time. Invalidated on exit.
+        let downloadSession = Self.makeDownloadSession()
+        defer { downloadSession.finishTasksAndInvalidate() }
+
+        // A STREAMING size cap (N-1): the delegate cancels the task the instant the
+        // bytes written — or the server's declared Content-Length — exceed the cap, so
+        // a hostile asset never lands a full oversize file on disk first.
+        let capDelegate = CappedDownloadDelegate(maxBytes: maxBytes)
+        let temp: URL
+        let response: URLResponse
+        do {
+            (temp, response) = try await downloadSession.download(from: url, delegate: capDelegate)
+        } catch {
+            if capDelegate.didExceed { throw UpdateError.downloadTooLarge(maxBytes) }
+            throw UpdateError.networkFailed(error.localizedDescription)
+        }
+        // A Content-Length check that THROWS when the declared size is over the cap
+        // (N-1): the old `try?` swallowed it. Belt-and-braces alongside the streaming cap.
+        try checkContentLength(response, cap: maxBytes)
         let size = (try? FileManager.default.attributesOfItem(atPath: temp.path)[.size] as? Int) ?? nil
         if let size, size > maxBytes {
             try? FileManager.default.removeItem(at: temp)
             throw UpdateError.downloadTooLarge(size)
         }
         return temp
+    }
+
+    /// A dedicated ephemeral download session: a bounded total-resource timeout, no
+    /// cache, no cookies (N-1). Separate from `session` (the feed fetcher) and never
+    /// `.shared`.
+    static func makeDownloadSession(resourceTimeout: TimeInterval = 600) -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = resourceTimeout
+        config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        config.urlCache = nil
+        config.httpCookieStorage = nil
+        return URLSession(configuration: config)
     }
 
     private func requireAllowed(_ url: URL) throws {
@@ -80,6 +112,47 @@ struct URLSessionUpdateTransport: UpdateFeedProviding, UpdateAssetFetching {
             throw UpdateError.downloadTooLarge(Int(clamping: response.expectedContentLength))
         }
     }
+}
+
+/// Cancels a download task the moment it exceeds the cap — either by bytes actually
+/// written or by the server's declared total — so an oversize asset never fully lands
+/// on disk (N-1). Thread-safe single flag; `didExceed` lets the caller map the
+/// resulting cancellation to `.downloadTooLarge` rather than a generic network error.
+final class CappedDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let maxBytes: Int
+    private let lock = NSLock()
+    private var exceeded = false
+
+    init(maxBytes: Int) { self.maxBytes = maxBytes }
+
+    var didExceed: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return exceeded
+    }
+
+    private func markExceeded() {
+        lock.lock(); exceeded = true; lock.unlock()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        if totalBytesWritten > Int64(maxBytes) || totalBytesExpectedToWrite > Int64(maxBytes) {
+            markExceeded()
+            downloadTask.cancel()
+        }
+    }
+
+    // Required by the protocol; the async `download(from:delegate:)` returns the file.
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {}
 }
 
 /// Stages a verified app bundle for the swap-on-quit helper, under
@@ -110,7 +183,7 @@ enum UpdateStaging {
     /// (not `FileManager.copyItem`) so symlinks, extended attributes and the code
     /// signature are preserved byte-for-byte — the caller re-verifies the staged copy
     /// regardless (TOCTOU guard).
-    static func stage(verifiedApp: URL) throws -> URL {
+    static func stage(verifiedApp: URL) async throws -> URL {
         let staged = try stagedDirectory()
         try? FileManager.default.removeItem(at: staged)
         try FileManager.default.createDirectory(
@@ -119,7 +192,7 @@ enum UpdateStaging {
         let dest = staged.appendingPathComponent("Emfy.app", isDirectory: true)
         #if os(macOS)
         do {
-            let result = try UpdateProcess.run("/usr/bin/ditto", [verifiedApp.path, dest.path], timeout: 120)
+            let result = try await UpdateProcess.run("/usr/bin/ditto", [verifiedApp.path, dest.path], timeout: 120)
             guard result.exitCode == 0 else { throw UpdateError.stagingFailed(result.stderr) }
         } catch let error as UpdateError {
             throw error

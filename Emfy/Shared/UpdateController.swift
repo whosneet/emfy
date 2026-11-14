@@ -55,6 +55,22 @@ final class UpdateController {
     /// Set when the user presses "Restart to Update" (autoDownload / notify paths).
     @ObservationIgnored private var userRequestedInstall = false
     @ObservationIgnored private var didLaunchSwap = false
+    /// The single in-flight pipeline task (C-4): the re-entrancy guard. Only one
+    /// check/download/verify runs at a time; a second request while busy is ignored.
+    @ObservationIgnored private var pipelineTask: Task<Void, Never>?
+    /// Set true once the staged bundle has passed verification BEFORE quit (C-3), so
+    /// `installOnQuitIfNeeded` at terminate does only a fast location check and never a
+    /// blocking codesign/spctl pass.
+    @ObservationIgnored private var installApproved = false
+
+    /// Whether a check/download/verify is in flight (C-4). The UI disables
+    /// "Check for Updates…" / "Check Now" and "Download" while this is true.
+    var isBusy: Bool {
+        switch phase {
+        case .checking, .downloading, .verifying: return true
+        default: return false
+        }
+    }
 
     init(
         defaults: UserDefaults = .standard,
@@ -101,14 +117,17 @@ final class UpdateController {
     /// The launch/timer entry point. Checks only when the mode checks automatically
     /// and the 24h throttle allows it.
     func startAutomaticCheckIfDue(now: Date = Date()) {
-        guard UpdatePolicy.checksAutomatically(mode),
+        guard !isBusy,   // C-4: never start a second pipeline over a running one
+              UpdatePolicy.checksAutomatically(mode),
               UpdateThrottle.shouldCheck(now: now, lastCheck: lastChecked) else { return }
-        Task { await check(automatic: true) }
+        pipelineTask = Task { await check(automatic: true) }
     }
 
-    /// "Check Now" from Settings or the menu — always runs, ignoring the throttle.
+    /// "Check Now" from Settings or the menu — always runs, ignoring the throttle, but
+    /// never while a check/download is already in flight (C-4).
     func checkNow() {
-        Task { await check(automatic: false) }
+        guard !isBusy else { return }
+        pipelineTask = Task { await check(automatic: false) }
     }
 
     private func check(automatic: Bool) async {
@@ -139,12 +158,13 @@ final class UpdateController {
 
     /// The user chose to download an update surfaced by `notify`.
     func downloadNow() {
-        guard let candidate = pendingCandidate else { return }
-        Task { await downloadVerifyStage(candidate) }
+        guard !isBusy, let candidate = pendingCandidate else { return }   // C-4
+        pipelineTask = Task { await downloadVerifyStage(candidate) }
     }
 
     private func downloadVerifyStage(_ candidate: UpdateCandidate) async {
         phase = .downloading
+        installApproved = false
         var downloaded: URL?
         do {
             let hex = try await resolveDigest(candidate)
@@ -154,25 +174,36 @@ final class UpdateController {
             let verifier = self.verifier
             let bundleID = self.bundleID
             let current = self.current
-            let verified = try await Task.detached {
-                try verifier.verify(dmg: dmg, expectedSHA256: hex, expectedBundleID: bundleID, current: current)
+            // (C-3) Verify, stage (ditto) and detach (hdiutil) ALL off the main actor —
+            // the streaming SHA-256, spctl and the copy are CPU/IO heavy and must never
+            // block the UI. The verifier methods are async (continuation-based), so the
+            // detached work never blocks a cooperative thread on a semaphore (C-5).
+            let result: (staged: URL, version: AppVersion) = try await Task.detached {
+                let verified = try await verifier.verify(
+                    dmg: dmg, expectedSHA256: hex, expectedBundleID: bundleID, current: current)
+                let copy: URL
+                do {
+                    copy = try await UpdateStaging.stage(verifiedApp: verified.appURL)
+                } catch {
+                    await verifier.detach(mountPoint: verified.mountPoint)
+                    throw error
+                }
+                await verifier.detach(mountPoint: verified.mountPoint)
+                // TOCTOU guard: re-verify the STAGED copy (now on a user-writable path).
+                // This is the "verification done before quit" (C-3) for the silent path.
+                do {
+                    try await verifier.verifyStagedBundle(
+                        appURL: copy, expectedBundleID: bundleID, current: current)
+                } catch {
+                    try? FileManager.default.removeItem(at: copy)
+                    throw error
+                }
+                return (copy, verified.version)
             }.value
-            // Stage a copy out of the mount, then detach.
-            let staged = try UpdateStaging.stage(verifiedApp: verified.appURL)
-            verifier.detach(mountPoint: verified.mountPoint)
             try? FileManager.default.removeItem(at: dmg)
-            // TOCTOU guard: re-verify the STAGED copy (now on a user-writable path)
-            // immediately. Any failure deletes it and aborts.
-            do {
-                try await Task.detached {
-                    try verifier.verifyStagedBundle(appURL: staged, expectedBundleID: bundleID, current: current)
-                }.value
-            } catch {
-                try? FileManager.default.removeItem(at: staged)
-                throw error
-            }
-            stagedAppURL = staged
-            phase = .readyToInstall(version: String(describing: verified.version))
+            stagedAppURL = result.staged
+            installApproved = true
+            phase = .readyToInstall(version: String(describing: result.version))
         } catch let error as UpdateError {
             if let d = downloaded { try? FileManager.default.removeItem(at: d) }
             phase = .failed(error)
@@ -198,18 +229,45 @@ final class UpdateController {
 
     // MARK: Install on quit
 
-    /// The user pressed "Restart to Update": record intent and quit, so the swap runs.
+    /// The user pressed "Restart to Update": re-verify the staged bundle BEFORE quit
+    /// (C-3), off the main actor, then record intent and quit so the swap runs. A
+    /// failed re-verification deletes the staged copy and aborts — nothing is installed.
+    /// The re-verify happens here, not at terminate, so quitting never blocks on
+    /// codesign/spctl.
     func restartToUpdate() {
-        userRequestedInstall = true
-        NSApp.terminate(nil)
+        guard !isBusy, let staged = stagedAppURL else { return }
+        let verifier = self.verifier
+        let bundleID = self.bundleID
+        let current = self.current
+        pipelineTask = Task {
+            phase = .verifying
+            do {
+                try await Task.detached {
+                    try await verifier.verifyStagedBundle(
+                        appURL: staged, expectedBundleID: bundleID, current: current)
+                }.value
+            } catch {
+                try? FileManager.default.removeItem(at: staged)
+                stagedAppURL = nil
+                installApproved = false
+                phase = .failed((error as? UpdateError) ?? .signatureInvalid("staged re-verification failed"))
+                return
+            }
+            installApproved = true
+            userRequestedInstall = true
+            phase = .readyToInstall(version: currentVersionString)
+            NSApp.terminate(nil)
+        }
     }
 
-    /// Called from `applicationWillTerminate`. If a verified update is staged and the
-    /// mode/intent call for it, and the install location is replaceable, writes the
-    /// detached swap helper and launches it. Refuses a translocated / read-only /
-    /// non-writable location.
+    /// Called from `applicationWillTerminate`. If a verified-BEFORE-quit update is staged
+    /// and the mode/intent call for it, and the install location is replaceable, writes
+    /// the detached swap helper and launches it. This runs ONLY the fast location check
+    /// (C-3) — the signature/notarisation verification already ran before quit — so
+    /// termination is never blocked by codesign/spctl. Refuses a translocated /
+    /// read-only / non-writable location.
     func installOnQuitIfNeeded() {
-        guard !didLaunchSwap else { return }
+        guard !didLaunchSwap, installApproved else { return }
         guard let staged = stagedAppURL,
               UpdatePolicy.swapOnQuit(mode: mode, userRequestedInstall: userRequestedInstall, hasStaged: true)
         else { return }
@@ -221,15 +279,6 @@ final class UpdateController {
             isOnReadOnlyVolume: facts.readOnly,
             isTranslocated: facts.translocated) != nil {
             return   // the UI already surfaced the refusal; never touch the bundle
-        }
-        // TOCTOU guard: re-verify the staged copy ONE LAST TIME before swapping — it may
-        // have sat on a writable path for hours. A failure deletes it and aborts.
-        do {
-            try verifier.verifyStagedBundle(appURL: staged, expectedBundleID: bundleID, current: current)
-        } catch {
-            try? FileManager.default.removeItem(at: staged)
-            stagedAppURL = nil
-            return
         }
         didLaunchSwap = true
         launchSwapHelper(staged: staged, target: bundleURL)
