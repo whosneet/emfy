@@ -71,7 +71,8 @@ struct GenEditOperation: Equatable {
     var color: String?
     @Guide(description: "The replacement text, for setText.")
     var text: String?
-    @Guide(description: "A typographic point size: the font size for setFontSize, or the line width for setLineWidth.")
+    // Dual-use (font size or line width); bound to the validator's 0…1000 pt ceiling.
+    @Guide(description: "A typographic point size: the font size for setFontSize, or the line width for setLineWidth.", .range(0...1000))
     var points: Double?
     @Guide(description: "The font family name, for setFontFamily.")
     var family: String?
@@ -79,7 +80,8 @@ struct GenEditOperation: Equatable {
     var dx: Double?
     @Guide(description: "The vertical move distance in device units, for move.")
     var dy: Double?
-    @Guide(description: "The scale factor (1 = no change), for scale.")
+    // Scale factor bound to the validator's (0, 1000] ceiling.
+    @Guide(description: "The scale factor (1 = no change), for scale.", .range(0...1000))
     var factor: Double?
     @Guide(description: "The edge to align to, for align.")
     var edge: GenAlignEdge?
@@ -130,7 +132,8 @@ struct GenEditOperation: Equatable {
 @available(macOS 26, iOS 26, *)
 @Generable
 struct GenEditPlan: Equatable {
-    @Guide(description: "The edit operations to apply, in order. Empty if the request can't be expressed with these operations.")
+    // maximumCount matches EditPlanValidator.Limits.maxOperations (200).
+    @Guide(description: "The edit operations to apply, in order. Empty if the request can't be expressed with these operations.", .maximumCount(200))
     var operations: [GenEditOperation]
 
     /// The domain `EditPlan`. An op missing a required field is dropped (not invented),
@@ -200,9 +203,9 @@ enum GenPagePreset: Equatable {
 @available(macOS 26, iOS 26, *)
 @Generable
 struct GenPointXY: Equatable {
-    @Guide(description: "The x coordinate, a fraction of the page width from 0 to 1.")
+    @Guide(description: "The x coordinate, a fraction of the page width from 0 to 1.", .range(0...1))
     var x: Double
-    @Guide(description: "The y coordinate, a fraction of the page height from 0 to 1.")
+    @Guide(description: "The y coordinate, a fraction of the page height from 0 to 1.", .range(0...1))
     var y: Double
 }
 
@@ -213,37 +216,40 @@ struct GenPointXY: Equatable {
 struct GenGenerateOperation: Equatable {
     @Guide(description: "The kind of shape or label to create.")
     var op: GenGenerateOpKind
-    @Guide(description: "Left edge (fraction 0…1), for rectangle, roundedRectangle, ellipse and text.")
+    @Guide(description: "Left edge (fraction 0…1), for rectangle, roundedRectangle, ellipse and text.", .range(0...1))
     var x: Double?
-    @Guide(description: "Top edge (fraction 0…1), for rectangle, roundedRectangle, ellipse and text.")
+    @Guide(description: "Top edge (fraction 0…1), for rectangle, roundedRectangle, ellipse and text.", .range(0...1))
     var y: Double?
-    @Guide(description: "Width (fraction 0…1), for rectangle, roundedRectangle and ellipse.")
+    @Guide(description: "Width (fraction 0…1), for rectangle, roundedRectangle and ellipse.", .range(0...1))
     var w: Double?
-    @Guide(description: "Height (fraction 0…1), for rectangle, roundedRectangle and ellipse.")
+    @Guide(description: "Height (fraction 0…1), for rectangle, roundedRectangle and ellipse.", .range(0...1))
     var h: Double?
-    @Guide(description: "Start x (fraction 0…1), for line and arrow.")
+    @Guide(description: "Start x (fraction 0…1), for line and arrow.", .range(0...1))
     var x1: Double?
-    @Guide(description: "Start y (fraction 0…1), for line and arrow.")
+    @Guide(description: "Start y (fraction 0…1), for line and arrow.", .range(0...1))
     var y1: Double?
-    @Guide(description: "End x (fraction 0…1), for line and arrow.")
+    @Guide(description: "End x (fraction 0…1), for line and arrow.", .range(0...1))
     var x2: Double?
-    @Guide(description: "End y (fraction 0…1), for line and arrow.")
+    @Guide(description: "End y (fraction 0…1), for line and arrow.", .range(0...1))
     var y2: Double?
-    @Guide(description: "Corner radius (fraction), for roundedRectangle.")
+    @Guide(description: "Corner radius (fraction 0…1), for roundedRectangle.", .range(0...1))
     var cornerRadius: Double?
-    @Guide(description: "The points, for polyline and polygon.")
+    // maximumCount matches GenerationPlanValidator.Limits.maxPointsPerPolyline (1000).
+    @Guide(description: "The points, for polyline and polygon.", .maximumCount(1000))
     var points: [GenPointXY]?
     @Guide(description: "Fill colour: a #RRGGBB hex value or a colour word like \"blue\".")
     var fill: String?
     @Guide(description: "Stroke (outline) colour: a #RRGGBB hex value or a colour word.")
     var stroke: String?
-    @Guide(description: "Stroke width in typographic points.")
+    // Bound to the validator's 0…1000 pt stroke-width ceiling.
+    @Guide(description: "Stroke width in typographic points.", .range(0...1000))
     var strokeWidth: Double?
     @Guide(description: "The words to show, for text.")
     var text: String?
     @Guide(description: "Text colour: a #RRGGBB hex value or a colour word, for text.")
     var color: String?
-    @Guide(description: "Text size in typographic points (4 to 200), for text.")
+    // Range matches GenerationPlanValidator.Limits font bounds (4…200 pt).
+    @Guide(description: "Text size in typographic points (4 to 200), for text.", .range(4...200))
     var fontSize: Double?
     @Guide(description: "Font family name, for text.")
     var fontFamily: String?
@@ -288,7 +294,8 @@ struct GenGenerateOperation: Equatable {
 struct GenGeneratePlan: Equatable {
     @Guide(description: "The page size and orientation.")
     var page: GenPagePreset
-    @Guide(description: "The shapes and text labels that make up the drawing, in order.")
+    // maximumCount matches GenerationPlanValidator.Limits.maxElements (300).
+    @Guide(description: "The shapes and text labels that make up the drawing, in order.", .maximumCount(300))
     var elements: [GenGenerateOperation]
 
     /// The domain `GenerationPlan` (coordinates are always fractions of the page). An op
