@@ -2276,7 +2276,7 @@ private struct PenPaletteSheet: View {
             .navigationTitle("Pen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                SheetDoneToolbar { dismiss() }   // C5e G3
             }
         }
     }
