@@ -93,15 +93,20 @@ struct LibraryWindow: View {
             // (C1: EXC_BREAKPOINT in EnvironmentBox.update during the snapshot rotation).
             // Each column carrying its own copy keeps the reads valid through that pass.
             withLibraryEnvironment {
-                LibrarySidebar(selection: $model.selection, isCompact: isCompactWindow)
+                LibrarySidebar(selection: selectionBinding, isCompact: isCompactWindow)
                     #if os(iOS)
                     // Compact width collapses the split view to this stack; push the
                     // viewer explicitly when the grid sets a selection. Inert at
-                    // regular width, where the detail column shows instead.
-                    .navigationDestination(item: $model.selection) { id in
+                    // regular width, where the detail column shows instead. The pushed
+                    // viewer renders the model's shared session, not one of its own.
+                    .navigationDestination(item: selectionBinding) { id in
                         withLibraryEnvironment {
-                            ViewerDetail(entryID: id, onRemove: { model.selection = nil })
-                                .id(id)
+                            if let session = model.session, session.entryID == id {
+                                ViewerDetail(session: session, onRemove: { model.select(nil) })
+                                    .id(id)
+                            } else {
+                                Color.clear
+                            }
                         }
                     }
                     #endif
@@ -119,7 +124,7 @@ struct LibraryWindow: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                Task { if let id = await store.handleOpenedURL(url) { model.selection = id } }
+                Task { if let id = await store.handleOpenedURL(url) { model.select(id) } }
             }
         }
         // Host the "couldn't open" alert at the window (C4a M5): visible with the
@@ -138,6 +143,10 @@ struct LibraryWindow: View {
             Text(message)
         }
         .task {
+            // Teach the model how to build a session for an entry, seeding each with the
+            // current Rendering options so the opening render honours them (S1b). Set before
+            // any selection can commit, since the model now owns the session (L4/N1).
+            model.sessionFactory = { id in DocumentSession(entryID: id, store: store, options: settings.renderOptions) }
             await store.loadIfNeeded()
             // Sync the settings-driven cap and Private mode into the store before the
             // first open can add anything (S1a-5).
@@ -169,9 +178,9 @@ struct LibraryWindow: View {
             // restored selection, whose stale bookmark could otherwise hang the run);
             // the plain -EmfyDebugOpen path only fills an empty window.
             if let path = EditorDebugLaunch.scriptOpenPath() {
-                if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
+                if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.select(id) }
             } else if model.selection == nil, let path = EditorDebugLaunch.safeCopiedOpenPath() ?? EditorDebugLaunch.pictureFixturePath() {
-                if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.selection = id }
+                if let id = await store.handleOpenedURL(URL(fileURLWithPath: path)) { model.select(id) }
             }
             #endif
             applyInitialSelection()
@@ -296,7 +305,9 @@ struct LibraryWindow: View {
         // window, via Clear Recents or a prune — so the viewer never orphans (C4a H8).
         .onChange(of: store.entries) { _, _ in
             if let id = model.selection, store.entry(id: id) == nil {
-                model.selection = nil
+                // The shown entry was removed (here, in another window, Clear Recents, or a
+                // prune): the file is gone, so clear without the save guard (C4a H8).
+                model.clearSelection()
             }
         }
         .onChange(of: model.selection) { _, id in
@@ -328,7 +339,7 @@ struct LibraryWindow: View {
             guard let id = CoreSpotlightActivity.entryID(from: activity) else { return }
             Task {
                 await store.loadIfNeeded()
-                if store.entry(id: id) != nil { model.selection = id }
+                if store.entry(id: id) != nil { model.select(id) }
             }
         }
         // New Drawing (E3a): the Mac File menu fires this focused action; every window
@@ -338,7 +349,7 @@ struct LibraryWindow: View {
             NewDrawingSheet { preset in
                 Task {
                     if let id = await NewDrawing.create(preset, in: store) {
-                        model.selection = id
+                        model.select(id)
                     }
                 }
             }
@@ -352,7 +363,7 @@ struct LibraryWindow: View {
             GenerateDrawingSheet { data in
                 Task {
                     if let id = await NewDrawing.create(data: data, in: store) {
-                        model.selection = id
+                        model.select(id)
                     }
                 }
             }
@@ -370,7 +381,7 @@ struct LibraryWindow: View {
         // carries the entry to show in its user activity (v3-plan §9.1).
         .onContinueUserActivity(WindowOpenActivity.type) { activity in
             if let id = WindowOpenActivity.entryID(from: activity), store.entry(id: id) != nil {
-                model.selection = id
+                model.select(id)
             }
         }
         .sheet(isPresented: $showLaunchWhatsNew) {
@@ -383,7 +394,7 @@ struct LibraryWindow: View {
             // closure's own capture. It is released on `onDisappear` via `unregister`,
             // and `model` never references the coordinator, so there is no cycle.
             coordinator.register(windowID: model.windowID) { entryID in
-                model.selection = entryID
+                model.select(entryID)
             }
         }
         .onDisappear {
@@ -443,8 +454,8 @@ struct LibraryWindow: View {
 
     @ViewBuilder
     private var regularDetail: some View {
-        if let id = model.selection {
-            ViewerDetail(entryID: id, onRemove: { model.selection = nil })
+        if let id = model.selection, let session = model.session, session.entryID == id {
+            ViewerDetail(session: session, onRemove: { model.select(nil) })
                 .id(id)
         } else {
             // "No File Selected" now carries an Open… action, so the invitation to
@@ -484,7 +495,15 @@ struct LibraryWindow: View {
             requested: initialSelection,
             stored: storedID
         ), store.entry(id: id) != nil else { return }
-        model.selection = id
+        model.select(id)
+    }
+
+    /// A guarded two-way binding over the model's selection: reads the committed value and
+    /// routes every write (sidebar tap, grid tap, iOS back) through the save guard. When a
+    /// switch is blocked or cancelled the committed value is unchanged, so the sidebar's
+    /// highlight (and the compact push) reconcile back to the current document (U1).
+    private var selectionBinding: Binding<UUID?> {
+        Binding(get: { model.selection }, set: { model.select($0) })
     }
 
     /// Imports a file arriving from Finder / Files / Mail / Messages and shows it per
@@ -513,58 +532,28 @@ struct LibraryWindow: View {
         )
         switch destination {
         case .frontWindow:
-            if model.selection != id { model.selection = id }
+            if model.selection != id { model.select(id) }
         case .newWindow:
             openWindow(id: "library", value: LibraryWindowValue(entryID: id))
         }
     }
 }
 
-/// The detail: a per-open `DocumentSession` plus the platform viewer. Owning the
-/// session here (rather than in `LibraryWindow`) means the same view serves both
-/// the regular-width detail column and the compact `navigationDestination` push,
-/// with exactly one session per shown file (v3-plan §11.2).
+/// The detail: the platform viewer over a `DocumentSession` the window model owns and
+/// loads (L4/N1). It no longer creates or loads the session itself — owning it above the
+/// size-class branch means the compact `navigationDestination` push and the regular detail
+/// column share one instance, so an iPad width change keeps its edit mode, undo stack and
+/// load (v3-plan §11.2).
 struct ViewerDetail: View {
-    @Environment(RecentsStore.self) private var store
-    @Environment(EmfySettings.self) private var settings
-    let entryID: UUID
-    /// Clears the window's selection when the file is removed from Recents.
+    let session: DocumentSession
+    /// Leaves the document (iOS back / removed from Recents), guarded by the window model.
     let onRemove: () -> Void
 
-    @State private var session: DocumentSession?
-
     var body: some View {
-        Group {
-            if let session {
-                #if os(macOS)
-                MacViewerPane(session: session, onRemove: onRemove)
-                #else
-                MetafileViewerScreen(session: session, onRemove: onRemove)
-                #endif
-            } else {
-                Color.clear
-            }
-        }
-        .task(id: entryID) {
-            // Seed the session with the current Rendering options so the opening
-            // render already honours them; live changes flow through the viewer (S1b).
-            let newSession = DocumentSession(entryID: entryID, store: store, options: settings.renderOptions)
-            session = newSession
-            await newSession.load()
-            // A freshly-created drawing opens straight into the editor (E3a design call 4).
-            if NewDrawing.consumePendingEdit(entryID) {
-                await newSession.beginEditing()
-            }
-        }
+        #if os(macOS)
+        MacViewerPane(session: session, onRemove: onRemove)
+        #else
+        MetafileViewerScreen(session: session, onRemove: onRemove, onBack: onRemove)
+        #endif
     }
-}
-
-/// Per-window state held by reference, so the open coordinator's stored selector
-/// closure (which outlives a single `body` evaluation) always targets this
-/// window's live selection. A plain `@State` can't be captured that way.
-@MainActor
-@Observable
-final class LibraryWindowModel {
-    let windowID = UUID()
-    var selection: UUID?
 }

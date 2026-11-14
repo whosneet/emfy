@@ -33,6 +33,9 @@ struct MetafileViewerScreen: View {
     let session: DocumentSession
     /// Clears the window's selection when the file is removed from Recents.
     let onRemove: () -> Void
+    /// Leaves the document via the compact back control — routed through the window model's
+    /// save guard so a dirty edit isn't lost when the system back pops the push (U1).
+    let onBack: () -> Void
 
     @State private var controller = MetafileZoomController()
     @State private var exporter = MetafileExportController()
@@ -202,6 +205,11 @@ struct MetafileViewerScreen: View {
         }
         .navigationTitle(entry?.baseName ?? "Metafile")
         .navigationBarTitleDisplayMode(.inline)
+        // While editing in the compact push, hide the system Back button and vend a custom
+        // one that leaves through the window model's save guard, so the system pop can't
+        // tear the edit session down and lose unsaved WMF edits (U1).
+        .navigationBarBackButtonHidden(guardsBack)
+        .toolbar { backToolbarItem }
         .metafileNavigationSubtitle(subtitle)
         // At regular width (iPad) a long inline title clips at the LEADING edge behind
         // the sidebar boundary; a principal title view truncates at the tail with an
@@ -1081,6 +1089,30 @@ struct MetafileViewerScreen: View {
             Button(session.editing == .editing ? "Done" : "Edit") { toggleEditMode() }
                 .disabled(loaded == nil)
                 .accessibilityIdentifier("viewerEdit")
+        }
+    }
+
+    /// Whether the compact push must guard the Back button (U1): only while editing, and
+    /// only in the compact stack (at regular width the viewer is a detail column with no
+    /// back button). `isDirty` is not required — leaving edit mode mid-navigation runs the
+    /// save flow regardless, and a clean session just pops.
+    private var guardsBack: Bool { !isRegularWidth && session.editing == .editing }
+
+    /// The custom Back button shown while `guardsBack`, routing the leave through the window
+    /// model's save guard instead of letting the system pop the push unguarded (U1).
+    @ToolbarContentBuilder
+    private var backToolbarItem: some ToolbarContent {
+        if guardsBack {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    editorModel.selection.clear()
+                    editorModel.disarmTools()
+                    onBack()
+                } label: {
+                    Label("Back", systemImage: "chevron.backward")
+                }
+                .accessibilityIdentifier("viewerGuardedBack")
+            }
         }
     }
 
