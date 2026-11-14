@@ -209,4 +209,21 @@ import Testing
         let input = "A safety notice about confined spaces."
         #expect(DrawingDescribeGrounding.groundQuotes(in: input, drawingText: drawing) == input)
     }
+
+    // FM-6: single smart quotes and guillemets are grounded too.
+    @Test func handlesSingleSmartQuotesAndGuillemets() {
+        let singles = "It says \u{2018}danger zone\u{2019} boldly."
+        #expect(DrawingDescribeGrounding.groundQuotes(in: singles, drawingText: drawing) == "It says danger zone boldly.")
+        let guillemets = "Marked \u{00AB}Permit required\u{00BB} here."
+        #expect(DrawingDescribeGrounding.groundQuotes(in: guillemets, drawingText: drawing) == guillemets)   // present ⇒ kept
+    }
+
+    // FM-6: a quote is matched on word boundaries, so a short invented quote isn't
+    // "supported" just by sitting inside a larger word.
+    @Test func matchesOnWordBoundaries() {
+        // "mit" sits inside "permit" but isn't a word there ⇒ not supported.
+        #expect(!DrawingDescribeGrounding.isQuoteSupported("mit", inDrawingText: drawing))
+        // The whole word "Permit" is supported.
+        #expect(DrawingDescribeGrounding.isQuoteSupported("Permit", inDrawingText: drawing))
+    }
 }

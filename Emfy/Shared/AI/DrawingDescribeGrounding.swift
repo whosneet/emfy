@@ -23,12 +23,37 @@ enum DrawingDescribeGrounding {
         return collapsed.trimmingCharacters(in: .whitespaces).lowercased()
     }
 
-    /// Whether `quote` appears (normalised, case-insensitive) in the drawing's text runs.
-    /// An empty/whitespace-only quote is treated as present (nothing to ground).
+    /// Whether `quote` appears (normalised, case-insensitive) in the drawing's text runs
+    /// as whole words. An empty/whitespace-only quote is treated as present (nothing to
+    /// ground).
     static func isQuoteSupported(_ quote: String, inDrawingText lines: [String]) -> Bool {
         let needle = normalise(quote)
         guard !needle.isEmpty else { return true }
-        return normalise(lines.joined(separator: " ")).contains(needle)
+        return haystackContainsPhrase(needle, in: haystack(for: lines))
+    }
+
+    /// Whether `needle` (already normalised) appears in `haystack` (already normalised)
+    /// as whole words — bounded by a non-alphanumeric character or a string edge on each
+    /// side — so a short quote isn't counted as present merely for sitting inside a larger
+    /// word (FM-6: match on word boundaries).
+    static func haystackContainsPhrase(_ needle: String, in haystack: String) -> Bool {
+        guard !needle.isEmpty else { return true }
+        let hay = Array(haystack)
+        let need = Array(needle)
+        guard need.count <= hay.count else { return false }
+        func isWord(_ c: Character) -> Bool { c.isLetter || c.isNumber }
+        var i = 0
+        let last = hay.count - need.count
+        while i <= last {
+            if Array(hay[i ..< i + need.count]) == need {
+                let beforeOK = i == 0 || !isWord(hay[i - 1])
+                let afterIndex = i + need.count
+                let afterOK = afterIndex == hay.count || !isWord(hay[afterIndex])
+                if beforeOK && afterOK { return true }
+            }
+            i += 1
+        }
+        return false
     }
 
     /// The normalised search text for `lines` — build it ONCE per stream and pass it to
@@ -57,7 +82,7 @@ enum DrawingDescribeGrounding {
                let end = nextIndex(of: closer, in: characters, after: index) {
                 let inner = String(characters[(index + 1) ..< end])
                 let needle = normalise(inner)
-                if !needle.isEmpty && !haystack.contains(needle) {
+                if !needle.isEmpty && !haystackContainsPhrase(needle, in: haystack) {
                     result += inner          // invented quote → drop only the marks
                 } else {
                     result += String(character) + inner + String(closer)
@@ -77,6 +102,8 @@ enum DrawingDescribeGrounding {
         switch character {
         case "\"": return "\""
         case "\u{201C}": return "\u{201D}"   // “ → ”
+        case "\u{2018}": return "\u{2019}"   // ‘ → ’ (FM-6)
+        case "\u{00AB}": return "\u{00BB}"   // « → » (FM-6)
         default: return nil
         }
     }
