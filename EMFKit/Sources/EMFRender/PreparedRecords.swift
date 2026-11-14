@@ -97,7 +97,12 @@ extension MetafileRenderer.Prepared {
                 )
             }
         case .wmfProgram:
-            return wmfRecordRefList
+            // Built on demand from the retained source `WMFFile` (M1), the same way
+            // EMF derives its rows above — never eagerly at prepare time, so a
+            // Quick Look / thumbnail extension that only sizes and renders allocates
+            // no ref rows. `wmfFile` is non-nil for every `.wmfProgram`.
+            guard let wmfFile else { return [] }
+            return Self.wmfRecordRefs(wmfFile)
         }
     }
 
@@ -111,8 +116,11 @@ extension MetafileRenderer.Prepared {
         case .emf(let file):
             return file.recordSummary(at: index)
         case .wmfProgram:
-            guard wmfRecordSummaryList.indices.contains(index) else { return "" }
-            return wmfRecordSummaryList[index]
+            // Decoded on demand for the single requested record (M1): the inspector
+            // asks one row at a time, so this never materialises the whole summary
+            // list, and an extension that never opens the inspector builds none.
+            guard let wmfFile, wmfFile.records.indices.contains(index) else { return "" }
+            return WMFRecordSummary.line(for: wmfFile.records[index], payload: wmfFile.payload(of: wmfFile.records[index]))
         }
     }
 
@@ -127,10 +135,11 @@ extension MetafileRenderer.Prepared {
         return EMFRenderer.playbackState(of: file, throughRecordIndex: limit, options: options)
     }
 
-    /// Builds the record-list rows for a translated WMF program from its source
-    /// `WMFFile` records ([MS-WMF] §2.3): META_* names, byte offsets, and sizes
-    /// (`sizeWords` × 2 bytes). Called once at prepare time, where the `WMFFile`
-    /// is in scope, since the program itself keeps only translated payloads.
+    /// Builds the record-list rows for a translated WMF program from its retained
+    /// source `WMFFile` records ([MS-WMF] §2.3): META_* names, byte offsets, and
+    /// sizes (`sizeWords` × 2 bytes). Called on demand from `recordRefs()` (M1),
+    /// not at prepare time, so an extension that never opens the inspector builds
+    /// no rows.
     static func wmfRecordRefs(_ file: WMFFile) -> [RecordRef] {
         file.records.enumerated().map { index, record in
             RecordRef(
@@ -143,13 +152,5 @@ extension MetafileRenderer.Prepared {
                 emfPlusRecordCount: 0
             )
         }
-    }
-
-    /// The one-line parameter summaries for a translated WMF program's records,
-    /// one per `WMFFile.records` row ([MS-WMF] §2.3), built at prepare time where
-    /// the `WMFFile` (and its payload bytes) are in scope. Pure and §8-bounded via
-    /// `WMFRecordSummary`.
-    static func wmfRecordSummaries(_ file: WMFFile) -> [String] {
-        file.records.map { WMFRecordSummary.line(for: $0, payload: file.payload(of: $0)) }
     }
 }
