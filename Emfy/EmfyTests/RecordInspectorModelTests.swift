@@ -75,6 +75,28 @@ import Testing
         #expect(builds == 1)
     }
 
+    @Test("Loading a new drawing clears the previous drawing's summary cache")
+    @MainActor func summaryCacheClearedOnContentChange() {
+        let model = RecordInspectorModel()
+        model.setContent(refs: sampleRefs, drawingIndices: [3], supportsPartial: true, isEMF: true, contentID: 1)
+        var builds = 0
+        _ = model.summary(at: 3) { _ in builds += 1; return "first drawing" }
+        #expect(builds == 1)
+
+        // Switching to a different content id must drop the first drawing's entry,
+        // so the same index rebuilds rather than serving a stale summary (M5).
+        model.setContent(refs: sampleRefs, drawingIndices: [3], supportsPartial: true, isEMF: true, contentID: 2)
+        let rebuilt = model.summary(at: 3) { _ in builds += 1; return "second drawing" }
+        #expect(rebuilt == "second drawing")
+        #expect(builds == 2, "a content change must clear the cache so the row rebuilds")
+
+        // Returning to the first content id no longer finds its old cached value
+        // (it was cleared), so it rebuilds too — the cache holds one drawing at a time.
+        model.setContent(refs: sampleRefs, drawingIndices: [3], supportsPartial: true, isEMF: true, contentID: 1)
+        _ = model.summary(at: 3) { _ in builds += 1; return "first drawing again" }
+        #expect(builds == 3)
+    }
+
     // MARK: - EMF+ / WMF step gating
 
     @Test("Stepping is gated to a steppable EMF with more than one record")

@@ -304,6 +304,10 @@ final class RecordInspectorModel {
     /// current selection and filter (the viewer re-derives on unrelated changes).
     func setContent(refs: [RecordRef], drawingIndices: [Int], supportsPartial: Bool, isEMF: Bool, contentID: Int) {
         if self.contentID == contentID, self.refs.count == refs.count { return }
+        // A different drawing is loading: drop the previous drawing's summaries so
+        // the per-content cache holds only the open drawing's rows and never grows
+        // across a browsing session (M5).
+        summaryCache.removeAll()
         self.contentID = contentID
         self.refs = refs
         self.drawingIndices = drawingIndices.sorted()
