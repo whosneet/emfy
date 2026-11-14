@@ -252,7 +252,7 @@ final class DrawingAIGenerateModel {
         if #available(macOS 26, iOS 26, *), DrawingAIEngine.isRefusal(error) {
             return DrawingAIEditModel.onDeviceRefusalMessage
         }
-        if #available(macOS 26, iOS 26, *), error is LanguageModelSession.GenerationError {
+        if #available(macOS 26, iOS 26, *), DrawingAIEngine.isOnDeviceError(error) {
             return DrawingAIEngine.friendlyMessage(for: error)
         }
         if let providerError = error as? ProviderError { return providerError.friendlyMessage }

@@ -33,6 +33,7 @@
 		C2E00000000000000000E13 /* DrawingAIGenerateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000E03 /* DrawingAIGenerateView.swift */; };
 		C2E00000000000000000E14 /* GenerateScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000E04 /* GenerateScreenshots.swift */; };
 		C2E00000000000000000E25 /* DrawingAIGenerateModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000E05 /* DrawingAIGenerateModelTests.swift */; };
+		C2E00000000000000000FA2 /* DrawingAIEngineErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000FA1 /* DrawingAIEngineErrorTests.swift */; };
 		C2E00000000000000000D20 /* DrawingAITranslateModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E00000000000000000F24 /* DrawingAITranslateModelTests.swift */; };
 		A1A0000000000000FACE0004 /* DrawingAIScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000FACE0003 /* DrawingAIScreenshots.swift */; };
 		A1A0000000000000RECP000A /* DrawingRecordPurpose.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A0000000000000RECP000F /* DrawingRecordPurpose.swift */; };
@@ -525,6 +526,7 @@
 		C2E00000000000000000E03 /* DrawingAIGenerateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAIGenerateView.swift; path = "Shared/AI/DrawingAIGenerateView.swift"; sourceTree = SOURCE_ROOT; };
 		C2E00000000000000000E04 /* GenerateScreenshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GenerateScreenshots.swift; path = "Shared/GenerateScreenshots.swift"; sourceTree = SOURCE_ROOT; };
 		C2E00000000000000000E05 /* DrawingAIGenerateModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIGenerateModelTests.swift; sourceTree = "<group>"; };
+		C2E00000000000000000FA1 /* DrawingAIEngineErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAIEngineErrorTests.swift; sourceTree = "<group>"; };
 		C2E00000000000000000F24 /* DrawingAITranslateModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingAITranslateModelTests.swift; sourceTree = "<group>"; };
 		C2E00000000000000000F25 /* TranslateScreenshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TranslateScreenshots.swift; path = "Shared/TranslateScreenshots.swift"; sourceTree = SOURCE_ROOT; };
 		C2E00000000000000000F01 /* DrawingAIEditContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DrawingAIEditContext.swift; path = "Shared/AI/DrawingAIEditContext.swift"; sourceTree = SOURCE_ROOT; };
@@ -1142,6 +1144,7 @@
 				C2E00000000000000000F08 /* DrawingRecolourModelTests.swift */,
 				C2E00000000000000000F24 /* DrawingAITranslateModelTests.swift */,
 				C2E00000000000000000E05 /* DrawingAIGenerateModelTests.swift */,
+				C2E00000000000000000FA1 /* DrawingAIEngineErrorTests.swift */,
 				C1B0000000000000000000D0 /* DrawingAIOutputSanitiserTests.swift */,
 				C1B0000000000000000000D4 /* DrawingCleanupModelTests.swift */,
 				A1A00000000000000000011D /* DrawingAIContextTests.swift */,
@@ -1786,6 +1789,7 @@
 				C2E00000000000000000E21 /* DrawingAIGenerateContext.swift in Sources */,
 				C2E00000000000000000E22 /* DrawingAIGenerateModel.swift in Sources */,
 				C2E00000000000000000E25 /* DrawingAIGenerateModelTests.swift in Sources */,
+				C2E00000000000000000FA2 /* DrawingAIEngineErrorTests.swift in Sources */,
 				C2E00000000000000000D20 /* DrawingAITranslateModelTests.swift in Sources */,
 				C1D0000000000000000000C3 /* DrawingSummariseModel.swift in Sources */,
 				C1B0000000000000000000C0 /* DrawingAIOutputSanitiser.swift in Sources */,
