@@ -57,6 +57,44 @@ struct DrawingAIEngineErrorTests {
         #expect(DrawingAIEngine.friendlyMessage(for: language).localizedCaseInsensitiveContains("language"))
     }
 
+    @available(macOS 27, iOS 27, *)
+    @Test("FM-2: split-out OS-27 error types are classified with their own messages")
+    func modernSplitOutMappings() {
+        // concurrentRequests moved out of GenerationError into LanguageModelSession.Error.
+        let concurrent = LanguageModelSession.Error.concurrentRequests
+        #expect(DrawingAIEngine.isOnDeviceError(concurrent))
+        #expect(!DrawingAIEngine.isRefusal(concurrent))
+        #expect(DrawingAIEngine.friendlyMessage(for: concurrent).localizedCaseInsensitiveContains("busy"))
+
+        // assetsUnavailable moved into SystemLanguageModel.Error.
+        let assets = SystemLanguageModel.Error.assetsUnavailable(.init(debugDescription: "x"))
+        #expect(DrawingAIEngine.isOnDeviceError(assets))
+        #expect(DrawingAIEngine.friendlyMessage(for: assets).localizedCaseInsensitiveContains("ready"))
+
+        // decodingFailure became GeneratedContent.ParsingError.
+        let parsing = GeneratedContent.ParsingError(rawContent: "x", debugDescription: "x")
+        #expect(DrawingAIEngine.isOnDeviceError(parsing))
+        #expect(DrawingAIEngine.friendlyMessage(for: parsing).localizedCaseInsensitiveContains("try again"))
+
+        // timeout gets its own message, distinct from the generic failure.
+        let timeout = LanguageModelError.timeout(.init(debugDescription: "x"))
+        #expect(DrawingAIEngine.isOnDeviceError(timeout))
+        #expect(!DrawingAIEngine.isRefusal(timeout))
+        let timeoutMessage = DrawingAIEngine.friendlyMessage(for: timeout)
+        #expect(timeoutMessage != DrawingAIEngine.genericFailure)
+        #expect(timeoutMessage.localizedCaseInsensitiveContains("too long"))
+    }
+
+    @available(macOS 27, iOS 27, *)
+    @Test("FM-2: the context-overflow copy is feature-neutral (no \"asking\")")
+    func overflowCopyIsFeatureNeutral() {
+        let overflow = LanguageModelError.contextSizeExceeded(
+            .init(contextSize: 4096, tokenCount: 5000, debugDescription: "x"))
+        let message = DrawingAIEngine.friendlyMessage(for: overflow)
+        #expect(!message.localizedCaseInsensitiveContains("asking"))
+        #expect(!message.localizedCaseInsensitiveContains("ask about"))
+    }
+
     @available(macOS 26, iOS 26, *)
     @Test("A cancellation maps to an empty message and a non-model error to the generic one")
     func cancellationAndNonModelError() {

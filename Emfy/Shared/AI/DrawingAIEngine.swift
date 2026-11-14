@@ -76,6 +76,9 @@ enum DrawingAIEngine {
         case contextOverflow
         case rateLimited
         case unsupportedLanguage
+        case modelNotReady
+        case parsing
+        case timeout
         case other
 
         var message: String {
@@ -83,11 +86,22 @@ enum DrawingAIEngine {
             case .refusal:
                 return "The on-device model declined to answer that one. Try asking a different way."
             case .contextOverflow:
-                return "This drawing has too much text for the on-device model to take in at once. Try asking about part of it."
+                // Feature-neutral: this engine backs Describe/Explain/Summarise/Ask, so
+                // the copy must not say "asking" (FM-2).
+                return "This drawing has too much text for the on-device model to take in at once. Try a smaller part of it."
             case .rateLimited:
+                // Covers rateLimited and concurrentRequests (another request already running).
                 return "The on-device model is busy right now. Try again in a moment."
             case .unsupportedLanguage:
                 return "The on-device model doesn’t support this language yet."
+            case .modelNotReady:
+                // assetsUnavailable: the model assets aren't downloaded/ready yet.
+                return "The on-device model isn’t ready yet. Try again in a moment."
+            case .parsing:
+                // decodingFailure / GeneratedContent.ParsingError: a retry usually fixes it.
+                return "The on-device model’s answer couldn’t be read. Please try again."
+            case .timeout:
+                return "The on-device model took too long to respond. Please try again."
             case .other:
                 return genericFailure
             }
@@ -99,19 +113,31 @@ enum DrawingAIEngine {
                 switch generation {
                 case .guardrailViolation, .refusal: return .refusal
                 case .exceededContextWindowSize: return .contextOverflow
-                case .rateLimited: return .rateLimited
+                case .rateLimited, .concurrentRequests: return .rateLimited
                 case .unsupportedLanguageOrLocale: return .unsupportedLanguage
+                case .assetsUnavailable: return .modelNotReady
+                case .decodingFailure: return .parsing
                 default: return .other
                 }
             }
-            if #available(macOS 27, iOS 27, *), let modern = error as? LanguageModelError {
-                switch modern {
-                case .guardrailViolation, .refusal: return .refusal
-                case .contextSizeExceeded: return .contextOverflow
-                case .rateLimited: return .rateLimited
-                case .unsupportedLanguageOrLocale: return .unsupportedLanguage
-                default: return .other
+            if #available(macOS 27, iOS 27, *) {
+                if let modern = error as? LanguageModelError {
+                    switch modern {
+                    case .guardrailViolation, .refusal: return .refusal
+                    case .contextSizeExceeded: return .contextOverflow
+                    case .rateLimited: return .rateLimited
+                    case .unsupportedLanguageOrLocale: return .unsupportedLanguage
+                    case .timeout: return .timeout
+                    default: return .other
+                    }
                 }
+                // macOS 27 / iOS 27 split these out of GenerationError into their own types.
+                if let session = error as? LanguageModelSession.Error {
+                    if case .concurrentRequests = session { return .rateLimited }
+                    return .other
+                }
+                if error is SystemLanguageModel.Error { return .modelNotReady }   // assetsUnavailable
+                if error is GeneratedContent.ParsingError { return .parsing }
             }
             return nil
         }
