@@ -284,7 +284,7 @@ struct MetafileViewerScreen: View {
             } onCancel: {
                 showAIShareConfirm = false
             }
-            .presentationDetents([.height(240)])
+            .presentationDetents([.height(240), .medium])   // C5e L3/A2
         }
         .sheet(item: aiActivityBinding, onDismiss: { exporter.cleanupAITemp() }) { payload in
             ShareSheet(items: payload.items)

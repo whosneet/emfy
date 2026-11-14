@@ -13,6 +13,31 @@ struct AIShareConfirmSheet: View {
     let onCancel: () -> Void
 
     var body: some View {
+        #if os(macOS)
+        VStack(alignment: .leading, spacing: 16) {
+            explanation
+            actions
+        }
+        .padding(20)
+        .frame(width: 360)
+        #else
+        // Scroll the explanation and pin the actions so Share stays reachable at large
+        // accessibility text sizes and on the compact detent (C5e L3/A2).
+        ScrollView {
+            explanation
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .safeAreaInset(edge: .bottom) {
+            actions
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(.bar)
+        }
+        #endif
+    }
+
+    private var explanation: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label(AISharePackage.sheetTitle, systemImage: "sparkles")
                 .font(.headline)
@@ -22,19 +47,18 @@ struct AIShareConfirmSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             Toggle(AISharePackage.includeOriginalLabel, isOn: $includeOriginal)
                 .accessibilityIdentifier("sendToAIIncludeOriginal")
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { onCancel() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Share…") { onConfirm() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("sendToAIConfirm")
-            }
         }
-        .padding(20)
-        #if os(macOS)
-        .frame(width: 360)
-        #endif
+    }
+
+    private var actions: some View {
+        HStack {
+            Spacer()
+            Button("Cancel", role: .cancel) { onCancel() }
+                .keyboardShortcut(.cancelAction)
+            Button("Share…") { onConfirm() }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("sendToAIConfirm")
+        }
     }
 }
