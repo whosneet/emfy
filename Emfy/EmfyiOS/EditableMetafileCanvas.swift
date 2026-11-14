@@ -201,7 +201,24 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         private var lastTrailingInset: CGFloat = -1
         fileprivate var drag: DragState?
 
-        init(_ parent: EditableMetafileCanvas) { self.parent = parent }
+        init(_ parent: EditableMetafileCanvas) {
+            self.parent = parent
+            super.init()
+            #if DEBUG
+            Self.debugActive = self
+            #endif
+        }
+
+        #if DEBUG
+        /// The most recently created editing coordinator, so a DEBUG dump script can read
+        /// the live accessibility tree it builds (mirrors the Mac coordinator's hook).
+        static weak var debugActive: Coordinator?
+
+        /// A text dump of the live accessibility tree (label, value, traits, actions).
+        func debugAccessibilityDump() -> String {
+            overlay?.debugAccessibilityDump() ?? EditorAccessibility.debugDump(in: scene, selection: selection)
+        }
+        #endif
 
         var scene: EMFEdit.Scene { parent.scene }
         var selection: EditorSelection {
@@ -451,6 +468,59 @@ struct EditableMetafileCanvas: UIViewRepresentable {
         func deleteSelection() {
             guard !selection.ids.isEmpty else { return }
             parent.delete(selection.ids)
+        }
+
+        // MARK: Accessibility (C5g / audit A1)
+
+        /// The editable elements exposed to assistive technologies, in reading order.
+        func accessibilityDescriptors() -> [EditorAccessibility.ElementDescriptor] {
+            EditorAccessibility.descriptors(in: scene, selection: selection)
+        }
+
+        /// The overlay-space (container) rect for an element's device bounds, so a
+        /// `UIAccessibilityElement` frame tracks the live zoom and scroll (the overlay is
+        /// scaled by the scroll view, so a container-space frame is zoom-independent).
+        func accessibilityFrame(forDevice bounds: CGRect) -> CGRect {
+            mapping.viewRect(fromDevice: bounds)
+        }
+
+        /// Selects `id` (the Select custom action and VoiceOver activation), takes first
+        /// responder so the keyboard Delete reaches the overlay, and posts a layout change
+        /// so VoiceOver re-reads the now-selected element.
+        func accessibilitySelect(_ id: Int) {
+            selection = selection.afterClick(hit: id, additive: false)
+            overlay?.becomeFirstResponder()
+            overlay?.setNeedsDisplay()
+            overlay?.postAccessibilityLayoutChanged()
+        }
+
+        /// Performs a custom accessibility action over `id`, routing through the SAME scene
+        /// commands and undo as a pointer edit (there is no second edit path). Returns
+        /// whether it was handled.
+        @discardableResult
+        func accessibilityPerform(_ action: EditorAccessibility.Action, on id: Int) -> Bool {
+            switch action {
+            case .select:
+                accessibilitySelect(id)
+                return true
+            case .delete:
+                if !selection.contains(id) { selection = selection.afterClick(hit: id, additive: false) }
+                parent.delete([id])
+                overlay?.setNeedsDisplay()
+                overlay?.announceAccessibility("Deleted")
+                return true
+            case .editText:
+                selection = selection.afterClick(hit: id, additive: false)
+                presentTextEdit(for: id)
+                return true
+            default:
+                guard let command = EditorAccessibility.command(for: action, elementID: id, in: scene) else { return false }
+                if !selection.contains(id) { selection = selection.afterClick(hit: id, additive: false) }
+                parent.apply(command, nil)
+                overlay?.setNeedsDisplay()
+                overlay?.postAccessibilityLayoutChanged()
+                return true
+            }
         }
 
         // MARK: Context menu (E3d) — Arrange + Move Selection to Layer
@@ -1106,6 +1176,81 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
 
     @objc private func deleteCommand() { coordinator?.deleteSelection() }
 
+    // MARK: Accessibility (C5g / audit A1)
+
+    override var isAccessibilityElement: Bool {
+        get { false }   // a container of per-element accessibility elements
+        set { }
+    }
+
+    override var accessibilityElements: [Any]? {
+        get { buildAccessibilityElements() }   // rebuilt each read, so frames track zoom/scroll
+        set { }
+    }
+
+    /// One `UIAccessibilityElement` per editable element, driven by the shared model: each
+    /// carries the label, value, Voice Control input labels, selection trait and the custom
+    /// actions, all routing back through the coordinator (the same scene commands as pointer
+    /// edits). Locked elements are announced as static text with no actions.
+    private func buildAccessibilityElements() -> [Any] {
+        guard let coordinator else { return [] }
+        return coordinator.accessibilityDescriptors().map { descriptor -> UIAccessibilityElement in
+            let id = descriptor.id
+            let element = EditorAXElement(accessibilityContainer: self)
+            element.coordinator = coordinator
+            element.elementID = id
+            element.accessibilityLabel = descriptor.label
+            element.accessibilityValue = descriptor.value
+            element.accessibilityFrameInContainerSpace = coordinator.accessibilityFrame(forDevice: descriptor.boundsDevice)
+            element.accessibilityIdentifier = "editor.element.\(descriptor.id)"
+            element.accessibilityUserInputLabels = descriptor.userInputLabels
+            var traits: UIAccessibilityTraits = descriptor.isLocked ? .staticText : .button
+            if descriptor.isSelected { traits.insert(.selected) }
+            element.accessibilityTraits = traits
+            element.accessibilityCustomActions = descriptor.actions.map { action in
+                UIAccessibilityCustomAction(name: action.name) { [weak coordinator] _ in
+                    // VoiceOver invokes this on the main thread; the coordinator is @MainActor.
+                    MainActor.assumeIsolated { coordinator?.accessibilityPerform(action, on: id) ?? false }
+                }
+            }
+            return element
+        }
+    }
+
+    /// Posts a layout-changed notification so VoiceOver re-reads the editor's elements
+    /// after a selection or edit (traits and values change in place).
+    func postAccessibilityLayoutChanged() {
+        UIAccessibility.post(notification: .layoutChanged, argument: nil)
+    }
+
+    /// Announces a discrete result (e.g. "Deleted") without moving focus.
+    func announceAccessibility(_ message: String) {
+        UIAccessibility.post(notification: .announcement, argument: message)
+    }
+
+    #if DEBUG
+    /// A text dump of the live UIKit accessibility elements (label, value, frame, traits,
+    /// Voice Control labels, actions) — the DEBUG evidence hook.
+    func debugAccessibilityDump() -> String {
+        let elements = buildAccessibilityElements().compactMap { $0 as? UIAccessibilityElement }
+        var lines = ["iOS accessibility tree — \(elements.count) element(s), reading order:"]
+        for (index, element) in elements.enumerated() {
+            var traits: [String] = []
+            if element.accessibilityTraits.contains(.button) { traits.append("button") }
+            if element.accessibilityTraits.contains(.staticText) { traits.append("staticText") }
+            if element.accessibilityTraits.contains(.selected) { traits.append("selected") }
+            let actions = (element.accessibilityCustomActions ?? []).map(\.name).joined(separator: ", ")
+            lines.append("  [\(index)] \(element.accessibilityLabel ?? "")")
+            lines.append("        value: \(element.accessibilityValue ?? "")")
+            lines.append("        frame(container): \(element.accessibilityFrameInContainerSpace)")
+            lines.append("        traits: [\(traits.joined(separator: ", "))]")
+            lines.append("        voiceControl: [\((element.accessibilityUserInputLabels ?? []).joined(separator: ", "))]")
+            lines.append("        actions: [\(actions)]")
+        }
+        return lines.joined(separator: "\n")
+    }
+    #endif
+
     /// Strokes (and lightly fills, for closed kinds) the shape-tool preview outline in
     /// the overlay's view space (y-down). A line keeps its drag direction; closed kinds
     /// use the standardised box, with the triangle apex at the top edge.
@@ -1362,6 +1507,26 @@ private final class IOSEditorOverlayView: UIView, UIContextMenuInteractionDelega
         for dy in drag.snapGuideYsDevice {
             let vy = mapping.viewPoint(fromDevice: CGPoint(x: page.minX, y: dy)).y
             context.beginPath(); context.move(to: CGPoint(x: leftV, y: vy)); context.addLine(to: CGPoint(x: rightV, y: vy)); context.strokePath()
+        }
+    }
+}
+
+// MARK: - Accessibility element (C5g / audit A1)
+
+/// A `UIAccessibilityElement` for one editable scene element, so VoiceOver activation
+/// (double-tap) selects it — matching the Select custom action and Switch Control / Voice
+/// Control, which drive the app through the accessibility element tree.
+private final class EditorAXElement: UIAccessibilityElement {
+    weak var coordinator: EditableMetafileCanvas.Coordinator?
+    var elementID: Int = -1
+
+    override func accessibilityActivate() -> Bool {
+        let coordinator = self.coordinator
+        let id = self.elementID
+        return MainActor.assumeIsolated {
+            guard let coordinator else { return false }
+            coordinator.accessibilitySelect(id)
+            return true
         }
     }
 }
