@@ -22,6 +22,7 @@ struct MacViewerPane: View {
     @Environment(EmfySettings.self) private var settings
     @Environment(AIProviderStore.self) private var aiProviders: AIProviderStore?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let session: DocumentSession
     /// Clears the window's selection when the file is removed from Recents.
     let onRemove: () -> Void
@@ -78,8 +79,8 @@ struct MacViewerPane: View {
             // (F3b). Esc (its Done button) closes it.
             .overlay(alignment: .top) {
                 if findModel.isPresented {
-                    MacFindBar(model: findModel) { withAnimation(.easeOut(duration: 0.2)) { findModel.dismiss() } }
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    MacFindBar(model: findModel) { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { findModel.dismiss() } }
+                        .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
                 }
             }
             // Keep the find model's runs current: the renderer observation in viewer mode,
@@ -1694,7 +1695,7 @@ struct MacViewerPane: View {
 
     /// Opens the find bar (⌘F); a second ⌘F re-focuses the field rather than closing.
     private func presentFind() {
-        withAnimation(.easeOut(duration: 0.2)) { findModel.present() }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { findModel.present() }
     }
 
     /// Copies the drawing's text (reading order, plain text) to the pasteboard (F3b).

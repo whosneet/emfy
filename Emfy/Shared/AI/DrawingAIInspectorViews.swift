@@ -100,6 +100,7 @@ struct DrawingAskView: View {
     let inputs: DrawingAIInspectorInputs
 
     @Environment(AIProviderStore.self) private var providerStore: AIProviderStore?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -148,7 +149,7 @@ struct DrawingAskView: View {
             }
             .onChange(of: model.messages.last?.text) { _, _ in
                 if let last = model.messages.last {
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
         }

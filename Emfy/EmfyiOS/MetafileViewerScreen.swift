@@ -1803,7 +1803,7 @@ struct MetafileViewerScreen: View {
     /// is reachable even from immersive mode.
     private func presentFind() {
         if chromeHidden { chromeHidden = false }
-        withAnimation(.easeOut(duration: 0.2)) { findModel.present() }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { findModel.present() }
     }
 
     /// Copies the drawing's text (reading order, plain text) to the pasteboard (F3b).

@@ -113,12 +113,14 @@ private struct MetafileFindBarModifier: ViewModifier {
     let ocrEnabled: Bool
     let onOCRToggle: (Bool) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .top) {
                 if model.isPresented {
-                    IOSFindBar(model: model) { withAnimation(.easeOut(duration: 0.2)) { model.dismiss() } }
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    IOSFindBar(model: model) { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { model.dismiss() } }
+                        .transition(reduceMotion ? .identity : .move(edge: .top).combined(with: .opacity))
                 }
             }
             .task(id: runsKey) { await refreshRuns() }
